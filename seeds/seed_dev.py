@@ -69,9 +69,12 @@ def seed():
 
         admin_email = os.environ.get("ADMIN_EMAIL", "admin@miempresa.cl")
         admin_username = os.environ.get("ADMIN_USERNAME", "admin")
+        admin_password_fija = os.environ.get("ADMIN_PASSWORD")  # opcional: fija la clave en vez de generarla
+        reset_solicitado = os.environ.get("RESET_ADMIN_PASSWORD", "").lower() == "true"
+
         admin = Usuario.query.filter_by(email=admin_email).first()
         if admin is None:
-            password_inicial = secrets.token_urlsafe(12)
+            password_inicial = admin_password_fija or secrets.token_urlsafe(12)
             admin = Usuario(
                 empresa_id=empresa.id,
                 nombre_completo="Super Administrador",
@@ -84,7 +87,10 @@ def seed():
             db.session.commit()
             print("=" * 60)
             print(f"Usuario super admin creado: {admin_username} ({admin_email})")
-            print(f"Contraseña inicial (cópiala ahora, no se vuelve a mostrar): {password_inicial}")
+            if admin_password_fija:
+                print("Contraseña: la que definiste en ADMIN_PASSWORD.")
+            else:
+                print(f"Contraseña inicial (cópiala ahora, no se vuelve a mostrar): {password_inicial}")
             print("Cámbiala apenas inicies sesión, en tu nombre (arriba a la derecha) > Cambiar contraseña.")
             print("=" * 60)
         else:
@@ -93,12 +99,17 @@ def seed():
                 # Compatibilidad: instalaciones previas a la jerarquía de 3 niveles.
                 admin.rol_id = roles_creados["superadmin"].id
                 cambios.append("rol -> superadmin")
-            if not admin.nombre_usuario:
-                # Compatibilidad: instalaciones previas al login por nombre de usuario.
+            if admin.nombre_usuario != admin_username:
                 admin.nombre_usuario = admin_username
                 cambios.append(f"nombre_usuario -> {admin_username}")
 
-            if os.environ.get("RESET_ADMIN_PASSWORD", "").lower() == "true":
+            if admin_password_fija:
+                admin.set_password(admin_password_fija)
+                cambios.append("contraseña -> la definida en ADMIN_PASSWORD")
+                db.session.commit()
+                print(f"Usuario {admin.nombre_usuario} ({admin_email}) actualizado: {', '.join(cambios)}.")
+                print("Quita ADMIN_PASSWORD de Render cuando termines (no dejarla guardada ahí).")
+            elif reset_solicitado:
                 password_nueva = secrets.token_urlsafe(12)
                 admin.set_password(password_nueva)
                 db.session.commit()
