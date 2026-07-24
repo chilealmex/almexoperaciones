@@ -1,4 +1,4 @@
-"""Crea datos iniciales: empresa, roles con su matriz de permisos, y un usuario admin.
+"""Crea datos iniciales: empresa, roles con su matriz de permisos, y el usuario super admin.
 
 Uso:
     python seeds/seed_dev.py
@@ -15,31 +15,20 @@ from app.models.empresa import Empresa
 from app.models.usuario import Rol, Usuario
 from app.models.permiso import MODULOS, RolModuloPermiso
 
+# Jerarquía de 3 niveles:
+#  - superadmin: acceso total, único que puede crear/editar otros admins o superadmins.
+#  - admin: acceso total a los módulos de negocio, pero solo gestiona usuarios de rol "usuario".
+#  - usuario: sin acceso por defecto; el admin/superadmin parametriza módulo por módulo.
 ROLES_PERMISOS = {
+    "superadmin": {modulo: (True, True) for modulo in MODULOS},
     "admin": {modulo: (True, True) for modulo in MODULOS},
-    "contador": {
-        "inventario": (True, True),
-        "contratos": (True, True),
-        "activos_fijos": (True, True),
-        "arriendos": (True, True),
-        "admin": (False, False),
-    },
-    "bodega": {
-        "inventario": (True, True),
-        "contratos": (False, False),
-        "activos_fijos": (True, False),
-        "arriendos": (False, False),
-        "admin": (False, False),
-    },
-    "lectura": {modulo: (True, False) for modulo in MODULOS if modulo != "admin"},
+    "usuario": {modulo: (False, False) for modulo in MODULOS},
 }
-ROLES_PERMISOS["lectura"]["admin"] = (False, False)
 
 ROLES_NOMBRES = {
+    "superadmin": "Super administrador",
     "admin": "Administrador",
-    "contador": "Contador",
-    "bodega": "Bodega",
-    "lectura": "Solo lectura",
+    "usuario": "Usuario",
 }
 
 
@@ -84,20 +73,25 @@ def seed():
             password_inicial = secrets.token_urlsafe(12)
             admin = Usuario(
                 empresa_id=empresa.id,
-                nombre_completo="Administrador",
+                nombre_completo="Super Administrador",
                 email=admin_email,
-                rol_id=roles_creados["admin"].id,
+                rol_id=roles_creados["superadmin"].id,
             )
             admin.set_password(password_inicial)
             db.session.add(admin)
             db.session.commit()
             print("=" * 60)
-            print(f"Usuario admin creado: {admin_email}")
+            print(f"Usuario super admin creado: {admin_email}")
             print(f"Contraseña inicial (cópiala ahora, no se vuelve a mostrar): {password_inicial}")
-            print("Cámbiala apenas inicies sesión, en Usuarios > (tu usuario) > Editar.")
+            print("Cámbiala apenas inicies sesión, en tu nombre (arriba a la derecha) > Cambiar contraseña.")
             print("=" * 60)
+        elif not admin.es_superadmin:
+            # Compatibilidad: instalaciones previas a la jerarquía de 3 niveles.
+            admin.rol_id = roles_creados["superadmin"].id
+            db.session.commit()
+            print(f"Usuario {admin_email} promovido a super administrador.")
         else:
-            print(f"Usuario admin ya existía: {admin_email}")
+            print(f"Usuario super admin ya existía: {admin_email}")
 
         print("Datos iniciales listos.")
 

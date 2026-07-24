@@ -53,6 +53,9 @@ class Usuario(UserMixin, db.Model):
         return self.activo
 
     def tiene_permiso(self, modulo: str, accion: str = "ver") -> bool:
+        if self.es_superadmin:
+            return True
+
         from app.models.permiso import PermisoUsuario, RolModuloPermiso
 
         override = PermisoUsuario.query.filter_by(
@@ -67,6 +70,22 @@ class Usuario(UserMixin, db.Model):
         if default is None:
             return False
         return default.puede_editar if accion == "editar" else default.puede_ver
+
+    @property
+    def es_superadmin(self) -> bool:
+        return self.rol is not None and self.rol.clave == "superadmin"
+
+    @property
+    def es_admin_o_superior(self) -> bool:
+        return self.rol is not None and self.rol.clave in ("admin", "superadmin")
+
+    def puede_gestionar_a(self, otro: "Usuario") -> bool:
+        """Un superadmin gestiona a cualquiera; un admin solo a usuarios normales (no a otros admins/superadmins)."""
+        if self.es_superadmin:
+            return True
+        if self.es_admin_o_superior:
+            return not otro.es_admin_o_superior
+        return False
 
     def __repr__(self):
         return f"<Usuario {self.email}>"

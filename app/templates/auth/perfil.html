@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Mi perfil{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">Cambiar mi contraseña</h1>
+<p class="text-muted">Sesión: {{ current_user.nombre_completo }} ({{ current_user.email }}) — rol {{ current_user.rol.nombre }}</p>
+
+<form method="post" novalidate class="col-12 col-lg-5">
+  {{ form.hidden_tag() }}
+  <div class="mb-3">
+    {{ form.password_actual.label(class="form-label") }}
+    {{ form.password_actual(class="form-control") }}
+    {% for error in form.password_actual.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+  </div>
+  <div class="mb-3">
+    {{ form.password_nueva.label(class="form-label") }}
+    {{ form.password_nueva(class="form-control") }}
+    {% for error in form.password_nueva.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+  </div>
+  <div class="mb-3">
+    {{ form.password_nueva_confirmar.label(class="form-label") }}
+    {{ form.password_nueva_confirmar(class="form-control") }}
+    {% for error in form.password_nueva_confirmar.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+  </div>
+  <button type="submit" class="btn btn-primary">Cambiar contraseña</button>
+  <a href="{{ url_for('core.dashboard') }}" class="btn btn-outline-secondary">Cancelar</a>
+</form>
+{% endblock %}

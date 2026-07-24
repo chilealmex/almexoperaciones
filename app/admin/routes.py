@@ -1,4 +1,4 @@
-from flask import render_template, redirect, url_for, flash, request
+from flask import render_template, redirect, url_for, flash, request, abort
 from flask_login import current_user
 
 from app.admin import bp
@@ -17,7 +17,18 @@ def usuarios():
 
 
 def _cargar_opciones_rol(form):
-    form.rol_id.choices = [(r.id, r.nombre) for r in Rol.query.order_by(Rol.nombre).all()]
+    query = Rol.query.order_by(Rol.nombre)
+    if not current_user.es_superadmin:
+        # un admin solo puede crear/editar usuarios normales, nunca otros admins/superadmins
+        query = query.filter(Rol.clave == "usuario")
+    form.rol_id.choices = [(r.id, r.nombre) for r in query.all()]
+
+
+def _rol_permitido_para_actor(rol_id: int) -> bool:
+    if current_user.es_superadmin:
+        return True
+    rol = db.session.get(Rol, rol_id)
+    return rol is not None and rol.clave == "usuario"
 
 
 @bp.route("/usuarios/nuevo", methods=["GET", "POST"])
@@ -26,6 +37,8 @@ def nuevo_usuario():
     form = UsuarioForm()
     _cargar_opciones_rol(form)
     if form.validate_on_submit():
+        if not _rol_permitido_para_actor(form.rol_id.data):
+            abort(403)
         if not form.password.data:
             flash("La contraseña es obligatoria para un usuario nuevo.", "danger")
             return render_template("admin/usuario_form.html", form=form, usuario=None)
@@ -54,10 +67,16 @@ def nuevo_usuario():
 @require_permission("admin", "editar")
 def editar_usuario(usuario_id):
     usuario = Usuario.query.get_or_404(usuario_id)
+    if not current_user.puede_gestionar_a(usuario):
+        abort(403)
+
     form = UsuarioForm(obj=usuario)
     _cargar_opciones_rol(form)
 
     if form.validate_on_submit():
+        if not _rol_permitido_para_actor(form.rol_id.data):
+            abort(403)
+
         email_normalizado = form.email.data.lower().strip()
         duplicado = Usuario.query.filter(
             Usuario.email == email_normalizado, Usuario.id != usuario.id
@@ -84,6 +103,8 @@ def editar_usuario(usuario_id):
 @require_permission("admin", "editar")
 def permisos_usuario(usuario_id):
     usuario = Usuario.query.get_or_404(usuario_id)
+    if not current_user.puede_gestionar_a(usuario):
+        abort(403)
 
     if request.method == "POST":
         for modulo in MODULOS:

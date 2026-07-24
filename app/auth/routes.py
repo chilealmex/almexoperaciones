@@ -6,7 +6,7 @@ from flask import render_template, redirect, url_for, flash, request
 from flask_login import login_user, logout_user, login_required, current_user
 
 from app.auth import bp
-from app.auth.forms import LoginForm
+from app.auth.forms import LoginForm, CambiarPasswordForm
 from app.extensions import db
 from app.models.usuario import Usuario
 
@@ -59,3 +59,20 @@ def logout():
     logout_user()
     flash("Sesión cerrada.", "info")
     return redirect(url_for("auth.login"))
+
+
+@bp.route("/perfil", methods=["GET", "POST"])
+@login_required
+def perfil():
+    form = CambiarPasswordForm()
+    if form.validate_on_submit():
+        if not current_user.check_password(form.password_actual.data):
+            flash("La contraseña actual no es correcta.", "danger")
+            return render_template("auth/perfil.html", form=form)
+
+        current_user.set_password(form.password_nueva.data)
+        db.session.commit()
+        flash("Contraseña actualizada correctamente.", "success")
+        return redirect(url_for("core.dashboard"))
+
+    return render_template("auth/perfil.html", form=form)

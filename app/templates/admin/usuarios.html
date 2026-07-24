@@ -29,8 +29,12 @@
           <span class="badge {{ 'bg-success' if u.activo else 'bg-secondary' }}">{{ 'Activo' if u.activo else 'Inactivo' }}</span>
         </td>
         <td class="text-end">
+          {% if current_user.puede_gestionar_a(u) %}
           <a href="{{ url_for('admin.editar_usuario', usuario_id=u.id) }}" class="btn btn-sm btn-outline-secondary">Editar</a>
           <a href="{{ url_for('admin.permisos_usuario', usuario_id=u.id) }}" class="btn btn-sm btn-outline-secondary">Permisos</a>
+          {% else %}
+          <span class="text-muted small">Sin acceso</span>
+          {% endif %}
         </td>
       </tr>
       {% else %}

@@ -1,4 +1,5 @@
-from app.models.permiso import PermisoUsuario
+from app.models.permiso import PermisoUsuario, RolModuloPermiso
+from app.models.usuario import Rol, Usuario
 from tests.conftest import login
 
 
@@ -33,3 +34,66 @@ def test_usuario_con_permiso_accede(client, usuario_bodega):
     login(client, "bodega@test.cl")
     response = client.get("/inventario/")
     assert response.status_code == 200
+
+
+def _crear_superadmin(db, empresa):
+    rol = Rol(clave="superadmin", nombre="Super administrador")
+    db.session.add(rol)
+    db.session.commit()
+    usuario = Usuario(
+        empresa_id=empresa.id, nombre_completo="Super", email="super@test.cl", rol_id=rol.id
+    )
+    usuario.set_password("password123")
+    db.session.add(usuario)
+    db.session.commit()
+    return usuario
+
+
+def test_superadmin_tiene_acceso_a_todo_sin_permisos_explicitos(db, empresa):
+    superadmin = _crear_superadmin(db, empresa)
+    assert superadmin.tiene_permiso("inventario", "editar")
+    assert superadmin.tiene_permiso("admin", "editar")
+
+
+def test_admin_no_puede_gestionar_a_otro_admin(db, usuario_admin):
+    otro_admin = Usuario(
+        empresa_id=usuario_admin.empresa_id,
+        nombre_completo="Otro admin",
+        email="otroadmin@test.cl",
+        rol_id=usuario_admin.rol_id,
+    )
+    otro_admin.set_password("password123")
+    db.session.add(otro_admin)
+    db.session.commit()
+
+    assert not usuario_admin.puede_gestionar_a(otro_admin)
+
+
+def test_admin_puede_gestionar_a_usuario_normal(db, empresa, usuario_admin):
+    rol_usuario = Rol(clave="usuario", nombre="Usuario")
+    db.session.add(rol_usuario)
+    db.session.commit()
+    normal = Usuario(
+        empresa_id=empresa.id, nombre_completo="Normal", email="normal@test.cl", rol_id=rol_usuario.id
+    )
+    normal.set_password("password123")
+    db.session.add(normal)
+    db.session.commit()
+
+    assert usuario_admin.puede_gestionar_a(normal)
+
+
+def test_admin_no_puede_editar_a_otro_admin_via_ruta(client, db, usuario_admin):
+    otro_admin = Usuario(
+        empresa_id=usuario_admin.empresa_id,
+        nombre_completo="Otro admin",
+        email="otroadmin2@test.cl",
+        rol_id=usuario_admin.rol_id,
+    )
+    otro_admin.set_password("password123")
+    db.session.add(otro_admin)
+    db.session.commit()
+
+    login(client, "admin@test.cl")
+    response = client.get(f"/admin/usuarios/{otro_admin.id}/editar")
+    assert response.status_code == 403
