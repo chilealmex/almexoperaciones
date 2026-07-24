@@ -19,7 +19,14 @@ def _cargar_categorias(form):
 @require_permission("inventario", "ver")
 def productos():
     lista = Producto.query.order_by(Producto.nombre).all()
-    return render_template("inventario/productos_lista.html", productos=lista)
+    activos = [p for p in lista if p.activo]
+    stats = {
+        "total_activos": len(activos),
+        "bajo_stock": sum(1 for p in activos if p.bajo_stock_minimo),
+        "valor_costo": sum(p.stock_actual * p.precio_costo for p in activos),
+        "valor_venta": sum(p.stock_actual * p.precio_venta for p in activos),
+    }
+    return render_template("inventario/productos_lista.html", productos=lista, stats=stats)
 
 
 @bp.route("/productos/nuevo", methods=["GET", "POST"])

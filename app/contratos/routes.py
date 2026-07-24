@@ -85,7 +85,14 @@ def _cargar_clientes(form):
 @require_permission("contratos", "ver")
 def contratos():
     lista = ContratoCliente.query.order_by(ContratoCliente.fecha_termino).all()
-    return render_template("contratos/lista.html", contratos=lista)
+    vigentes = [c for c in lista if c.estado == "vigente"]
+    stats = {
+        "vigentes": len(vigentes),
+        "por_vencer": sum(1 for c in lista if c.estado == "por_vencer"),
+        "vencidos": sum(1 for c in lista if c.estado == "vencido"),
+        "monto_vigente": sum(c.monto for c in vigentes),
+    }
+    return render_template("contratos/lista.html", contratos=lista, stats=stats)
 
 
 @bp.route("/nuevo", methods=["GET", "POST"])

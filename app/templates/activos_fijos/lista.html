@@ -12,6 +12,34 @@
 </div>
 
 {% set estado_badge = {'activo': 'bg-success', 'en_mantenimiento': 'bg-warning text-dark', 'dado_de_baja': 'bg-secondary', 'vendido': 'bg-dark'} %}
+
+<div class="row g-3 mb-4">
+  <div class="col-6 col-lg-3">
+    <div class="card tile-activos card-body">
+      <small>Activos vigentes</small>
+      <div class="h4 mb-0">{{ stats.total_activos }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card tile-activos card-body">
+      <small>Valor libro total</small>
+      <div class="h4 mb-0">{{ stats.valor_libro_total|clp }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card tile-activos card-body">
+      <small>Depreciación mensual</small>
+      <div class="h4 mb-0">{{ stats.depreciacion_mensual_total|clp }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card tile-activos card-body">
+      <small>Arrendados hoy</small>
+      <div class="h4 mb-0">{{ stats.arrendados }}</div>
+    </div>
+  </div>
+</div>
+
 <div class="table-responsive">
   <table class="table table-striped align-middle">
     <thead><tr><th>Código</th><th>Nombre</th><th class="d-none d-md-table-cell">Ubicación</th><th class="d-none d-md-table-cell text-end">Valor libro</th><th>Estado</th></tr></thead>

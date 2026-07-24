@@ -15,7 +15,14 @@ from app.utils.storage import guardar_documento, listar_documentos
 @require_permission("activos_fijos", "ver")
 def activos():
     lista = ActivoFijo.query.order_by(ActivoFijo.codigo_activo).all()
-    return render_template("activos_fijos/lista.html", activos=lista)
+    activos_vigentes = [a for a in lista if a.estado == "activo"]
+    stats = {
+        "total_activos": len(activos_vigentes),
+        "valor_libro_total": sum(a.valor_libro for a in activos_vigentes),
+        "depreciacion_mensual_total": sum(a.depreciacion_mensual for a in activos_vigentes),
+        "arrendados": sum(1 for a in activos_vigentes if a.es_arrendable and a.arrendado_actualmente),
+    }
+    return render_template("activos_fijos/lista.html", activos=lista, stats=stats)
 
 
 @bp.route("/depreciacion")
