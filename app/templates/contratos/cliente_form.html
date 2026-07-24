@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Editar cliente' if cliente else 'Nuevo cliente' }}{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">{{ 'Editar cliente' if cliente else 'Nuevo cliente' }}</h1>
+<form method="post" novalidate class="col-12 col-lg-6">
+  {{ form.hidden_tag() }}
+  <div class="row">
+    <div class="col-6 mb-3">
+      {{ form.rut.label(class="form-label") }}
+      {{ form.rut(class="form-control", placeholder="12345678-9") }}
+      {% for error in form.rut.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+    </div>
+    <div class="col-6 mb-3">
+      {{ form.giro.label(class="form-label") }}
+      {{ form.giro(class="form-control") }}
+    </div>
+  </div>
+  <div class="mb-3">
+    {{ form.razon_social.label(class="form-label") }}
+    {{ form.razon_social(class="form-control") }}
+    {% for error in form.razon_social.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+  </div>
+  <div class="row">
+    <div class="col-6 mb-3">
+      {{ form.direccion.label(class="form-label") }}
+      {{ form.direccion(class="form-control") }}
+    </div>
+    <div class="col-3 mb-3">
+      {{ form.comuna.label(class="form-label") }}
+      {{ form.comuna(class="form-control") }}
+    </div>
+    <div class="col-3 mb-3">
+      {{ form.ciudad.label(class="form-label") }}
+      {{ form.ciudad(class="form-control") }}
+    </div>
+  </div>
+  <div class="row">
+    <div class="col-6 mb-3">
+      {{ form.telefono.label(class="form-label") }}
+      {{ form.telefono(class="form-control") }}
+    </div>
+    <div class="col-6 mb-3">
+      {{ form.email.label(class="form-label") }}
+      {{ form.email(class="form-control") }}
+      {% for error in form.email.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+    </div>
+  </div>
+  <div class="mb-3">
+    {{ form.contacto_nombre.label(class="form-label") }}
+    {{ form.contacto_nombre(class="form-control") }}
+  </div>
+  <div class="form-check mb-3">
+    {{ form.activo(class="form-check-input") }}
+    {{ form.activo.label(class="form-check-label") }}
+  </div>
+  <button type="submit" class="btn btn-primary">Guardar</button>
+  <a href="{{ url_for('contratos.clientes') }}" class="btn btn-outline-secondary">Cancelar</a>
+</form>
+{% endblock %}

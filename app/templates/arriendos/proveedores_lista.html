@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Proveedores{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 mb-0">Proveedores</h1>
+  {% if puede('arriendos', 'editar') %}
+  <a href="{{ url_for('arriendos.nuevo_proveedor') }}" class="btn btn-primary">Nuevo proveedor</a>
+  {% endif %}
+</div>
+<div class="table-responsive">
+  <table class="table table-striped align-middle">
+    <thead><tr><th>RUT</th><th>Razón social</th><th class="d-none d-md-table-cell">Contacto</th><th class="d-none d-md-table-cell">Teléfono</th></tr></thead>
+    <tbody>
+      {% for p in proveedores %}
+      <tr>
+        <td>{{ p.rut }}</td>
+        <td>{{ p.razon_social }}</td>
+        <td class="d-none d-md-table-cell">{{ p.contacto_nombre or '—' }}</td>
+        <td class="d-none d-md-table-cell">{{ p.telefono or '—' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="text-center text-muted">No hay proveedores registrados.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Clientes{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 mb-0">Clientes</h1>
+  <div>
+    <a href="{{ url_for('contratos.contratos') }}" class="btn btn-outline-secondary">Contratos</a>
+    {% if puede('contratos', 'editar') %}
+    <a href="{{ url_for('contratos.nuevo_cliente') }}" class="btn btn-primary">Nuevo cliente</a>
+    {% endif %}
+  </div>
+</div>
+
+<div class="table-responsive">
+  <table class="table table-striped align-middle">
+    <thead><tr><th>RUT</th><th>Razón social</th><th class="d-none d-md-table-cell">Contacto</th><th class="d-none d-md-table-cell">Estado</th><th></th></tr></thead>
+    <tbody>
+      {% for c in clientes %}
+      <tr>
+        <td>{{ c.rut }}</td>
+        <td>{{ c.razon_social }}</td>
+        <td class="d-none d-md-table-cell">{{ c.contacto_nombre or '—' }}</td>
+        <td class="d-none d-md-table-cell"><span class="badge {{ 'bg-success' if c.activo else 'bg-secondary' }}">{{ 'Activo' if c.activo else 'Inactivo' }}</span></td>
+        <td class="text-end">
+          {% if puede('contratos', 'editar') %}
+          <a href="{{ url_for('contratos.editar_cliente', cliente_id=c.id) }}" class="btn btn-sm btn-outline-secondary">Editar</a>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="text-center text-muted">No hay clientes registrados.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

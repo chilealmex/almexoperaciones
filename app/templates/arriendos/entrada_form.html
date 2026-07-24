@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Nuevo arriendo de entrada{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">Nuevo arriendo de entrada</h1>
+<p class="text-muted">La empresa arrienda un activo de un proveedor externo para su propio uso.</p>
+<form method="post" novalidate class="col-12 col-lg-6">
+  {{ form.hidden_tag() }}
+  <div class="mb-3">
+    {{ form.proveedor_id.label(class="form-label") }}
+    {{ form.proveedor_id(class="form-select") }}
+    {% if not form.proveedor_id.choices %}<div class="form-text text-warning">Primero debes <a href="{{ url_for('arriendos.nuevo_proveedor') }}">crear un proveedor</a>.</div>{% endif %}
+  </div>
+  <div class="mb-3">
+    {{ form.descripcion_activo.label(class="form-label") }}
+    {{ form.descripcion_activo(class="form-control") }}
+  </div>
+  <div class="row">
+    <div class="col-6 mb-3">
+      {{ form.numero_contrato.label(class="form-label") }}
+      {{ form.numero_contrato(class="form-control") }}
+    </div>
+    <div class="col-6 mb-3">
+      {{ form.ubicacion_uso.label(class="form-label") }}
+      {{ form.ubicacion_uso(class="form-control") }}
+    </div>
+  </div>
+  <div class="row">
+    <div class="col-6 mb-3">
+      {{ form.fecha_inicio.label(class="form-label") }}
+      {{ form.fecha_inicio(class="form-control", type="date") }}
+    </div>
+    <div class="col-6 mb-3">
+      {{ form.fecha_termino.label(class="form-label") }}
+      {{ form.fecha_termino(class="form-control", type="date") }}
+    </div>
+  </div>
+  <div class="row">
+    <div class="col-4 mb-3">
+      {{ form.monto_periodo.label(class="form-label") }}
+      {{ form.monto_periodo(class="form-control") }}
+    </div>
+    <div class="col-4 mb-3">
+      {{ form.periodicidad.label(class="form-label") }}
+      {{ form.periodicidad(class="form-select") }}
+    </div>
+    <div class="col-4 mb-3">
+      {{ form.dias_alerta_vencimiento.label(class="form-label") }}
+      {{ form.dias_alerta_vencimiento(class="form-control") }}
+    </div>
+  </div>
+  <button type="submit" class="btn btn-primary">Guardar</button>
+  <a href="{{ url_for('arriendos.index') }}" class="btn btn-outline-secondary">Cancelar</a>
+</form>
+{% endblock %}

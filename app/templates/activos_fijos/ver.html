@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}{{ activo.nombre }}{% endblock %}
+{% block content %}
+{% set estado_badge = {'activo': 'bg-success', 'en_mantenimiento': 'bg-warning text-dark', 'dado_de_baja': 'bg-secondary', 'vendido': 'bg-dark'} %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 mb-0">{{ activo.codigo_activo }} — {{ activo.nombre }} <span class="badge {{ estado_badge[activo.estado] }}">{{ activo.estado.replace('_', ' ') }}</span></h1>
+  {% if puede('activos_fijos', 'editar') %}
+  <a href="{{ url_for('activos_fijos.editar_activo', activo_id=activo.id) }}" class="btn btn-outline-secondary">Editar</a>
+  {% endif %}
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3"><div class="card card-body"><small class="text-muted">Valor de compra</small><div>{{ activo.valor_compra|clp }}</div></div></div>
+  <div class="col-6 col-md-3"><div class="card card-body"><small class="text-muted">Valor libro (hoy)</small><div>{{ activo.valor_libro|clp }}</div></div></div>
+  <div class="col-6 col-md-3"><div class="card card-body"><small class="text-muted">Fecha de compra</small><div>{{ activo.fecha_compra|fecha }}</div></div></div>
+  <div class="col-6 col-md-3"><div class="card card-body"><small class="text-muted">Vida útil</small><div>{{ activo.vida_util_meses }} meses</div></div></div>
+</div>
+
+<p><strong>Ubicación:</strong> {{ activo.ubicacion or '—' }}</p>
+<p><strong>Responsable:</strong> {{ activo.responsable.nombre_completo if activo.responsable else '—' }}</p>
+{% if activo.es_arrendable %}
+<p><strong>Estado de arriendo:</strong> {{ 'Arrendado actualmente' if activo.arrendado_actualmente else 'Disponible para arrendar' }}</p>
+{% endif %}
+{% if activo.estado == 'activo' %}
+<p><strong>Depreciación mensual:</strong> {{ activo.depreciacion_mensual|clp }} → centro de costo <span class="badge {{ 'bg-info text-dark' if activo.centro_costo == 'Arriendo' else 'bg-secondary' }}">{{ activo.centro_costo }}</span></p>
+{% endif %}
+{% if activo.estado == 'dado_de_baja' or activo.estado == 'vendido' %}
+<p><strong>Motivo de baja:</strong> {{ activo.motivo_baja }} ({{ activo.fecha_baja|fecha }})</p>
+{% endif %}
+
+{% if puede('activos_fijos', 'editar') and activo.estado == 'activo' %}
+<div class="card mb-4">
+  <div class="card-body">
+    <h2 class="h6">Dar de baja este activo</h2>
+    <form method="post" action="{{ url_for('activos_fijos.dar_de_baja', activo_id=activo.id) }}" onsubmit="return confirm('¿Confirmas dar de baja este activo?');">
+      {{ baja_form.hidden_tag() }}
+      <div class="row g-2 align-items-end">
+        <div class="col-auto">{{ baja_form.estado(class="form-select") }}</div>
+        <div class="col">{{ baja_form.motivo_baja(class="form-control", placeholder="Motivo") }}</div>
+        <div class="col-auto"><button type="submit" class="btn btn-outline-danger">Dar de baja</button></div>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+<h2 class="h5 mt-4">Documentos adjuntos</h2>
+{% if puede('activos_fijos', 'editar') %}
+<form method="post" action="{{ url_for('activos_fijos.subir_documento', activo_id=activo.id) }}" enctype="multipart/form-data" class="row g-2 align-items-center mb-3">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="col-auto"><input type="file" name="archivo" class="form-control" required></div>
+  <div class="col-auto"><button type="submit" class="btn btn-outline-primary">Adjuntar</button></div>
+</form>
+{% endif %}
+<ul class="list-group">
+  {% for d in documentos %}
+  <li class="list-group-item d-flex justify-content-between">
+    <a href="{{ url_for('core.descargar_documento', documento_id=d.id) }}">{{ d.nombre_archivo }}</a>
+    <span class="text-muted small">{{ d.subido_en|fecha }}</span>
+  </li>
+  {% else %}
+  <li class="list-group-item text-muted">Sin documentos adjuntos.</li>
+  {% endfor %}
+</ul>
+{% endblock %}

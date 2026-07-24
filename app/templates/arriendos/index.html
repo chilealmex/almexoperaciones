@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Activos en arriendo{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">Activos en arriendo</h1>
+
+<div class="d-flex justify-content-between align-items-center mb-2">
+  <h2 class="h5 mb-0">Arrendados a clientes (salida)</h2>
+  {% if puede('arriendos', 'editar') %}
+  <a href="{{ url_for('arriendos.nuevo_arriendo_salida') }}" class="btn btn-primary btn-sm">Nuevo arriendo de salida</a>
+  {% endif %}
+</div>
+{% set estado_badge_salida = {'activo': 'bg-success', 'finalizado': 'bg-secondary', 'atrasado': 'bg-danger'} %}
+<div class="table-responsive mb-4">
+  <table class="table table-striped table-sm align-middle">
+    <thead><tr><th>Activo</th><th>Cliente</th><th class="d-none d-md-table-cell">Término previsto</th><th>Estado</th></tr></thead>
+    <tbody>
+      {% for a in salidas %}
+      <tr>
+        <td><a href="{{ url_for('arriendos.ver_arriendo_salida', arriendo_id=a.id) }}">{{ a.activo_fijo.nombre }}</a></td>
+        <td>{{ a.cliente.razon_social }}</td>
+        <td class="d-none d-md-table-cell">{{ a.fecha_termino_prevista|fecha }}</td>
+        <td><span class="badge {{ estado_badge_salida[a.estado] }}">{{ a.estado }}</span></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="text-center text-muted">Sin arriendos de salida registrados.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="d-flex justify-content-between align-items-center mb-2">
+  <h2 class="h5 mb-0">Arrendados de proveedores (entrada)</h2>
+  <div>
+    <a href="{{ url_for('arriendos.proveedores') }}" class="btn btn-outline-secondary btn-sm">Proveedores</a>
+    {% if puede('arriendos', 'editar') %}
+    <a href="{{ url_for('arriendos.nuevo_arriendo_entrada') }}" class="btn btn-primary btn-sm">Nuevo arriendo de entrada</a>
+    {% endif %}
+  </div>
+</div>
+{% set estado_badge_entrada = {'vigente': 'bg-success', 'por_vencer': 'bg-warning text-dark', 'vencido': 'bg-danger', 'terminado': 'bg-secondary'} %}
+<div class="table-responsive">
+  <table class="table table-striped table-sm align-middle">
+    <thead><tr><th>Activo</th><th>Proveedor</th><th class="d-none d-md-table-cell">Término</th><th>Estado</th></tr></thead>
+    <tbody>
+      {% for a in entradas %}
+      <tr>
+        <td><a href="{{ url_for('arriendos.ver_arriendo_entrada', arriendo_id=a.id) }}">{{ a.descripcion_activo }}</a></td>
+        <td>{{ a.proveedor.razon_social }}</td>
+        <td class="d-none d-md-table-cell">{{ a.fecha_termino|fecha }}</td>
+        <td><span class="badge {{ estado_badge_entrada[a.estado] }}">{{ a.estado.replace('_', ' ') }}</span></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="text-center text-muted">Sin arriendos de entrada registrados.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: gestor-pyme
+    runtime: python
+    plan: starter
+    buildCommand: "pip install -r requirements.txt"
+    preDeployCommand: "flask db upgrade"
+    startCommand: "gunicorn wsgi:app --workers 3 --bind 0.0.0.0:$PORT"
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.4
+      - key: FLASK_ENV
+        value: production
+      - key: FLASK_APP
+        value: wsgi.py
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: EMPRESA_ID
+        value: "1"
+      - key: STORAGE_BACKEND
+        value: local
+      - key: R2_BUCKET
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_ENDPOINT_URL
+        sync: false

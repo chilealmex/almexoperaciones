@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Contrato {{ contrato.numero_contrato }}{% endblock %}
+{% block content %}
+{% set estado_badge = {'vigente': 'bg-success', 'por_vencer': 'bg-warning text-dark', 'vencido': 'bg-danger', 'terminado': 'bg-secondary'} %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 mb-0">Contrato {{ contrato.numero_contrato }} <span class="badge {{ estado_badge[contrato.estado] }}">{{ contrato.estado.replace('_', ' ') }}</span></h1>
+  {% if puede('contratos', 'editar') %}
+  <div>
+    <a href="{{ url_for('contratos.editar_contrato', contrato_id=contrato.id) }}" class="btn btn-outline-secondary">Editar</a>
+    {% if contrato.estado in ('por_vencer', 'vencido') %}
+    <form method="post" action="{{ url_for('contratos.renovar_contrato', contrato_id=contrato.id) }}" class="d-inline">
+      <button type="submit" class="btn btn-primary">Renovar</button>
+    </form>
+    {% endif %}
+    {% if contrato.estado != 'terminado' %}
+    <form method="post" action="{{ url_for('contratos.terminar_contrato', contrato_id=contrato.id) }}" class="d-inline" onsubmit="return confirm('¿Marcar este contrato como terminado?');">
+      <button type="submit" class="btn btn-outline-danger">Terminar</button>
+    </form>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3"><div class="card card-body"><small class="text-muted">Cliente</small><div>{{ contrato.cliente.razon_social }}</div></div></div>
+  <div class="col-6 col-md-3"><div class="card card-body"><small class="text-muted">Monto</small><div>{{ contrato.monto|clp }}</div></div></div>
+  <div class="col-6 col-md-3"><div class="card card-body"><small class="text-muted">Inicio</small><div>{{ contrato.fecha_inicio|fecha }}</div></div></div>
+  <div class="col-6 col-md-3"><div class="card card-body"><small class="text-muted">Término</small><div>{{ contrato.fecha_termino|fecha }}</div></div></div>
+</div>
+
+<p><strong>Objeto:</strong> {{ contrato.objeto }}</p>
+{% if contrato.notas %}<p><strong>Notas:</strong> {{ contrato.notas }}</p>{% endif %}
+{% if contrato.contrato_anterior %}
+<p class="text-muted small">Este contrato es una renovación de <a href="{{ url_for('contratos.ver_contrato', contrato_id=contrato.contrato_anterior.id) }}">{{ contrato.contrato_anterior.numero_contrato }}</a>.</p>
+{% endif %}
+
+<h2 class="h5 mt-4">Documentos adjuntos</h2>
+{% if puede('contratos', 'editar') %}
+<form method="post" action="{{ url_for('contratos.subir_documento', contrato_id=contrato.id) }}" enctype="multipart/form-data" class="row g-2 align-items-center mb-3">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="col-auto"><input type="file" name="archivo" class="form-control" required></div>
+  <div class="col-auto"><button type="submit" class="btn btn-outline-primary">Adjuntar</button></div>
+</form>
+{% endif %}
+<ul class="list-group">
+  {% for d in documentos %}
+  <li class="list-group-item d-flex justify-content-between">
+    <a href="{{ url_for('core.descargar_documento', documento_id=d.id) }}">{{ d.nombre_archivo }}</a>
+    <span class="text-muted small">{{ d.subido_en|fecha }}</span>
+  </li>
+  {% else %}
+  <li class="list-group-item text-muted">Sin documentos adjuntos.</li>
+  {% endfor %}
+</ul>
+{% endblock %}

@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Activos fijos{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 mb-0">Activos fijos</h1>
+  <div>
+    <a href="{{ url_for('activos_fijos.depreciacion') }}" class="btn btn-outline-secondary">Depreciación por centro de costo</a>
+    {% if puede('activos_fijos', 'editar') %}
+    <a href="{{ url_for('activos_fijos.nuevo_activo') }}" class="btn btn-primary">Nuevo activo</a>
+    {% endif %}
+  </div>
+</div>
+
+{% set estado_badge = {'activo': 'bg-success', 'en_mantenimiento': 'bg-warning text-dark', 'dado_de_baja': 'bg-secondary', 'vendido': 'bg-dark'} %}
+<div class="table-responsive">
+  <table class="table table-striped align-middle">
+    <thead><tr><th>Código</th><th>Nombre</th><th class="d-none d-md-table-cell">Ubicación</th><th class="d-none d-md-table-cell text-end">Valor libro</th><th>Estado</th></tr></thead>
+    <tbody>
+      {% for a in activos %}
+      <tr>
+        <td><a href="{{ url_for('activos_fijos.ver_activo', activo_id=a.id) }}">{{ a.codigo_activo }}</a></td>
+        <td>
+          {{ a.nombre }}
+          {% if a.es_arrendable %}
+            {% if a.arrendado_actualmente %}
+            <span class="badge bg-info text-dark">arrendado</span>
+            {% else %}
+            <span class="badge bg-light text-dark border">en sucursal</span>
+            {% endif %}
+          {% endif %}
+        </td>
+        <td class="d-none d-md-table-cell">{{ a.ubicacion or '—' }}</td>
+        <td class="d-none d-md-table-cell text-end">{{ a.valor_libro|clp }}</td>
+        <td><span class="badge {{ estado_badge[a.estado] }}">{{ a.estado.replace('_', ' ') }}</span></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="text-center text-muted">No hay activos registrados.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

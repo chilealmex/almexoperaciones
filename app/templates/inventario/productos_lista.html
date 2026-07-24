@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Inventario{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 mb-0">Inventario</h1>
+  <div>
+    <a href="{{ url_for('inventario.movimientos') }}" class="btn btn-outline-secondary">Movimientos</a>
+    {% if puede('inventario', 'editar') %}
+    <a href="{{ url_for('inventario.nuevo_producto') }}" class="btn btn-primary">Nuevo producto</a>
+    {% endif %}
+  </div>
+</div>
+
+<div class="table-responsive">
+  <table class="table table-striped align-middle">
+    <thead>
+      <tr>
+        <th>SKU</th>
+        <th>Nombre</th>
+        <th class="d-none d-md-table-cell">Categoría</th>
+        <th class="text-end">Stock</th>
+        <th class="d-none d-md-table-cell text-end">Precio venta</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in productos %}
+      <tr class="{{ 'table-warning' if p.bajo_stock_minimo else '' }}">
+        <td>{{ p.sku }}</td>
+        <td><a href="{{ url_for('inventario.ver_producto', producto_id=p.id) }}">{{ p.nombre }}</a></td>
+        <td class="d-none d-md-table-cell">{{ p.categoria.nombre if p.categoria else '—' }}</td>
+        <td class="text-end">{{ p.stock_actual }} {{ p.unidad_medida }}</td>
+        <td class="d-none d-md-table-cell text-end">{{ p.precio_venta|clp }}</td>
+        <td class="text-end">
+          {% if puede('inventario', 'editar') %}
+          <a href="{{ url_for('inventario.editar_producto', producto_id=p.id) }}" class="btn btn-sm btn-outline-secondary">Editar</a>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="text-center text-muted">No hay productos registrados.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Inicio{% endblock %}
+{% block content %}
+<h1 class="h3 mb-4">Bienvenido/a, {{ current_user.nombre_completo }}</h1>
+
+<div class="row g-3">
+  {% if puede('inventario') %}
+  <div class="col-12 col-md-6 col-lg-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <h2 class="h5">Inventario</h2>
+        {% if productos_bajo_stock %}
+        <p class="text-danger mb-2">{{ productos_bajo_stock|length }} producto(s) bajo el stock mínimo</p>
+        <ul class="list-unstyled small">
+          {% for p in productos_bajo_stock[:5] %}
+          <li><a href="{{ url_for('inventario.ver_producto', producto_id=p.id) }}">{{ p.nombre }}</a> — stock {{ p.stock_actual }} / mínimo {{ p.stock_minimo }}</li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-muted mb-0">Sin alertas de stock.</p>
+        {% endif %}
+        <a href="{{ url_for('inventario.productos') }}" class="btn btn-sm btn-outline-primary mt-2">Ver inventario</a>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if puede('contratos') %}
+  <div class="col-12 col-md-6 col-lg-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <h2 class="h5">Contratos con clientes</h2>
+        {% if contratos_por_vencer %}
+        <p class="text-warning mb-2">{{ contratos_por_vencer|length }} contrato(s) por vencer</p>
+        <ul class="list-unstyled small">
+          {% for c in contratos_por_vencer[:5] %}
+          <li><a href="{{ url_for('contratos.ver_contrato', contrato_id=c.id) }}">{{ c.numero_contrato }}</a> — {{ c.cliente.razon_social }} — vence {{ c.fecha_termino|fecha }}</li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-muted mb-0">Sin contratos próximos a vencer.</p>
+        {% endif %}
+        <a href="{{ url_for('contratos.contratos') }}" class="btn btn-sm btn-outline-primary mt-2">Ver contratos</a>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if puede('activos_fijos') %}
+  <div class="col-12 col-md-6 col-lg-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <h2 class="h5">Activos fijos</h2>
+        <p class="text-muted mb-2">Gestiona el registro de activos y su depreciación.</p>
+        <a href="{{ url_for('activos_fijos.activos') }}" class="btn btn-sm btn-outline-primary mt-2">Ver activos fijos</a>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if puede('arriendos') %}
+  <div class="col-12 col-md-6 col-lg-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <h2 class="h5">Activos en arriendo</h2>
+        {% if arriendos_entrada_por_vencer %}
+        <p class="text-warning mb-2">{{ arriendos_entrada_por_vencer|length }} arriendo(s) de proveedores por vencer</p>
+        <ul class="list-unstyled small">
+          {% for a in arriendos_entrada_por_vencer[:5] %}
+          <li><a href="{{ url_for('arriendos.ver_arriendo_entrada', arriendo_id=a.id) }}">{{ a.descripcion_activo }}</a> — {{ a.proveedor.razon_social }} — vence {{ a.fecha_termino|fecha }}</li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-muted mb-0">Sin arriendos de proveedores próximos a vencer.</p>
+        {% endif %}
+        <a href="{{ url_for('arriendos.index') }}" class="btn btn-sm btn-outline-primary mt-2">Ver arriendos</a>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

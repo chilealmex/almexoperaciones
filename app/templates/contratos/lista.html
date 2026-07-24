@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Contratos con clientes{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 mb-0">Contratos con clientes</h1>
+  <div>
+    <a href="{{ url_for('contratos.clientes') }}" class="btn btn-outline-secondary">Clientes</a>
+    {% if puede('contratos', 'editar') %}
+    <a href="{{ url_for('contratos.nuevo_contrato') }}" class="btn btn-primary">Nuevo contrato</a>
+    {% endif %}
+  </div>
+</div>
+
+{% set estado_badge = {'vigente': 'bg-success', 'por_vencer': 'bg-warning text-dark', 'vencido': 'bg-danger', 'terminado': 'bg-secondary'} %}
+<div class="table-responsive">
+  <table class="table table-striped align-middle">
+    <thead><tr><th>N° contrato</th><th>Cliente</th><th class="d-none d-md-table-cell">Vence</th><th class="d-none d-md-table-cell text-end">Monto</th><th>Estado</th></tr></thead>
+    <tbody>
+      {% for c in contratos %}
+      <tr>
+        <td><a href="{{ url_for('contratos.ver_contrato', contrato_id=c.id) }}">{{ c.numero_contrato }}</a></td>
+        <td>{{ c.cliente.razon_social }}</td>
+        <td class="d-none d-md-table-cell">{{ c.fecha_termino|fecha }}</td>
+        <td class="d-none d-md-table-cell text-end">{{ c.monto|clp }}</td>
+        <td><span class="badge {{ estado_badge[c.estado] }}">{{ c.estado.replace('_', ' ') }}</span></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="text-center text-muted">No hay contratos registrados.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

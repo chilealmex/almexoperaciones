@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Error del servidor{% endblock %}
+{% block content %}
+<div class="text-center py-5">
+  <h1 class="display-5">500</h1>
+  <p class="lead">Ocurrió un error inesperado. Intenta nuevamente.</p>
+  <a href="{{ url_for('core.dashboard') }}" class="btn btn-primary">Volver al inicio</a>
+</div>
+{% endblock %}

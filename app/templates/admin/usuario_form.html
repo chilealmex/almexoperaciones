@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Editar usuario' if usuario else 'Nuevo usuario' }}{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">{{ 'Editar usuario' if usuario else 'Nuevo usuario' }}</h1>
+
+<form method="post" novalidate class="col-12 col-lg-6">
+  {{ form.hidden_tag() }}
+  <div class="mb-3">
+    {{ form.nombre_completo.label(class="form-label") }}
+    {{ form.nombre_completo(class="form-control") }}
+    {% for error in form.nombre_completo.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+  </div>
+  <div class="mb-3">
+    {{ form.email.label(class="form-label") }}
+    {{ form.email(class="form-control") }}
+    {% for error in form.email.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+  </div>
+  <div class="mb-3">
+    {{ form.rut.label(class="form-label") }}
+    {{ form.rut(class="form-control") }}
+    {% for error in form.rut.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+  </div>
+  <div class="mb-3">
+    {{ form.rol_id.label(class="form-label") }}
+    {{ form.rol_id(class="form-select") }}
+  </div>
+  <div class="mb-3">
+    {{ form.password.label(class="form-label") }}
+    {{ form.password(class="form-control") }}
+    <div class="form-text">{{ 'Deja en blanco para no cambiarla.' if usuario else 'Mínimo 8 caracteres.' }}</div>
+    {% for error in form.password.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+  </div>
+  <div class="form-check mb-3">
+    {{ form.activo(class="form-check-input") }}
+    {{ form.activo.label(class="form-check-label") }}
+  </div>
+  <button type="submit" class="btn btn-primary">Guardar</button>
+  <a href="{{ url_for('admin.usuarios') }}" class="btn btn-outline-secondary">Cancelar</a>
+</form>
+{% endblock %}

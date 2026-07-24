@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Editar contrato' if contrato else 'Nuevo contrato' }}{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">{{ 'Editar contrato' if contrato else 'Nuevo contrato' }}</h1>
+<form method="post" novalidate class="col-12 col-lg-6">
+  {{ form.hidden_tag() }}
+  <div class="mb-3">
+    {{ form.cliente_id.label(class="form-label") }}
+    {{ form.cliente_id(class="form-select") }}
+  </div>
+  <div class="row">
+    <div class="col-6 mb-3">
+      {{ form.numero_contrato.label(class="form-label") }}
+      {{ form.numero_contrato(class="form-control") }}
+    </div>
+    <div class="col-6 mb-3">
+      {{ form.monto.label(class="form-label") }}
+      {{ form.monto(class="form-control") }}
+    </div>
+  </div>
+  <div class="mb-3">
+    {{ form.objeto.label(class="form-label") }}
+    {{ form.objeto(class="form-control") }}
+  </div>
+  <div class="row">
+    <div class="col-6 mb-3">
+      {{ form.fecha_inicio.label(class="form-label") }}
+      {{ form.fecha_inicio(class="form-control", type="date") }}
+    </div>
+    <div class="col-6 mb-3">
+      {{ form.fecha_termino.label(class="form-label") }}
+      {{ form.fecha_termino(class="form-control", type="date") }}
+    </div>
+  </div>
+  <div class="row">
+    <div class="col-6 mb-3">
+      {{ form.periodicidad_pago.label(class="form-label") }}
+      {{ form.periodicidad_pago(class="form-select") }}
+    </div>
+    <div class="col-6 mb-3">
+      {{ form.dias_alerta_vencimiento.label(class="form-label") }}
+      {{ form.dias_alerta_vencimiento(class="form-control") }}
+    </div>
+  </div>
+  <div class="mb-3">
+    {{ form.notas.label(class="form-label") }}
+    {{ form.notas(class="form-control", rows=3) }}
+  </div>
+  <button type="submit" class="btn btn-primary">Guardar</button>
+  <a href="{{ url_for('contratos.contratos') }}" class="btn btn-outline-secondary">Cancelar</a>
+</form>
+{% endblock %}

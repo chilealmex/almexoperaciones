@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Permisos de {{ usuario.nombre_completo }}{% endblock %}
+{% block content %}
+<h1 class="h3 mb-1">Permisos de {{ usuario.nombre_completo }}</h1>
+<p class="text-muted">Rol base: {{ usuario.rol.nombre }}. Marca "Usar rol" para que este módulo herede el permiso del rol, o desmárcalo para definir un permiso individual.</p>
+
+<form method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="table-responsive">
+    <table class="table align-middle">
+      <thead>
+        <tr>
+          <th>Módulo</th>
+          <th class="text-center">Usar rol</th>
+          <th class="text-center">Ver</th>
+          <th class="text-center">Editar</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for modulo in modulos %}
+        {% set override = overrides.get(modulo) %}
+        <tr>
+          <td>{{ modulo.replace('_', ' ')|capitalize }}</td>
+          <td class="text-center">
+            <input type="checkbox" name="heredar_{{ modulo }}" class="form-check-input" {{ 'checked' if not override else '' }}>
+          </td>
+          <td class="text-center">
+            <input type="checkbox" name="ver_{{ modulo }}" class="form-check-input" {{ 'checked' if override and override.puede_ver else '' }}>
+          </td>
+          <td class="text-center">
+            <input type="checkbox" name="editar_{{ modulo }}" class="form-check-input" {{ 'checked' if override and override.puede_editar else '' }}>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <button type="submit" class="btn btn-primary">Guardar permisos</button>
+  <a href="{{ url_for('admin.usuarios') }}" class="btn btn-outline-secondary">Volver</a>
+</form>
+{% endblock %}

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Nuevo movimiento{% endblock %}
+{% block content %}
+<h1 class="h3 mb-1">Nuevo movimiento</h1>
+<p class="text-muted">Producto: {{ producto.nombre }} (stock actual: {{ producto.stock_actual }} {{ producto.unidad_medida }})</p>
+
+<form method="post" enctype="multipart/form-data" novalidate class="col-12 col-lg-6">
+  {{ form.hidden_tag() }}
+  <div class="mb-3">
+    {{ form.tipo.label(class="form-label") }}
+    {{ form.tipo(class="form-select") }}
+  </div>
+  <div class="mb-3">
+    {{ form.cantidad.label(class="form-label") }}
+    {{ form.cantidad(class="form-control") }}
+    <div class="form-text">Para "ajuste", ingresa el nuevo stock total.</div>
+    {% for error in form.cantidad.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+  </div>
+  <div class="row">
+    <div class="col-6 mb-3">
+      {{ form.tipo_documento.label(class="form-label") }}
+      {{ form.tipo_documento(class="form-select") }}
+    </div>
+    <div class="col-6 mb-3">
+      {{ form.numero_documento.label(class="form-label") }}
+      {{ form.numero_documento(class="form-control") }}
+    </div>
+  </div>
+  <div class="mb-3">
+    {{ form.motivo.label(class="form-label") }}
+    {{ form.motivo(class="form-control") }}
+  </div>
+  <div class="mb-3">
+    {{ form.observaciones.label(class="form-label") }}
+    {{ form.observaciones(class="form-control", rows=2) }}
+  </div>
+  <div class="mb-3">
+    {{ form.archivo.label(class="form-label") }}
+    {{ form.archivo(class="form-control") }}
+    {% for error in form.archivo.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+  </div>
+  <button type="submit" class="btn btn-primary">Registrar</button>
+  <a href="{{ url_for('inventario.ver_producto', producto_id=producto.id) }}" class="btn btn-outline-secondary">Cancelar</a>
+</form>
+{% endblock %}

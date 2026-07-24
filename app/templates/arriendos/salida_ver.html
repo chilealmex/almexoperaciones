@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+{% block title %}Arriendo de salida{% endblock %}
+{% block content %}
+{% set estado_badge = {'activo': 'bg-success', 'finalizado': 'bg-secondary', 'atrasado': 'bg-danger'} %}
+<h1 class="h3 mb-3">{{ arriendo.activo_fijo.nombre }} → {{ arriendo.cliente.razon_social }} <span class="badge {{ estado_badge[arriendo.estado] }}">{{ arriendo.estado }}</span></h1>
+
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3"><div class="card card-body"><small class="text-muted">Inicio</small><div>{{ arriendo.fecha_inicio|fecha }}</div></div></div>
+  <div class="col-6 col-md-3"><div class="card card-body"><small class="text-muted">Término previsto</small><div>{{ arriendo.fecha_termino_prevista|fecha }}</div></div></div>
+  <div class="col-6 col-md-3"><div class="card card-body"><small class="text-muted">Monto período</small><div>{{ arriendo.monto_periodo|clp }} / {{ arriendo.periodicidad }}</div></div></div>
+  <div class="col-6 col-md-3"><div class="card card-body"><small class="text-muted">Devolución real</small><div>{{ arriendo.fecha_devolucion_real|fecha if arriendo.fecha_devolucion_real else '—' }}</div></div></div>
+</div>
+
+{% if puede('arriendos', 'editar') and not arriendo.fecha_devolucion_real %}
+<div class="card mb-4">
+  <div class="card-body">
+    <h2 class="h6">Registrar devolución</h2>
+    <form method="post" action="{{ url_for('arriendos.devolver_arriendo_salida', arriendo_id=arriendo.id) }}" class="row g-2 align-items-end">
+      {{ devolucion_form.hidden_tag() }}
+      <div class="col-auto">{{ devolucion_form.fecha_devolucion_real(class="form-control", type="date") }}</div>
+      <div class="col-auto"><button type="submit" class="btn btn-outline-primary">Registrar devolución</button></div>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+<h2 class="h5">Cobros</h2>
+{% if puede('arriendos', 'editar') %}
+<form method="post" action="{{ url_for('arriendos.nueva_facturacion_salida', arriendo_id=arriendo.id) }}" class="row g-2 align-items-end mb-3">
+  {{ pago_form.hidden_tag() }}
+  <div class="col-auto">{{ pago_form.periodo(class="form-control", placeholder="AAAA-MM") }}</div>
+  <div class="col-auto">{{ pago_form.monto(class="form-control", placeholder="Monto") }}</div>
+  <div class="col-auto">{{ pago_form.numero_documento(class="form-control", placeholder="N° documento") }}</div>
+  <div class="col-auto"><button type="submit" class="btn btn-outline-primary">Registrar cobro</button></div>
+</form>
+{% endif %}
+<div class="table-responsive">
+  <table class="table table-sm">
+    <thead><tr><th>Período</th><th class="text-end">Monto</th><th>Documento</th><th>Estado</th><th></th></tr></thead>
+    <tbody>
+      {% for f in arriendo.facturaciones %}
+      <tr>
+        <td>{{ f.periodo }}</td>
+        <td class="text-end">{{ f.monto|clp }}</td>
+        <td>{{ f.numero_documento or '—' }}</td>
+        <td><span class="badge {{ 'bg-success' if f.estado_pago == 'pagado' else 'bg-warning text-dark' }}">{{ f.estado_pago }}</span></td>
+        <td>
+          {% if puede('arriendos', 'editar') and f.estado_pago != 'pagado' %}
+          <form method="post" action="{{ url_for('arriendos.marcar_facturacion_pagada', facturacion_id=f.id) }}">
+            <button type="submit" class="btn btn-sm btn-outline-success">Marcar pagado</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="text-center text-muted">Sin cobros registrados.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h2 class="h5 mt-4">Firma del cliente</h2>
+<p class="text-muted small">Esta es una firma dibujada en pantalla como confirmación/respaldo interno, no una firma electrónica avanzada con validez legal plena.</p>
+{% if arriendo.firmado %}
+<div class="card mb-4" style="max-width: 400px;">
+  <div class="card-body">
+    <img src="{{ url_for('arriendos.ver_firma_salida', arriendo_id=arriendo.id) }}" alt="Firma de {{ arriendo.firma_cliente_nombre }}" class="img-fluid border rounded mb-2" style="background: #fff;">
+    <p class="mb-0"><strong>{{ arriendo.firma_cliente_nombre }}</strong></p>
+    <p class="text-muted small mb-0">{{ arriendo.firma_cliente_en.strftime('%d-%m-%Y %H:%M') }}</p>
+  </div>
+</div>
+{% elif puede('arriendos', 'editar') %}
+<form method="post" action="{{ url_for('arriendos.firmar_arriendo_salida', arriendo_id=arriendo.id) }}" id="form-firma" class="col-12 col-lg-6 mb-4">
+  {{ firma_form.hidden_tag() }}
+  <div class="mb-2">
+    {{ firma_form.firma_cliente_nombre.label(class="form-label") }}
+    {{ firma_form.firma_cliente_nombre(class="form-control", placeholder="Nombre completo de quien firma") }}
+  </div>
+  <div class="border rounded mb-2" style="touch-action: none;">
+    <canvas id="canvas-firma" width="500" height="180" style="width: 100%; height: 180px; background: #fff; cursor: crosshair;"></canvas>
+  </div>
+  <input type="hidden" name="firma_imagen" id="input-firma-imagen">
+  <button type="button" id="btn-limpiar-firma" class="btn btn-outline-secondary btn-sm">Limpiar</button>
+  <button type="submit" id="btn-guardar-firma" class="btn btn-primary btn-sm">Guardar firma</button>
+</form>
+{% else %}
+<p class="text-muted">Aún no se ha registrado la firma del cliente.</p>
+{% endif %}
+
+<h2 class="h5 mt-4">Contrato y documentos adjuntos</h2>
+{% if puede('arriendos', 'editar') %}
+<form method="post" action="{{ url_for('arriendos.subir_documento_salida', arriendo_id=arriendo.id) }}" enctype="multipart/form-data" class="row g-2 align-items-center mb-3">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="col-auto"><input type="file" name="archivo" class="form-control" required></div>
+  <div class="col-auto"><button type="submit" class="btn btn-outline-primary">Adjuntar</button></div>
+</form>
+{% endif %}
+<ul class="list-group">
+  {% for d in documentos %}
+  <li class="list-group-item d-flex justify-content-between">
+    <a href="{{ url_for('core.descargar_documento', documento_id=d.id) }}">{{ d.nombre_archivo }}</a>
+    <span class="text-muted small">{{ d.subido_en|fecha }}</span>
+  </li>
+  {% else %}
+  <li class="list-group-item text-muted">Sin documentos adjuntos.</li>
+  {% endfor %}
+</ul>
+{% endblock %}
+
+{% block scripts %}
+{% if puede('arriendos', 'editar') and not arriendo.firmado %}
+<script>
+(function () {
+  var canvas = document.getElementById('canvas-firma');
+  if (!canvas) return;
+  var ctx = canvas.getContext('2d');
+
+  function resizeCanvas() {
+    var ratio = window.devicePixelRatio || 1;
+    var rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * ratio;
+    canvas.height = rect.height * ratio;
+    ctx.scale(ratio, ratio);
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#000';
+  }
+  resizeCanvas();
+
+  var dibujando = false;
+  var ultimoPunto = null;
+
+  function posicion(evento) {
+    var rect = canvas.getBoundingClientRect();
+    var punto = evento.touches ? evento.touches[0] : evento;
+    return { x: punto.clientX - rect.left, y: punto.clientY - rect.top };
+  }
+
+  function iniciar(evento) {
+    dibujando = true;
+    ultimoPunto = posicion(evento);
+    evento.preventDefault();
+  }
+
+  function dibujar(evento) {
+    if (!dibujando) return;
+    var actual = posicion(evento);
+    ctx.beginPath();
+    ctx.moveTo(ultimoPunto.x, ultimoPunto.y);
+    ctx.lineTo(actual.x, actual.y);
+    ctx.stroke();
+    ultimoPunto = actual;
+    evento.preventDefault();
+  }
+
+  function terminar() {
+    dibujando = false;
+  }
+
+  canvas.addEventListener('mousedown', iniciar);
+  canvas.addEventListener('mousemove', dibujar);
+  window.addEventListener('mouseup', terminar);
+  canvas.addEventListener('touchstart', iniciar, { passive: false });
+  canvas.addEventListener('touchmove', dibujar, { passive: false });
+  canvas.addEventListener('touchend', terminar);
+
+  document.getElementById('btn-limpiar-firma').addEventListener('click', function () {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  });
+
+  document.getElementById('form-firma').addEventListener('submit', function (evento) {
+    var vacio = !ctx.getImageData(0, 0, canvas.width, canvas.height).data.some(function (v) { return v !== 0; });
+    if (vacio) {
+      evento.preventDefault();
+      alert('Dibuja la firma antes de guardar.');
+      return;
+    }
+    document.getElementById('input-firma-imagen').value = canvas.toDataURL('image/png');
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}

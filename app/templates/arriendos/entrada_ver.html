@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Arriendo de entrada{% endblock %}
+{% block content %}
+{% set estado_badge = {'vigente': 'bg-success', 'por_vencer': 'bg-warning text-dark', 'vencido': 'bg-danger', 'terminado': 'bg-secondary'} %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 mb-0">{{ arriendo.descripcion_activo }} <span class="badge {{ estado_badge[arriendo.estado] }}">{{ arriendo.estado.replace('_', ' ') }}</span></h1>
+  {% if puede('arriendos', 'editar') and arriendo.estado != 'terminado' %}
+  <form method="post" action="{{ url_for('arriendos.terminar_arriendo_entrada', arriendo_id=arriendo.id) }}" onsubmit="return confirm('¿Marcar este arriendo como terminado?');">
+    <button type="submit" class="btn btn-outline-danger">Terminar</button>
+  </form>
+  {% endif %}
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3"><div class="card card-body"><small class="text-muted">Proveedor</small><div>{{ arriendo.proveedor.razon_social }}</div></div></div>
+  <div class="col-6 col-md-3"><div class="card card-body"><small class="text-muted">Inicio</small><div>{{ arriendo.fecha_inicio|fecha }}</div></div></div>
+  <div class="col-6 col-md-3"><div class="card card-body"><small class="text-muted">Término</small><div>{{ arriendo.fecha_termino|fecha }}</div></div></div>
+  <div class="col-6 col-md-3"><div class="card card-body"><small class="text-muted">Monto período</small><div>{{ arriendo.monto_periodo|clp }} / {{ arriendo.periodicidad }}</div></div></div>
+</div>
+
+<h2 class="h5">Pagos</h2>
+{% if puede('arriendos', 'editar') %}
+<form method="post" action="{{ url_for('arriendos.nuevo_pago_entrada', arriendo_id=arriendo.id) }}" class="row g-2 align-items-end mb-3">
+  {{ pago_form.hidden_tag() }}
+  <div class="col-auto">{{ pago_form.periodo(class="form-control", placeholder="AAAA-MM") }}</div>
+  <div class="col-auto">{{ pago_form.monto(class="form-control", placeholder="Monto") }}</div>
+  <div class="col-auto">{{ pago_form.numero_documento(class="form-control", placeholder="N° documento") }}</div>
+  <div class="col-auto"><button type="submit" class="btn btn-outline-primary">Registrar pago</button></div>
+</form>
+{% endif %}
+<div class="table-responsive">
+  <table class="table table-sm">
+    <thead><tr><th>Período</th><th class="text-end">Monto</th><th>Documento</th><th>Estado</th><th></th></tr></thead>
+    <tbody>
+      {% for p in arriendo.pagos %}
+      <tr>
+        <td>{{ p.periodo }}</td>
+        <td class="text-end">{{ p.monto|clp }}</td>
+        <td>{{ p.numero_documento or '—' }}</td>
+        <td><span class="badge {{ 'bg-success' if p.estado_pago == 'pagado' else 'bg-warning text-dark' }}">{{ p.estado_pago }}</span></td>
+        <td>
+          {% if puede('arriendos', 'editar') and p.estado_pago != 'pagado' %}
+          <form method="post" action="{{ url_for('arriendos.marcar_pago_realizado', pago_id=p.id) }}">
+            <button type="submit" class="btn btn-sm btn-outline-success">Marcar pagado</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="text-center text-muted">Sin pagos registrados.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

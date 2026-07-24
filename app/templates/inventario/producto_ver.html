@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}{{ producto.nombre }}{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 mb-0">{{ producto.nombre }}</h1>
+  {% if puede('inventario', 'editar') %}
+  <a href="{{ url_for('inventario.nuevo_movimiento', producto_id=producto.id) }}" class="btn btn-primary">Registrar movimiento</a>
+  {% endif %}
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3"><div class="card card-body"><small class="text-muted">SKU</small><div>{{ producto.sku }}</div></div></div>
+  <div class="col-6 col-md-3"><div class="card card-body"><small class="text-muted">Stock actual</small><div class="{{ 'text-danger fw-bold' if producto.bajo_stock_minimo else '' }}">{{ producto.stock_actual }} {{ producto.unidad_medida }}</div></div></div>
+  <div class="col-6 col-md-3"><div class="card card-body"><small class="text-muted">Stock mínimo</small><div>{{ producto.stock_minimo }}</div></div></div>
+  <div class="col-6 col-md-3"><div class="card card-body"><small class="text-muted">Precio venta</small><div>{{ producto.precio_venta|clp }}</div></div></div>
+</div>
+
+<h2 class="h5">Movimientos recientes</h2>
+<div class="table-responsive">
+  <table class="table table-sm">
+    <thead><tr><th>Fecha</th><th>Tipo</th><th class="text-end">Cantidad</th><th>Documento</th><th>Usuario</th></tr></thead>
+    <tbody>
+      {% for m in producto.movimientos[:20] %}
+      <tr>
+        <td>{{ m.fecha|fecha }}</td>
+        <td><span class="badge {{ {'entrada': 'bg-success', 'salida': 'bg-danger', 'ajuste': 'bg-secondary'}[m.tipo] }}">{{ m.tipo }}</span></td>
+        <td class="text-end">{{ m.cantidad }}</td>
+        <td>{{ m.numero_documento or '—' }}</td>
+        <td>{{ m.usuario.nombre_completo }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="text-center text-muted">Sin movimientos registrados.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

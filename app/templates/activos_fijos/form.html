@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Editar activo' if activo else 'Nuevo activo' }}{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">{{ 'Editar activo' if activo else 'Nuevo activo' }}</h1>
+<form method="post" novalidate class="col-12 col-lg-6">
+  {{ form.hidden_tag() }}
+  <div class="row">
+    <div class="col-6 mb-3">
+      {{ form.codigo_activo.label(class="form-label") }}
+      {{ form.codigo_activo(class="form-control") }}
+      {% for error in form.codigo_activo.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+    </div>
+    <div class="col-6 mb-3">
+      {{ form.categoria.label(class="form-label") }}
+      {{ form.categoria(class="form-control") }}
+    </div>
+  </div>
+  <div class="mb-3">
+    {{ form.nombre.label(class="form-label") }}
+    {{ form.nombre(class="form-control") }}
+  </div>
+  <div class="mb-3">
+    {{ form.descripcion.label(class="form-label") }}
+    {{ form.descripcion(class="form-control", rows=2) }}
+  </div>
+  <div class="row">
+    <div class="col-4 mb-3">
+      {{ form.fecha_compra.label(class="form-label") }}
+      {{ form.fecha_compra(class="form-control", type="date") }}
+    </div>
+    <div class="col-4 mb-3">
+      {{ form.valor_compra.label(class="form-label") }}
+      {{ form.valor_compra(class="form-control") }}
+    </div>
+    <div class="col-4 mb-3">
+      {{ form.valor_residual.label(class="form-label") }}
+      {{ form.valor_residual(class="form-control") }}
+    </div>
+  </div>
+  <div class="row">
+    <div class="col-6 mb-3">
+      {{ form.vida_util_meses.label(class="form-label") }}
+      {{ form.vida_util_meses(class="form-control") }}
+    </div>
+    <div class="col-6 mb-3">
+      {{ form.numero_factura_compra.label(class="form-label") }}
+      {{ form.numero_factura_compra(class="form-control") }}
+    </div>
+  </div>
+  <div class="mb-3">
+    {{ form.ubicacion.label(class="form-label") }}
+    {{ form.ubicacion(class="form-control") }}
+  </div>
+  <div class="form-check mb-3">
+    {{ form.es_arrendable(class="form-check-input") }}
+    {{ form.es_arrendable.label(class="form-check-label") }}
+  </div>
+  <button type="submit" class="btn btn-primary">Guardar</button>
+  <a href="{{ url_for('activos_fijos.activos') }}" class="btn btn-outline-secondary">Cancelar</a>
+</form>
+{% endblock %}

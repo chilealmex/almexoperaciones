@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Usuarios{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 mb-0">Usuarios</h1>
+  {% if puede('admin', 'editar') %}
+  <a href="{{ url_for('admin.nuevo_usuario') }}" class="btn btn-primary">Nuevo usuario</a>
+  {% endif %}
+</div>
+
+<div class="table-responsive">
+  <table class="table table-striped align-middle">
+    <thead>
+      <tr>
+        <th>Nombre</th>
+        <th>Correo</th>
+        <th class="d-none d-md-table-cell">Rol</th>
+        <th class="d-none d-md-table-cell">Estado</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for u in usuarios %}
+      <tr>
+        <td>{{ u.nombre_completo }}</td>
+        <td>{{ u.email }}</td>
+        <td class="d-none d-md-table-cell">{{ u.rol.nombre }}</td>
+        <td class="d-none d-md-table-cell">
+          <span class="badge {{ 'bg-success' if u.activo else 'bg-secondary' }}">{{ 'Activo' if u.activo else 'Inactivo' }}</span>
+        </td>
+        <td class="text-end">
+          <a href="{{ url_for('admin.editar_usuario', usuario_id=u.id) }}" class="btn btn-sm btn-outline-secondary">Editar</a>
+          <a href="{{ url_for('admin.permisos_usuario', usuario_id=u.id) }}" class="btn btn-sm btn-outline-secondary">Permisos</a>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="text-center text-muted">No hay usuarios registrados.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

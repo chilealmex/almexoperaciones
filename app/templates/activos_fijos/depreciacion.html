@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Depreciación por centro de costo{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 mb-0">Depreciación mensual por centro de costo</h1>
+  <a href="{{ url_for('activos_fijos.activos') }}" class="btn btn-outline-secondary">Volver a activos</a>
+</div>
+<p class="text-muted">Cada activo se imputa automáticamente al centro "Arriendo" mientras está arrendado a un cliente, o a "Administración" cuando no lo está.</p>
+
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-4">
+    <div class="card card-body">
+      <small class="text-muted">Centro Arriendo</small>
+      <div class="h4 mb-0">{{ total_arriendo|clp }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-4">
+    <div class="card card-body">
+      <small class="text-muted">Centro Administración</small>
+      <div class="h4 mb-0">{{ total_administracion|clp }}</div>
+    </div>
+  </div>
+  <div class="col-12 col-md-4">
+    <div class="card card-body">
+      <small class="text-muted">Total depreciación del mes</small>
+      <div class="h4 mb-0">{{ (total_arriendo + total_administracion)|clp }}</div>
+    </div>
+  </div>
+</div>
+
+<div class="table-responsive">
+  <table class="table table-striped align-middle">
+    <thead>
+      <tr>
+        <th>Código</th>
+        <th>Activo</th>
+        <th class="d-none d-md-table-cell text-end">Valor libro</th>
+        <th class="text-end">Depreciación mensual</th>
+        <th>Centro de costo</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for a in activos %}
+      <tr>
+        <td><a href="{{ url_for('activos_fijos.ver_activo', activo_id=a.id) }}">{{ a.codigo_activo }}</a></td>
+        <td>{{ a.nombre }}</td>
+        <td class="d-none d-md-table-cell text-end">{{ a.valor_libro|clp }}</td>
+        <td class="text-end">{{ a.depreciacion_mensual|clp }}</td>
+        <td><span class="badge {{ 'bg-info text-dark' if a.centro_costo == 'Arriendo' else 'bg-secondary' }}">{{ a.centro_costo }}</span></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="text-center text-muted">No hay activos con depreciación vigente.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

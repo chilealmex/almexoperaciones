@@ -1,0 +1,11 @@
+body {
+  min-height: 100vh;
+}
+
+.table-responsive {
+  overflow-x: auto;
+}
+
+.card-body small {
+  display: block;
+}

@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Editar producto' if producto else 'Nuevo producto' }}{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">{{ 'Editar producto' if producto else 'Nuevo producto' }}</h1>
+
+<form method="post" novalidate class="col-12 col-lg-6">
+  {{ form.hidden_tag() }}
+  <div class="row">
+    <div class="col-6 mb-3">
+      {{ form.sku.label(class="form-label") }}
+      {{ form.sku(class="form-control") }}
+      {% for error in form.sku.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+    </div>
+    <div class="col-6 mb-3">
+      {{ form.unidad_medida.label(class="form-label") }}
+      {{ form.unidad_medida(class="form-control") }}
+    </div>
+  </div>
+  <div class="mb-3">
+    {{ form.nombre.label(class="form-label") }}
+    {{ form.nombre(class="form-control") }}
+    {% for error in form.nombre.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+  </div>
+  <div class="mb-3">
+    {{ form.descripcion.label(class="form-label") }}
+    {{ form.descripcion(class="form-control", rows=2) }}
+  </div>
+  <div class="mb-3">
+    {{ form.categoria_id.label(class="form-label") }}
+    {{ form.categoria_id(class="form-select") }}
+  </div>
+  <div class="row">
+    <div class="col-4 mb-3">
+      {{ form.stock_minimo.label(class="form-label") }}
+      {{ form.stock_minimo(class="form-control") }}
+    </div>
+    <div class="col-4 mb-3">
+      {{ form.precio_costo.label(class="form-label") }}
+      {{ form.precio_costo(class="form-control") }}
+    </div>
+    <div class="col-4 mb-3">
+      {{ form.precio_venta.label(class="form-label") }}
+      {{ form.precio_venta(class="form-control") }}
+    </div>
+  </div>
+  <div class="form-check mb-3">
+    {{ form.activo(class="form-check-input") }}
+    {{ form.activo.label(class="form-check-label") }}
+  </div>
+  <button type="submit" class="btn btn-primary">Guardar</button>
+  <a href="{{ url_for('inventario.productos') }}" class="btn btn-outline-secondary">Cancelar</a>
+</form>
+{% endblock %}
