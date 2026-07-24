@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: gestor-pyme
+    name: almex-operaciones
     runtime: python
     plan: free
     buildCommand: "pip install -r requirements.txt && flask db upgrade && python seeds/seed_dev.py"
