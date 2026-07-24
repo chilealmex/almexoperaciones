@@ -97,7 +97,17 @@ def seed():
                 # Compatibilidad: instalaciones previas al login por nombre de usuario.
                 admin.nombre_usuario = admin_username
                 cambios.append(f"nombre_usuario -> {admin_username}")
-            if cambios:
+
+            if os.environ.get("RESET_ADMIN_PASSWORD", "").lower() == "true":
+                password_nueva = secrets.token_urlsafe(12)
+                admin.set_password(password_nueva)
+                db.session.commit()
+                print("=" * 60)
+                print(f"Contraseña de {admin.nombre_usuario} ({admin_email}) restablecida.")
+                print(f"Nueva contraseña (cópiala ahora): {password_nueva}")
+                print("Quita la variable RESET_ADMIN_PASSWORD de Render cuando termines.")
+                print("=" * 60)
+            elif cambios:
                 db.session.commit()
                 print(f"Usuario {admin_email} actualizado: {', '.join(cambios)}.")
             else:
