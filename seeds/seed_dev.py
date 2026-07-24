@@ -67,8 +67,8 @@ def seed():
 
         db.session.commit()
 
-        admin_email = os.environ.get("ADMIN_EMAIL", "admin@miempresa.cl")
-        admin_username = os.environ.get("ADMIN_USERNAME", "admin")
+        admin_email = os.environ.get("ADMIN_EMAIL", "admin@miempresa.cl").strip().lower()
+        admin_username = os.environ.get("ADMIN_USERNAME", "admin").strip().lower()
         admin_password_fija = os.environ.get("ADMIN_PASSWORD")  # opcional: fija la clave en vez de generarla
         reset_solicitado = os.environ.get("RESET_ADMIN_PASSWORD", "").lower() == "true"
 
