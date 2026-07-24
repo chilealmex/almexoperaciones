@@ -4,6 +4,7 @@ Uso:
     python seeds/seed_dev.py
 """
 import os
+import secrets
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -47,11 +48,12 @@ def seed():
     with app.app_context():
         db.create_all()
 
-        empresa = Empresa.query.filter_by(rut="76.000.000-0").first()
+        empresa_rut = os.environ.get("EMPRESA_RUT", "76.000.000-0")
+        empresa = Empresa.query.filter_by(rut=empresa_rut).first()
         if empresa is None:
             empresa = Empresa(
-                rut="76.000.000-0",
-                razon_social="Mi Empresa SPA",
+                rut=empresa_rut,
+                razon_social=os.environ.get("EMPRESA_NOMBRE", "Mi Empresa SPA"),
                 giro="Servicios",
             )
             db.session.add(empresa)
@@ -76,19 +78,24 @@ def seed():
 
         db.session.commit()
 
-        admin_email = "admin@miempresa.cl"
+        admin_email = os.environ.get("ADMIN_EMAIL", "admin@miempresa.cl")
         admin = Usuario.query.filter_by(email=admin_email).first()
         if admin is None:
+            password_inicial = secrets.token_urlsafe(12)
             admin = Usuario(
                 empresa_id=empresa.id,
                 nombre_completo="Administrador",
                 email=admin_email,
                 rol_id=roles_creados["admin"].id,
             )
-            admin.set_password("CambiarAhora123")
+            admin.set_password(password_inicial)
             db.session.add(admin)
             db.session.commit()
-            print(f"Usuario admin creado: {admin_email} / CambiarAhora123 (cámbiala al primer ingreso)")
+            print("=" * 60)
+            print(f"Usuario admin creado: {admin_email}")
+            print(f"Contraseña inicial (cópiala ahora, no se vuelve a mostrar): {password_inicial}")
+            print("Cámbiala apenas inicies sesión, en Usuarios > (tu usuario) > Editar.")
+            print("=" * 60)
         else:
             print(f"Usuario admin ya existía: {admin_email}")
 
