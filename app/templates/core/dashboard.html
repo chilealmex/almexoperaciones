@@ -6,9 +6,9 @@
 <div class="row g-3">
   {% if puede('inventario') %}
   <div class="col-12 col-md-6 col-lg-4">
-    <div class="card h-100">
+    <div class="card tile-inventario h-100">
       <div class="card-body">
-        <h2 class="h5">Inventario</h2>
+        <h2 class="h5">📦 Inventario</h2>
         {% if productos_bajo_stock %}
         <p class="text-danger mb-2">{{ productos_bajo_stock|length }} producto(s) bajo el stock mínimo</p>
         <ul class="list-unstyled small">
@@ -27,9 +27,9 @@
 
   {% if puede('contratos') %}
   <div class="col-12 col-md-6 col-lg-4">
-    <div class="card h-100">
+    <div class="card tile-contratos h-100">
       <div class="card-body">
-        <h2 class="h5">Contratos con clientes</h2>
+        <h2 class="h5">📄 Contratos con clientes</h2>
         {% if contratos_por_vencer %}
         <p class="text-warning mb-2">{{ contratos_por_vencer|length }} contrato(s) por vencer</p>
         <ul class="list-unstyled small">
@@ -48,9 +48,9 @@
 
   {% if puede('activos_fijos') %}
   <div class="col-12 col-md-6 col-lg-4">
-    <div class="card h-100">
+    <div class="card tile-activos h-100">
       <div class="card-body">
-        <h2 class="h5">Activos fijos</h2>
+        <h2 class="h5">🏷️ Activos fijos</h2>
         <p class="text-muted mb-2">Gestiona el registro de activos y su depreciación.</p>
         <a href="{{ url_for('activos_fijos.activos') }}" class="btn btn-sm btn-outline-primary mt-2">Ver activos fijos</a>
       </div>
@@ -60,9 +60,9 @@
 
   {% if puede('arriendos') %}
   <div class="col-12 col-md-6 col-lg-4">
-    <div class="card h-100">
+    <div class="card tile-arriendos h-100">
       <div class="card-body">
-        <h2 class="h5">Activos en arriendo</h2>
+        <h2 class="h5">🔑 Activos en arriendo</h2>
         {% if arriendos_entrada_por_vencer %}
         <p class="text-warning mb-2">{{ arriendos_entrada_por_vencer|length }} arriendo(s) de proveedores por vencer</p>
         <ul class="list-unstyled small">
