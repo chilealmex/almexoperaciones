@@ -1,10 +1,10 @@
 from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField, BooleanField
-from wtforms.validators import DataRequired, Email, Length, EqualTo
+from wtforms.validators import DataRequired, Length, EqualTo
 
 
 class LoginForm(FlaskForm):
-    email = StringField("Correo electrónico", validators=[DataRequired(), Email()])
+    identificador = StringField("Usuario o correo", validators=[DataRequired()])
     password = PasswordField("Contraseña", validators=[DataRequired()])
     recordarme = BooleanField("Recordarme")
 

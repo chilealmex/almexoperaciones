@@ -41,7 +41,11 @@ def _crear_superadmin(db, empresa):
     db.session.add(rol)
     db.session.commit()
     usuario = Usuario(
-        empresa_id=empresa.id, nombre_completo="Super", email="super@test.cl", rol_id=rol.id
+        empresa_id=empresa.id,
+        nombre_completo="Super",
+        nombre_usuario="super_prueba",
+        email="super@test.cl",
+        rol_id=rol.id,
     )
     usuario.set_password("password123")
     db.session.add(usuario)
@@ -59,6 +63,7 @@ def test_admin_no_puede_gestionar_a_otro_admin(db, usuario_admin):
     otro_admin = Usuario(
         empresa_id=usuario_admin.empresa_id,
         nombre_completo="Otro admin",
+        nombre_usuario="otroadmin_prueba",
         email="otroadmin@test.cl",
         rol_id=usuario_admin.rol_id,
     )
@@ -74,7 +79,11 @@ def test_admin_puede_gestionar_a_usuario_normal(db, empresa, usuario_admin):
     db.session.add(rol_usuario)
     db.session.commit()
     normal = Usuario(
-        empresa_id=empresa.id, nombre_completo="Normal", email="normal@test.cl", rol_id=rol_usuario.id
+        empresa_id=empresa.id,
+        nombre_completo="Normal",
+        nombre_usuario="normal_prueba",
+        email="normal@test.cl",
+        rol_id=rol_usuario.id,
     )
     normal.set_password("password123")
     db.session.add(normal)
@@ -87,6 +96,7 @@ def test_admin_no_puede_editar_a_otro_admin_via_ruta(client, db, usuario_admin):
     otro_admin = Usuario(
         empresa_id=usuario_admin.empresa_id,
         nombre_completo="Otro admin",
+        nombre_usuario="otroadmin2_prueba",
         email="otroadmin2@test.cl",
         rol_id=usuario_admin.rol_id,
     )

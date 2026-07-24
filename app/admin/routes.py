@@ -42,14 +42,22 @@ def nuevo_usuario():
         if not form.password.data:
             flash("La contraseña es obligatoria para un usuario nuevo.", "danger")
             return render_template("admin/usuario_form.html", form=form, usuario=None)
-        if Usuario.query.filter_by(email=form.email.data.lower().strip()).first():
+
+        nombre_usuario = form.nombre_usuario.data.strip().lower()
+        if Usuario.query.filter_by(nombre_usuario=nombre_usuario).first():
+            flash("Ya existe un usuario con ese nombre de usuario.", "danger")
+            return render_template("admin/usuario_form.html", form=form, usuario=None)
+
+        email_normalizado = form.email.data.lower().strip() if form.email.data else None
+        if email_normalizado and Usuario.query.filter_by(email=email_normalizado).first():
             flash("Ya existe un usuario con ese correo.", "danger")
             return render_template("admin/usuario_form.html", form=form, usuario=None)
 
         usuario = Usuario(
             empresa_id=current_user.empresa_id,
             nombre_completo=form.nombre_completo.data.strip(),
-            email=form.email.data.lower().strip(),
+            nombre_usuario=nombre_usuario,
+            email=email_normalizado,
             rut=form.rut.data,
             rol_id=form.rol_id.data,
             activo=form.activo.data,
@@ -77,15 +85,25 @@ def editar_usuario(usuario_id):
         if not _rol_permitido_para_actor(form.rol_id.data):
             abort(403)
 
-        email_normalizado = form.email.data.lower().strip()
-        duplicado = Usuario.query.filter(
-            Usuario.email == email_normalizado, Usuario.id != usuario.id
+        nombre_usuario = form.nombre_usuario.data.strip().lower()
+        duplicado_usuario = Usuario.query.filter(
+            Usuario.nombre_usuario == nombre_usuario, Usuario.id != usuario.id
         ).first()
-        if duplicado:
-            flash("Ya existe otro usuario con ese correo.", "danger")
+        if duplicado_usuario:
+            flash("Ya existe otro usuario con ese nombre de usuario.", "danger")
             return render_template("admin/usuario_form.html", form=form, usuario=usuario)
 
+        email_normalizado = form.email.data.lower().strip() if form.email.data else None
+        if email_normalizado:
+            duplicado_email = Usuario.query.filter(
+                Usuario.email == email_normalizado, Usuario.id != usuario.id
+            ).first()
+            if duplicado_email:
+                flash("Ya existe otro usuario con ese correo.", "danger")
+                return render_template("admin/usuario_form.html", form=form, usuario=usuario)
+
         usuario.nombre_completo = form.nombre_completo.data.strip()
+        usuario.nombre_usuario = nombre_usuario
         usuario.email = email_normalizado
         usuario.rut = form.rut.data
         usuario.rol_id = form.rol_id.data

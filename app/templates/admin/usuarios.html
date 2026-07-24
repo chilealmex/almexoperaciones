@@ -13,7 +13,8 @@
     <thead>
       <tr>
         <th>Nombre</th>
-        <th>Correo</th>
+        <th>Usuario</th>
+        <th class="d-none d-md-table-cell">Correo</th>
         <th class="d-none d-md-table-cell">Rol</th>
         <th class="d-none d-md-table-cell">Estado</th>
         <th></th>
@@ -23,7 +24,8 @@
       {% for u in usuarios %}
       <tr>
         <td>{{ u.nombre_completo }}</td>
-        <td>{{ u.email }}</td>
+        <td>{{ u.nombre_usuario }}</td>
+        <td class="d-none d-md-table-cell">{{ u.email or '—' }}</td>
         <td class="d-none d-md-table-cell">{{ u.rol.nombre }}</td>
         <td class="d-none d-md-table-cell">
           <span class="badge {{ 'bg-success' if u.activo else 'bg-secondary' }}">{{ 'Activo' if u.activo else 'Inactivo' }}</span>
@@ -38,7 +40,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="5" class="text-center text-muted">No hay usuarios registrados.</td></tr>
+      <tr><td colspan="6" class="text-center text-muted">No hay usuarios registrados.</td></tr>
       {% endfor %}
     </tbody>
   </table>

@@ -68,12 +68,14 @@ def seed():
         db.session.commit()
 
         admin_email = os.environ.get("ADMIN_EMAIL", "admin@miempresa.cl")
+        admin_username = os.environ.get("ADMIN_USERNAME", "admin")
         admin = Usuario.query.filter_by(email=admin_email).first()
         if admin is None:
             password_inicial = secrets.token_urlsafe(12)
             admin = Usuario(
                 empresa_id=empresa.id,
                 nombre_completo="Super Administrador",
+                nombre_usuario=admin_username,
                 email=admin_email,
                 rol_id=roles_creados["superadmin"].id,
             )
@@ -81,17 +83,25 @@ def seed():
             db.session.add(admin)
             db.session.commit()
             print("=" * 60)
-            print(f"Usuario super admin creado: {admin_email}")
+            print(f"Usuario super admin creado: {admin_username} ({admin_email})")
             print(f"Contraseña inicial (cópiala ahora, no se vuelve a mostrar): {password_inicial}")
             print("Cámbiala apenas inicies sesión, en tu nombre (arriba a la derecha) > Cambiar contraseña.")
             print("=" * 60)
-        elif not admin.es_superadmin:
-            # Compatibilidad: instalaciones previas a la jerarquía de 3 niveles.
-            admin.rol_id = roles_creados["superadmin"].id
-            db.session.commit()
-            print(f"Usuario {admin_email} promovido a super administrador.")
         else:
-            print(f"Usuario super admin ya existía: {admin_email}")
+            cambios = []
+            if not admin.es_superadmin:
+                # Compatibilidad: instalaciones previas a la jerarquía de 3 niveles.
+                admin.rol_id = roles_creados["superadmin"].id
+                cambios.append("rol -> superadmin")
+            if not admin.nombre_usuario:
+                # Compatibilidad: instalaciones previas al login por nombre de usuario.
+                admin.nombre_usuario = admin_username
+                cambios.append(f"nombre_usuario -> {admin_username}")
+            if cambios:
+                db.session.commit()
+                print(f"Usuario {admin_email} actualizado: {', '.join(cambios)}.")
+            else:
+                print(f"Usuario super admin ya existía: {admin.nombre_usuario} ({admin_email})")
 
         print("Datos iniciales listos.")
 

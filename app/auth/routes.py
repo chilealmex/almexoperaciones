@@ -38,10 +38,13 @@ def login():
             flash("Demasiados intentos. Intenta nuevamente en unos minutos.", "danger")
             return render_template("auth/login.html", form=form)
 
-        usuario = Usuario.query.filter_by(email=form.email.data.lower().strip()).first()
+        identificador = form.identificador.data.strip().lower()
+        usuario = Usuario.query.filter(
+            db.or_(Usuario.nombre_usuario == identificador, Usuario.email == identificador)
+        ).first()
         if usuario is None or not usuario.check_password(form.password.data) or not usuario.activo:
             _registrar_intento(ip)
-            flash("Correo o contraseña incorrectos.", "danger")
+            flash("Usuario/correo o contraseña incorrectos.", "danger")
             return render_template("auth/login.html", form=form)
 
         login_user(usuario, remember=form.recordarme.data)

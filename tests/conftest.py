@@ -50,6 +50,7 @@ def usuario_admin(db, empresa, roles):
     usuario = Usuario(
         empresa_id=empresa.id,
         nombre_completo="Admin de Prueba",
+        nombre_usuario="admin_prueba",
         email="admin@test.cl",
         rol_id=roles["admin"].id,
     )
@@ -64,6 +65,7 @@ def usuario_bodega(db, empresa, roles):
     usuario = Usuario(
         empresa_id=empresa.id,
         nombre_completo="Bodega de Prueba",
+        nombre_usuario="bodega_prueba",
         email="bodega@test.cl",
         rol_id=roles["bodega"].id,
     )
@@ -78,5 +80,7 @@ def client(app):
     return app.test_client()
 
 
-def login(client, email, password="password123"):
-    return client.post("/login", data={"email": email, "password": password}, follow_redirects=True)
+def login(client, identificador, password="password123"):
+    return client.post(
+        "/login", data={"identificador": identificador, "password": password}, follow_redirects=True
+    )

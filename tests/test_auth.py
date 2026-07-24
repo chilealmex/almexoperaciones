@@ -10,7 +10,13 @@ def test_login_exitoso(client, usuario_admin):
 def test_login_password_incorrecta(client, usuario_admin):
     response = login(client, "admin@test.cl", password="incorrecta")
     assert response.status_code == 200
-    assert "Correo o contraseña incorrectos".encode("utf-8") in response.data
+    assert "Usuario/correo o contraseña incorrectos".encode("utf-8") in response.data
+
+
+def test_login_con_nombre_usuario_en_vez_de_correo(client, usuario_admin):
+    response = login(client, "admin_prueba")
+    assert response.status_code == 200
+    assert b"Bienvenido" in response.data
 
 
 def test_password_hash_roundtrip(usuario_admin):

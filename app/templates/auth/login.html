@@ -14,9 +14,9 @@
           <form method="post" novalidate>
             {{ form.hidden_tag() }}
             <div class="mb-3">
-              {{ form.email.label(class="form-label") }}
-              {{ form.email(class="form-control form-control-lg", autofocus=true, placeholder="tu@correo.cl") }}
-              {% for error in form.email.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+              {{ form.identificador.label(class="form-label") }}
+              {{ form.identificador(class="form-control form-control-lg", autofocus=true, placeholder="usuario o correo") }}
+              {% for error in form.identificador.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
             </div>
             <div class="mb-3">
               {{ form.password.label(class="form-label") }}
