@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Activos en arriendo{% endblock %}
 {% block content %}
-<h1 class="h3 mb-3">Activos en arriendo</h1>
+<h1 class="h3 mb-3">Contratos y Arriendos</h1>
+{% with seccion_activa = 'arriendos' %}{% include "partials/_subnav_contratos.html" %}{% endwith %}
 
 <div class="row g-3 mb-4">
   <div class="col-6 col-lg-3">
@@ -32,7 +33,7 @@
 
 <div class="d-flex justify-content-between align-items-center mb-2">
   <h2 class="h5 mb-0">Arrendados a clientes (salida)</h2>
-  {% if puede('arriendos', 'editar') %}
+  {% if puede('contratos', 'editar') %}
   <a href="{{ url_for('arriendos.nuevo_arriendo_salida') }}" class="btn btn-primary btn-sm">Nuevo arriendo de salida</a>
   {% endif %}
 </div>
@@ -59,7 +60,7 @@
   <h2 class="h5 mb-0">Arrendados de proveedores (entrada)</h2>
   <div>
     <a href="{{ url_for('arriendos.proveedores') }}" class="btn btn-outline-secondary btn-sm">Proveedores</a>
-    {% if puede('arriendos', 'editar') %}
+    {% if puede('contratos', 'editar') %}
     <a href="{{ url_for('arriendos.nuevo_arriendo_entrada') }}" class="btn btn-primary btn-sm">Nuevo arriendo de entrada</a>
     {% endif %}
   </div>

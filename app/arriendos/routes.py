@@ -26,7 +26,7 @@ from app.utils.storage import guardar_documento, listar_documentos, guardar_firm
 
 
 @bp.route("/")
-@require_permission("arriendos", "ver")
+@require_permission("contratos", "ver")
 def index():
     salidas = ArriendoSalida.query.order_by(ArriendoSalida.fecha_inicio.desc()).all()
     entradas = ArriendoEntrada.query.order_by(ArriendoEntrada.fecha_termino).all()
@@ -56,7 +56,7 @@ def _cargar_opciones_salida(form):
 
 
 @bp.route("/salida/nuevo", methods=["GET", "POST"])
-@require_permission("arriendos", "editar")
+@require_permission("contratos", "editar")
 def nuevo_arriendo_salida():
     form = ArriendoSalidaForm()
     _cargar_opciones_salida(form)
@@ -93,7 +93,7 @@ def nuevo_arriendo_salida():
 
 
 @bp.route("/salida/<int:arriendo_id>")
-@require_permission("arriendos", "ver")
+@require_permission("contratos", "ver")
 def ver_arriendo_salida(arriendo_id):
     arriendo = ArriendoSalida.query.get_or_404(arriendo_id)
     devolucion_form = DevolucionForm()
@@ -111,7 +111,7 @@ def ver_arriendo_salida(arriendo_id):
 
 
 @bp.route("/salida/<int:arriendo_id>/documentos", methods=["POST"])
-@require_permission("arriendos", "editar")
+@require_permission("contratos", "editar")
 def subir_documento_salida(arriendo_id):
     arriendo = ArriendoSalida.query.get_or_404(arriendo_id)
     archivo = request.files.get("archivo")
@@ -122,7 +122,7 @@ def subir_documento_salida(arriendo_id):
 
 
 @bp.route("/salida/<int:arriendo_id>/firmar", methods=["POST"])
-@require_permission("arriendos", "editar")
+@require_permission("contratos", "editar")
 def firmar_arriendo_salida(arriendo_id):
     arriendo = ArriendoSalida.query.get_or_404(arriendo_id)
     form = FirmaClienteForm()
@@ -145,7 +145,7 @@ def firmar_arriendo_salida(arriendo_id):
 
 
 @bp.route("/salida/<int:arriendo_id>/firma-imagen")
-@require_permission("arriendos", "ver")
+@require_permission("contratos", "ver")
 def ver_firma_salida(arriendo_id):
     arriendo = ArriendoSalida.query.get_or_404(arriendo_id)
     if not arriendo.firma_cliente_ruta:
@@ -163,7 +163,7 @@ def ver_firma_salida(arriendo_id):
 
 
 @bp.route("/salida/<int:arriendo_id>/devolver", methods=["POST"])
-@require_permission("arriendos", "editar")
+@require_permission("contratos", "editar")
 def devolver_arriendo_salida(arriendo_id):
     arriendo = ArriendoSalida.query.get_or_404(arriendo_id)
     form = DevolucionForm()
@@ -178,7 +178,7 @@ def devolver_arriendo_salida(arriendo_id):
 
 
 @bp.route("/salida/<int:arriendo_id>/facturacion", methods=["POST"])
-@require_permission("arriendos", "editar")
+@require_permission("contratos", "editar")
 def nueva_facturacion_salida(arriendo_id):
     arriendo = ArriendoSalida.query.get_or_404(arriendo_id)
     form = PagoForm()
@@ -196,7 +196,7 @@ def nueva_facturacion_salida(arriendo_id):
 
 
 @bp.route("/salida/facturacion/<int:facturacion_id>/pagar", methods=["POST"])
-@require_permission("arriendos", "editar")
+@require_permission("contratos", "editar")
 def marcar_facturacion_pagada(facturacion_id):
     facturacion = FacturacionArriendoSalida.query.get_or_404(facturacion_id)
     facturacion.estado_pago = "pagado"
@@ -210,14 +210,14 @@ def marcar_facturacion_pagada(facturacion_id):
 
 
 @bp.route("/proveedores")
-@require_permission("arriendos", "ver")
+@require_permission("contratos", "ver")
 def proveedores():
     lista = Proveedor.query.order_by(Proveedor.razon_social).all()
     return render_template("arriendos/proveedores_lista.html", proveedores=lista)
 
 
 @bp.route("/proveedores/nuevo", methods=["GET", "POST"])
-@require_permission("arriendos", "editar")
+@require_permission("contratos", "editar")
 def nuevo_proveedor():
     form = ProveedorForm()
     if form.validate_on_submit():
@@ -253,7 +253,7 @@ def _cargar_opciones_entrada(form):
 
 
 @bp.route("/entrada/nuevo", methods=["GET", "POST"])
-@require_permission("arriendos", "editar")
+@require_permission("contratos", "editar")
 def nuevo_arriendo_entrada():
     form = ArriendoEntradaForm()
     _cargar_opciones_entrada(form)
@@ -285,7 +285,7 @@ def nuevo_arriendo_entrada():
 
 
 @bp.route("/entrada/<int:arriendo_id>")
-@require_permission("arriendos", "ver")
+@require_permission("contratos", "ver")
 def ver_arriendo_entrada(arriendo_id):
     arriendo = ArriendoEntrada.query.get_or_404(arriendo_id)
     pago_form = PagoForm()
@@ -293,7 +293,7 @@ def ver_arriendo_entrada(arriendo_id):
 
 
 @bp.route("/entrada/<int:arriendo_id>/terminar", methods=["POST"])
-@require_permission("arriendos", "editar")
+@require_permission("contratos", "editar")
 def terminar_arriendo_entrada(arriendo_id):
     arriendo = ArriendoEntrada.query.get_or_404(arriendo_id)
     arriendo.terminado_manualmente = True
@@ -303,7 +303,7 @@ def terminar_arriendo_entrada(arriendo_id):
 
 
 @bp.route("/entrada/<int:arriendo_id>/pago", methods=["POST"])
-@require_permission("arriendos", "editar")
+@require_permission("contratos", "editar")
 def nuevo_pago_entrada(arriendo_id):
     arriendo = ArriendoEntrada.query.get_or_404(arriendo_id)
     form = PagoForm()
@@ -322,7 +322,7 @@ def nuevo_pago_entrada(arriendo_id):
 
 
 @bp.route("/entrada/pago/<int:pago_id>/pagar", methods=["POST"])
-@require_permission("arriendos", "editar")
+@require_permission("contratos", "editar")
 def marcar_pago_realizado(pago_id):
     pago = PagoArriendoEntrada.query.get_or_404(pago_id)
     pago.estado_pago = "pagado"

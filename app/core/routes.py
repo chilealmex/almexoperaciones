@@ -39,7 +39,7 @@ def dashboard():
             if c.estado == "por_vencer"
         ]
 
-    if current_user.tiene_permiso("arriendos", "ver"):
+    if current_user.tiene_permiso("contratos", "ver"):
         arriendos_entrada_por_vencer = [
             a
             for a in ArriendoEntrada.query.filter(

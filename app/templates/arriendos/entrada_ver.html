@@ -4,7 +4,7 @@
 {% set estado_badge = {'vigente': 'bg-success', 'por_vencer': 'bg-warning text-dark', 'vencido': 'bg-danger', 'terminado': 'bg-secondary'} %}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h1 class="h3 mb-0">{{ arriendo.descripcion_activo }} <span class="badge {{ estado_badge[arriendo.estado] }}">{{ arriendo.estado.replace('_', ' ') }}</span></h1>
-  {% if puede('arriendos', 'editar') and arriendo.estado != 'terminado' %}
+  {% if puede('contratos', 'editar') and arriendo.estado != 'terminado' %}
   <form method="post" action="{{ url_for('arriendos.terminar_arriendo_entrada', arriendo_id=arriendo.id) }}" onsubmit="return confirm('¿Marcar este arriendo como terminado?');">
     <button type="submit" class="btn btn-outline-danger">Terminar</button>
   </form>
@@ -19,7 +19,7 @@
 </div>
 
 <h2 class="h5">Pagos</h2>
-{% if puede('arriendos', 'editar') %}
+{% if puede('contratos', 'editar') %}
 <form method="post" action="{{ url_for('arriendos.nuevo_pago_entrada', arriendo_id=arriendo.id) }}" class="row g-2 align-items-end mb-3">
   {{ pago_form.hidden_tag() }}
   <div class="col-auto">{{ pago_form.periodo(class="form-control", placeholder="AAAA-MM") }}</div>
@@ -39,7 +39,7 @@
         <td>{{ p.numero_documento or '—' }}</td>
         <td><span class="badge {{ 'bg-success' if p.estado_pago == 'pagado' else 'bg-warning text-dark' }}">{{ p.estado_pago }}</span></td>
         <td>
-          {% if puede('arriendos', 'editar') and p.estado_pago != 'pagado' %}
+          {% if puede('contratos', 'editar') and p.estado_pago != 'pagado' %}
           <form method="post" action="{{ url_for('arriendos.marcar_pago_realizado', pago_id=p.id) }}">
             <button type="submit" class="btn btn-sm btn-outline-success">Marcar pagado</button>
           </form>

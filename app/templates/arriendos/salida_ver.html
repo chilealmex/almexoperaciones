@@ -11,7 +11,7 @@
   <div class="col-6 col-md-3"><div class="card card-body"><small class="text-muted">Devolución real</small><div>{{ arriendo.fecha_devolucion_real|fecha if arriendo.fecha_devolucion_real else '—' }}</div></div></div>
 </div>
 
-{% if puede('arriendos', 'editar') and not arriendo.fecha_devolucion_real %}
+{% if puede('contratos', 'editar') and not arriendo.fecha_devolucion_real %}
 <div class="card mb-4">
   <div class="card-body">
     <h2 class="h6">Registrar devolución</h2>
@@ -25,7 +25,7 @@
 {% endif %}
 
 <h2 class="h5">Cobros</h2>
-{% if puede('arriendos', 'editar') %}
+{% if puede('contratos', 'editar') %}
 <form method="post" action="{{ url_for('arriendos.nueva_facturacion_salida', arriendo_id=arriendo.id) }}" class="row g-2 align-items-end mb-3">
   {{ pago_form.hidden_tag() }}
   <div class="col-auto">{{ pago_form.periodo(class="form-control", placeholder="AAAA-MM") }}</div>
@@ -45,7 +45,7 @@
         <td>{{ f.numero_documento or '—' }}</td>
         <td><span class="badge {{ 'bg-success' if f.estado_pago == 'pagado' else 'bg-warning text-dark' }}">{{ f.estado_pago }}</span></td>
         <td>
-          {% if puede('arriendos', 'editar') and f.estado_pago != 'pagado' %}
+          {% if puede('contratos', 'editar') and f.estado_pago != 'pagado' %}
           <form method="post" action="{{ url_for('arriendos.marcar_facturacion_pagada', facturacion_id=f.id) }}">
             <button type="submit" class="btn btn-sm btn-outline-success">Marcar pagado</button>
           </form>
@@ -69,7 +69,7 @@
     <p class="text-muted small mb-0">{{ arriendo.firma_cliente_en.strftime('%d-%m-%Y %H:%M') }}</p>
   </div>
 </div>
-{% elif puede('arriendos', 'editar') %}
+{% elif puede('contratos', 'editar') %}
 <form method="post" action="{{ url_for('arriendos.firmar_arriendo_salida', arriendo_id=arriendo.id) }}" id="form-firma" class="col-12 col-lg-6 mb-4">
   {{ firma_form.hidden_tag() }}
   <div class="mb-2">
@@ -88,7 +88,7 @@
 {% endif %}
 
 <h2 class="h5 mt-4">Contrato y documentos adjuntos</h2>
-{% if puede('arriendos', 'editar') %}
+{% if puede('contratos', 'editar') %}
 <form method="post" action="{{ url_for('arriendos.subir_documento_salida', arriendo_id=arriendo.id) }}" enctype="multipart/form-data" class="row g-2 align-items-center mb-3">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="col-auto"><input type="file" name="archivo" class="form-control" required></div>
@@ -108,7 +108,7 @@
 {% endblock %}
 
 {% block scripts %}
-{% if puede('arriendos', 'editar') and not arriendo.firmado %}
+{% if puede('contratos', 'editar') and not arriendo.firmado %}
 <script>
 (function () {
   var canvas = document.getElementById('canvas-firma');

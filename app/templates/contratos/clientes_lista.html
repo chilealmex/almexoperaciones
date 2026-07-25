@@ -2,14 +2,12 @@
 {% block title %}Clientes{% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
-  <h1 class="h3 mb-0">Clientes</h1>
-  <div>
-    <a href="{{ url_for('contratos.contratos') }}" class="btn btn-outline-secondary">Contratos</a>
-    {% if puede('contratos', 'editar') %}
-    <a href="{{ url_for('contratos.nuevo_cliente') }}" class="btn btn-primary">Nuevo cliente</a>
-    {% endif %}
-  </div>
+  <h1 class="h3 mb-0">Contratos y Arriendos</h1>
+  {% if puede('contratos', 'editar') %}
+  <a href="{{ url_for('contratos.nuevo_cliente') }}" class="btn btn-primary">Nuevo cliente</a>
+  {% endif %}
 </div>
+{% with seccion_activa = 'clientes' %}{% include "partials/_subnav_contratos.html" %}{% endwith %}
 
 <div class="table-responsive">
   <table class="table table-striped align-middle">
