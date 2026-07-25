@@ -1,5 +1,8 @@
 <ul class="nav nav-pills mb-3 gap-1">
   <li class="nav-item">
+    <a class="nav-link {{ 'active' if seccion_activa == 'resumen' else '' }}" href="{{ url_for('contratos.resumen') }}">Resumen</a>
+  </li>
+  <li class="nav-item">
     <a class="nav-link {{ 'active' if seccion_activa == 'contratos' else '' }}" href="{{ url_for('contratos.contratos') }}">Contratos</a>
   </li>
   <li class="nav-item">

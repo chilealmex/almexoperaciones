@@ -1,0 +1,14 @@
+<ul class="nav nav-pills mb-3 gap-1">
+  <li class="nav-item">
+    <a class="nav-link {{ 'active' if seccion_activa == 'resumen' else '' }}" href="{{ url_for('activos_fijos.resumen') }}">Resumen</a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link {{ 'active' if seccion_activa == 'activos' else '' }}" href="{{ url_for('activos_fijos.activos') }}">Activos</a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link {{ 'active' if seccion_activa == 'depreciacion' else '' }}" href="{{ url_for('activos_fijos.depreciacion') }}">Depreciación</a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link {{ 'active' if seccion_activa == 'categorias' else '' }}" href="{{ url_for('activos_fijos.categorias') }}">Categorías</a>
+  </li>
+</ul>

@@ -9,33 +9,6 @@
 </div>
 {% with seccion_activa = 'productos' %}{% include "partials/_subnav_inventario.html" %}{% endwith %}
 
-<div class="row g-3 mb-4">
-  <div class="col-6 col-lg-3">
-    <div class="card tile-inventario card-body">
-      <small>Productos activos</small>
-      <div class="h4 mb-0">{{ stats.total_activos }}</div>
-    </div>
-  </div>
-  <div class="col-6 col-lg-3">
-    <div class="card tile-inventario card-body">
-      <small>Bajo stock mínimo</small>
-      <div class="h4 mb-0 {{ 'text-danger' if stats.bajo_stock else '' }}">{{ stats.bajo_stock }}</div>
-    </div>
-  </div>
-  <div class="col-6 col-lg-3">
-    <div class="card tile-inventario card-body">
-      <small>Valor inventario (costo)</small>
-      <div class="h4 mb-0">{{ stats.valor_costo|clp }}</div>
-    </div>
-  </div>
-  <div class="col-6 col-lg-3">
-    <div class="card tile-inventario card-body">
-      <small>Valor inventario (venta)</small>
-      <div class="h4 mb-0">{{ stats.valor_venta|clp }}</div>
-    </div>
-  </div>
-</div>
-
 <div class="table-responsive">
   <table class="table table-striped align-middle">
     <thead>

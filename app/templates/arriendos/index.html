@@ -4,33 +4,6 @@
 <h1 class="h3 mb-3">Contratos y Arriendos</h1>
 {% with seccion_activa = 'arriendos' %}{% include "partials/_subnav_contratos.html" %}{% endwith %}
 
-<div class="row g-3 mb-4">
-  <div class="col-6 col-lg-3">
-    <div class="card tile-arriendos card-body">
-      <small>Arriendos de salida activos</small>
-      <div class="h4 mb-0">{{ stats.salidas_activas }}</div>
-    </div>
-  </div>
-  <div class="col-6 col-lg-3">
-    <div class="card tile-arriendos card-body">
-      <small>Ingreso por período</small>
-      <div class="h4 mb-0 text-success">{{ stats.ingreso_por_periodo|clp }}</div>
-    </div>
-  </div>
-  <div class="col-6 col-lg-3">
-    <div class="card tile-arriendos card-body">
-      <small>Arriendos de entrada vigentes</small>
-      <div class="h4 mb-0">{{ stats.entradas_vigentes }}</div>
-    </div>
-  </div>
-  <div class="col-6 col-lg-3">
-    <div class="card tile-arriendos card-body">
-      <small>Gasto por período</small>
-      <div class="h4 mb-0 text-danger">{{ stats.gasto_por_periodo|clp }}</div>
-    </div>
-  </div>
-</div>
-
 <div class="d-flex justify-content-between align-items-center mb-2">
   <h2 class="h5 mb-0">Arrendados a clientes (salida)</h2>
   {% if puede('contratos', 'editar') %}

@@ -3,6 +3,22 @@ from datetime import date, datetime, timezone
 from app.extensions import db
 
 
+class CategoriaActivo(db.Model):
+    """Tipos de categoría de activo fijo, parametrizables desde el submódulo Categorías."""
+
+    __tablename__ = "categorias_activo"
+    __table_args__ = (db.UniqueConstraint("empresa_id", "nombre", name="uq_categoria_activo_nombre"),)
+
+    id = db.Column(db.Integer, primary_key=True)
+    empresa_id = db.Column(db.Integer, db.ForeignKey("empresas.id"), nullable=False)
+    nombre = db.Column(db.String(80), nullable=False)
+    descripcion = db.Column(db.String(255), nullable=True)
+    activa = db.Column(db.Boolean, default=True, nullable=False)
+
+    def __repr__(self):
+        return f"<CategoriaActivo {self.nombre}>"
+
+
 class ActivoFijo(db.Model):
     __tablename__ = "activos_fijos"
 

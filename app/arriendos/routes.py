@@ -30,16 +30,7 @@ from app.utils.storage import guardar_documento, listar_documentos, guardar_firm
 def index():
     salidas = ArriendoSalida.query.order_by(ArriendoSalida.fecha_inicio.desc()).all()
     entradas = ArriendoEntrada.query.order_by(ArriendoEntrada.fecha_termino).all()
-
-    salidas_activas = [s for s in salidas if s.estado in ("activo", "atrasado")]
-    entradas_vigentes = [e for e in entradas if e.estado in ("vigente", "por_vencer")]
-    stats = {
-        "salidas_activas": len(salidas_activas),
-        "ingreso_por_periodo": sum(s.monto_periodo for s in salidas_activas),
-        "entradas_vigentes": len(entradas_vigentes),
-        "gasto_por_periodo": sum(e.monto_periodo for e in entradas_vigentes),
-    }
-    return render_template("arriendos/index.html", salidas=salidas, entradas=entradas, stats=stats)
+    return render_template("arriendos/index.html", salidas=salidas, entradas=entradas)
 
 
 # --- Arriendo de salida: la empresa arrienda A un cliente ---

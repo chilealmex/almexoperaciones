@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Categorías de activos{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 mb-0">Activos fijos</h1>
+  {% if puede('activos_fijos', 'editar') %}
+  <a href="{{ url_for('activos_fijos.nueva_categoria') }}" class="btn btn-primary">Nueva categoría</a>
+  {% endif %}
+</div>
+{% with seccion_activa = 'categorias' %}{% include "partials/_subnav_activos.html" %}{% endwith %}
+
+<p class="text-muted">Estas categorías aparecen como opciones al crear o editar un activo fijo.</p>
+
+<div class="table-responsive">
+  <table class="table table-striped align-middle">
+    <thead>
+      <tr>
+        <th>Nombre</th>
+        <th class="d-none d-md-table-cell">Descripción</th>
+        <th class="text-end">Activos que la usan</th>
+        <th>Estado</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in categorias %}
+      <tr>
+        <td>{{ c.nombre }}</td>
+        <td class="d-none d-md-table-cell">{{ c.descripcion or '—' }}</td>
+        <td class="text-end">{{ conteo_uso[c.nombre] }}</td>
+        <td><span class="badge {{ 'bg-success' if c.activa else 'bg-secondary' }}">{{ 'Activa' if c.activa else 'Inactiva' }}</span></td>
+        <td class="text-end">
+          {% if puede('activos_fijos', 'editar') %}
+          <a href="{{ url_for('activos_fijos.editar_categoria', categoria_id=c.id) }}" class="btn btn-sm btn-outline-secondary">Editar</a>
+          {% if conteo_uso[c.nombre] == 0 %}
+          <form method="post" action="{{ url_for('activos_fijos.eliminar_categoria', categoria_id=c.id) }}" class="d-inline" onsubmit="return confirm('¿Eliminar la categoría {{ c.nombre }}?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-sm btn-outline-danger">Eliminar</button>
+          </form>
+          {% endif %}
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="text-center text-muted">No hay categorías creadas todavía.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Activos fijos{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">Activos fijos</h1>
+{% with seccion_activa = 'resumen' %}{% include "partials/_subnav_activos.html" %}{% endwith %}
+
+<div class="row g-3 mb-4">
+  <div class="col-6 col-lg-3">
+    <div class="card tile-activos card-body">
+      <small>Activos vigentes</small>
+      <div class="h4 mb-0">{{ stats.total_activos }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card tile-activos card-body">
+      <small>Valor libro total</small>
+      <div class="h4 mb-0">{{ stats.valor_libro_total|clp }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card tile-activos card-body">
+      <small>Depreciación mensual</small>
+      <div class="h4 mb-0">{{ stats.depreciacion_mensual_total|clp }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card tile-activos card-body">
+      <small>Arrendados hoy</small>
+      <div class="h4 mb-0">{{ stats.arrendados }}</div>
+    </div>
+  </div>
+</div>
+
+<p class="text-muted">Usa las pestañas de arriba para gestionar los activos, ver la depreciación por centro de costo o parametrizar las categorías.</p>
+{% endblock %}

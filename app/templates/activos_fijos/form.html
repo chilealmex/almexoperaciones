@@ -12,7 +12,8 @@
     </div>
     <div class="col-6 mb-3">
       {{ form.categoria.label(class="form-label") }}
-      {{ form.categoria(class="form-control") }}
+      {{ form.categoria(class="form-select") }}
+      <div class="form-text">Se administran en la pestaña <a href="{{ url_for('activos_fijos.categorias') }}">Categorías</a>.</div>
     </div>
   </div>
   <div class="mb-3">

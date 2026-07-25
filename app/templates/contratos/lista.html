@@ -11,33 +11,6 @@
 
 {% set estado_badge = {'vigente': 'bg-success', 'por_vencer': 'bg-warning text-dark', 'vencido': 'bg-danger', 'terminado': 'bg-secondary'} %}
 
-<div class="row g-3 mb-4">
-  <div class="col-6 col-lg-3">
-    <div class="card tile-contratos card-body">
-      <small>Vigentes</small>
-      <div class="h4 mb-0 text-success">{{ stats.vigentes }}</div>
-    </div>
-  </div>
-  <div class="col-6 col-lg-3">
-    <div class="card tile-contratos card-body">
-      <small>Por vencer</small>
-      <div class="h4 mb-0 {{ 'text-warning' if stats.por_vencer else '' }}">{{ stats.por_vencer }}</div>
-    </div>
-  </div>
-  <div class="col-6 col-lg-3">
-    <div class="card tile-contratos card-body">
-      <small>Vencidos</small>
-      <div class="h4 mb-0 {{ 'text-danger' if stats.vencidos else '' }}">{{ stats.vencidos }}</div>
-    </div>
-  </div>
-  <div class="col-6 col-lg-3">
-    <div class="card tile-contratos card-body">
-      <small>Monto contratado vigente</small>
-      <div class="h4 mb-0">{{ stats.monto_vigente|clp }}</div>
-    </div>
-  </div>
-</div>
-
 <div class="table-responsive">
   <table class="table table-striped align-middle">
     <thead><tr><th>N° contrato</th><th>Cliente</th><th class="d-none d-md-table-cell">Vence</th><th class="d-none d-md-table-cell text-end">Monto</th><th>Estado</th></tr></thead>

@@ -81,17 +81,49 @@ def _cargar_clientes(form):
     ]
 
 
-@bp.route("/")
-@require_permission("contratos", "ver")
-def contratos():
+def _stats_contratos():
     lista = ContratoCliente.query.order_by(ContratoCliente.fecha_termino).all()
     vigentes = [c for c in lista if c.estado == "vigente"]
-    stats = {
+    return lista, {
         "vigentes": len(vigentes),
         "por_vencer": sum(1 for c in lista if c.estado == "por_vencer"),
         "vencidos": sum(1 for c in lista if c.estado == "vencido"),
         "monto_vigente": sum(c.monto for c in vigentes),
     }
+
+
+@bp.route("/")
+@require_permission("contratos", "ver")
+def resumen():
+    from app.models.arriendo import ArriendoSalida, ArriendoEntrada
+
+    lista, stats = _stats_contratos()
+    contratos_por_vencer = [c for c in lista if c.estado == "por_vencer"]
+
+    salidas = ArriendoSalida.query.all()
+    entradas = ArriendoEntrada.query.all()
+    salidas_activas = [s for s in salidas if s.estado in ("activo", "atrasado")]
+    entradas_vigentes = [e for e in entradas if e.estado in ("vigente", "por_vencer")]
+    stats_arriendos = {
+        "salidas_activas": len(salidas_activas),
+        "ingreso_por_periodo": sum(s.monto_periodo for s in salidas_activas),
+        "entradas_vigentes": len(entradas_vigentes),
+        "gasto_por_periodo": sum(e.monto_periodo for e in entradas_vigentes),
+    }
+    arriendos_entrada_por_vencer = [e for e in entradas if e.estado == "por_vencer"]
+    return render_template(
+        "contratos/resumen.html",
+        stats=stats,
+        stats_arriendos=stats_arriendos,
+        contratos_por_vencer=contratos_por_vencer,
+        arriendos_entrada_por_vencer=arriendos_entrada_por_vencer,
+    )
+
+
+@bp.route("/lista")
+@require_permission("contratos", "ver")
+def contratos():
+    lista, stats = _stats_contratos()
     return render_template("contratos/lista.html", contratos=lista, stats=stats)
 
 

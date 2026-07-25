@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Contratos y Arriendos{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">Contratos y Arriendos</h1>
+{% with seccion_activa = 'resumen' %}{% include "partials/_subnav_contratos.html" %}{% endwith %}
+
+<h2 class="h6 text-muted text-uppercase">Contratos</h2>
+<div class="row g-3 mb-4">
+  <div class="col-6 col-lg-3">
+    <div class="card tile-contratos card-body">
+      <small>Vigentes</small>
+      <div class="h4 mb-0 text-success">{{ stats.vigentes }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card tile-contratos card-body">
+      <small>Por vencer</small>
+      <div class="h4 mb-0 {{ 'text-warning' if stats.por_vencer else '' }}">{{ stats.por_vencer }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card tile-contratos card-body">
+      <small>Vencidos</small>
+      <div class="h4 mb-0 {{ 'text-danger' if stats.vencidos else '' }}">{{ stats.vencidos }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card tile-contratos card-body">
+      <small>Monto contratado vigente</small>
+      <div class="h4 mb-0">{{ stats.monto_vigente|clp }}</div>
+    </div>
+  </div>
+</div>
+
+<h2 class="h6 text-muted text-uppercase">Arriendos</h2>
+<div class="row g-3 mb-4">
+  <div class="col-6 col-lg-3">
+    <div class="card tile-arriendos card-body">
+      <small>Arriendos de salida activos</small>
+      <div class="h4 mb-0">{{ stats_arriendos.salidas_activas }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card tile-arriendos card-body">
+      <small>Ingreso por período</small>
+      <div class="h4 mb-0 text-success">{{ stats_arriendos.ingreso_por_periodo|clp }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card tile-arriendos card-body">
+      <small>Arriendos de entrada vigentes</small>
+      <div class="h4 mb-0">{{ stats_arriendos.entradas_vigentes }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card tile-arriendos card-body">
+      <small>Gasto por período</small>
+      <div class="h4 mb-0 text-danger">{{ stats_arriendos.gasto_por_periodo|clp }}</div>
+    </div>
+  </div>
+</div>
+
+{% if contratos_por_vencer or arriendos_entrada_por_vencer %}
+<div class="row g-3">
+  {% if contratos_por_vencer %}
+  <div class="col-12 col-lg-6">
+    <div class="card">
+      <div class="card-body">
+        <h2 class="h6">⚠️ Contratos por vencer</h2>
+        <ul class="list-unstyled small mb-0">
+          {% for c in contratos_por_vencer[:8] %}
+          <li><a href="{{ url_for('contratos.ver_contrato', contrato_id=c.id) }}">{{ c.numero_contrato }}</a> — {{ c.cliente.razon_social }} — vence {{ c.fecha_termino|fecha }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+  {% if arriendos_entrada_por_vencer %}
+  <div class="col-12 col-lg-6">
+    <div class="card">
+      <div class="card-body">
+        <h2 class="h6">⚠️ Arriendos de proveedores por vencer</h2>
+        <ul class="list-unstyled small mb-0">
+          {% for a in arriendos_entrada_por_vencer[:8] %}
+          <li><a href="{{ url_for('arriendos.ver_arriendo_entrada', arriendo_id=a.id) }}">{{ a.descripcion_activo }}</a> — {{ a.proveedor.razon_social }} — vence {{ a.fecha_termino|fecha }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

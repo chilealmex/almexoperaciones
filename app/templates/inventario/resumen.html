@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Inventario{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">Inventario</h1>
+{% with seccion_activa = 'resumen' %}{% include "partials/_subnav_inventario.html" %}{% endwith %}
+
+<div class="row g-3 mb-4">
+  <div class="col-6 col-lg-3">
+    <div class="card tile-inventario card-body">
+      <small>Productos activos</small>
+      <div class="h4 mb-0">{{ stats.total_activos }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card tile-inventario card-body">
+      <small>Bajo stock mínimo</small>
+      <div class="h4 mb-0 {{ 'text-danger' if stats.bajo_stock else '' }}">{{ stats.bajo_stock }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card tile-inventario card-body">
+      <small>Valor inventario (costo)</small>
+      <div class="h4 mb-0">{{ stats.valor_costo|clp }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card tile-inventario card-body">
+      <small>Valor inventario (venta)</small>
+      <div class="h4 mb-0">{{ stats.valor_venta|clp }}</div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-6 col-lg-4">
+    <div class="card tile-inventario card-body">
+      <small>Artículos en conteo físico</small>
+      <div class="h4 mb-0">{{ stats.total_conteo }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-4">
+    <div class="card tile-inventario card-body">
+      <small>Pendientes de contar</small>
+      <div class="h4 mb-0">{{ stats.conteo_pendientes }}</div>
+    </div>
+  </div>
+  <div class="col-12 col-lg-4">
+    <div class="card tile-inventario card-body">
+      <small>Con diferencias</small>
+      <div class="h4 mb-0 {{ 'text-danger' if stats.conteo_con_diferencia else '' }}">{{ stats.conteo_con_diferencia }}</div>
+    </div>
+  </div>
+</div>
+
+{% if productos_bajo_stock %}
+<div class="card">
+  <div class="card-body">
+    <h2 class="h6">⚠️ Productos bajo el stock mínimo</h2>
+    <ul class="list-unstyled small mb-0">
+      {% for p in productos_bajo_stock[:8] %}
+      <li><a href="{{ url_for('inventario.ver_producto', producto_id=p.id) }}">{{ p.nombre }}</a> — stock {{ p.stock_actual }} / mínimo {{ p.stock_minimo }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

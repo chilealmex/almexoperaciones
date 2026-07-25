@@ -19,7 +19,7 @@
         {% else %}
         <p class="text-muted mb-0">Sin alertas de stock.</p>
         {% endif %}
-        <a href="{{ url_for('inventario.productos') }}" class="btn btn-sm btn-outline-primary mt-2">Ver inventario</a>
+        <a href="{{ url_for('inventario.resumen') }}" class="btn btn-sm btn-outline-primary mt-2">Ver inventario</a>
       </div>
     </div>
   </div>
@@ -40,7 +40,7 @@
         {% else %}
         <p class="text-muted mb-0">Sin contratos próximos a vencer.</p>
         {% endif %}
-        <a href="{{ url_for('contratos.contratos') }}" class="btn btn-sm btn-outline-primary mt-2">Ver contratos</a>
+        <a href="{{ url_for('contratos.resumen') }}" class="btn btn-sm btn-outline-primary mt-2">Ver contratos</a>
       </div>
     </div>
   </div>
@@ -52,7 +52,7 @@
       <div class="card-body">
         <h2 class="h5">🏷️ Activos fijos</h2>
         <p class="text-muted mb-2">Gestiona el registro de activos y su depreciación.</p>
-        <a href="{{ url_for('activos_fijos.activos') }}" class="btn btn-sm btn-outline-primary mt-2">Ver activos fijos</a>
+        <a href="{{ url_for('activos_fijos.resumen') }}" class="btn btn-sm btn-outline-primary mt-2">Ver activos fijos</a>
       </div>
     </div>
   </div>

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Editar categoría' if categoria else 'Nueva categoría' }}{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">{{ 'Editar categoría' if categoria else 'Nueva categoría' }}</h1>
+
+<form method="post" novalidate class="col-12 col-lg-5">
+  {{ form.hidden_tag() }}
+  <div class="mb-3">
+    {{ form.nombre.label(class="form-label") }}
+    {{ form.nombre(class="form-control", autofocus=true) }}
+    {% for error in form.nombre.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+  </div>
+  <div class="mb-3">
+    {{ form.descripcion.label(class="form-label") }}
+    {{ form.descripcion(class="form-control") }}
+  </div>
+  <div class="form-check mb-3">
+    {{ form.activa(class="form-check-input") }}
+    {{ form.activa.label(class="form-check-label") }}
+    <div class="form-text">Las categorías inactivas dejan de aparecer como opción para activos nuevos, pero los activos existentes las conservan.</div>
+  </div>
+  <button type="submit" class="btn btn-primary">Guardar</button>
+  <a href="{{ url_for('activos_fijos.categorias') }}" class="btn btn-outline-secondary">Cancelar</a>
+</form>
+{% endblock %}

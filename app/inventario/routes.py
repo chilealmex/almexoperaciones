@@ -18,17 +18,34 @@ def _cargar_categorias(form):
     ]
 
 
-@bp.route("/")
-@require_permission("inventario", "ver")
-def productos():
+def _stats_inventario():
     lista = Producto.query.order_by(Producto.nombre).all()
     activos = [p for p in lista if p.activo]
-    stats = {
+    total_conteo = ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id).count()
+    items_conteo = ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id).all()
+    return lista, {
         "total_activos": len(activos),
         "bajo_stock": sum(1 for p in activos if p.bajo_stock_minimo),
         "valor_costo": sum(p.stock_actual * p.precio_costo for p in activos),
         "valor_venta": sum(p.stock_actual * p.precio_venta for p in activos),
+        "total_conteo": total_conteo,
+        "conteo_con_diferencia": sum(1 for i in items_conteo if i.tiene_diferencia),
+        "conteo_pendientes": sum(1 for i in items_conteo if i.cantidad_fisica is None),
     }
+
+
+@bp.route("/")
+@require_permission("inventario", "ver")
+def resumen():
+    _lista, stats = _stats_inventario()
+    productos_bajo_stock = [p for p in _lista if p.activo and p.bajo_stock_minimo]
+    return render_template("inventario/resumen.html", stats=stats, productos_bajo_stock=productos_bajo_stock)
+
+
+@bp.route("/productos")
+@require_permission("inventario", "ver")
+def productos():
+    lista, stats = _stats_inventario()
     return render_template("inventario/productos_lista.html", productos=lista, stats=stats)
 
 

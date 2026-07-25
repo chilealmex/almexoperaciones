@@ -3,42 +3,13 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h1 class="h3 mb-0">Activos fijos</h1>
-  <div>
-    <a href="{{ url_for('activos_fijos.depreciacion') }}" class="btn btn-outline-secondary">Depreciación por centro de costo</a>
-    {% if puede('activos_fijos', 'editar') %}
-    <a href="{{ url_for('activos_fijos.nuevo_activo') }}" class="btn btn-primary">Nuevo activo</a>
-    {% endif %}
-  </div>
+  {% if puede('activos_fijos', 'editar') %}
+  <a href="{{ url_for('activos_fijos.nuevo_activo') }}" class="btn btn-primary">Nuevo activo</a>
+  {% endif %}
 </div>
+{% with seccion_activa = 'activos' %}{% include "partials/_subnav_activos.html" %}{% endwith %}
 
 {% set estado_badge = {'activo': 'bg-success', 'en_mantenimiento': 'bg-warning text-dark', 'dado_de_baja': 'bg-secondary', 'vendido': 'bg-dark'} %}
-
-<div class="row g-3 mb-4">
-  <div class="col-6 col-lg-3">
-    <div class="card tile-activos card-body">
-      <small>Activos vigentes</small>
-      <div class="h4 mb-0">{{ stats.total_activos }}</div>
-    </div>
-  </div>
-  <div class="col-6 col-lg-3">
-    <div class="card tile-activos card-body">
-      <small>Valor libro total</small>
-      <div class="h4 mb-0">{{ stats.valor_libro_total|clp }}</div>
-    </div>
-  </div>
-  <div class="col-6 col-lg-3">
-    <div class="card tile-activos card-body">
-      <small>Depreciación mensual</small>
-      <div class="h4 mb-0">{{ stats.depreciacion_mensual_total|clp }}</div>
-    </div>
-  </div>
-  <div class="col-6 col-lg-3">
-    <div class="card tile-activos card-body">
-      <small>Arrendados hoy</small>
-      <div class="h4 mb-0">{{ stats.arrendados }}</div>
-    </div>
-  </div>
-</div>
 
 <div class="table-responsive">
   <table class="table table-striped align-middle">
