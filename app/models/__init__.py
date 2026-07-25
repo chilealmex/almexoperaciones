@@ -3,6 +3,7 @@ from app.models.usuario import Rol, Usuario
 from app.models.permiso import MODULOS, RolModuloPermiso, PermisoUsuario
 from app.models.cliente import Cliente, Proveedor
 from app.models.inventario import CategoriaProducto, Producto, MovimientoInventario
+from app.models.conteo_inventario import ItemConteoInventario
 from app.models.contrato import ContratoCliente
 from app.models.activo_fijo import ActivoFijo
 from app.models.arriendo import (
@@ -25,6 +26,7 @@ __all__ = [
     "CategoriaProducto",
     "Producto",
     "MovimientoInventario",
+    "ItemConteoInventario",
     "ContratoCliente",
     "ActivoFijo",
     "ArriendoSalida",

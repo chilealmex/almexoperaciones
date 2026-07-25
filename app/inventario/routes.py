@@ -1,12 +1,15 @@
 from flask import render_template, redirect, url_for, flash, request, abort
 from flask_login import current_user
+from sqlalchemy import or_
 
 from app.inventario import bp
-from app.inventario.forms import ProductoForm, MovimientoForm
+from app.inventario.forms import ProductoForm, MovimientoForm, ImportarCsvForm, ContarFisicoForm
 from app.extensions import db
 from app.models.inventario import Producto, CategoriaProducto, MovimientoInventario
+from app.models.conteo_inventario import ItemConteoInventario
 from app.utils.decorators import require_permission
 from app.utils.storage import guardar_documento, listar_documentos
+from app.utils.importar_conteo import importar_qms, importar_defontana
 
 
 def _cargar_categorias(form):
@@ -156,3 +159,94 @@ def nuevo_movimiento(producto_id):
 def movimientos():
     lista = MovimientoInventario.query.order_by(MovimientoInventario.fecha.desc()).limit(200).all()
     return render_template("inventario/movimientos_lista.html", movimientos=lista)
+
+
+# --- Conteo físico (cruce QMS / Defontana) ---
+
+
+@bp.route("/conteo")
+@require_permission("inventario", "ver")
+def conteo():
+    q = request.args.get("q", "").strip()
+    query = ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id)
+    if q:
+        patron = f"%{q}%"
+        query = query.filter(or_(ItemConteoInventario.codigo.ilike(patron), ItemConteoInventario.nombre.ilike(patron)))
+    items = query.order_by(ItemConteoInventario.codigo).limit(500).all()
+    total = ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id).count()
+    return render_template("inventario/conteo_lista.html", items=items, q=q, total=total)
+
+
+@bp.route("/conteo/diferencias")
+@require_permission("inventario", "ver")
+def conteo_diferencias():
+    todos = ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id).order_by(ItemConteoInventario.codigo).all()
+    items = [i for i in todos if i.tiene_diferencia]
+    return render_template("inventario/conteo_diferencias.html", items=items)
+
+
+@bp.route("/conteo/<int:item_id>/contar", methods=["GET", "POST"])
+@require_permission("inventario", "editar")
+def conteo_contar(item_id):
+    item = ItemConteoInventario.query.filter_by(id=item_id, empresa_id=current_user.empresa_id).first_or_404()
+    form = ContarFisicoForm(obj=item)
+    if form.validate_on_submit():
+        item.cantidad_fisica = form.cantidad_fisica.data
+        item.contado_por_id = current_user.id
+        from datetime import datetime, timezone
+
+        item.contado_en = datetime.now(timezone.utc)
+        db.session.commit()
+        flash(f"Conteo de {item.codigo} registrado correctamente.", "success")
+        return redirect(url_for("inventario.conteo", q=request.args.get("q", "")))
+
+    return render_template("inventario/conteo_contar.html", form=form, item=item)
+
+
+@bp.route("/conteo/importar", methods=["GET", "POST"])
+@require_permission("inventario", "editar")
+def conteo_importar():
+    form_qms = ImportarCsvForm(prefix="qms")
+    form_defontana = ImportarCsvForm(prefix="def")
+    total_items = ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id).count()
+    return render_template(
+        "inventario/conteo_importar.html", form_qms=form_qms, form_defontana=form_defontana, total_items=total_items
+    )
+
+
+@bp.route("/conteo/importar/qms", methods=["POST"])
+@require_permission("inventario", "editar")
+def conteo_importar_qms():
+    form = ImportarCsvForm(prefix="qms")
+    if form.validate_on_submit():
+        try:
+            resultado = importar_qms(form.archivo.data, current_user.empresa_id)
+            flash(
+                f"QMS importado: {resultado['total_codigos']} códigos "
+                f"({resultado['creados']} nuevos, {resultado['actualizados']} actualizados).",
+                "success",
+            )
+        except ValueError as e:
+            flash(str(e), "danger")
+    else:
+        flash("Selecciona un archivo CSV válido.", "danger")
+    return redirect(url_for("inventario.conteo_importar"))
+
+
+@bp.route("/conteo/importar/defontana", methods=["POST"])
+@require_permission("inventario", "editar")
+def conteo_importar_defontana():
+    form = ImportarCsvForm(prefix="def")
+    if form.validate_on_submit():
+        try:
+            resultado = importar_defontana(form.archivo.data, current_user.empresa_id)
+            flash(
+                f"Defontana importado: {resultado['total_codigos']} códigos "
+                f"({resultado['creados']} nuevos, {resultado['actualizados']} actualizados).",
+                "success",
+            )
+        except ValueError as e:
+            flash(str(e), "danger")
+    else:
+        flash("Selecciona un archivo CSV válido.", "danger")
+    return redirect(url_for("inventario.conteo_importar"))

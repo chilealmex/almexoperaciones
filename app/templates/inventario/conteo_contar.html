@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Contar {{ item.codigo }}{% endblock %}
+{% block content %}
+<h1 class="h3 mb-1">Registrar conteo físico</h1>
+<p class="text-muted">{{ item.codigo }} — {{ item.nombre or 'Sin nombre' }}</p>
+
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3"><div class="card card-body"><small class="text-muted">QMS</small><div class="h4 mb-0">{{ item.cantidad_qms }}</div></div></div>
+  <div class="col-6 col-md-3"><div class="card card-body"><small class="text-muted">Defontana</small><div class="h4 mb-0">{{ item.cantidad_defontana }}</div></div></div>
+  <div class="col-6 col-md-3"><div class="card card-body"><small class="text-muted">Ubicación</small><div>{{ item.ubicacion or '—' }}</div></div></div>
+  <div class="col-6 col-md-3"><div class="card card-body"><small class="text-muted">Línea de negocio</small><div>{{ item.linea_negocio or '—' }}</div></div></div>
+</div>
+
+{% if item.cantidad_fisica is not none %}
+<div class="alert alert-info">
+  Ya fue contado: <strong>{{ item.cantidad_fisica }}</strong>
+  {% if item.contado_por %}por {{ item.contado_por.nombre_completo }}{% endif %}
+  {% if item.contado_en %}el {{ item.contado_en|fecha }}{% endif %}.
+  Puedes registrar un nuevo conteo que reemplazará al anterior.
+</div>
+{% endif %}
+
+<form method="post" novalidate class="col-12 col-md-5 col-lg-3">
+  {{ form.hidden_tag() }}
+  <div class="mb-3">
+    {{ form.cantidad_fisica.label(class="form-label") }}
+    {{ form.cantidad_fisica(class="form-control form-control-lg", autofocus=true, inputmode="numeric") }}
+    {% for error in form.cantidad_fisica.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+  </div>
+  <button type="submit" class="btn btn-primary btn-lg w-100">Guardar conteo</button>
+  <a href="{{ url_for('inventario.conteo', q=request.args.get('q', '')) }}" class="btn btn-outline-secondary w-100 mt-2">Volver al listado</a>
+</form>
+{% endblock %}

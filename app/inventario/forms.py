@@ -30,3 +30,11 @@ class MovimientoForm(FlaskForm):
     motivo = StringField("Motivo", validators=[Optional(), Length(max=255)])
     observaciones = TextAreaField("Observaciones", validators=[Optional()])
     archivo = FileField("Adjuntar documento", validators=[Optional(), FileAllowed(["pdf", "jpg", "jpeg", "png", "xlsx", "docx"], "Formato no permitido.")])
+
+
+class ImportarCsvForm(FlaskForm):
+    archivo = FileField("Archivo CSV", validators=[DataRequired(), FileAllowed(["csv"], "Debe ser un archivo .csv")])
+
+
+class ContarFisicoForm(FlaskForm):
+    cantidad_fisica = IntegerField("Cantidad física contada", validators=[DataRequired(), NumberRange(min=0)])

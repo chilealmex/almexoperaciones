@@ -1,0 +1,19 @@
+<ul class="nav nav-pills mb-3 gap-1">
+  <li class="nav-item">
+    <a class="nav-link {{ 'active' if seccion_activa == 'productos' else '' }}" href="{{ url_for('inventario.productos') }}">Productos</a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link {{ 'active' if seccion_activa == 'movimientos' else '' }}" href="{{ url_for('inventario.movimientos') }}">Movimientos</a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link {{ 'active' if seccion_activa == 'conteo' else '' }}" href="{{ url_for('inventario.conteo') }}">Conteo físico</a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link {{ 'active' if seccion_activa == 'diferencias' else '' }}" href="{{ url_for('inventario.conteo_diferencias') }}">Diferencias</a>
+  </li>
+  {% if puede('inventario', 'editar') %}
+  <li class="nav-item">
+    <a class="nav-link {{ 'active' if seccion_activa == 'importar' else '' }}" href="{{ url_for('inventario.conteo_importar') }}">Importar</a>
+  </li>
+  {% endif %}
+</ul>
