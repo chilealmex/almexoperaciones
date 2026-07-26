@@ -68,6 +68,47 @@ def test_diferencia_fisica(db, empresa):
     assert not item.tiene_diferencia
 
 
+def test_importacion_no_escala_en_consultas_por_articulo(db, empresa):
+    """Con miles de artículos, una consulta por código agota el tiempo contra la base remota."""
+    from sqlalchemy import event
+
+    filas = [
+        f"Casa Matriz;GOMAS;CAT;0;0;{i};0;PRODUCTO {i};UN;COD-{i:04d};RACK" for i in range(200)
+    ]
+    csv_grande = CSV_QMS.splitlines()[0] + "\n" + "\n".join(filas) + "\n"
+
+    consultas = []
+    motor = db.engine
+
+    def contar(conn, cursor, statement, parameters, context, executemany):
+        consultas.append(statement)
+
+    event.listen(motor, "before_cursor_execute", contar)
+    try:
+        importar_qms(_fs(csv_grande.encode("utf-8"), "qms.csv"), empresa.id)
+    finally:
+        event.remove(motor, "before_cursor_execute", contar)
+
+    selects = [c for c in consultas if c.strip().upper().startswith("SELECT")]
+    assert len(selects) <= 5, f"{len(selects)} SELECT para 200 artículos: debe ser un número fijo"
+
+
+def test_textos_mas_largos_que_la_columna_se_recortan(db, empresa):
+    nombre_largo = "X" * 400
+    csv_largo = (
+        CSV_QMS.splitlines()[0]
+        + "\n"
+        + f"Casa Matriz;{'L' * 200};CAT;0;0;5;0;{nombre_largo};UN;{'C' * 120};{'U' * 400}\n"
+    )
+    importar_qms(_fs(csv_largo.encode("utf-8"), "qms.csv"), empresa.id)
+
+    item = ItemConteoInventario.query.first()
+    assert len(item.codigo) <= 80
+    assert len(item.nombre) <= 255
+    assert len(item.linea_negocio) <= 120
+    assert len(item.ubicacion) <= 255
+
+
 def test_reimportar_no_pierde_conteo_fisico(db, empresa):
     importar_qms(_fs(CSV_QMS.encode("utf-8"), "qms.csv"), empresa.id)
     item = ItemConteoInventario.query.filter_by(codigo="COD-001").first()

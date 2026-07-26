@@ -4,7 +4,7 @@ services:
     runtime: python
     plan: free
     buildCommand: "pip install -r requirements.txt && flask db upgrade && python seeds/seed_dev.py"
-    startCommand: "gunicorn wsgi:app --workers 3 --bind 0.0.0.0:$PORT"
+    startCommand: "gunicorn wsgi:app --workers 3 --timeout 120 --bind 0.0.0.0:$PORT"
     healthCheckPath: /healthz
     autoDeploy: true
     envVars:

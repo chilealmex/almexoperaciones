@@ -25,15 +25,24 @@ def _a_entero(valor: str) -> int:
 
 def _normalizar_codigo(codigo: str) -> str:
     """Quita apóstrofes iniciales (artefacto de Excel) y espacios para que ambos sistemas crucen."""
-    return codigo.strip().lstrip("'").strip()
+    return codigo.strip().lstrip("'").strip()[:80]
 
 
-def _obtener_item(empresa_id: int, codigo: str) -> ItemConteoInventario:
-    item = ItemConteoInventario.query.filter_by(empresa_id=empresa_id, codigo=codigo).first()
-    if item is None:
-        item = ItemConteoInventario(empresa_id=empresa_id, codigo=codigo, cantidad_qms=0, cantidad_defontana=0)
-        db.session.add(item)
-    return item
+def _texto(valor, limite: int) -> str:
+    """Recorta al límite de la columna: PostgreSQL rechaza los textos que se pasan, SQLite no."""
+    return (valor or "").strip()[:limite]
+
+
+def _items_existentes(empresa_id: int) -> dict:
+    """Trae todos los items de la empresa en una sola consulta.
+
+    Consultar código por código genera miles de round-trips contra la base de datos
+    remota y agota el tiempo de la petición.
+    """
+    return {
+        item.codigo: item
+        for item in ItemConteoInventario.query.filter_by(empresa_id=empresa_id).all()
+    }
 
 
 def importar_qms(file_storage, empresa_id: int) -> dict:
@@ -59,20 +68,24 @@ def importar_qms(file_storage, empresa_id: int) -> dict:
         if codigo not in acumulado:
             acumulado[codigo] = {
                 "cantidad": 0,
-                "nombre": (fila.get(columna_nombre) or "").strip(),
-                "linea_negocio": (fila.get(columna_linea) or "").strip(),
-                "ubicacion": (fila.get(columna_ubicacion) or "").strip() or (fila.get("Sucursal") or "").strip(),
+                "nombre": _texto(fila.get(columna_nombre), 255),
+                "linea_negocio": _texto(fila.get(columna_linea), 120),
+                "ubicacion": _texto(fila.get(columna_ubicacion), 255) or _texto(fila.get("Sucursal"), 255),
             }
         acumulado[codigo]["cantidad"] += cantidad
 
+    existentes = _items_existentes(empresa_id)
     filas_creadas = 0
     filas_actualizadas = 0
+    nuevos = []
     for codigo, datos in acumulado.items():
-        item = ItemConteoInventario.query.filter_by(empresa_id=empresa_id, codigo=codigo).first()
-        es_nuevo = item is None
-        if es_nuevo:
-            item = ItemConteoInventario(empresa_id=empresa_id, codigo=codigo)
-            db.session.add(item)
+        item = existentes.get(codigo)
+        if item is None:
+            item = ItemConteoInventario(empresa_id=empresa_id, codigo=codigo, cantidad_defontana=0)
+            nuevos.append(item)
+            filas_creadas += 1
+        else:
+            filas_actualizadas += 1
         item.cantidad_qms = datos["cantidad"]
         if datos["nombre"]:
             item.nombre = datos["nombre"]
@@ -80,11 +93,9 @@ def importar_qms(file_storage, empresa_id: int) -> dict:
             item.linea_negocio = datos["linea_negocio"]
         if datos["ubicacion"] and not item.ubicacion:
             item.ubicacion = datos["ubicacion"]
-        if es_nuevo:
-            filas_creadas += 1
-        else:
-            filas_actualizadas += 1
 
+    if nuevos:
+        db.session.add_all(nuevos)
     db.session.commit()
     return {"total_codigos": len(acumulado), "creados": filas_creadas, "actualizados": filas_actualizadas}
 
@@ -120,30 +131,32 @@ def importar_defontana(file_storage, empresa_id: int) -> dict:
         if codigo not in acumulado:
             acumulado[codigo] = {
                 "cantidad": 0,
-                "nombre": (fila.get(columna_nombre) or "").strip() if columna_nombre else "",
+                "nombre": _texto(fila.get(columna_nombre), 255) if columna_nombre else "",
                 "bodegas": set(),
             }
         acumulado[codigo]["cantidad"] += cantidad
         if bodega and cantidad:
             acumulado[codigo]["bodegas"].add(bodega)
 
+    existentes = _items_existentes(empresa_id)
     filas_creadas = 0
     filas_actualizadas = 0
+    nuevos = []
     for codigo, datos in acumulado.items():
-        item = ItemConteoInventario.query.filter_by(empresa_id=empresa_id, codigo=codigo).first()
-        es_nuevo = item is None
-        if es_nuevo:
-            item = ItemConteoInventario(empresa_id=empresa_id, codigo=codigo)
-            db.session.add(item)
+        item = existentes.get(codigo)
+        if item is None:
+            item = ItemConteoInventario(empresa_id=empresa_id, codigo=codigo, cantidad_qms=0)
+            nuevos.append(item)
+            filas_creadas += 1
+        else:
+            filas_actualizadas += 1
         item.cantidad_defontana = datos["cantidad"]
         if datos["nombre"] and not item.nombre:
             item.nombre = datos["nombre"]
         if datos["bodegas"] and not item.ubicacion:
-            item.ubicacion = ", ".join(sorted(datos["bodegas"]))
-        if es_nuevo:
-            filas_creadas += 1
-        else:
-            filas_actualizadas += 1
+            item.ubicacion = ", ".join(sorted(datos["bodegas"]))[:255]
 
+    if nuevos:
+        db.session.add_all(nuevos)
     db.session.commit()
     return {"total_codigos": len(acumulado), "creados": filas_creadas, "actualizados": filas_actualizadas}
