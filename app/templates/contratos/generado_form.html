@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Editar contrato generado' if contrato else 'Nuevo contrato de arriendo' }}{% endblock %}
+{% block content %}
+<h1 class="h3 mb-1">{{ 'Editar contrato generado' if contrato else 'Nuevo contrato de arriendo' }}</h1>
+<p class="text-muted">Completa los datos variables; el resto del texto del contrato es fijo según la plantilla Shaw Almex.</p>
+
+<form method="post" novalidate class="col-12 col-lg-8">
+  {{ form.hidden_tag() }}
+
+  <div class="card mb-3">
+    <div class="card-body">
+      <h2 class="h6 text-uppercase text-muted">Datos generales</h2>
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          {{ form.fecha_contrato.label(class="form-label") }}
+          {{ form.fecha_contrato(class="form-control", type="date") }}
+          {% for error in form.fecha_contrato.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-6 mb-3">
+          {{ form.correo_arrendador.label(class="form-label") }}
+          {{ form.correo_arrendador(class="form-control", placeholder="contacto@shawalmex.cl") }}
+          {% for error in form.correo_arrendador.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-md-4 mb-3">
+          {{ form.cotizacion_numero.label(class="form-label") }}
+          {{ form.cotizacion_numero(class="form-control") }}
+          {% for error in form.cotizacion_numero.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-4 mb-3">
+          {{ form.cotizacion_fecha.label(class="form-label") }}
+          {{ form.cotizacion_fecha(class="form-control", type="date") }}
+          {% for error in form.cotizacion_fecha.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-4 mb-3">
+          {{ form.deducible_uf.label(class="form-label") }}
+          {{ form.deducible_uf(class="form-control") }}
+          {% for error in form.deducible_uf.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+      </div>
+      <div class="mb-1">
+        {{ form.planta_ubicacion.label(class="form-label") }}
+        {{ form.planta_ubicacion(class="form-control", placeholder="Dirección de la Planta Almex") }}
+        {% for error in form.planta_ubicacion.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <div class="card mb-3">
+    <div class="card-body">
+      <h2 class="h6 text-uppercase text-muted">Arrendatario</h2>
+      <div class="mb-3">
+        {{ form.cliente_id.label(class="form-label") }}
+        {{ form.cliente_id(class="form-select") }}
+        <div class="form-text">La razón social y el RUT se toman de la ficha del cliente.</div>
+      </div>
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          {{ form.representante_nombre.label(class="form-label") }}
+          {{ form.representante_nombre(class="form-control") }}
+          {% for error in form.representante_nombre.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-6 mb-3">
+          {{ form.representante_cedula.label(class="form-label") }}
+          {{ form.representante_cedula(class="form-control", placeholder="12.345.678-9") }}
+          {% for error in form.representante_cedula.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          {{ form.arrendatario_domicilio.label(class="form-label") }}
+          {{ form.arrendatario_domicilio(class="form-control") }}
+          {% for error in form.arrendatario_domicilio.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-6 mb-3">
+          {{ form.arrendatario_correo.label(class="form-label") }}
+          {{ form.arrendatario_correo(class="form-control") }}
+          {% for error in form.arrendatario_correo.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card mb-3">
+    <div class="card-body">
+      <h2 class="h6 text-uppercase text-muted">Fiador y codeudor solidario</h2>
+      <div class="row">
+        <div class="col-md-4 mb-3">
+          {{ form.fiador_tipo.label(class="form-label") }}
+          {{ form.fiador_tipo(class="form-select") }}
+        </div>
+        <div class="col-md-4 mb-3">
+          {{ form.fiador_nombre.label(class="form-label") }}
+          {{ form.fiador_nombre(class="form-control") }}
+          {% for error in form.fiador_nombre.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-4 mb-3">
+          {{ form.fiador_rut.label(class="form-label") }}
+          {{ form.fiador_rut(class="form-control", placeholder="12.345.678-9") }}
+          {% for error in form.fiador_rut.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-md-4 mb-3">
+          {{ form.fiador_domicilio.label(class="form-label") }}
+          {{ form.fiador_domicilio(class="form-control") }}
+        </div>
+        <div class="col-md-4 mb-3">
+          {{ form.fiador_correo.label(class="form-label") }}
+          {{ form.fiador_correo(class="form-control") }}
+          {% for error in form.fiador_correo.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-4 mb-3">
+          {{ form.fiador_representante.label(class="form-label") }}
+          {{ form.fiador_representante(class="form-control") }}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <button type="submit" class="btn btn-primary">{{ 'Guardar cambios' if contrato else 'Generar contrato' }}</button>
+  <a href="{{ url_for('contratos.generados') }}" class="btn btn-outline-secondary">Cancelar</a>
+</form>
+{% endblock %}

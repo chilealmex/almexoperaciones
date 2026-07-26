@@ -2,12 +2,22 @@ from flask import render_template, redirect, url_for, flash, request
 from flask_login import current_user
 
 from app.contratos import bp
-from app.contratos.forms import ClienteForm, ContratoForm
+from app.contratos.forms import ClienteForm, ContratoForm, ContratoGeneradoForm
 from app.extensions import db
 from app.models.cliente import Cliente
 from app.models.contrato import ContratoCliente
+from app.models.contrato_generado import ContratoGenerado
 from app.utils.decorators import require_permission
 from app.utils.storage import guardar_documento, listar_documentos
+
+MESES_ES = (
+    "enero", "febrero", "marzo", "abril", "mayo", "junio",
+    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+)
+
+
+def _fecha_en_palabras(fecha):
+    return f"{fecha.day} de {MESES_ES[fecha.month - 1]} de {fecha.year}"
 
 
 # --- Clientes ---
@@ -230,3 +240,104 @@ def subir_documento(contrato_id):
         guardar_documento("contrato_cliente", contrato.id, archivo, current_user.id)
         flash("Documento adjuntado correctamente.", "success")
     return redirect(url_for("contratos.ver_contrato", contrato_id=contrato.id))
+
+
+# --- Generador de contratos de arriendo (plantilla Shaw Almex) ---
+
+
+def _preparar_form_generado(form):
+    form.cliente_id.choices = [
+        (c.id, c.razon_social)
+        for c in Cliente.query.filter_by(activo=True).order_by(Cliente.razon_social).all()
+    ]
+
+
+def _guardar_datos_generado(form, contrato):
+    contrato.cliente_id = form.cliente_id.data
+    contrato.fecha_contrato = form.fecha_contrato.data
+    contrato.correo_arrendador = form.correo_arrendador.data or None
+    contrato.representante_nombre = form.representante_nombre.data.strip()
+    contrato.representante_cedula = form.representante_cedula.data.strip()
+    contrato.arrendatario_domicilio = form.arrendatario_domicilio.data.strip()
+    contrato.arrendatario_correo = form.arrendatario_correo.data.strip()
+    contrato.fiador_tipo = form.fiador_tipo.data
+    contrato.fiador_nombre = form.fiador_nombre.data.strip()
+    contrato.fiador_rut = form.fiador_rut.data.strip()
+    contrato.fiador_domicilio = form.fiador_domicilio.data or None
+    contrato.fiador_correo = form.fiador_correo.data or None
+    contrato.fiador_representante = form.fiador_representante.data or None
+    contrato.cotizacion_numero = form.cotizacion_numero.data.strip()
+    contrato.cotizacion_fecha = form.cotizacion_fecha.data
+    contrato.planta_ubicacion = form.planta_ubicacion.data.strip()
+    contrato.deducible_uf = form.deducible_uf.data
+
+
+@bp.route("/generados")
+@require_permission("contratos", "ver")
+def generados():
+    lista = (
+        ContratoGenerado.query.filter_by(empresa_id=current_user.empresa_id)
+        .order_by(ContratoGenerado.creado_en.desc())
+        .all()
+    )
+    return render_template("contratos/generados_lista.html", contratos=lista)
+
+
+@bp.route("/generados/nuevo", methods=["GET", "POST"])
+@require_permission("contratos", "editar")
+def nuevo_generado():
+    form = ContratoGeneradoForm()
+    _preparar_form_generado(form)
+    if not form.cliente_id.choices:
+        flash("Primero debes crear un cliente en la pestaña Clientes.", "warning")
+        return redirect(url_for("contratos.clientes"))
+
+    if form.validate_on_submit():
+        if form.fiador_tipo.data == "empresa" and not form.fiador_representante.data:
+            flash("Si el fiador es una empresa, debes indicar su representante legal.", "danger")
+            return render_template("contratos/generado_form.html", form=form, contrato=None)
+
+        contrato = ContratoGenerado(empresa_id=current_user.empresa_id, creado_por_id=current_user.id)
+        _guardar_datos_generado(form, contrato)
+        db.session.add(contrato)
+        db.session.commit()
+        flash("Contrato generado correctamente. Revísalo y usa Imprimir para obtener el PDF.", "success")
+        return redirect(url_for("contratos.ver_generado", contrato_id=contrato.id))
+
+    return render_template("contratos/generado_form.html", form=form, contrato=None)
+
+
+@bp.route("/generados/<int:contrato_id>/editar", methods=["GET", "POST"])
+@require_permission("contratos", "editar")
+def editar_generado(contrato_id):
+    contrato = ContratoGenerado.query.filter_by(
+        id=contrato_id, empresa_id=current_user.empresa_id
+    ).first_or_404()
+    form = ContratoGeneradoForm(obj=contrato)
+    _preparar_form_generado(form)
+
+    if form.validate_on_submit():
+        if form.fiador_tipo.data == "empresa" and not form.fiador_representante.data:
+            flash("Si el fiador es una empresa, debes indicar su representante legal.", "danger")
+            return render_template("contratos/generado_form.html", form=form, contrato=contrato)
+
+        _guardar_datos_generado(form, contrato)
+        db.session.commit()
+        flash("Contrato actualizado correctamente.", "success")
+        return redirect(url_for("contratos.ver_generado", contrato_id=contrato.id))
+
+    return render_template("contratos/generado_form.html", form=form, contrato=contrato)
+
+
+@bp.route("/generados/<int:contrato_id>")
+@require_permission("contratos", "ver")
+def ver_generado(contrato_id):
+    contrato = ContratoGenerado.query.filter_by(
+        id=contrato_id, empresa_id=current_user.empresa_id
+    ).first_or_404()
+    return render_template(
+        "contratos/generado_documento.html",
+        c=contrato,
+        fecha_contrato_palabras=_fecha_en_palabras(contrato.fecha_contrato),
+        cotizacion_fecha_palabras=_fecha_en_palabras(contrato.cotizacion_fecha),
+    )

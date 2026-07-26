@@ -5,6 +5,7 @@ from app.models.cliente import Cliente, Proveedor
 from app.models.inventario import CategoriaProducto, Producto, MovimientoInventario
 from app.models.conteo_inventario import ItemConteoInventario
 from app.models.contrato import ContratoCliente
+from app.models.contrato_generado import ContratoGenerado
 from app.models.activo_fijo import ActivoFijo, CategoriaActivo
 from app.models.arriendo import (
     ArriendoSalida,
@@ -28,6 +29,7 @@ __all__ = [
     "MovimientoInventario",
     "ItemConteoInventario",
     "ContratoCliente",
+    "ContratoGenerado",
     "ActivoFijo",
     "CategoriaActivo",
     "ArriendoSalida",

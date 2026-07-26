@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+{% block title %}Contrato {{ c.cliente.razon_social }}{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 no-imprimir">
+  <h1 class="h5 mb-0">Contrato de arriendo — {{ c.cliente.razon_social }} (Cotización N° {{ c.cotizacion_numero }})</h1>
+  <div>
+    {% if puede('contratos', 'editar') %}
+    <a href="{{ url_for('contratos.editar_generado', contrato_id=c.id) }}" class="btn btn-outline-secondary">Editar</a>
+    {% endif %}
+    <button onclick="window.print()" class="btn btn-primary">🖨️ Imprimir / Guardar PDF</button>
+    <a href="{{ url_for('contratos.generados') }}" class="btn btn-outline-secondary">Volver</a>
+  </div>
+</div>
+
+<div class="documento-contrato card">
+  <div class="card-body p-4 p-lg-5">
+
+    <h2 class="doc-titulo">CONTRATO DE ARRIENDO DE EQUIPOS VULCANIZADORES Y FIANZA SOLIDARIA</h2>
+    <p class="text-center fw-bold">Shaw Almex Chile SpA</p>
+
+    <p>En Santiago de Chile, a {{ fecha_contrato_palabras }}, comparecen:</p>
+
+    <p><strong>SHAW ALMEX CHILE SpA</strong>, sociedad por acciones constituida conforme a las leyes de la República de Chile, Rol Único Tributario N° 99.578.050-K, representada legalmente por don Claudio Patricio Berríos Aparicio, cédula nacional de identidad N° 13.454.087-7{% if c.correo_arrendador %}, correo electrónico de contacto: {{ c.correo_arrendador }}{% endif %}, en adelante e indistintamente el "Arrendador" o el "Acreedor";</p>
+
+    <p><strong>{{ c.cliente.razon_social }}</strong>, sociedad constituida conforme a las leyes de la República de Chile, Rol Único Tributario N° {{ c.cliente.rut }}, representada legalmente por don/doña {{ c.representante_nombre }}, cédula nacional de identidad N° {{ c.representante_cedula }}, domiciliada en {{ c.arrendatario_domicilio }}, correo electrónico de contacto: {{ c.arrendatario_correo }}, en adelante el "Arrendatario" o "Deudor Principal"; y</p>
+
+    {% if c.fiador_tipo == 'natural' %}
+    <p>Don/doña <strong>{{ c.fiador_nombre }}</strong>, persona natural, cédula de identidad N° {{ c.fiador_rut }}{% if c.fiador_domicilio %}, domiciliado/a en {{ c.fiador_domicilio }}{% endif %}{% if c.fiador_correo %}, correo electrónico de contacto: {{ c.fiador_correo }}{% endif %}, en adelante el "Fiador y Codeudor Solidario";</p>
+    {% else %}
+    <p><strong>{{ c.fiador_nombre }}</strong>, RUT {{ c.fiador_rut }}, representada legalmente por don/doña {{ c.fiador_representante }}{% if c.fiador_domicilio %}, domiciliada en {{ c.fiador_domicilio }}{% endif %}{% if c.fiador_correo %}, correo electrónico de contacto: {{ c.fiador_correo }}{% endif %}, con facultad expresa para otorgar fianzas y afianzar obligaciones de terceros según constancia de personería que se acompaña, en adelante el "Fiador y Codeudor Solidario";</p>
+    {% endif %}
+
+    <p>El Arrendador, el Arrendatario y el Fiador y Codeudor Solidario se denominarán conjuntamente las "Partes". Las Partes han convenido el siguiente Contrato de Arriendo de Equipos Vulcanizadores y Fianza Solidaria (en adelante, el "Contrato"), sujeto a los términos y condiciones que se indican a continuación:</p>
+
+    <h3 class="doc-clausula">PRIMERO: OBJETO DEL CONTRATO</h3>
+    <p>1.1. El Arrendador da en arriendo al Arrendatario, y éste acepta en tal calidad, el o los equipos vulcanizadores y sus componentes que se describen, especifican y valorizan en la Cotización N° {{ c.cotizacion_numero }} de fecha {{ cotizacion_fecha_palabras }} emitida por el Arrendador que el Arrendatario ha aceptado, (en adelante, la "Cotización").</p>
+    <p>1.2. Las Partes declaran y acuerdan que la Cotización es parte integrante del presente Contrato. En caso de contradicción entre sus disposiciones y las del presente instrumento, prevalecerán las cláusulas de este Contrato, salvo en lo que respecta a la descripción técnica de los equipos, precio, plazo de arriendo y condiciones de pago, materias en que prevalecerá la Cotización.</p>
+    <p>1.3. El arriendo incluye los componentes y accesorios indicados en la Cotización, todos los cuales forman parte del objeto arrendado. El Arrendatario declara conocer las características técnicas y el estado de los equipos al momento de su recepción.</p>
+
+    <h3 class="doc-clausula">SEGUNDO: PRECIO, PLAZO, CONDICIONES DE PAGO Y GARANTÍAS EJECUTIVAS</h3>
+    <p>2.1. El precio del arriendo, el plazo de duración del mismo, las condiciones de pago y la tarifa aplicable a días adicionales serán los estipulados en la Cotización, los que se entenderán incorporados al presente Contrato por esta referencia.</p>
+    <p>2.2. El precio incluye todos los costos indicados en la Cotización. Cualquier servicio, traslado, asistencia técnica o componente no contemplado expresamente en la Cotización podrá ser cobrado por separado, previa comunicación escrita al Arrendatario.</p>
+    <p>2.3. El Arrendatario deberá emitir una Orden de Compra por el monto total correspondiente al período total en que se requieran los equipos, con un mínimo de cinco (5) días corridos de anticipación a la fecha de entrega acordada.</p>
+    <p>2.4. Las facturas emitidas por el Arrendador se considerarán aceptadas si el Arrendatario no manifiesta objeción fundada dentro de los ocho (8) días hábiles siguientes a su recepción, de conformidad con lo dispuesto en la Ley N° 19.983. El pago deberá efectuarse dentro del plazo señalado en la Cotización, contado desde la fecha de emisión de la factura. El retardo en el pago devengará intereses moratorios al máximo convencional permitido por la ley para operaciones no reajustables, desde la fecha de mora y hasta el pago efectivo, más los gastos de cobranza e indemnización que corresponda.</p>
+    <p>2.5. Los días adicionales de arriendo, esto es, aquellos que excedan el plazo pactado en la Cotización, se cobrarán a la tarifa diaria indicada en la misma, sin necesidad de suscribir un documento adicional, bastando la comunicación escrita entre las Partes.</p>
+    <p>2.6. <strong>Garantía Ejecutiva y Pagaré:</strong> Como condición previa e indispensable para la entrega de los equipos, el Arrendatario suscribirá y entregará al Arrendador un Pagaré a la Orden del Arrendador, firmado ante Notario Público y avalado en forma difusa e incondicional por el Fiador y Codeudor Solidario, emitido a la vista y sin protesto, por un monto equivalente a la renta total proyectada más el valor del deducible o reposición de los equipos arrendados según corresponda. El Arrendador estará facultado para hacer efectivo o completar dicho Pagaré ante el incumplimiento de las obligaciones de pago de rentas, tarifas adicionales, deducibles, reparaciones o valores de reposición estipulados en este Contrato.</p>
+
+    <h3 class="doc-clausula">TERCERO: ENTREGA Y RECEPCIÓN DE LOS EQUIPOS</h3>
+    <p>3.1. La entrega de los equipos se efectuará en la planta de Almex ubicada en {{ c.planta_ubicacion }} (en adelante la "Planta Almex"), en la fecha acordada en la Cotización.</p>
+    <p>3.2. El Arrendatario es responsable del retiro, traslado, transporte y devolución de los equipos, salvo que la Cotización establezca expresamente una modalidad diferente.</p>
+    <p>3.3. Al momento del retiro, las Partes suscribirán un Acta de Entrega-Recepción, que consignará el estado de los equipos y sus componentes, respaldado con documentación fotográfica. Cualquier observación al estado del equipo deberá constar en dicha acta; en caso contrario, se entenderá que el equipo fue recibido en condiciones operativas óptimas y sin daños.</p>
+    <p>3.4. El Acta de Entrega-Recepción tendrá el carácter de plena prueba respecto del estado de los equipos a la fecha de entrega y constituirá antecedente indispensable para la determinación de responsabilidades al momento de la devolución.</p>
+
+    <h3 class="doc-clausula">CUARTO: OBLIGACIONES DEL ARRENDATARIO</h3>
+    <p>4.1. Sin perjuicio de las demás obligaciones establecidas en este Contrato y en la Cotización, el Arrendatario se obliga a:</p>
+    <ul>
+      <li>Usar los equipos arrendados única y exclusivamente para los fines operativos para los cuales fueron diseñados, conforme a las especificaciones técnicas del fabricante y las instrucciones del Arrendador.</li>
+      <li>Mantener los equipos en buen estado de conservación y funcionamiento durante toda la vigencia del arriendo, siendo responsable de los daños, deterioros o pérdidas que se produzcan, salvo el desgaste normal por uso correcto y adecuado de los mismos.</li>
+      <li>Operar los equipos exclusivamente a través de personal técnico capacitado y habilitado para ello, respetando en todo momento las normas de seguridad aplicables en la faena o lugar de utilización.</li>
+      <li>No subarrendar, ceder, prestar, trasladar a terceros ni desplazar los equipos a una faena o lugar distinto al indicado en la Cotización, sin la autorización previa y escrita del Arrendador.</li>
+      <li>No efectuar modificaciones, intervenciones, desmontajes ni reparaciones no autorizadas sobre los equipos. Cualquier intervención técnica requerida deberá ser coordinada con el Arrendador.</li>
+      <li>Notificar de inmediato y por escrito al Arrendador ante cualquier falla, daño, pérdida, robo o accidente que afecte los equipos o sus componentes, adjuntando la respectiva denuncia policial o informe de incidentes dentro de un plazo máximo de doce (12) horas de ocurridos los hechos.</li>
+      <li>Restituir los equipos y todos sus componentes en la fecha acordada, en la Planta Almex, completamente limpios, descontaminados y en igual estado al que fueron recibidos según el Acta de Entrega-Recepción, sin perjuicio del desgaste normal por uso correcto.</li>
+      <li>Cumplir con todas las normas legales, reglamentarias y de seguridad aplicables en el lugar de utilización de los equipos, siendo el único responsable de cualquier accidente, daño a terceros o infracción regulatoria que se produzca en el marco del uso de los mismos.</li>
+      <li>Pagar oportunamente el precio del arriendo, el Cargo por Cobertura de Equipos y los deducibles aplicables en la forma, moneda y plazos establecidos en la Cotización y en este Contrato.</li>
+    </ul>
+
+    <h3 class="doc-clausula">QUINTO: OBLIGACIONES DEL ARRENDADOR</h3>
+    <p>5.1. El Arrendador se obliga a:</p>
+    <ul>
+      <li>Entregar los equipos en las condiciones técnicas y operativas descritas en la Cotización, debidamente revisados y certificados, en la fecha y lugar acordados.</li>
+      <li>Mantener vigente la póliza corporativa de seguro de equipos y maquinaria durante la ejecución del Contrato.</li>
+      <li>Proveer la asistencia técnica pactada en la Cotización, en los términos y condiciones allí estipulados.</li>
+      <li>Atender en forma oportuna los requerimientos de soporte técnico que sean de su responsabilidad conforme a los términos de este Contrato.</li>
+    </ul>
+
+    <h3 class="doc-clausula">SEXTO: RESPONSABILIDAD, COBERTURA DE EQUIPOS Y PAGO DE DEDUCIBLE</h3>
+    <p>6.1. El Arrendatario asume plena responsabilidad por la custodia, correcto uso y conservación de los equipos arrendados y de todos sus componentes durante el período de arriendo, incluidos los períodos de traslado, almacenamiento en faena, operación y devolución, hasta la recepción conforme por parte del Arrendador en la Planta Almex.</p>
+    <p>6.2. <strong>Cobro por Cobertura de Equipos (Protección de Flota):</strong> Los equipos objeto del presente Contrato se encuentran amparados por una póliza corporativa de seguro de Equipo y Maquinaria (TREC) mantenida por el Arrendador. En virtud de esta cobertura, se incorporará en la Cotización un ítem denominado "Cargo por Cobertura de Equipos", cuyo pago por parte del Arrendatario es obligatorio y le otorga derecho a la limitación de responsabilidad regulada en este numeral.</p>
+    <p>6.3. <strong>Limitación de Responsabilidad al Pago del Deducible:</strong> En caso de siniestro que origine daño grave, destrucción total, incendio, volcamiento o robo con fuerza del equipo o sus componentes durante el período de arriendo, la responsabilidad del Arrendatario por la pérdida patrimonial del bien quedará acotada únicamente al pago del Deducible de la Póliza, cuyo monto se especifica en la Cotización / Acta de Entrega (equivalente a {{ c.deducible_uf }} UF por evento). El pago de dicho Deducible deberá efectuarse dentro de los cinco (5) días hábiles siguientes a la notificación de la liquidación del siniestro.</p>
+    <p>6.4. <strong>Requisitos de Procedencia de la Limitación:</strong> Para que opere la limitación de responsabilidad al pago del Deducible, el Arrendatario deberá haber cumplido estrictamente con: (a) la notificación por escrito al Arrendador dentro de las doce (12) horas de ocurrido el evento; (b) la entrega inmediata de la copia de la denuncia policial efectuada ante Carabineros o PDI en caso de robo o hurto con fuerza; y (c) la entrega de un informe técnico detallado del incidente emitido por el encargado de faena.</p>
+    <p>6.5. <strong>Exclusiones de la Cobertura (Responsabilidad Total):</strong> La limitación de responsabilidad al pago del Deducible no aplicará, quedando el Arrendatario obligado al pago del 100% del valor de reposición como nuevo del equipo más los perjuicios por lucro cesante, en los siguientes casos: (i) dolo o culpa grave del Arrendatario o sus dependientes; (ii) operación de los equipos por personal no capacitado o bajo influencia de alcohol o drogas; (iii) traslados o modificaciones no autorizadas previamente por el Arrendador; (iv) pérdidas por extravío no justificado o negligencia en la custodia; y (v) cuando la compañía aseguradora rechace la cobertura del siniestro por causas imputables al Arrendatario.</p>
+    <p>6.6. El Arrendador no será responsable por los daños que los equipos arrendados puedan ocasionar a las instalaciones, bienes o personal del Arrendatario, ni a terceros, ni por accidentes o incidentes derivados de la operación incorrecta, negligente o contraria a las instrucciones técnicas de uso.</p>
+
+    <h3 class="doc-clausula">SÉPTIMO: INSPECCIÓN TÉCNICA, AVALÚO DE DAÑOS Y LIMPIEZA</h3>
+    <p>7.1. El Arrendador estará facultado para realizar inspecciones periódicas sobre el estado de los equipos durante la vigencia del arriendo, coordinadas con el Arrendatario con una anticipación razonable.</p>
+    <p>7.2. La asistencia técnica periódica, cuando esté incluida en la Cotización, no exime al Arrendatario de sus obligaciones de cuidado y conservación establecidas en este Contrato.</p>
+    <p>7.3. Al momento de la devolución, se realizará una inspección técnica de los equipos con documentación fotográfica, levantándose un Acta de Devolución suscrita por ambas Partes.</p>
+    <p>7.4. <strong>Carácter Definitivo del Informe Técnico:</strong> Cualquier observación al estado del equipo deberá constar en dicha acta. De constatarse daños menores, faltantes no cubiertos por la póliza o deterioros imputables al Arrendatario por mal uso, el servicio técnico autorizado del Arrendador emitirá la liquidación valorizada de reparación. Las Partes acuerdan que la liquidación valorizada efectuada por el Arrendador tendrá carácter vinculante, definitivo y fehaciente, debiendo pagarse dentro de cinco (5) días hábiles.</p>
+    <p>7.5. <strong>Descontaminación y Limpieza Especial:</strong> Los equipos deben ser devueltos completamente libres de barro, polvo minero, sustancias químicas o residuos de caucho vulcanizado. Si los equipos fueren devueltos sin la debida limpieza o descontaminación, el Arrendador aplicará automáticamente un cobro o tarifa por concepto de acondicionamiento y limpieza especial equivalente al costo real contratado o a una tarifa fija de taller, la cual deberá ser pagada inmediatamente por el Arrendatario.</p>
+
+    <h3 class="doc-clausula">OCTAVO: DEVOLUCIÓN DE LOS EQUIPOS Y RETARDO</h3>
+    <p>8.1. Los equipos deberán ser devueltos en la Planta Almex, en la fecha acordada en la Cotización y en las mismas condiciones en que fueron entregados, salvo el desgaste normal por uso correcto.</p>
+    <p>8.2. La devolución de los equipos se entenderá efectuada única y exclusivamente cuando el Arrendador haya suscrito el Acta de Devolución con recepción conforme.</p>
+    <p>8.3. En caso de no devolución oportuna de los equipos, se aplicará un cargo por extensión de arriendo equivalente a la tarifa diaria indicada en la Cotización, por cada día de atraso.</p>
+    <p>8.4. No obstante lo anterior, si el atraso en la devolución supera cinco (5) días corridos contados desde la fecha pactada de devolución, el Arrendador quedará facultado, a su sola discreción, para:</p>
+    <ul>
+      <li>Declarar terminado este Contrato de pleno derecho, sin necesidad de trámite ni declaración judicial previa; y</li>
+      <li>Exigir la restitución inmediata de los equipos, con el auxilio de la fuerza pública o acciones judiciales de retención e indemnización si fuere necesario, o</li>
+      <li>Cobrar el valor total de reposición como nuevo de los equipos no devueltos más los perjuicios por lucro cesante devengados.</li>
+    </ul>
+
+    <h3 class="doc-clausula">NOVENO: PLAZO Y MECANISMOS DE TERMINACIÓN ANTICIPADA</h3>
+    <p>9.1. El plazo de vigencia del presente Contrato corresponde al período de arriendo indicado en la Cotización, el que se computará desde la fecha de recepción conforme de los equipos por el Arrendatario, según conste en el Acta de Entrega-Recepción.</p>
+    <p>9.2. El presente Contrato podrá terminar anticipadamente por las siguientes causales:</p>
+    <ul>
+      <li><strong>Mutuo Acuerdo:</strong> Las Partes podrán poner término al Contrato en cualquier momento, de común acuerdo y por escrito, estableciendo las condiciones de devolución de los equipos y liquidación de los montos adeudados.</li>
+      <li><strong>Incumplimiento del Arrendatario:</strong> El Arrendador podrá declarar terminado el Contrato de pleno derecho e ipso facto, sin necesidad de trámite ni declaración judicial alguna, ante el incumplimiento de cualquiera de las obligaciones esenciales del Arrendatario (tales como la falta de pago oportuno, el uso indebido o traslados no autorizados). En tal caso, el Arrendador podrá exigir copulativamente la restitución inmediata, el pago de rentas devengadas, deducibles o indemnizaciones y hacer efectivos los pagarés e instrumentos de garantía.</li>
+      <li><strong>Destrucción total o pérdida definitiva del equipo:</strong> En caso de destrucción total o pérdida, el Contrato terminará de pleno derecho desde la fecha del siniestro, activando la liquidación de la póliza y el pago del deducible aplicable por el Arrendatario.</li>
+    </ul>
+
+    <h3 class="doc-clausula">DÉCIMO: PRÓRROGA</h3>
+    <p>10.1. El presente Contrato no se prorrogará automáticamente por el solo transcurso del plazo. Si ambas Partes acordaren extender el período de arriendo, ello deberá constar en comunicación escrita aceptada por el Arrendador con al menos dos (2) días corridos de anticipación al vencimiento del plazo original, y los días adicionales se cobrarán a la tarifa señalada en la Cotización.</p>
+
+    <h3 class="doc-clausula">DÉCIMO PRIMERO: ESTADO Y GARANTÍA DE LOS EQUIPOS</h3>
+    <p>11.1. El Arrendador garantiza que los equipos serán entregados en condiciones operativas óptimas, revisados y certificados conforme a los estándares técnicos del fabricante. Dicha garantía se refiere exclusivamente al estado de los equipos al momento de su entrega, conforme al Acta de Entrega-Recepción.</p>
+    <p>11.2. El Arrendador no garantiza resultados operacionales específicos, ni asume responsabilidad por la idoneidad de los equipos para proyectos o condiciones de faena particulares del Arrendatario.</p>
+
+    <h3 class="doc-clausula">DÉCIMO SEGUNDO: CONFIDENCIALIDAD Y PROPIEDAD INTELECTUAL</h3>
+    <p>12.1. Toda información técnica, operativa, comercial o financiera compartida mantendrá carácter estrictamente confidencial por la vigencia del contrato y por tres (3) años posteriores. El Arrendatario no podrá realizar ingeniería inversa, copias ni modificaciones de los diseños ni componentes del Arrendador.</p>
+
+    <h3 class="doc-clausula">DÉCIMO TERCERO: FIANZA Y CODEUDA SOLIDARIA</h3>
+    <p>13.1. <strong>Constitución de Fianza e Indivisibilidad:</strong> En este acto, el Fiador y Codeudor Solidario declara conocer íntegramente el contenido, términos y condiciones del presente Contrato y de la Cotización que lo integra, y se constituye en fiador y codeudor solidario del Arrendatario, garantizando íntegra, solidaria e ilimitadamente el cumplimiento de todas y cada una de las obligaciones del Arrendatario (rentas, reajustes, intereses, deducibles, reparaciones, limpiezas, pérdidas y costas).</p>
+    <p>13.2. <strong>Carácter Solidario y Renuncia Expresa de Beneficios:</strong> La fianza pactada tiene carácter solidario. El Acreedor podrá dirigirse indistinta, simultánea o conjuntamente contra el Arrendatario y/o el Fiador para el cobro de cualquier suma. El Fiador renuncia expresamente e irrevocablemente a los beneficios de excusión (artículos 2358 N° 3 y 2365 del Código Civil), división, subrogación previa e interpelación judicial.</p>
+
+    <h3 class="doc-clausula">DÉCIMO CUARTO: VALOR EJECUTIVO Y AUTORIZACIÓN DE FIRMAS NOTARIALES</h3>
+    <p>14.1. <strong>Suscripción Notarial:</strong> El presente Contrato, así como el Pagaré en garantía señalado en la Cláusula Segunda, serán firmados ante Notario Público. Las Partes acuerdan que el presente instrumento, debidamente autorizado o protocolizado, constituirá antecedente suficiente para el cobro ejecutivo de las obligaciones pactadas.</p>
+
+    <h3 class="doc-clausula">DÉCIMO QUINTO: DOMICILIO Y JURISDICCIÓN</h3>
+    <p>15.1. Para todos los efectos legales derivados del presente Contrato, las Partes fijan su domicilio en la ciudad y comuna de Santiago y se someten a la jurisdicción de los Tribunales Ordinarios de Justicia de Santiago, renunciando expresamente a cualquier otro fuero o jurisdicción que pudiera corresponderles.</p>
+
+    <h3 class="doc-clausula">DÉCIMO SEXTO: LEY APLICABLE</h3>
+    <p>16.1. El presente Contrato se rige íntegramente por la legislación de la República de Chile, en particular por las disposiciones del Código Civil, Código de Comercio y Ley N° 19.983.</p>
+
+    <p class="mt-4">En prueba de conformidad, las Partes suscriben el presente Contrato en tres ejemplares del mismo tenor ante Notario Público.</p>
+
+    <div class="row mt-5 pt-4 firmas">
+      <div class="col-4 text-center">
+        <div class="linea-firma"></div>
+        <p class="mb-0 fw-bold">SHAW ALMEX CHILE SpA</p>
+        <p class="mb-0 small">El Arrendador / Acreedor</p>
+        <p class="small">RUT: 99.578.050-K</p>
+      </div>
+      <div class="col-4 text-center">
+        <div class="linea-firma"></div>
+        <p class="mb-0 fw-bold">{{ c.cliente.razon_social }}</p>
+        <p class="mb-0 small">El Arrendatario / Deudor Principal</p>
+        <p class="small">RUT: {{ c.cliente.rut }}</p>
+      </div>
+      <div class="col-4 text-center">
+        <div class="linea-firma"></div>
+        <p class="mb-0 fw-bold">{{ c.fiador_nombre }}</p>
+        <p class="mb-0 small">El Fiador y Codeudor Solidario</p>
+        <p class="small">RUT / C.I.: {{ c.fiador_rut }}</p>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<style>
+.documento-contrato {
+  max-width: 900px;
+  margin: 0 auto;
+  font-size: 0.95rem;
+  text-align: justify;
+}
+.doc-titulo {
+  font-size: 1.15rem;
+  font-weight: 800;
+  text-align: center;
+  text-transform: uppercase;
+  margin-bottom: 0.5rem;
+}
+.doc-clausula {
+  font-size: 1rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  margin-top: 1.5rem;
+}
+.linea-firma {
+  border-top: 1px solid #000;
+  margin: 0 1rem 0.5rem 1rem;
+  padding-top: 0.25rem;
+}
+@media print {
+  .navbar, .no-imprimir, .alert { display: none !important; }
+  body { background: #fff !important; }
+  .documento-contrato { box-shadow: none !important; border: none !important; max-width: 100%; font-size: 11pt; }
+  .documento-contrato .card-body { padding: 0 !important; }
+  .firmas { page-break-inside: avoid; margin-top: 4rem !important; }
+  main.container { max-width: 100% !important; margin: 0 !important; }
+}
+</style>
+{% endblock %}

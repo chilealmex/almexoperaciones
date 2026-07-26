@@ -14,4 +14,7 @@
   <li class="nav-item">
     <a class="nav-link {{ 'active' if seccion_activa == 'proveedores' else '' }}" href="{{ url_for('arriendos.proveedores') }}">Proveedores</a>
   </li>
+  <li class="nav-item">
+    <a class="nav-link {{ 'active' if seccion_activa == 'generados' else '' }}" href="{{ url_for('contratos.generados') }}">Generar contrato</a>
+  </li>
 </ul>
