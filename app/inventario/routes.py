@@ -1,9 +1,11 @@
-from flask import render_template, redirect, url_for, flash, request, abort
+from datetime import datetime, timezone
+
+from flask import render_template, redirect, url_for, flash, request, abort, jsonify
 from flask_login import current_user
-from sqlalchemy import or_
+from sqlalchemy import or_, and_
 
 from app.inventario import bp
-from app.inventario.forms import ProductoForm, MovimientoForm, ImportarCsvForm, ContarFisicoForm
+from app.inventario.forms import ProductoForm, MovimientoForm, ImportarCsvForm
 from app.extensions import db
 from app.models.inventario import Producto, CategoriaProducto, MovimientoInventario
 from app.models.conteo_inventario import ItemConteoInventario
@@ -178,46 +180,96 @@ def movimientos():
     return render_template("inventario/movimientos_lista.html", movimientos=lista)
 
 
-# --- Conteo físico (cruce QMS / Defontana) ---
+# --- Stock: cruce QMS / Defontana, conteo físico y diferencias en una sola vista ---
+
+FILTROS_STOCK = ("todos", "diferencias", "sin_contar", "contados")
 
 
-@bp.route("/conteo")
+@bp.route("/stock")
 @require_permission("inventario", "ver")
-def conteo():
+def stock():
     q = request.args.get("q", "").strip()
-    query = ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id)
+    filtro = request.args.get("filtro", "todos")
+    if filtro not in FILTROS_STOCK:
+        filtro = "todos"
+    pagina = request.args.get("pagina", 1, type=int)
+
+    base = ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id)
     if q:
         patron = f"%{q}%"
-        query = query.filter(or_(ItemConteoInventario.codigo.ilike(patron), ItemConteoInventario.nombre.ilike(patron)))
-    items = query.order_by(ItemConteoInventario.codigo).limit(500).all()
-    total = ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id).count()
-    return render_template("inventario/conteo_lista.html", items=items, q=q, total=total)
+        base = base.filter(
+            or_(ItemConteoInventario.codigo.ilike(patron), ItemConteoInventario.nombre.ilike(patron))
+        )
+
+    if filtro == "sin_contar":
+        base = base.filter(ItemConteoInventario.cantidad_fisica.is_(None))
+    elif filtro == "contados":
+        base = base.filter(ItemConteoInventario.cantidad_fisica.isnot(None))
+    elif filtro == "diferencias":
+        # descuadre entre sistemas, o el físico contado no coincide con alguno de ellos
+        base = base.filter(
+            or_(
+                ItemConteoInventario.cantidad_qms != ItemConteoInventario.cantidad_defontana,
+                and_(
+                    ItemConteoInventario.cantidad_fisica.isnot(None),
+                    or_(
+                        ItemConteoInventario.cantidad_fisica != ItemConteoInventario.cantidad_qms,
+                        ItemConteoInventario.cantidad_fisica != ItemConteoInventario.cantidad_defontana,
+                    ),
+                ),
+            )
+        )
+
+    paginacion = base.order_by(ItemConteoInventario.codigo).paginate(page=pagina, per_page=100, error_out=False)
+
+    todos = ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id).all()
+    resumen = {
+        "total": len(todos),
+        "con_diferencia": sum(1 for i in todos if i.tiene_diferencia),
+        "sin_contar": sum(1 for i in todos if not i.contado),
+        "contados": sum(1 for i in todos if i.contado),
+    }
+    return render_template(
+        "inventario/stock.html", paginacion=paginacion, q=q, filtro=filtro, resumen=resumen
+    )
 
 
-@bp.route("/conteo/diferencias")
-@require_permission("inventario", "ver")
-def conteo_diferencias():
-    todos = ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id).order_by(ItemConteoInventario.codigo).all()
-    items = [i for i in todos if i.tiene_diferencia]
-    return render_template("inventario/conteo_diferencias.html", items=items)
-
-
-@bp.route("/conteo/<int:item_id>/contar", methods=["GET", "POST"])
+@bp.route("/stock/<int:item_id>/contar", methods=["POST"])
 @require_permission("inventario", "editar")
-def conteo_contar(item_id):
-    item = ItemConteoInventario.query.filter_by(id=item_id, empresa_id=current_user.empresa_id).first_or_404()
-    form = ContarFisicoForm(obj=item)
-    if form.validate_on_submit():
-        item.cantidad_fisica = form.cantidad_fisica.data
+def stock_contar(item_id):
+    """Registra el conteo físico desde la misma fila del listado, sin recargar la página."""
+    item = ItemConteoInventario.query.filter_by(
+        id=item_id, empresa_id=current_user.empresa_id
+    ).first_or_404()
+
+    datos = request.get_json(silent=True) or {}
+    valor = str(datos.get("cantidad", "")).strip()
+
+    if valor == "":
+        item.cantidad_fisica = None
+        item.contado_por_id = None
+        item.contado_en = None
+    else:
+        try:
+            cantidad = int(valor)
+        except ValueError:
+            return jsonify({"ok": False, "error": "Ingresa un número entero."}), 400
+        if cantidad < 0:
+            return jsonify({"ok": False, "error": "La cantidad no puede ser negativa."}), 400
+        item.cantidad_fisica = cantidad
         item.contado_por_id = current_user.id
-        from datetime import datetime, timezone
-
         item.contado_en = datetime.now(timezone.utc)
-        db.session.commit()
-        flash(f"Conteo de {item.codigo} registrado correctamente.", "success")
-        return redirect(url_for("inventario.conteo", q=request.args.get("q", "")))
 
-    return render_template("inventario/conteo_contar.html", form=form, item=item)
+    db.session.commit()
+    return jsonify(
+        {
+            "ok": True,
+            "contado": item.contado,
+            "dif_qms": item.diferencia_fisica_qms,
+            "dif_defontana": item.diferencia_fisica_defontana,
+            "tiene_diferencia": item.tiene_diferencia,
+        }
+    )
 
 
 @bp.route("/conteo/importar", methods=["GET", "POST"])

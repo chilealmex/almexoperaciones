@@ -29,23 +29,33 @@ class ItemConteoInventario(db.Model):
     contado_por = db.relationship("Usuario")
 
     @property
+    def contado(self) -> bool:
+        return self.cantidad_fisica is not None
+
+    @property
     def diferencia_sistemas(self) -> int:
         """QMS - Defontana. Distinto de 0 significa que los dos sistemas no cuadran entre sí."""
         return self.cantidad_qms - self.cantidad_defontana
 
     @property
-    def diferencia_fisica(self):
-        """Físico contado vs. el mayor de los dos sistemas. None si aún no se ha contado."""
-        if self.cantidad_fisica is None:
+    def diferencia_fisica_qms(self):
+        """Físico contado menos lo que dice QMS. None si aún no se ha contado."""
+        if not self.contado:
             return None
-        referencia = max(self.cantidad_qms, self.cantidad_defontana)
-        return self.cantidad_fisica - referencia
+        return self.cantidad_fisica - self.cantidad_qms
+
+    @property
+    def diferencia_fisica_defontana(self):
+        """Físico contado menos lo que dice Defontana. None si aún no se ha contado."""
+        if not self.contado:
+            return None
+        return self.cantidad_fisica - self.cantidad_defontana
 
     @property
     def tiene_diferencia(self) -> bool:
         if self.diferencia_sistemas != 0:
             return True
-        if self.cantidad_fisica is not None and self.diferencia_fisica != 0:
+        if self.contado and (self.diferencia_fisica_qms != 0 or self.diferencia_fisica_defontana != 0):
             return True
         return False
 

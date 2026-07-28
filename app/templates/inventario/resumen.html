@@ -33,22 +33,28 @@
 
 <div class="row g-3 mb-4">
   <div class="col-6 col-lg-4">
-    <div class="card tile-inventario card-body">
-      <small>Artículos en conteo físico</small>
-      <div class="h4 mb-0">{{ stats.total_conteo }}</div>
-    </div>
+    <a href="{{ url_for('inventario.stock') }}" class="text-decoration-none">
+      <div class="card tile-inventario card-body h-100">
+        <small>Artículos en stock (QMS/Defontana)</small>
+        <div class="h4 mb-0">{{ stats.total_conteo }}</div>
+      </div>
+    </a>
   </div>
   <div class="col-6 col-lg-4">
-    <div class="card tile-inventario card-body">
-      <small>Pendientes de contar</small>
-      <div class="h4 mb-0">{{ stats.conteo_pendientes }}</div>
-    </div>
+    <a href="{{ url_for('inventario.stock', filtro='sin_contar') }}" class="text-decoration-none">
+      <div class="card tile-inventario card-body h-100">
+        <small>Pendientes de contar</small>
+        <div class="h4 mb-0">{{ stats.conteo_pendientes }}</div>
+      </div>
+    </a>
   </div>
   <div class="col-12 col-lg-4">
-    <div class="card tile-inventario card-body">
-      <small>Con diferencias</small>
-      <div class="h4 mb-0 {{ 'text-danger' if stats.conteo_con_diferencia else '' }}">{{ stats.conteo_con_diferencia }}</div>
-    </div>
+    <a href="{{ url_for('inventario.stock', filtro='diferencias') }}" class="text-decoration-none">
+      <div class="card tile-inventario card-body h-100">
+        <small>Con diferencias</small>
+        <div class="h4 mb-0 {{ 'text-danger' if stats.conteo_con_diferencia else '' }}">{{ stats.conteo_con_diferencia }}</div>
+      </div>
+    </a>
   </div>
 </div>
 

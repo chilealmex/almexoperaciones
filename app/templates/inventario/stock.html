@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% block title %}Stock y conteo{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">Inventario</h1>
+{% with seccion_activa = 'stock' %}{% include "partials/_subnav_inventario.html" %}{% endwith %}
+
+{% if resumen.total == 0 %}
+<div class="alert alert-info">
+  Aún no hay stock cargado. {% if puede('inventario', 'editar') %}Ve a la pestaña <a href="{{ url_for('inventario.conteo_importar') }}">Importar</a> para subir los archivos de QMS y Defontana.{% endif %}
+</div>
+{% else %}
+
+<form method="get" class="row g-2 align-items-center mb-3">
+  <div class="col-12 col-md-5 col-lg-4">
+    <input type="search" name="q" value="{{ q }}" class="form-control" placeholder="Buscar por código o nombre..." autofocus>
+  </div>
+  <input type="hidden" name="filtro" value="{{ filtro }}">
+  <div class="col-auto">
+    <button type="submit" class="btn btn-primary">Buscar</button>
+    {% if q %}<a href="{{ url_for('inventario.stock', filtro=filtro) }}" class="btn btn-outline-secondary">Limpiar</a>{% endif %}
+  </div>
+</form>
+
+<ul class="nav nav-pills mb-3 gap-1 small">
+  <li class="nav-item"><a class="nav-link {{ 'active' if filtro == 'todos' }}" href="{{ url_for('inventario.stock', q=q, filtro='todos') }}">Todos ({{ resumen.total }})</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if filtro == 'diferencias' }}" href="{{ url_for('inventario.stock', q=q, filtro='diferencias') }}">Con diferencias ({{ resumen.con_diferencia }})</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if filtro == 'sin_contar' }}" href="{{ url_for('inventario.stock', q=q, filtro='sin_contar') }}">Sin contar ({{ resumen.sin_contar }})</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if filtro == 'contados' }}" href="{{ url_for('inventario.stock', q=q, filtro='contados') }}">Contados ({{ resumen.contados }})</a></li>
+</ul>
+
+{% if puede('inventario', 'editar') %}
+<p class="text-muted small">Escribe la cantidad contada en la columna <strong>Físico</strong> y presiona Enter (o sal del campo) para guardar. Las diferencias se recalculan al instante.</p>
+{% endif %}
+
+<div class="table-responsive">
+  <table class="table table-striped align-middle" id="tabla-stock">
+    <thead>
+      <tr>
+        <th>Código</th>
+        <th>Nombre</th>
+        <th class="text-end">QMS</th>
+        <th class="text-end">Defontana</th>
+        <th class="text-end">Dif. sistemas</th>
+        <th class="text-end" style="min-width: 7rem;">Físico</th>
+        <th class="text-end">vs QMS</th>
+        <th class="text-end">vs Defontana</th>
+        <th class="d-none d-xl-table-cell">Ubicación</th>
+        <th class="d-none d-xl-table-cell">Línea de negocio</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for i in paginacion.items %}
+      <tr data-fila="{{ i.id }}" class="{{ 'table-warning' if i.tiene_diferencia else '' }}">
+        <td class="text-nowrap">{{ i.codigo }}</td>
+        <td>{{ i.nombre or '—' }}</td>
+        <td class="text-end">{{ i.cantidad_qms }}</td>
+        <td class="text-end">{{ i.cantidad_defontana }}</td>
+        <td class="text-end">
+          {% if i.diferencia_sistemas != 0 %}
+          <span class="badge bg-danger">{{ '%+d'|format(i.diferencia_sistemas) }}</span>
+          {% else %}
+          <span class="badge bg-success">0</span>
+          {% endif %}
+        </td>
+        <td class="text-end">
+          {% if puede('inventario', 'editar') %}
+          <input type="number" inputmode="numeric" class="form-control form-control-sm text-end input-fisico"
+                 value="{{ i.cantidad_fisica if i.contado else '' }}"
+                 data-url="{{ url_for('inventario.stock_contar', item_id=i.id) }}"
+                 aria-label="Cantidad física de {{ i.codigo }}">
+          {% else %}
+          {{ i.cantidad_fisica if i.contado else '—' }}
+          {% endif %}
+        </td>
+        <td class="text-end celda-dif-qms">
+          {% if i.contado %}
+          <span class="badge {{ 'bg-success' if i.diferencia_fisica_qms == 0 else 'bg-danger' }}">{{ '%+d'|format(i.diferencia_fisica_qms) }}</span>
+          {% else %}
+          <span class="text-muted small">—</span>
+          {% endif %}
+        </td>
+        <td class="text-end celda-dif-def">
+          {% if i.contado %}
+          <span class="badge {{ 'bg-success' if i.diferencia_fisica_defontana == 0 else 'bg-danger' }}">{{ '%+d'|format(i.diferencia_fisica_defontana) }}</span>
+          {% else %}
+          <span class="text-muted small">—</span>
+          {% endif %}
+        </td>
+        <td class="d-none d-xl-table-cell">{{ i.ubicacion or '—' }}</td>
+        <td class="d-none d-xl-table-cell">{{ i.linea_negocio or '—' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="10" class="text-center text-muted">Sin resultados{% if q %} para "{{ q }}"{% endif %}.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if paginacion.pages > 1 %}
+<nav class="d-flex justify-content-between align-items-center">
+  <span class="text-muted small">Página {{ paginacion.page }} de {{ paginacion.pages }} — {{ paginacion.total }} artículo(s)</span>
+  <ul class="pagination pagination-sm mb-0">
+    {% if paginacion.has_prev %}
+    <li class="page-item"><a class="page-link" href="{{ url_for('inventario.stock', q=q, filtro=filtro, pagina=paginacion.prev_num) }}">Anterior</a></li>
+    {% endif %}
+    {% if paginacion.has_next %}
+    <li class="page-item"><a class="page-link" href="{{ url_for('inventario.stock', q=q, filtro=filtro, pagina=paginacion.next_num) }}">Siguiente</a></li>
+    {% endif %}
+  </ul>
+</nav>
+{% endif %}
+
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if puede('inventario', 'editar') %}
+<script>
+(function () {
+  var token = "{{ csrf_token() }}";
+
+  function pintarBadge(celda, valor) {
+    if (valor === null || valor === undefined) {
+      celda.innerHTML = '<span class="text-muted small">—</span>';
+      return;
+    }
+    var signo = valor > 0 ? '+' + valor : String(valor);
+    var clase = valor === 0 ? 'bg-success' : 'bg-danger';
+    celda.innerHTML = '<span class="badge ' + clase + '">' + signo + '</span>';
+  }
+
+  function guardar(input) {
+    var fila = input.closest('tr');
+    input.classList.remove('is-invalid', 'is-valid');
+
+    fetch(input.dataset.url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
+      body: JSON.stringify({ cantidad: input.value })
+    })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, datos: d }; }); })
+      .then(function (res) {
+        if (!res.ok || !res.datos.ok) {
+          input.classList.add('is-invalid');
+          input.title = (res.datos && res.datos.error) || 'No se pudo guardar.';
+          return;
+        }
+        input.classList.add('is-valid');
+        pintarBadge(fila.querySelector('.celda-dif-qms'), res.datos.dif_qms);
+        pintarBadge(fila.querySelector('.celda-dif-def'), res.datos.dif_defontana);
+        fila.classList.toggle('table-warning', res.datos.tiene_diferencia);
+      })
+      .catch(function () {
+        input.classList.add('is-invalid');
+        input.title = 'Sin conexión: el conteo no se guardó.';
+      });
+  }
+
+  document.querySelectorAll('.input-fisico').forEach(function (input) {
+    var valorPrevio = input.value;
+    input.addEventListener('change', function () {
+      if (input.value !== valorPrevio) {
+        valorPrevio = input.value;
+        guardar(input);
+      }
+    });
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        input.blur();
+      }
+    });
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}

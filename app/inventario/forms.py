@@ -35,6 +35,3 @@ class MovimientoForm(FlaskForm):
 class ImportarCsvForm(FlaskForm):
     archivo = FileField("Archivo CSV", validators=[DataRequired(), FileAllowed(["csv"], "Debe ser un archivo .csv")])
 
-
-class ContarFisicoForm(FlaskForm):
-    cantidad_fisica = IntegerField("Cantidad física contada", validators=[DataRequired(), NumberRange(min=0)])

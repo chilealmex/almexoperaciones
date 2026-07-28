@@ -54,17 +54,26 @@ def test_importar_defontana_cruza_con_qms(db, empresa):
     assert solo_def.diferencia_sistemas == -8
 
 
-def test_diferencia_fisica(db, empresa):
+def test_diferencia_fisica_se_compara_contra_cada_sistema(db, empresa):
     importar_qms(_fs(CSV_QMS.encode("utf-8"), "qms.csv"), empresa.id)
     item = ItemConteoInventario.query.filter_by(codigo="COD-002").first()
+    item.cantidad_defontana = 4  # QMS dice 7, Defontana 4
 
-    assert item.diferencia_fisica is None
+    assert not item.contado
+    assert item.diferencia_fisica_qms is None
+    assert item.diferencia_fisica_defontana is None
+
     item.cantidad_fisica = 5
-    assert item.diferencia_fisica == -2  # 5 contra el mayor de los sistemas (7)
+    assert item.contado
+    assert item.diferencia_fisica_qms == -2
+    assert item.diferencia_fisica_defontana == 1
     assert item.tiene_diferencia
 
+    # los tres cuadran: deja de aparecer como diferencia
     item.cantidad_fisica = 7
     item.cantidad_defontana = 7
+    assert item.diferencia_fisica_qms == 0
+    assert item.diferencia_fisica_defontana == 0
     assert not item.tiene_diferencia
 
 
