@@ -32,7 +32,24 @@ def create_app(config_name=None):
 
     @login_manager.user_loader
     def load_user(user_id):
-        return db.session.get(Usuario, int(user_id))
+        """Carga al usuario de la sesión.
+
+        Si la base de datos falla (la conexión de Render se cae al estar inactiva),
+        se descarta la transacción rota y se devuelve None: la petición se trata
+        como anónima en vez de arrastrar el error a la página de error, que
+        también necesita al usuario para dibujar el menú.
+        """
+        try:
+            return db.session.get(Usuario, int(user_id))
+        except (ValueError, TypeError):
+            return None
+        except Exception:
+            app.logger.exception("No se pudo cargar el usuario %s", user_id)
+            try:
+                db.session.rollback()
+            except Exception:
+                db.session.remove()
+            return None
 
     from app.utils.decorators import require_permission
 
@@ -125,13 +142,25 @@ def _registrar_manejo_de_errores(app):
     """Ninguna excepción debe dejar al usuario frente a una pantalla en blanco."""
 
     def _pagina(plantilla, codigo, mensaje):
+        # La página de error consulta la base (menú, usuario). Si la transacción
+        # quedó rota, hay que descartarla antes de dibujarla o el error se repite.
+        try:
+            db.session.rollback()
+        except Exception:
+            db.session.remove()
+
         if _quiere_json():
             return jsonify({"ok": False, "error": mensaje}), codigo
         try:
             return render_template(plantilla, mensaje=mensaje), codigo
         except Exception:  # la propia página de error falló: respuesta mínima
             app.logger.exception("No se pudo renderizar %s", plantilla)
-            return f"<h1>{codigo}</h1><p>{mensaje}</p>", codigo
+            return (
+                "<!doctype html><meta charset='utf-8'>"
+                f"<title>Error {codigo}</title>"
+                f"<h1>{codigo}</h1><p>{mensaje}</p><p><a href='/'>Volver al inicio</a></p>",
+                codigo,
+            )
 
     @app.errorhandler(403)
     def forbidden(_e):

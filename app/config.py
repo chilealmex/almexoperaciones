@@ -20,7 +20,21 @@ class Config:
     # "server closed the connection" cuando la base se duerme o se reinicia.
     # SQLite no usa pool de red, así que se deja sin opciones.
     SQLALCHEMY_ENGINE_OPTIONS = (
-        {} if SQLALCHEMY_DATABASE_URI.startswith("sqlite") else {"pool_pre_ping": True, "pool_recycle": 280}
+        {}
+        if SQLALCHEMY_DATABASE_URI.startswith("sqlite")
+        else {
+            "pool_pre_ping": True,
+            "pool_recycle": 280,
+            # La base gratuita de Render corta las conexiones inactivas: keepalives
+            # las mantienen vivas y un timeout corto evita peticiones colgadas.
+            "connect_args": {
+                "connect_timeout": 10,
+                "keepalives": 1,
+                "keepalives_idle": 30,
+                "keepalives_interval": 10,
+                "keepalives_count": 3,
+            },
+        }
     )
     EMPRESA_ID = int(os.environ.get("EMPRESA_ID", "1"))
 
