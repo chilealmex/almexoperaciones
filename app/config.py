@@ -1,12 +1,27 @@
 import os
 
 
+def _normalizar_uri(uri: str) -> str:
+    """Render y otros proveedores entregan 'postgres://', que SQLAlchemy 2 ya no acepta."""
+    if uri.startswith("postgres://"):
+        return uri.replace("postgres://", "postgresql://", 1)
+    return uri
+
+
 class Config:
     SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-key-change-me")
-    SQLALCHEMY_DATABASE_URI = os.environ.get(
-        "DATABASE_URL", "sqlite:///" + os.path.join(os.getcwd(), "instance", "dev.db")
+    SQLALCHEMY_DATABASE_URI = _normalizar_uri(
+        os.environ.get(
+            "DATABASE_URL", "sqlite:///" + os.path.join(os.getcwd(), "instance", "dev.db")
+        )
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    # pool_pre_ping descarta conexiones muertas antes de usarlas: evita los errores
+    # "server closed the connection" cuando la base se duerme o se reinicia.
+    # SQLite no usa pool de red, así que se deja sin opciones.
+    SQLALCHEMY_ENGINE_OPTIONS = (
+        {} if SQLALCHEMY_DATABASE_URI.startswith("sqlite") else {"pool_pre_ping": True, "pool_recycle": 280}
+    )
     EMPRESA_ID = int(os.environ.get("EMPRESA_ID", "1"))
 
     STORAGE_BACKEND = os.environ.get("STORAGE_BACKEND", "local")
@@ -36,10 +51,12 @@ class ProdConfig(Config):
 class TestConfig(Config):
     TESTING = True
     WTF_CSRF_ENABLED = False
-    SQLALCHEMY_DATABASE_URI = os.environ.get(
-        "TEST_DATABASE_URL", "sqlite:///:memory:"
+    SQLALCHEMY_DATABASE_URI = _normalizar_uri(
+        os.environ.get("TEST_DATABASE_URL", "sqlite:///:memory:")
     )
+    SQLALCHEMY_ENGINE_OPTIONS = {}
     SESSION_COOKIE_SECURE = False
+    PROPAGAR_ERRORES = True  # en tests interesa ver la excepción real, no la página 500
 
 
 CONFIG_MAP = {

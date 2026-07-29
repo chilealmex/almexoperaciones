@@ -1,0 +1,114 @@
+{#
+  Componentes de visualización reutilizables.
+  Todo se dibuja con SVG/CSS propios: no hay librerías externas ni llamadas a CDN,
+  así que los tableros funcionan igual sin conexión y no se caen si un CDN falla.
+
+  Uso:  {% import "partials/_graficos.html" as g %}
+#}
+
+{# --- Tarjeta de indicador -------------------------------------------------- #}
+{% macro kpi(etiqueta, valor, tono='', pie='', href=None, color=None) %}
+{% set tag = 'a' if href else 'div' %}
+<{{ tag }} class="kpi"{% if href %} href="{{ href }}"{% endif %}>
+  <div class="kpi-label">
+    {% if color %}<span class="kpi-dot" style="background: {{ color }}"></span>{% endif %}{{ etiqueta }}
+  </div>
+  <div class="kpi-value{{ ' is-' ~ tono if tono else '' }}">{{ valor }}</div>
+  {% if pie %}<div class="kpi-foot">{{ pie }}</div>{% endif %}
+</{{ tag }}>
+{% endmacro %}
+
+{# --- Dona con leyenda -----------------------------------------------------
+   series: [{'etiqueta': 'Contados', 'valor': 12, 'color': '#1c5f8f'}, ...]
+---------------------------------------------------------------------------- #}
+{% macro donut(series, centro_valor=None, centro_etiqueta='Total', tamano=148, grosor=16) %}
+{% set datos = series | selectattr('valor') | list %}
+{% set suma = datos | sum(attribute='valor') %}
+{% set radio = (tamano - grosor) / 2 %}
+{% set circ = 2 * 3.14159265 * radio %}
+{% set ns = namespace(acumulado=0) %}
+<div class="donut-wrap">
+  {% if suma > 0 %}
+  <svg width="{{ tamano }}" height="{{ tamano }}" viewBox="0 0 {{ tamano }} {{ tamano }}" role="img" aria-label="{{ centro_etiqueta }}: {{ suma }}">
+    <g transform="rotate(-90 {{ tamano / 2 }} {{ tamano / 2 }})">
+      <circle cx="{{ tamano / 2 }}" cy="{{ tamano / 2 }}" r="{{ radio }}" fill="none" stroke="#eef2f6" stroke-width="{{ grosor }}"></circle>
+      {% for s in datos %}
+      {% set fraccion = s.valor / suma %}
+      <circle cx="{{ tamano / 2 }}" cy="{{ tamano / 2 }}" r="{{ radio }}" fill="none"
+              stroke="{{ s.color }}" stroke-width="{{ grosor }}"
+              stroke-dasharray="{{ (circ * fraccion) | round(2) }} {{ (circ - circ * fraccion) | round(2) }}"
+              stroke-dashoffset="{{ (-circ * ns.acumulado) | round(2) }}"></circle>
+      {% set ns.acumulado = ns.acumulado + fraccion %}
+      {% endfor %}
+    </g>
+    <text x="50%" y="47%" text-anchor="middle" class="donut-center-value">{{ centro_valor if centro_valor is not none else suma }}</text>
+    <text x="50%" y="61%" text-anchor="middle" class="donut-center-label">{{ centro_etiqueta }}</text>
+  </svg>
+  <ul class="chart-legend flex-column flex-grow-1">
+    {% for s in datos %}
+    <li>
+      <span class="swatch" style="background: {{ s.color }}"></span>
+      <span>{{ s.etiqueta }}</span>
+      <span class="valor">{{ s.valor }} <span class="text-muted fw-normal">({{ (100 * s.valor / suma) | round | int }}%)</span></span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <div class="chart-empty w-100">Sin datos para mostrar todavía.</div>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{# --- Barras horizontales ---------------------------------------------------
+   series: [{'etiqueta': 'Prensas', 'valor': 120, 'color': '#1c5f8f', 'texto': '$120.000'}]
+---------------------------------------------------------------------------- #}
+{% macro barras(series, vacio='Sin datos para mostrar todavía.') %}
+{% set datos = series | list %}
+{% set maximo = (datos | map(attribute='valor') | max) if datos else 0 %}
+{% if datos and maximo > 0 %}
+<div class="barras">
+  {% for s in datos %}
+  <div class="bar-row">
+    <span class="bar-label" title="{{ s.etiqueta }}">{{ s.etiqueta }}</span>
+    <span class="bar-track">
+      <span class="bar-fill" style="width: {{ (100 * s.valor / maximo) | round(1) }}%; background: {{ s.color | default('var(--chart-1)') }}"></span>
+    </span>
+    <span class="bar-value">{{ s.texto | default(s.valor) }}</span>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="chart-empty">{{ vacio }}</div>
+{% endif %}
+{% endmacro %}
+
+{# --- Barra de avance apilada (una sola línea) ------------------------------ #}
+{% macro progreso(series, alto=10) %}
+{% set datos = series | selectattr('valor') | list %}
+{% set suma = datos | sum(attribute='valor') %}
+{% if suma > 0 %}
+<div class="d-flex rounded overflow-hidden" style="height: {{ alto }}px; background: #eef2f6;">
+  {% for s in datos %}
+  <div style="width: {{ (100 * s.valor / suma) | round(2) }}%; background: {{ s.color }}" title="{{ s.etiqueta }}: {{ s.valor }}"></div>
+  {% endfor %}
+</div>
+<ul class="chart-legend mt-2">
+  {% for s in datos %}
+  <li><span class="swatch" style="background: {{ s.color }}"></span>{{ s.etiqueta }} <strong>{{ s.valor }}</strong></li>
+  {% endfor %}
+</ul>
+{% else %}
+<div class="chart-empty">Sin datos para mostrar todavía.</div>
+{% endif %}
+{% endmacro %}
+
+{# --- Contenedor de gráfico ------------------------------------------------- #}
+{% macro tarjeta(titulo, subtitulo='') %}
+<div class="card chart-card h-100">
+  <div class="card-body">
+    <div class="chart-title">{{ titulo }}</div>
+    {% if subtitulo %}<div class="chart-sub">{{ subtitulo }}</div>{% endif %}
+    {{ caller() }}
+  </div>
+</div>
+{% endmacro %}

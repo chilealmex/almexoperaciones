@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Almex Operaciones{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/custom.css') }}">
+  {# v= evita que el navegador siga mostrando una versión antigua del CSS tras un despliegue #}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/custom.css', v=version_estatica) }}">
 </head>
 <body>
   {% include "partials/_navbar.html" %}

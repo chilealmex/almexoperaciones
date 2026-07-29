@@ -1,10 +1,15 @@
+import logging
 import os
+import sys
 
-from flask import Flask, render_template
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
+from flask_wtf.csrf import CSRFError
+from werkzeug.exceptions import HTTPException
 
 from app.config import CONFIG_MAP
 from app.extensions import db, migrate, login_manager, csrf
 from app.utils.formatting import register_filters
+from app.utils.navegacion import construir_navegacion
 
 
 def create_app(config_name=None):
@@ -14,6 +19,7 @@ def create_app(config_name=None):
 
     os.makedirs(app.instance_path, exist_ok=True)
     os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
+    app.config["VERSION_ESTATICA"] = _version_estatica(app)
 
     db.init_app(app)
     migrate.init_app(app, db)
@@ -37,7 +43,11 @@ def create_app(config_name=None):
         def puede(modulo, accion="ver"):
             return current_user.is_authenticated and current_user.tiene_permiso(modulo, accion)
 
-        return {"puede": puede}
+        nav = {"modulos": [], "modulo_activo": None, "submodulos": []}
+        if current_user.is_authenticated:
+            nav = construir_navegacion(request.endpoint, puede)
+
+        return {"puede": puede, "nav": nav, "version_estatica": app.config["VERSION_ESTATICA"]}
 
     from app.auth import bp as auth_bp
     from app.core import bp as core_bp
@@ -55,16 +65,94 @@ def create_app(config_name=None):
     app.register_blueprint(activos_fijos_bp, url_prefix="/activos-fijos")
     app.register_blueprint(arriendos_bp, url_prefix="/arriendos")
 
+    _configurar_logging(app)
+    _registrar_manejo_de_errores(app)
+
+    return app
+
+
+def _version_estatica(app) -> str:
+    """Marca de versión para los archivos estáticos, basada en la fecha del CSS."""
+    try:
+        css = os.path.join(app.static_folder, "css", "custom.css")
+        return str(int(os.path.getmtime(css)))
+    except OSError:
+        return "1"
+
+
+def _configurar_logging(app):
+    """Deja el log en stdout para que el proveedor (Render) lo capture."""
+    if app.logger.handlers:
+        return
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(
+        logging.Formatter("[%(asctime)s] %(levelname)s en %(module)s: %(message)s")
+    )
+    app.logger.addHandler(handler)
+    app.logger.setLevel(logging.DEBUG if app.debug else logging.INFO)
+
+
+def _quiere_json() -> bool:
+    """True si la petición espera JSON (fetch de la app) en vez de una página HTML."""
+    if request.is_json or request.path.endswith(".json"):
+        return True
+    return request.accept_mimetypes.best == "application/json"
+
+
+def _registrar_manejo_de_errores(app):
+    """Ninguna excepción debe dejar al usuario frente a una pantalla en blanco."""
+
+    def _pagina(plantilla, codigo, mensaje):
+        if _quiere_json():
+            return jsonify({"ok": False, "error": mensaje}), codigo
+        try:
+            return render_template(plantilla, mensaje=mensaje), codigo
+        except Exception:  # la propia página de error falló: respuesta mínima
+            app.logger.exception("No se pudo renderizar %s", plantilla)
+            return f"<h1>{codigo}</h1><p>{mensaje}</p>", codigo
+
     @app.errorhandler(403)
     def forbidden(_e):
-        return render_template("errors/403.html"), 403
+        return _pagina("errors/403.html", 403, "No tienes permiso para acceder a esta sección.")
 
     @app.errorhandler(404)
     def not_found(_e):
-        return render_template("errors/404.html"), 404
+        return _pagina("errors/404.html", 404, "La página que buscas no existe.")
 
-    @app.errorhandler(500)
-    def server_error(_e):
-        return render_template("errors/500.html"), 500
+    @app.errorhandler(413)
+    def archivo_muy_grande(_e):
+        flash("El archivo supera el tamaño máximo permitido (16 MB).", "danger")
+        destino = request.referrer or url_for("core.dashboard")
+        return redirect(destino)
 
-    return app
+    @app.errorhandler(CSRFError)
+    def csrf_expirado(_e):
+        """Un formulario abierto demasiado tiempo no debe terminar en un error 400 crudo."""
+        flash("Tu sesión expiró por seguridad. Vuelve a enviar el formulario.", "warning")
+        return redirect(request.referrer or url_for("auth.login"))
+
+    @app.errorhandler(HTTPException)
+    def error_http(e):
+        """Cualquier otro error HTTP (400, 405, 500...) con la misma cara que el resto."""
+        return _pagina("errors/500.html", e.code or 500, e.description or "Solicitud inválida.")
+
+    @app.errorhandler(Exception)
+    def error_no_controlado(e):
+        """Última red de seguridad: se registra el error, se descarta la transacción
+        a medias y se responde con la página 500 en vez de caerse."""
+        app.logger.exception("Error no controlado en %s %s", request.method, request.path)
+        try:
+            db.session.rollback()
+        except Exception:
+            app.logger.exception("No se pudo revertir la transacción")
+        if app.config.get("PROPAGAR_ERRORES"):
+            raise e
+        return _pagina("errors/500.html", 500, "Ocurrió un error inesperado. Intenta nuevamente.")
+
+    @app.teardown_request
+    def cerrar_sesion_bd(exc):
+        if exc is not None:
+            try:
+                db.session.rollback()
+            except Exception:
+                app.logger.exception("No se pudo revertir la transacción al cerrar la petición")

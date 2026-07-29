@@ -7,7 +7,6 @@
   <a href="{{ url_for('activos_fijos.nuevo_activo') }}" class="btn btn-primary">Nuevo activo</a>
   {% endif %}
 </div>
-{% with seccion_activa = 'activos' %}{% include "partials/_subnav_activos.html" %}{% endwith %}
 
 {% set estado_badge = {'activo': 'bg-success', 'en_mantenimiento': 'bg-warning text-dark', 'dado_de_baja': 'bg-secondary', 'vendido': 'bg-dark'} %}
 

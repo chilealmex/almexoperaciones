@@ -7,7 +7,6 @@
   <a href="{{ url_for('contratos.nuevo_contrato') }}" class="btn btn-primary">Nuevo contrato</a>
   {% endif %}
 </div>
-{% with seccion_activa = 'contratos' %}{% include "partials/_subnav_contratos.html" %}{% endwith %}
 
 {% set estado_badge = {'vigente': 'bg-success', 'por_vencer': 'bg-warning text-dark', 'vencido': 'bg-danger', 'terminado': 'bg-secondary'} %}
 

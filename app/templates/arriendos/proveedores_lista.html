@@ -7,7 +7,6 @@
   <a href="{{ url_for('arriendos.nuevo_proveedor') }}" class="btn btn-primary">Nuevo proveedor</a>
   {% endif %}
 </div>
-{% with seccion_activa = 'proveedores' %}{% include "partials/_subnav_contratos.html" %}{% endwith %}
 <div class="table-responsive">
   <table class="table table-striped align-middle">
     <thead><tr><th>RUT</th><th>Razón social</th><th class="d-none d-md-table-cell">Contacto</th><th class="d-none d-md-table-cell">Teléfono</th></tr></thead>

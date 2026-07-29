@@ -2,7 +2,6 @@
 {% block title %}Movimientos de inventario{% endblock %}
 {% block content %}
 <h1 class="h3 mb-3">Inventario</h1>
-{% with seccion_activa = 'movimientos' %}{% include "partials/_subnav_inventario.html" %}{% endwith %}
 <div class="table-responsive">
   <table class="table table-striped table-sm">
     <thead><tr><th>Fecha</th><th>Producto</th><th>Tipo</th><th class="text-end">Cantidad</th><th class="d-none d-md-table-cell">Documento</th><th class="d-none d-md-table-cell">Usuario</th></tr></thead>

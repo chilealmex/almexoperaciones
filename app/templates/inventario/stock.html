@@ -2,7 +2,6 @@
 {% block title %}Stock y conteo{% endblock %}
 {% block content %}
 <h1 class="h3 mb-3">Inventario</h1>
-{% with seccion_activa = 'stock' %}{% include "partials/_subnav_inventario.html" %}{% endwith %}
 
 {% if resumen.total == 0 %}
 <div class="alert alert-info">
