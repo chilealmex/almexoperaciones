@@ -1,34 +1,44 @@
 {% extends "base.html" %}
+{% import "partials/_graficos.html" as g %}
 {% block title %}Activos fijos{% endblock %}
 {% block content %}
-<h1 class="h3 mb-3">Activos fijos</h1>
 
-<div class="row g-3 mb-4">
-  <div class="col-6 col-lg-3">
-    <div class="card tile-activos card-body">
-      <small>Activos vigentes</small>
-      <div class="h4 mb-0">{{ stats.total_activos }}</div>
-    </div>
-  </div>
-  <div class="col-6 col-lg-3">
-    <div class="card tile-activos card-body">
-      <small>Valor libro total</small>
-      <div class="h4 mb-0">{{ stats.valor_libro_total|clp }}</div>
-    </div>
-  </div>
-  <div class="col-6 col-lg-3">
-    <div class="card tile-activos card-body">
-      <small>Depreciación mensual</small>
-      <div class="h4 mb-0">{{ stats.depreciacion_mensual_total|clp }}</div>
-    </div>
-  </div>
-  <div class="col-6 col-lg-3">
-    <div class="card tile-activos card-body">
-      <small>Arrendados hoy</small>
-      <div class="h4 mb-0">{{ stats.arrendados }}</div>
-    </div>
+<div class="page-head">
+  <div>
+    <h1>Activos fijos</h1>
+    <p class="page-sub">Valor libro, depreciación y estado de los activos de la empresa.</p>
   </div>
 </div>
 
-<p class="text-muted">Usa las pestañas de arriba para gestionar los activos, ver la depreciación por centro de costo o parametrizar las categorías.</p>
+<div class="row g-3 mb-3">
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Activos vigentes', stats.total_activos, color='var(--mod-activos)', href=url_for('activos_fijos.activos')) }}
+  </div>
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Valor libro total', stats.valor_libro_total|clp) }}
+  </div>
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Depreciación mensual', stats.depreciacion_mensual_total|clp, href=url_for('activos_fijos.depreciacion')) }}
+  </div>
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Arrendados hoy', stats.arrendados, pie='Entregados a clientes', href=url_for('arriendos.index') if puede('contratos') else None) }}
+  </div>
+</div>
+
+{% if panel %}
+<div class="row g-3 mb-4">
+  <div class="col-12 col-lg-7">
+    {% call g.tarjeta('Valor libro por categoría', 'Activos vigentes') %}
+      {{ g.barras(panel.grafico_categorias, vacio='Aún no hay activos registrados.') }}
+    {% endcall %}
+  </div>
+  <div class="col-12 col-lg-5">
+    {% call g.tarjeta('Estado de los activos', 'Incluye bajas y ventas') %}
+      {{ g.donut(panel.grafico_estados, centro_etiqueta='Activos') }}
+    {% endcall %}
+  </div>
+</div>
+{% endif %}
+
+<p class="text-muted small">Usa las pestañas de arriba para gestionar los activos, ver la depreciación por centro de costo o parametrizar las categorías.</p>
 {% endblock %}

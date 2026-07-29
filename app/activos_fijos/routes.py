@@ -9,6 +9,8 @@ from app.extensions import db
 from app.models.activo_fijo import ActivoFijo, CategoriaActivo
 from app.utils.decorators import require_permission
 from app.utils.storage import guardar_documento, listar_documentos
+from app.utils.graficos import widget_seguro
+from app.utils.paneles import panel_activos
 
 
 def _stats_activos():
@@ -38,7 +40,8 @@ def _cargar_categorias(form, valor_actual=None):
 @require_permission("activos_fijos", "ver")
 def resumen():
     _lista, stats = _stats_activos()
-    return render_template("activos_fijos/resumen.html", stats=stats)
+    panel = widget_seguro(panel_activos, nombre="resumen de activos fijos")
+    return render_template("activos_fijos/resumen.html", stats=stats, panel=panel)
 
 
 @bp.route("/lista")

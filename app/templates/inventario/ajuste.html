@@ -1,0 +1,210 @@
+{% extends "base.html" %}
+{% import "partials/_graficos.html" as g %}
+{% import "partials/_tabla.html" as t with context %}
+{% block title %}Ajuste de inventario{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <h1>Ajuste de inventario</h1>
+    <p class="page-sub">Costo, unidad de medida y valorización comparadas entre QMS, Defontana y el conteo físico.</p>
+  </div>
+  <a href="{{ url_for('inventario.ajuste_csv', **request.args) }}" class="btn btn-outline-secondary btn-sm">Exportar CSV</a>
+</div>
+
+{% if totales.articulos == 0 and not q %}
+<div class="alert alert-info">
+  Aún no hay artículos cruzados. {% if puede('inventario', 'editar') %}Sube los archivos de QMS y Defontana en <a href="{{ url_for('inventario.conteo_importar') }}">Importar</a>: el de QMS aporta el costo unitario y la unidad de medida.{% endif %}
+</div>
+{% else %}
+
+{# ---------- Indicadores ---------- #}
+<div class="row g-3 mb-3">
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Valorización QMS', totales.valor_qms|clp, color='var(--chart-1)',
+             pie=totales.stock_qms ~ ' unidades en stock') }}
+  </div>
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Valorización Defontana', totales.valor_defontana|clp, color='var(--brand-500)',
+             pie=totales.stock_defontana ~ ' unidades en stock') }}
+  </div>
+  {% set dif_valor = totales.valor_qms - totales.valor_defontana %}
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Diferencia de valorización', dif_valor|clp,
+             tono='danger' if dif_valor else 'ok',
+             pie='QMS menos Defontana') }}
+  </div>
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Ajuste por conteo físico', totales.ajuste_fisico|clp,
+             tono='danger' if totales.ajuste_fisico < 0 else ('ok' if totales.ajuste_fisico > 0 else ''),
+             pie=totales.contados ~ ' artículos contados · ' ~ (totales.valor_fisico|clp) ~ ' valorizados',
+             href=url_for('inventario.stock', filtro='sin_contar')) }}
+  </div>
+</div>
+
+{# ---------- Gráficos ---------- #}
+<div class="row g-3 mb-4">
+  <div class="col-12 col-lg-4">
+    {% call g.tarjeta('Valorización comparada', 'Stock total por fuente, al costo de cada sistema') %}
+      {{ g.barras(grafico_valorizacion, vacio='Falta cargar el costo unitario.') }}
+      <div class="kpi-foot mt-3">
+        Físico contado: {{ totales.stock_fisico }} unidades sobre {{ totales.contados }} artículos
+        (QMS declara {{ totales.valor_qms_contados|clp }} para esos mismos artículos).
+      </div>
+    {% endcall %}
+  </div>
+  <div class="col-12 col-lg-4">
+    {% call g.tarjeta('Calidad del maestro', 'Artículos según coincidencia entre sistemas') %}
+      {{ g.donut(grafico_calidad, centro_valor=totales.articulos, centro_etiqueta='Artículos') }}
+    {% endcall %}
+  </div>
+  <div class="col-12 col-lg-4">
+    {% call g.tarjeta('Mayores diferencias de valorización', 'Top 8 por monto absoluto') %}
+      {{ g.barras(grafico_top, vacio='No hay diferencias de valorización.') }}
+    {% endcall %}
+  </div>
+</div>
+
+{# ---------- Filtros ---------- #}
+<form method="get" id="filtros-ajuste" class="row g-2 align-items-center mb-3">
+  <input type="hidden" name="filtro" value="{{ filtro }}">
+  <input type="hidden" name="orden" value="{{ orden }}">
+  <input type="hidden" name="dir" value="{{ direccion }}">
+  <div class="col-12 col-md-5 col-lg-4">
+    <input type="search" name="q" value="{{ q }}" class="form-control" placeholder="Buscar por código o descripción...">
+  </div>
+  <div class="col-auto">
+    <button type="submit" class="btn btn-primary">Buscar</button>
+    {% if q or filtros_columna.values()|select|list %}
+    <a href="{{ url_for('inventario.ajuste', filtro=filtro) }}" class="btn btn-outline-secondary">Limpiar</a>
+    {% endif %}
+  </div>
+</form>
+
+<div class="filtro-pills mb-3">
+  {{ t.pill('Todos', 'todos', filtro, totales.articulos if filtro == 'todos' else None) }}
+  {{ t.pill('Diferencia de costo', 'dif_costo', filtro, totales.dif_costo if filtro == 'todos' else None) }}
+  {{ t.pill('Distinta unidad', 'dif_unidad', filtro, totales.dif_unidad if filtro == 'todos' else None) }}
+  {{ t.pill('Diferencia de stock', 'dif_stock', filtro, totales.dif_stock if filtro == 'todos' else None) }}
+  {{ t.pill('Sin costo cargado', 'sin_costo', filtro, totales.sin_costo if filtro == 'todos' else None) }}
+  {{ t.pill('Contados', 'contados', filtro, totales.contados if filtro == 'todos' else None) }}
+</div>
+
+{# ---------- Tabla ---------- #}
+<div class="table-card">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead>
+        <tr>
+          {{ t.th('Código', 'codigo', orden, direccion) }}
+          {{ t.th('Descripción', 'nombre', orden, direccion) }}
+          {{ t.th('Un. QMS', 'unidad_qms', orden, direccion) }}
+          {{ t.th('Un. Defontana', 'unidad_defontana', orden, direccion) }}
+          {{ t.th('Costo QMS', 'costo_qms', orden, direccion, 'num') }}
+          {{ t.th('Costo Defontana', 'costo_defontana', orden, direccion, 'num') }}
+          <th class="num">Dif. costo</th>
+          {{ t.th('Stock QMS', 'cantidad_qms', orden, direccion, 'num') }}
+          {{ t.th('Stock Defontana', 'cantidad_defontana', orden, direccion, 'num') }}
+          {{ t.th('Físico', 'cantidad_fisica', orden, direccion, 'num') }}
+          <th class="num">Valor QMS</th>
+          <th class="num">Valor Defontana</th>
+          <th class="num">Dif. valorización</th>
+          <th class="num">Ajuste físico</th>
+          {{ t.th('Categoría', 'categoria', orden, direccion, 'd-none d-xxl-table-cell') }}
+        </tr>
+        <tr class="filtros-fila">
+          {{ t.filtro('f_codigo', filtros_columna, 'filtros-ajuste', 'Código') }}
+          {{ t.filtro('f_nombre', filtros_columna, 'filtros-ajuste', 'Descripción') }}
+          {{ t.filtro('f_unidad', filtros_columna, 'filtros-ajuste', 'Unidad') }}
+          {{ t.sin_filtro() }}
+          {{ t.sin_filtro('num') }}
+          {{ t.sin_filtro('num') }}
+          {{ t.sin_filtro('num') }}
+          {{ t.sin_filtro('num') }}
+          {{ t.sin_filtro('num') }}
+          {{ t.sin_filtro('num') }}
+          {{ t.sin_filtro('num') }}
+          {{ t.sin_filtro('num') }}
+          {{ t.sin_filtro('num') }}
+          {{ t.sin_filtro('num') }}
+          {{ t.filtro('f_categoria', filtros_columna, 'filtros-ajuste', 'Categoría', 'd-none d-xxl-table-cell') }}
+        </tr>
+      </thead>
+      <tbody>
+        {% for i in items %}
+        <tr>
+          <td class="text-nowrap fw-semibold">{{ i.codigo }}</td>
+          <td>{{ i.nombre or '—' }}</td>
+          <td>{{ i.unidad_qms or '—' }}</td>
+          <td>
+            {% if i.unidades_coinciden %}
+            {{ i.unidad_defontana or '—' }}
+            {% else %}
+            <span class="badge bg-danger" title="Las unidades de medida no coinciden">{{ i.unidad_defontana }}</span>
+            {% endif %}
+          </td>
+          <td class="num">{{ i.costo_unitario_qms|clp if i.costo_unitario_qms is not none else '—' }}</td>
+          <td class="num">{{ i.costo_unitario_defontana|clp if i.costo_unitario_defontana is not none else '—' }}</td>
+          <td class="num">
+            {% if i.diferencia_costo_unitario is none %}
+            <span class="text-muted">—</span>
+            {% elif i.diferencia_costo_unitario == 0 %}
+            <span class="badge bg-success">0</span>
+            {% else %}
+            <span class="badge bg-danger">{{ i.diferencia_costo_unitario|clp }}</span>
+            {% endif %}
+          </td>
+          <td class="num">{{ i.cantidad_qms }}</td>
+          <td class="num">{{ i.cantidad_defontana }}</td>
+          <td class="num">{{ i.cantidad_fisica if i.contado else '—' }}</td>
+          <td class="num">{{ i.valor_qms|clp }}</td>
+          <td class="num">{{ i.valor_defontana|clp }}</td>
+          <td class="num">
+            {% if i.diferencia_valor_sistemas == 0 %}
+            <span class="badge bg-success">0</span>
+            {% else %}
+            <span class="badge bg-danger">{{ i.diferencia_valor_sistemas|clp }}</span>
+            {% endif %}
+          </td>
+          <td class="num">
+            {% if not i.contado %}
+            <span class="text-muted">—</span>
+            {% elif i.diferencia_valor_fisico == 0 %}
+            <span class="badge bg-success">0</span>
+            {% else %}
+            <span class="badge {{ 'bg-warning' if i.diferencia_valor_fisico > 0 else 'bg-danger' }}">{{ i.diferencia_valor_fisico|clp }}</span>
+            {% endif %}
+          </td>
+          <td class="d-none d-xxl-table-cell">{{ i.categoria or '—' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="15" class="text-center text-muted py-4">Sin resultados con los filtros aplicados.</td></tr>
+        {% endfor %}
+      </tbody>
+      {% if items %}
+      <tfoot>
+        <tr class="fw-bold">
+          <td colspan="7">Totales del filtro ({{ totales.articulos }} artículos)</td>
+          <td class="num">{{ totales.stock_qms }}</td>
+          <td class="num">{{ totales.stock_defontana }}</td>
+          <td class="num">{{ totales.stock_fisico }}</td>
+          <td class="num">{{ totales.valor_qms|clp }}</td>
+          <td class="num">{{ totales.valor_defontana|clp }}</td>
+          <td class="num">{{ (totales.valor_qms - totales.valor_defontana)|clp }}</td>
+          <td class="num">{{ totales.ajuste_fisico|clp }}</td>
+          <td class="d-none d-xxl-table-cell"></td>
+        </tr>
+      </tfoot>
+      {% endif %}
+    </table>
+  </div>
+  {{ t.paginacion(pagina, total_paginas, totales.articulos, 'artículos') }}
+</div>
+
+<p class="text-muted small mt-2">
+  El costo unitario proviene del archivo de QMS («Valor Unitario CLP») y del de Defontana cuando el informe lo incluye.
+  Si Defontana no trae costo, su valorización se calcula con el costo de QMS para poder comparar stock contra stock.
+</p>
+
+{% endif %}
+{% endblock %}

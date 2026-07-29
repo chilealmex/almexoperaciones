@@ -1,82 +1,207 @@
 {% extends "base.html" %}
+{% import "partials/_graficos.html" as g %}
 {% block title %}Inicio{% endblock %}
 {% block content %}
-<h1 class="h3 mb-4">Bienvenido/a, {{ current_user.nombre_completo }}</h1>
 
-<div class="row g-3">
-  {% if puede('inventario') %}
-  <div class="col-12 col-md-6 col-lg-4">
-    <div class="card tile-inventario h-100">
-      <div class="card-body">
-        <h2 class="h5">📦 Inventario</h2>
-        {% if productos_bajo_stock %}
-        <p class="text-danger mb-2">{{ productos_bajo_stock|length }} producto(s) bajo el stock mínimo</p>
-        <ul class="list-unstyled small">
-          {% for p in productos_bajo_stock[:5] %}
-          <li><a href="{{ url_for('inventario.ver_producto', producto_id=p.id) }}">{{ p.nombre }}</a> — stock {{ p.stock_actual }} / mínimo {{ p.stock_minimo }}</li>
-          {% endfor %}
-        </ul>
-        {% else %}
-        <p class="text-muted mb-0">Sin alertas de stock.</p>
-        {% endif %}
-        <a href="{{ url_for('inventario.resumen') }}" class="btn btn-sm btn-outline-primary mt-2">Ver inventario</a>
+<div class="page-head">
+  <div>
+    <h1>Panel de control</h1>
+    <p class="page-sub">Bienvenido/a, {{ current_user.nombre_completo }} — resumen al {{ hoy|fecha }}</p>
+  </div>
+</div>
+
+{% if not inventario and not contratos and not activos %}
+<div class="alert alert-info">Todavía no tienes módulos habilitados. Pide a un administrador que revise tus permisos.</div>
+{% endif %}
+
+{# ===================== INVENTARIO ===================== #}
+{% if inventario %}
+<div class="d-flex align-items-center justify-content-between mb-2">
+  <h2 class="h6 text-uppercase text-muted mb-0" style="letter-spacing:.08em;">📦 Inventario</h2>
+  <a href="{{ url_for('inventario.resumen') }}" class="small">Ver módulo →</a>
+</div>
+<div class="row g-3 mb-3">
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Productos activos', inventario.productos, color='var(--mod-inventario)', href=url_for('inventario.productos')) }}
+  </div>
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Bajo stock mínimo', inventario.bajo_stock, tono='danger' if inventario.bajo_stock else 'ok',
+             pie='Requieren reposición' if inventario.bajo_stock else 'Todo en orden',
+             href=url_for('inventario.productos')) }}
+  </div>
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Valor inventario (costo)', inventario.valor_costo|clp) }}
+  </div>
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Diferencias de conteo', inventario.con_diferencia, tono='warn' if inventario.con_diferencia else 'ok',
+             pie='De ' ~ inventario.conteo_total ~ ' artículos cruzados',
+             href=url_for('inventario.stock', filtro='diferencias')) }}
+  </div>
+</div>
+<div class="row g-3 mb-4">
+  <div class="col-12 col-lg-4">
+    {% call g.tarjeta('Salud del stock', 'Productos según su stock mínimo') %}
+      {{ g.donut(inventario.grafico_salud, centro_valor=inventario.productos, centro_etiqueta='Productos') }}
+    {% endcall %}
+  </div>
+  <div class="col-12 col-lg-4">
+    {% call g.tarjeta('Avance del conteo físico', 'Cruce QMS / Defontana vs conteo') %}
+      {{ g.donut(inventario.grafico_conteo, centro_valor=inventario.conteo_total, centro_etiqueta='Artículos') }}
+    {% endcall %}
+  </div>
+  <div class="col-12 col-lg-4">
+    {% call g.tarjeta('Valor por categoría', 'Top 5 a precio de costo') %}
+      {{ g.barras(inventario.grafico_categorias, vacio='Aún no hay productos con valor registrado.') }}
+    {% endcall %}
+  </div>
+</div>
+{% if inventario.productos_bajo_stock %}
+<div class="card mb-4">
+  <div class="card-header">Productos bajo el stock mínimo</div>
+  <div class="table-responsive">
+    <table class="table table-hover mb-0">
+      <thead><tr><th>Producto</th><th class="num">Stock</th><th class="num">Mínimo</th><th class="num">Faltante</th></tr></thead>
+      <tbody>
+        {% for p in inventario.productos_bajo_stock %}
+        <tr>
+          <td><a href="{{ url_for('inventario.ver_producto', producto_id=p.id) }}">{{ p.nombre }}</a></td>
+          <td class="num">{{ p.stock_actual }}</td>
+          <td class="num">{{ p.stock_minimo }}</td>
+          <td class="num"><span class="badge bg-danger">{{ p.stock_minimo - p.stock_actual }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+{% endif %}
+
+{# ===================== CONTRATOS Y ARRIENDOS ===================== #}
+{% if contratos %}
+<div class="d-flex align-items-center justify-content-between mb-2">
+  <h2 class="h6 text-uppercase text-muted mb-0" style="letter-spacing:.08em;">📄 Contratos y arriendos</h2>
+  <a href="{{ url_for('contratos.resumen') }}" class="small">Ver módulo →</a>
+</div>
+<div class="row g-3 mb-3">
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Contratos vigentes', contratos.vigentes, tono='ok', color='var(--mod-contratos)',
+             href=url_for('contratos.contratos')) }}
+  </div>
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Por vencer', contratos.por_vencer, tono='warn' if contratos.por_vencer else '',
+             pie='Dentro del plazo de alerta', href=url_for('contratos.contratos')) }}
+  </div>
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Monto vigente', contratos.monto_vigente|clp) }}
+  </div>
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Arriendos activos', contratos.salidas_activas, color='var(--mod-arriendos)',
+             pie='Activos entregados a clientes', href=url_for('arriendos.index')) }}
+  </div>
+</div>
+<div class="row g-3 mb-4">
+  <div class="col-12 col-lg-4">
+    {% call g.tarjeta('Estado de los contratos', 'Distribución de la cartera') %}
+      {{ g.donut(contratos.grafico_estados, centro_valor=contratos.total, centro_etiqueta='Contratos') }}
+    {% endcall %}
+  </div>
+  <div class="col-12 col-lg-4">
+    {% call g.tarjeta('Vencimientos próximos', 'Contratos que terminan por mes') %}
+      {{ g.barras(contratos.grafico_vencimientos, vacio='No hay vencimientos en los próximos 6 meses.') }}
+    {% endcall %}
+  </div>
+  <div class="col-12 col-lg-4">
+    {% call g.tarjeta('Flujo de arriendos', 'Monto por período vigente') %}
+      {{ g.barras(contratos.grafico_flujo, vacio='Sin arriendos vigentes.') }}
+      {% set balance = contratos.ingreso_arriendos - contratos.gasto_arriendos %}
+      <div class="kpi-foot mt-3">
+        Balance por período:
+        <strong class="{{ 'text-success' if balance >= 0 else 'text-danger' }}">{{ balance|clp }}</strong>
+      </div>
+    {% endcall %}
+  </div>
+</div>
+{% if contratos.contratos_por_vencer or contratos.arriendos_por_vencer %}
+<div class="row g-3 mb-4">
+  {% if contratos.contratos_por_vencer %}
+  <div class="col-12 col-lg-6">
+    <div class="card h-100">
+      <div class="card-header">Contratos por vencer</div>
+      <div class="table-responsive">
+        <table class="table table-hover mb-0">
+          <thead><tr><th>Contrato</th><th>Cliente</th><th>Vence</th></tr></thead>
+          <tbody>
+            {% for c in contratos.contratos_por_vencer %}
+            <tr>
+              <td><a href="{{ url_for('contratos.ver_contrato', contrato_id=c.id) }}">{{ c.numero_contrato }}</a></td>
+              <td>{{ c.cliente.razon_social }}</td>
+              <td><span class="badge bg-warning">{{ c.fecha_termino|fecha }}</span></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
       </div>
     </div>
   </div>
   {% endif %}
-
-  {% if puede('contratos') %}
-  <div class="col-12 col-md-6 col-lg-4">
-    <div class="card tile-contratos h-100">
-      <div class="card-body">
-        <h2 class="h5">📄 Contratos con clientes</h2>
-        {% if contratos_por_vencer %}
-        <p class="text-warning mb-2">{{ contratos_por_vencer|length }} contrato(s) por vencer</p>
-        <ul class="list-unstyled small">
-          {% for c in contratos_por_vencer[:5] %}
-          <li><a href="{{ url_for('contratos.ver_contrato', contrato_id=c.id) }}">{{ c.numero_contrato }}</a> — {{ c.cliente.razon_social }} — vence {{ c.fecha_termino|fecha }}</li>
-          {% endfor %}
-        </ul>
-        {% else %}
-        <p class="text-muted mb-0">Sin contratos próximos a vencer.</p>
-        {% endif %}
-        <a href="{{ url_for('contratos.resumen') }}" class="btn btn-sm btn-outline-primary mt-2">Ver contratos</a>
-      </div>
-    </div>
-  </div>
-  {% endif %}
-
-  {% if puede('activos_fijos') %}
-  <div class="col-12 col-md-6 col-lg-4">
-    <div class="card tile-activos h-100">
-      <div class="card-body">
-        <h2 class="h5">🏷️ Activos fijos</h2>
-        <p class="text-muted mb-2">Gestiona el registro de activos y su depreciación.</p>
-        <a href="{{ url_for('activos_fijos.resumen') }}" class="btn btn-sm btn-outline-primary mt-2">Ver activos fijos</a>
-      </div>
-    </div>
-  </div>
-  {% endif %}
-
-  {% if puede('contratos') %}
-  <div class="col-12 col-md-6 col-lg-4">
-    <div class="card tile-arriendos h-100">
-      <div class="card-body">
-        <h2 class="h5">🔑 Activos en arriendo</h2>
-        {% if arriendos_entrada_por_vencer %}
-        <p class="text-warning mb-2">{{ arriendos_entrada_por_vencer|length }} arriendo(s) de proveedores por vencer</p>
-        <ul class="list-unstyled small">
-          {% for a in arriendos_entrada_por_vencer[:5] %}
-          <li><a href="{{ url_for('arriendos.ver_arriendo_entrada', arriendo_id=a.id) }}">{{ a.descripcion_activo }}</a> — {{ a.proveedor.razon_social }} — vence {{ a.fecha_termino|fecha }}</li>
-          {% endfor %}
-        </ul>
-        {% else %}
-        <p class="text-muted mb-0">Sin arriendos de proveedores próximos a vencer.</p>
-        {% endif %}
-        <a href="{{ url_for('arriendos.index') }}" class="btn btn-sm btn-outline-primary mt-2">Ver arriendos</a>
+  {% if contratos.arriendos_por_vencer %}
+  <div class="col-12 col-lg-6">
+    <div class="card h-100">
+      <div class="card-header">Arriendos de proveedores por vencer</div>
+      <div class="table-responsive">
+        <table class="table table-hover mb-0">
+          <thead><tr><th>Activo</th><th>Proveedor</th><th>Vence</th></tr></thead>
+          <tbody>
+            {% for a in contratos.arriendos_por_vencer %}
+            <tr>
+              <td><a href="{{ url_for('arriendos.ver_arriendo_entrada', arriendo_id=a.id) }}">{{ a.descripcion_activo }}</a></td>
+              <td>{{ a.proveedor.razon_social }}</td>
+              <td><span class="badge bg-warning">{{ a.fecha_termino|fecha }}</span></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
       </div>
     </div>
   </div>
   {% endif %}
 </div>
+{% endif %}
+{% endif %}
+
+{# ===================== ACTIVOS FIJOS ===================== #}
+{% if activos %}
+<div class="d-flex align-items-center justify-content-between mb-2">
+  <h2 class="h6 text-uppercase text-muted mb-0" style="letter-spacing:.08em;">🏷️ Activos fijos</h2>
+  <a href="{{ url_for('activos_fijos.resumen') }}" class="small">Ver módulo →</a>
+</div>
+<div class="row g-3 mb-3">
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Activos en uso', activos.total, color='var(--mod-activos)', href=url_for('activos_fijos.activos')) }}
+  </div>
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Valor libro', activos.valor_libro|clp) }}
+  </div>
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Depreciación mensual', activos.depreciacion_mensual|clp, href=url_for('activos_fijos.depreciacion')) }}
+  </div>
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Arrendados hoy', activos.arrendados, pie='Entregados a clientes') }}
+  </div>
+</div>
+<div class="row g-3 mb-4">
+  <div class="col-12 col-lg-7">
+    {% call g.tarjeta('Valor libro por categoría', 'Activos vigentes') %}
+      {{ g.barras(activos.grafico_categorias, vacio='Aún no hay activos registrados.') }}
+    {% endcall %}
+  </div>
+  <div class="col-12 col-lg-5">
+    {% call g.tarjeta('Estado de los activos', 'Incluye bajas y ventas') %}
+      {{ g.donut(activos.grafico_estados, centro_etiqueta='Activos') }}
+    {% endcall %}
+  </div>
+</div>
+{% endif %}
+
 {% endblock %}

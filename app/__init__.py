@@ -47,7 +47,29 @@ def create_app(config_name=None):
         if current_user.is_authenticated:
             nav = construir_navegacion(request.endpoint, puede)
 
-        return {"puede": puede, "nav": nav, "version_estatica": app.config["VERSION_ESTATICA"]}
+        def url_con(**cambios):
+            """URL de la vista actual conservando los parámetros y cambiando sólo algunos.
+
+            Sirve para ordenar, filtrar y paginar sin perder el resto de la consulta.
+            Un valor None o vacío quita el parámetro.
+            """
+            if not request.endpoint:
+                return "#"
+            args = request.args.to_dict()
+            args.update(request.view_args or {})
+            for clave, valor in cambios.items():
+                if valor in (None, ""):
+                    args.pop(clave, None)
+                else:
+                    args[clave] = valor
+            return url_for(request.endpoint, **args)
+
+        return {
+            "puede": puede,
+            "nav": nav,
+            "url_con": url_con,
+            "version_estatica": app.config["VERSION_ESTATICA"],
+        }
 
     from app.auth import bp as auth_bp
     from app.core import bp as core_bp

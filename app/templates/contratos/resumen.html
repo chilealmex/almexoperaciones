@@ -1,94 +1,124 @@
 {% extends "base.html" %}
+{% import "partials/_graficos.html" as g %}
 {% block title %}Contratos y Arriendos{% endblock %}
 {% block content %}
-<h1 class="h3 mb-3">Contratos y Arriendos</h1>
 
-<h2 class="h6 text-muted text-uppercase">Contratos</h2>
-<div class="row g-3 mb-4">
-  <div class="col-6 col-lg-3">
-    <div class="card tile-contratos card-body">
-      <small>Vigentes</small>
-      <div class="h4 mb-0 text-success">{{ stats.vigentes }}</div>
-    </div>
-  </div>
-  <div class="col-6 col-lg-3">
-    <div class="card tile-contratos card-body">
-      <small>Por vencer</small>
-      <div class="h4 mb-0 {{ 'text-warning' if stats.por_vencer else '' }}">{{ stats.por_vencer }}</div>
-    </div>
-  </div>
-  <div class="col-6 col-lg-3">
-    <div class="card tile-contratos card-body">
-      <small>Vencidos</small>
-      <div class="h4 mb-0 {{ 'text-danger' if stats.vencidos else '' }}">{{ stats.vencidos }}</div>
-    </div>
-  </div>
-  <div class="col-6 col-lg-3">
-    <div class="card tile-contratos card-body">
-      <small>Monto contratado vigente</small>
-      <div class="h4 mb-0">{{ stats.monto_vigente|clp }}</div>
-    </div>
+<div class="page-head">
+  <div>
+    <h1>Contratos y arriendos</h1>
+    <p class="page-sub">Cartera de contratos con clientes y arriendos de entrada y salida.</p>
   </div>
 </div>
 
-<h2 class="h6 text-muted text-uppercase">Arriendos</h2>
-<div class="row g-3 mb-4">
+<h2 class="h6 text-uppercase text-muted mb-2" style="letter-spacing:.08em;">Contratos</h2>
+<div class="row g-3 mb-3">
   <div class="col-6 col-lg-3">
-    <div class="card tile-arriendos card-body">
-      <small>Arriendos de salida activos</small>
-      <div class="h4 mb-0">{{ stats_arriendos.salidas_activas }}</div>
-    </div>
+    {{ g.kpi('Vigentes', stats.vigentes, tono='ok', color='var(--mod-contratos)', href=url_for('contratos.contratos')) }}
   </div>
   <div class="col-6 col-lg-3">
-    <div class="card tile-arriendos card-body">
-      <small>Ingreso por período</small>
-      <div class="h4 mb-0 text-success">{{ stats_arriendos.ingreso_por_periodo|clp }}</div>
-    </div>
+    {{ g.kpi('Por vencer', stats.por_vencer, tono='warn' if stats.por_vencer else '', href=url_for('contratos.contratos')) }}
   </div>
   <div class="col-6 col-lg-3">
-    <div class="card tile-arriendos card-body">
-      <small>Arriendos de entrada vigentes</small>
-      <div class="h4 mb-0">{{ stats_arriendos.entradas_vigentes }}</div>
-    </div>
+    {{ g.kpi('Vencidos', stats.vencidos, tono='danger' if stats.vencidos else '', href=url_for('contratos.contratos')) }}
   </div>
   <div class="col-6 col-lg-3">
-    <div class="card tile-arriendos card-body">
-      <small>Gasto por período</small>
-      <div class="h4 mb-0 text-danger">{{ stats_arriendos.gasto_por_periodo|clp }}</div>
-    </div>
+    {{ g.kpi('Monto contratado vigente', stats.monto_vigente|clp) }}
   </div>
 </div>
 
-{% if contratos_por_vencer or arriendos_entrada_por_vencer %}
-<div class="row g-3">
-  {% if contratos_por_vencer %}
-  <div class="col-12 col-lg-6">
-    <div class="card">
-      <div class="card-body">
-        <h2 class="h6">⚠️ Contratos por vencer</h2>
-        <ul class="list-unstyled small mb-0">
-          {% for c in contratos_por_vencer[:8] %}
-          <li><a href="{{ url_for('contratos.ver_contrato', contrato_id=c.id) }}">{{ c.numero_contrato }}</a> — {{ c.cliente.razon_social }} — vence {{ c.fecha_termino|fecha }}</li>
-          {% endfor %}
-        </ul>
+{% if panel %}
+<div class="row g-3 mb-4">
+  <div class="col-12 col-lg-5">
+    {% call g.tarjeta('Estado de la cartera', 'Distribución de contratos') %}
+      {{ g.donut(panel.grafico_estados, centro_valor=panel.total, centro_etiqueta='Contratos') }}
+    {% endcall %}
+  </div>
+  <div class="col-12 col-lg-7">
+    {% call g.tarjeta('Vencimientos próximos', 'Contratos que terminan por mes') %}
+      {{ g.barras(panel.grafico_vencimientos, vacio='No hay vencimientos en los próximos 6 meses.') }}
+    {% endcall %}
+  </div>
+</div>
+{% endif %}
+
+<h2 class="h6 text-uppercase text-muted mb-2" style="letter-spacing:.08em;">Arriendos</h2>
+<div class="row g-3 mb-3">
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Arriendos de salida activos', stats_arriendos.salidas_activas, color='var(--mod-arriendos)', href=url_for('arriendos.index')) }}
+  </div>
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Ingreso por período', stats_arriendos.ingreso_por_periodo|clp, tono='ok') }}
+  </div>
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Arriendos de entrada vigentes', stats_arriendos.entradas_vigentes, href=url_for('arriendos.index')) }}
+  </div>
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Gasto por período', stats_arriendos.gasto_por_periodo|clp, tono='danger') }}
+  </div>
+</div>
+
+{% if panel %}
+<div class="row g-3 mb-4">
+  <div class="col-12 col-lg-5">
+    {% call g.tarjeta('Flujo de arriendos', 'Monto por período vigente') %}
+      {{ g.barras(panel.grafico_flujo, vacio='Sin arriendos vigentes.') }}
+      {% set balance = panel.ingreso_arriendos - panel.gasto_arriendos %}
+      <div class="kpi-foot mt-3">
+        Balance por período: <strong class="{{ 'text-success' if balance >= 0 else 'text-danger' }}">{{ balance|clp }}</strong>
       </div>
+    {% endcall %}
+  </div>
+  <div class="col-12 col-lg-7">
+    <div class="row g-3">
+      {% if contratos_por_vencer %}
+      <div class="col-12">
+        <div class="card">
+          <div class="card-header">Contratos por vencer</div>
+          <div class="table-responsive">
+            <table class="table table-hover mb-0">
+              <thead><tr><th>Contrato</th><th>Cliente</th><th>Vence</th></tr></thead>
+              <tbody>
+                {% for c in contratos_por_vencer[:6] %}
+                <tr>
+                  <td><a href="{{ url_for('contratos.ver_contrato', contrato_id=c.id) }}">{{ c.numero_contrato }}</a></td>
+                  <td>{{ c.cliente.razon_social }}</td>
+                  <td><span class="badge bg-warning">{{ c.fecha_termino|fecha }}</span></td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+      {% if arriendos_entrada_por_vencer %}
+      <div class="col-12">
+        <div class="card">
+          <div class="card-header">Arriendos de proveedores por vencer</div>
+          <div class="table-responsive">
+            <table class="table table-hover mb-0">
+              <thead><tr><th>Activo</th><th>Proveedor</th><th>Vence</th></tr></thead>
+              <tbody>
+                {% for a in arriendos_entrada_por_vencer[:6] %}
+                <tr>
+                  <td><a href="{{ url_for('arriendos.ver_arriendo_entrada', arriendo_id=a.id) }}">{{ a.descripcion_activo }}</a></td>
+                  <td>{{ a.proveedor.razon_social }}</td>
+                  <td><span class="badge bg-warning">{{ a.fecha_termino|fecha }}</span></td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+      {% if not contratos_por_vencer and not arriendos_entrada_por_vencer %}
+      <div class="col-12">
+        <div class="card h-100"><div class="card-body text-muted">Sin vencimientos próximos: nada requiere atención inmediata.</div></div>
+      </div>
+      {% endif %}
     </div>
   </div>
-  {% endif %}
-  {% if arriendos_entrada_por_vencer %}
-  <div class="col-12 col-lg-6">
-    <div class="card">
-      <div class="card-body">
-        <h2 class="h6">⚠️ Arriendos de proveedores por vencer</h2>
-        <ul class="list-unstyled small mb-0">
-          {% for a in arriendos_entrada_por_vencer[:8] %}
-          <li><a href="{{ url_for('arriendos.ver_arriendo_entrada', arriendo_id=a.id) }}">{{ a.descripcion_activo }}</a> — {{ a.proveedor.razon_social }} — vence {{ a.fecha_termino|fecha }}</li>
-          {% endfor %}
-        </ul>
-      </div>
-    </div>
-  </div>
-  {% endif %}
 </div>
 {% endif %}
 {% endblock %}

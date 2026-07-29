@@ -23,6 +23,45 @@ def _a_entero(valor: str) -> int:
         return 0
 
 
+def _a_monto(valor: str):
+    """Convierte un importe exportado por planilla a entero de pesos.
+
+    Acepta '19,563,554', '1.961.923', '1.234,56' y '1,234.56': el último separador
+    manda cuando quedan 1-2 dígitos a su derecha, en cualquier otro caso los
+    separadores son de miles. Devuelve None si no hay dato utilizable.
+    """
+    if valor is None:
+        return None
+    limpio = str(valor).strip().replace("$", "").replace(" ", "").replace("\xa0", "")
+    if not limpio:
+        return None
+    negativo = limpio.startswith("-") or (limpio.startswith("(") and limpio.endswith(")"))
+    limpio = limpio.strip("-()")
+
+    ultimo_separador = max(limpio.rfind(","), limpio.rfind("."))
+    if ultimo_separador != -1 and len(limpio) - ultimo_separador - 1 in (1, 2):
+        entero = limpio[:ultimo_separador].replace(".", "").replace(",", "")
+        decimales = limpio[ultimo_separador + 1 :]
+        numero_texto = f"{entero}.{decimales}" if entero else f"0.{decimales}"
+    else:
+        numero_texto = limpio.replace(".", "").replace(",", "")
+
+    try:
+        numero = round(float(numero_texto))
+    except ValueError:
+        return None
+    return -numero if negativo else numero
+
+
+def _buscar_columna(campos, *palabras_clave):
+    """Primera columna cuyo nombre contiene todas las palabras clave (sin distinguir mayúsculas)."""
+    for campo in campos or []:
+        nombre = campo.lower()
+        if all(palabra in nombre for palabra in palabras_clave):
+            return campo
+    return None
+
+
 def _normalizar_codigo(codigo: str) -> str:
     """Quita apóstrofes iniciales (artefacto de Excel) y espacios para que ambos sistemas crucen."""
     return codigo.strip().lstrip("'").strip()[:80]
@@ -55,6 +94,10 @@ def importar_qms(file_storage, empresa_id: int) -> dict:
     columna_stock = "Stock"
     columna_linea = "Linea Negocio"
     columna_ubicacion = "ubicacion_bodega"
+    columna_unidad = _buscar_columna(reader.fieldnames, "unidad")
+    columna_categoria = _buscar_columna(reader.fieldnames, "categor")
+    columna_costo = _buscar_columna(reader.fieldnames, "valor", "unitario")
+    columna_valor_total = _buscar_columna(reader.fieldnames, "valor", "total")
 
     if not columna_codigo or not columna_nombre:
         raise ValueError("No se encontraron las columnas de código/descripción esperadas en el archivo QMS.")
@@ -71,8 +114,20 @@ def importar_qms(file_storage, empresa_id: int) -> dict:
                 "nombre": _texto(fila.get(columna_nombre), 255),
                 "linea_negocio": _texto(fila.get(columna_linea), 120),
                 "ubicacion": _texto(fila.get(columna_ubicacion), 255) or _texto(fila.get("Sucursal"), 255),
+                "categoria": _texto(fila.get(columna_categoria), 120) if columna_categoria else "",
+                "unidad": _texto(fila.get(columna_unidad), 20) if columna_unidad else "",
+                "costo": None,
             }
         acumulado[codigo]["cantidad"] += cantidad
+
+        # Costo unitario: viene explícito o se deduce del valor total de la fila
+        costo = _a_monto(fila.get(columna_costo)) if columna_costo else None
+        if costo is None and columna_valor_total and cantidad:
+            total = _a_monto(fila.get(columna_valor_total))
+            if total:
+                costo = round(total / cantidad)
+        if costo and acumulado[codigo]["costo"] is None:
+            acumulado[codigo]["costo"] = costo
 
     existentes = _items_existentes(empresa_id)
     filas_creadas = 0
@@ -93,6 +148,12 @@ def importar_qms(file_storage, empresa_id: int) -> dict:
             item.linea_negocio = datos["linea_negocio"]
         if datos["ubicacion"] and not item.ubicacion:
             item.ubicacion = datos["ubicacion"]
+        if datos["categoria"]:
+            item.categoria = datos["categoria"]
+        if datos["unidad"]:
+            item.unidad_qms = datos["unidad"]
+        if datos["costo"] is not None:
+            item.costo_unitario_qms = datos["costo"]
 
     if nuevos:
         db.session.add_all(nuevos)
@@ -117,6 +178,17 @@ def importar_defontana(file_storage, empresa_id: int) -> dict:
     columna_nombre = next((c for c in reader.fieldnames if "descripci" in c.lower()), None)
     columna_stock = next((c for c in reader.fieldnames if "saldo" in c.lower()), None)
     columna_bodega = next((c for c in reader.fieldnames if "nombre bodega" in c.lower()), None)
+    columna_unidad = _buscar_columna(reader.fieldnames, "unidad")
+    # Defontana exporta el costo con nombres distintos según el informe
+    columna_costo = (
+        _buscar_columna(reader.fieldnames, "costo", "unitario")
+        or _buscar_columna(reader.fieldnames, "costo", "promedio")
+        or _buscar_columna(reader.fieldnames, "costo")
+        or _buscar_columna(reader.fieldnames, "valor", "unitario")
+    )
+    columna_valor_total = _buscar_columna(reader.fieldnames, "valor", "total") or _buscar_columna(
+        reader.fieldnames, "total", "costo"
+    )
 
     if not columna_codigo or not columna_stock:
         raise ValueError("No se encontraron las columnas de código/stock esperadas en el archivo de Defontana.")
@@ -133,10 +205,20 @@ def importar_defontana(file_storage, empresa_id: int) -> dict:
                 "cantidad": 0,
                 "nombre": _texto(fila.get(columna_nombre), 255) if columna_nombre else "",
                 "bodegas": set(),
+                "unidad": _texto(fila.get(columna_unidad), 20) if columna_unidad else "",
+                "costo": None,
             }
         acumulado[codigo]["cantidad"] += cantidad
         if bodega and cantidad:
             acumulado[codigo]["bodegas"].add(bodega)
+
+        costo = _a_monto(fila.get(columna_costo)) if columna_costo else None
+        if costo is None and columna_valor_total and cantidad:
+            total = _a_monto(fila.get(columna_valor_total))
+            if total:
+                costo = round(total / cantidad)
+        if costo and acumulado[codigo]["costo"] is None:
+            acumulado[codigo]["costo"] = costo
 
     existentes = _items_existentes(empresa_id)
     filas_creadas = 0
@@ -155,6 +237,10 @@ def importar_defontana(file_storage, empresa_id: int) -> dict:
             item.nombre = datos["nombre"]
         if datos["bodegas"] and not item.ubicacion:
             item.ubicacion = ", ".join(sorted(datos["bodegas"]))[:255]
+        if datos["unidad"]:
+            item.unidad_defontana = datos["unidad"]
+        if datos["costo"] is not None:
+            item.costo_unitario_defontana = datos["costo"]
 
     if nuevos:
         db.session.add_all(nuevos)

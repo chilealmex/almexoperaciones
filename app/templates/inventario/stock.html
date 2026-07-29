@@ -1,113 +1,131 @@
 {% extends "base.html" %}
+{% import "partials/_tabla.html" as t with context %}
 {% block title %}Stock y conteo{% endblock %}
 {% block content %}
-<h1 class="h3 mb-3">Inventario</h1>
+
+<div class="page-head">
+  <div>
+    <h1>Stock y conteo</h1>
+    <p class="page-sub">Cruce de existencias QMS / Defontana y registro del conteo físico.</p>
+  </div>
+  {% if puede('inventario', 'editar') %}
+  <a href="{{ url_for('inventario.conteo_importar') }}" class="btn btn-outline-secondary btn-sm">Importar archivos</a>
+  {% endif %}
+</div>
 
 {% if resumen.total == 0 %}
 <div class="alert alert-info">
-  Aún no hay stock cargado. {% if puede('inventario', 'editar') %}Ve a la pestaña <a href="{{ url_for('inventario.conteo_importar') }}">Importar</a> para subir los archivos de QMS y Defontana.{% endif %}
+  Aún no hay stock cargado. {% if puede('inventario', 'editar') %}Ve a <a href="{{ url_for('inventario.conteo_importar') }}">Importar</a> para subir los archivos de QMS y Defontana.{% endif %}
 </div>
 {% else %}
 
-<form method="get" class="row g-2 align-items-center mb-3">
-  <div class="col-12 col-md-5 col-lg-4">
-    <input type="search" name="q" value="{{ q }}" class="form-control" placeholder="Buscar por código o nombre..." autofocus>
-  </div>
+<form method="get" id="filtros-stock" class="row g-2 align-items-center mb-3">
   <input type="hidden" name="filtro" value="{{ filtro }}">
+  <input type="hidden" name="orden" value="{{ orden }}">
+  <input type="hidden" name="dir" value="{{ direccion }}">
+  <div class="col-12 col-md-5 col-lg-4">
+    <input type="search" name="q" value="{{ q }}" class="form-control" placeholder="Buscar por código o nombre...">
+  </div>
   <div class="col-auto">
     <button type="submit" class="btn btn-primary">Buscar</button>
-    {% if q %}<a href="{{ url_for('inventario.stock', filtro=filtro) }}" class="btn btn-outline-secondary">Limpiar</a>{% endif %}
+    {% if q or filtros_columna.values()|select|list %}
+    <a href="{{ url_for('inventario.stock', filtro=filtro) }}" class="btn btn-outline-secondary">Limpiar</a>
+    {% endif %}
   </div>
 </form>
 
-<ul class="nav nav-pills mb-3 gap-1 small">
-  <li class="nav-item"><a class="nav-link {{ 'active' if filtro == 'todos' }}" href="{{ url_for('inventario.stock', q=q, filtro='todos') }}">Todos ({{ resumen.total }})</a></li>
-  <li class="nav-item"><a class="nav-link {{ 'active' if filtro == 'diferencias' }}" href="{{ url_for('inventario.stock', q=q, filtro='diferencias') }}">Con diferencias ({{ resumen.con_diferencia }})</a></li>
-  <li class="nav-item"><a class="nav-link {{ 'active' if filtro == 'sin_contar' }}" href="{{ url_for('inventario.stock', q=q, filtro='sin_contar') }}">Sin contar ({{ resumen.sin_contar }})</a></li>
-  <li class="nav-item"><a class="nav-link {{ 'active' if filtro == 'contados' }}" href="{{ url_for('inventario.stock', q=q, filtro='contados') }}">Contados ({{ resumen.contados }})</a></li>
-</ul>
-
-{% if puede('inventario', 'editar') %}
-<p class="text-muted small">Escribe la cantidad contada en la columna <strong>Físico</strong> y presiona Enter (o sal del campo) para guardar. Las diferencias se recalculan al instante.</p>
-{% endif %}
-
-<div class="table-responsive">
-  <table class="table table-striped align-middle" id="tabla-stock">
-    <thead>
-      <tr>
-        <th>Código</th>
-        <th>Nombre</th>
-        <th class="text-end">QMS</th>
-        <th class="text-end">Defontana</th>
-        <th class="text-end">Dif. sistemas</th>
-        <th class="text-end" style="min-width: 7rem;">Físico</th>
-        <th class="text-end">vs QMS</th>
-        <th class="text-end">vs Defontana</th>
-        <th class="d-none d-xl-table-cell">Ubicación</th>
-        <th class="d-none d-xl-table-cell">Línea de negocio</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for i in paginacion.items %}
-      <tr data-fila="{{ i.id }}" class="{{ 'table-warning' if i.tiene_diferencia else '' }}">
-        <td class="text-nowrap">{{ i.codigo }}</td>
-        <td>{{ i.nombre or '—' }}</td>
-        <td class="text-end">{{ i.cantidad_qms }}</td>
-        <td class="text-end">{{ i.cantidad_defontana }}</td>
-        <td class="text-end">
-          {% if i.diferencia_sistemas != 0 %}
-          <span class="badge bg-danger">{{ '%+d'|format(i.diferencia_sistemas) }}</span>
-          {% else %}
-          <span class="badge bg-success">0</span>
-          {% endif %}
-        </td>
-        <td class="text-end">
-          {% if puede('inventario', 'editar') %}
-          <input type="number" inputmode="numeric" class="form-control form-control-sm text-end input-fisico"
-                 value="{{ i.cantidad_fisica if i.contado else '' }}"
-                 data-url="{{ url_for('inventario.stock_contar', item_id=i.id) }}"
-                 aria-label="Cantidad física de {{ i.codigo }}">
-          {% else %}
-          {{ i.cantidad_fisica if i.contado else '—' }}
-          {% endif %}
-        </td>
-        <td class="text-end celda-dif-qms">
-          {% if i.contado %}
-          <span class="badge {{ 'bg-success' if i.diferencia_fisica_qms == 0 else 'bg-danger' }}">{{ '%+d'|format(i.diferencia_fisica_qms) }}</span>
-          {% else %}
-          <span class="text-muted small">—</span>
-          {% endif %}
-        </td>
-        <td class="text-end celda-dif-def">
-          {% if i.contado %}
-          <span class="badge {{ 'bg-success' if i.diferencia_fisica_defontana == 0 else 'bg-danger' }}">{{ '%+d'|format(i.diferencia_fisica_defontana) }}</span>
-          {% else %}
-          <span class="text-muted small">—</span>
-          {% endif %}
-        </td>
-        <td class="d-none d-xl-table-cell">{{ i.ubicacion or '—' }}</td>
-        <td class="d-none d-xl-table-cell">{{ i.linea_negocio or '—' }}</td>
-      </tr>
-      {% else %}
-      <tr><td colspan="10" class="text-center text-muted">Sin resultados{% if q %} para "{{ q }}"{% endif %}.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+<div class="filtro-pills mb-3">
+  {{ t.pill('Todos', 'todos', filtro, resumen.total) }}
+  {{ t.pill('Con diferencias', 'diferencias', filtro, resumen.con_diferencia) }}
+  {{ t.pill('Sin contar', 'sin_contar', filtro, resumen.sin_contar) }}
+  {{ t.pill('Contados', 'contados', filtro, resumen.contados) }}
 </div>
 
-{% if paginacion.pages > 1 %}
-<nav class="d-flex justify-content-between align-items-center">
-  <span class="text-muted small">Página {{ paginacion.page }} de {{ paginacion.pages }} — {{ paginacion.total }} artículo(s)</span>
-  <ul class="pagination pagination-sm mb-0">
-    {% if paginacion.has_prev %}
-    <li class="page-item"><a class="page-link" href="{{ url_for('inventario.stock', q=q, filtro=filtro, pagina=paginacion.prev_num) }}">Anterior</a></li>
-    {% endif %}
-    {% if paginacion.has_next %}
-    <li class="page-item"><a class="page-link" href="{{ url_for('inventario.stock', q=q, filtro=filtro, pagina=paginacion.next_num) }}">Siguiente</a></li>
-    {% endif %}
-  </ul>
-</nav>
+{% if puede('inventario', 'editar') %}
+<p class="text-muted small">
+  Escribe la cantidad contada en la columna <strong>Físico</strong> y presiona Enter (o sal del campo) para guardar.
+  Las diferencias se recalculan al instante. Los campos bajo cada título filtran el listado y los títulos ordenan al hacer clic.
+</p>
 {% endif %}
+
+<div class="table-card">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0" id="tabla-stock">
+      <thead>
+        <tr>
+          {{ t.th('Código', 'codigo', orden, direccion) }}
+          {{ t.th('Nombre', 'nombre', orden, direccion) }}
+          {{ t.th('QMS', 'cantidad_qms', orden, direccion, 'num') }}
+          {{ t.th('Defontana', 'cantidad_defontana', orden, direccion, 'num') }}
+          <th class="num">Dif. sistemas</th>
+          {{ t.th('Físico', 'cantidad_fisica', orden, direccion, 'num') }}
+          <th class="num">vs QMS</th>
+          <th class="num">vs Defontana</th>
+          {{ t.th('Ubicación', 'ubicacion', orden, direccion, 'd-none d-xl-table-cell') }}
+          {{ t.th('Línea de negocio', 'linea_negocio', orden, direccion, 'd-none d-xl-table-cell') }}
+        </tr>
+        <tr class="filtros-fila">
+          {{ t.filtro('f_codigo', filtros_columna, 'filtros-stock', 'Código') }}
+          {{ t.filtro('f_nombre', filtros_columna, 'filtros-stock', 'Nombre') }}
+          {{ t.sin_filtro('num') }}
+          {{ t.sin_filtro('num') }}
+          {{ t.sin_filtro('num') }}
+          {{ t.sin_filtro('num') }}
+          {{ t.sin_filtro('num') }}
+          {{ t.sin_filtro('num') }}
+          {{ t.filtro('f_ubicacion', filtros_columna, 'filtros-stock', 'Ubicación', 'd-none d-xl-table-cell') }}
+          {{ t.filtro('f_linea', filtros_columna, 'filtros-stock', 'Línea', 'd-none d-xl-table-cell') }}
+        </tr>
+      </thead>
+      <tbody>
+        {% for i in paginacion.items %}
+        <tr data-fila="{{ i.id }}" class="{{ 'table-warning' if i.tiene_diferencia else '' }}">
+          <td class="text-nowrap fw-semibold">{{ i.codigo }}</td>
+          <td>{{ i.nombre or '—' }}</td>
+          <td class="num">{{ i.cantidad_qms }}</td>
+          <td class="num">{{ i.cantidad_defontana }}</td>
+          <td class="num">
+            {% if i.diferencia_sistemas != 0 %}
+            <span class="badge bg-danger">{{ '%+d'|format(i.diferencia_sistemas) }}</span>
+            {% else %}
+            <span class="badge bg-success">0</span>
+            {% endif %}
+          </td>
+          <td class="num" style="min-width: 7rem;">
+            {% if puede('inventario', 'editar') %}
+            <input type="number" inputmode="numeric" class="form-control form-control-sm text-end input-fisico"
+                   value="{{ i.cantidad_fisica if i.contado else '' }}"
+                   data-url="{{ url_for('inventario.stock_contar', item_id=i.id) }}"
+                   aria-label="Cantidad física de {{ i.codigo }}">
+            {% else %}
+            {{ i.cantidad_fisica if i.contado else '—' }}
+            {% endif %}
+          </td>
+          <td class="num celda-dif-qms">
+            {% if i.contado %}
+            <span class="badge {{ 'bg-success' if i.diferencia_fisica_qms == 0 else 'bg-danger' }}">{{ '%+d'|format(i.diferencia_fisica_qms) }}</span>
+            {% else %}
+            <span class="text-muted small">—</span>
+            {% endif %}
+          </td>
+          <td class="num celda-dif-def">
+            {% if i.contado %}
+            <span class="badge {{ 'bg-success' if i.diferencia_fisica_defontana == 0 else 'bg-danger' }}">{{ '%+d'|format(i.diferencia_fisica_defontana) }}</span>
+            {% else %}
+            <span class="text-muted small">—</span>
+            {% endif %}
+          </td>
+          <td class="d-none d-xl-table-cell">{{ i.ubicacion or '—' }}</td>
+          <td class="d-none d-xl-table-cell">{{ i.linea_negocio or '—' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="10" class="text-center text-muted py-4">Sin resultados{% if q %} para "{{ q }}"{% endif %}.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {{ t.paginacion(paginacion.page, paginacion.pages, paginacion.total, 'artículos') }}
+</div>
 
 {% endif %}
 {% endblock %}

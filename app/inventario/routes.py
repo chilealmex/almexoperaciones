@@ -1,6 +1,8 @@
-from datetime import datetime, timezone
+import csv
+import io
+from datetime import date, datetime, timezone
 
-from flask import render_template, redirect, url_for, flash, request, abort, jsonify
+from flask import render_template, redirect, url_for, flash, request, abort, jsonify, make_response
 from flask_login import current_user
 from sqlalchemy import or_, and_
 
@@ -12,6 +14,9 @@ from app.models.conteo_inventario import ItemConteoInventario
 from app.utils.decorators import require_permission
 from app.utils.storage import guardar_documento, listar_documentos
 from app.utils.importar_conteo import importar_qms, importar_defontana
+from app.utils.formatting import format_clp
+from app.utils.graficos import COLOR, serie, widget_seguro
+from app.utils.paneles import panel_inventario
 
 
 def _cargar_categorias(form):
@@ -40,15 +45,85 @@ def _stats_inventario():
 @require_permission("inventario", "ver")
 def resumen():
     _lista, stats = _stats_inventario()
-    productos_bajo_stock = [p for p in _lista if p.activo and p.bajo_stock_minimo]
-    return render_template("inventario/resumen.html", stats=stats, productos_bajo_stock=productos_bajo_stock)
+    panel = widget_seguro(panel_inventario, nombre="resumen de inventario")
+    return render_template("inventario/resumen.html", stats=stats, panel=panel)
+
+
+COLUMNAS_PRODUCTOS = {
+    "sku": Producto.sku,
+    "nombre": Producto.nombre,
+    "stock": Producto.stock_actual,
+    "stock_minimo": Producto.stock_minimo,
+    "precio_costo": Producto.precio_costo,
+    "precio_venta": Producto.precio_venta,
+}
+
+FILTROS_PRODUCTOS = ("todos", "bajo_stock", "sin_stock", "inactivos")
 
 
 @bp.route("/productos")
 @require_permission("inventario", "ver")
 def productos():
-    lista, stats = _stats_inventario()
-    return render_template("inventario/productos_lista.html", productos=lista, stats=stats)
+    """Listado de productos con búsqueda, filtros por columna y orden por título."""
+    consulta = Producto.query.outerjoin(CategoriaProducto, Producto.categoria_id == CategoriaProducto.id)
+
+    q = (request.args.get("q") or "").strip()
+    if q:
+        patron = f"%{q}%"
+        consulta = consulta.filter(or_(Producto.sku.ilike(patron), Producto.nombre.ilike(patron)))
+
+    filtros_columna = {}
+    for parametro, columna in (
+        ("f_sku", Producto.sku),
+        ("f_nombre", Producto.nombre),
+        ("f_categoria", CategoriaProducto.nombre),
+    ):
+        texto = (request.args.get(parametro) or "").strip()
+        filtros_columna[parametro] = texto
+        if texto:
+            consulta = consulta.filter(columna.ilike(f"%{texto}%"))
+
+    filtro = request.args.get("filtro", "todos")
+    if filtro not in FILTROS_PRODUCTOS:
+        filtro = "todos"
+    if filtro == "inactivos":
+        consulta = consulta.filter(Producto.activo.is_(False))
+    else:
+        consulta = consulta.filter(Producto.activo.is_(True))
+        if filtro == "bajo_stock":
+            consulta = consulta.filter(Producto.stock_actual < Producto.stock_minimo)
+        elif filtro == "sin_stock":
+            consulta = consulta.filter(Producto.stock_actual <= 0)
+
+    consulta, orden, direccion = _ordenar(consulta, request.args, COLUMNAS_PRODUCTOS, "nombre")
+    lista = consulta.all()
+
+    todos = Producto.query.all()
+    activos = [p for p in todos if p.activo]
+    conteos = {
+        "todos": len(activos),
+        "bajo_stock": sum(1 for p in activos if p.bajo_stock_minimo),
+        "sin_stock": sum(1 for p in activos if p.stock_actual <= 0),
+        "inactivos": len(todos) - len(activos),
+    }
+    resumen_filtro = {
+        "articulos": len(lista),
+        "unidades": sum(p.stock_actual for p in lista),
+        "valor_costo": sum(p.stock_actual * p.precio_costo for p in lista),
+        "valor_venta": sum(p.stock_actual * p.precio_venta for p in lista),
+    }
+
+    return render_template(
+        "inventario/productos_lista.html",
+        productos=lista,
+        q=q,
+        filtro=filtro,
+        filtros_columna=filtros_columna,
+        orden=orden,
+        direccion=direccion,
+        conteos=conteos,
+        resumen_filtro=resumen_filtro,
+    )
 
 
 @bp.route("/productos/nuevo", methods=["GET", "POST"])
@@ -185,6 +260,17 @@ def movimientos():
 FILTROS_STOCK = ("todos", "diferencias", "sin_contar", "contados")
 
 
+COLUMNAS_STOCK = {
+    "codigo": ItemConteoInventario.codigo,
+    "nombre": ItemConteoInventario.nombre,
+    "cantidad_qms": ItemConteoInventario.cantidad_qms,
+    "cantidad_defontana": ItemConteoInventario.cantidad_defontana,
+    "cantidad_fisica": ItemConteoInventario.cantidad_fisica,
+    "ubicacion": ItemConteoInventario.ubicacion,
+    "linea_negocio": ItemConteoInventario.linea_negocio,
+}
+
+
 @bp.route("/stock")
 @require_permission("inventario", "ver")
 def stock():
@@ -200,6 +286,8 @@ def stock():
         base = base.filter(
             or_(ItemConteoInventario.codigo.ilike(patron), ItemConteoInventario.nombre.ilike(patron))
         )
+
+    base, filtros_columna = _filtros_de_columna(base, request.args)
 
     if filtro == "sin_contar":
         base = base.filter(ItemConteoInventario.cantidad_fisica.is_(None))
@@ -220,7 +308,8 @@ def stock():
             )
         )
 
-    paginacion = base.order_by(ItemConteoInventario.codigo).paginate(page=pagina, per_page=100, error_out=False)
+    base, orden, direccion = _ordenar(base, request.args, COLUMNAS_STOCK, "codigo")
+    paginacion = base.paginate(page=max(1, pagina), per_page=100, error_out=False)
 
     todos = ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id).all()
     resumen = {
@@ -230,7 +319,14 @@ def stock():
         "contados": sum(1 for i in todos if i.contado),
     }
     return render_template(
-        "inventario/stock.html", paginacion=paginacion, q=q, filtro=filtro, resumen=resumen
+        "inventario/stock.html",
+        paginacion=paginacion,
+        q=q,
+        filtro=filtro,
+        resumen=resumen,
+        filtros_columna=filtros_columna,
+        orden=orden,
+        direccion=direccion,
     )
 
 
@@ -270,6 +366,205 @@ def stock_contar(item_id):
             "tiene_diferencia": item.tiene_diferencia,
         }
     )
+
+
+# --- Ajuste de inventario: valorización QMS vs Defontana vs conteo físico ---
+
+FILTROS_AJUSTE = ("todos", "dif_costo", "dif_unidad", "dif_stock", "sin_costo", "contados")
+
+COLUMNAS_AJUSTE = {
+    "codigo": ItemConteoInventario.codigo,
+    "nombre": ItemConteoInventario.nombre,
+    "unidad_qms": ItemConteoInventario.unidad_qms,
+    "unidad_defontana": ItemConteoInventario.unidad_defontana,
+    "categoria": ItemConteoInventario.categoria,
+    "linea_negocio": ItemConteoInventario.linea_negocio,
+    "costo_qms": ItemConteoInventario.costo_unitario_qms,
+    "costo_defontana": ItemConteoInventario.costo_unitario_defontana,
+    "cantidad_qms": ItemConteoInventario.cantidad_qms,
+    "cantidad_defontana": ItemConteoInventario.cantidad_defontana,
+    "cantidad_fisica": ItemConteoInventario.cantidad_fisica,
+}
+
+# Filtros de texto por columna: parámetro de la URL -> columna de la tabla
+FILTROS_COLUMNA = {
+    "f_codigo": ItemConteoInventario.codigo,
+    "f_nombre": ItemConteoInventario.nombre,
+    "f_unidad": ItemConteoInventario.unidad_qms,
+    "f_categoria": ItemConteoInventario.categoria,
+    "f_linea": ItemConteoInventario.linea_negocio,
+    "f_ubicacion": ItemConteoInventario.ubicacion,
+}
+
+
+def _filtros_de_columna(consulta, args):
+    """Aplica los filtros escritos bajo cada título de columna. Devuelve (consulta, valores)."""
+    valores = {}
+    for parametro, columna in FILTROS_COLUMNA.items():
+        texto = (args.get(parametro) or "").strip()
+        valores[parametro] = texto
+        if texto:
+            consulta = consulta.filter(columna.ilike(f"%{texto}%"))
+    return consulta, valores
+
+
+def _ordenar(consulta, args, columnas, por_defecto):
+    """Ordena por la columna pedida en el encabezado; ignora columnas desconocidas."""
+    orden = args.get("orden") or por_defecto
+    if orden not in columnas:
+        orden = por_defecto
+    descendente = args.get("dir") == "desc"
+    columna = columnas[orden]
+    consulta = consulta.order_by(columna.desc() if descendente else columna.asc())
+    return consulta, orden, ("desc" if descendente else "asc")
+
+
+def _items_ajuste(args):
+    """Items del cruce ya filtrados y ordenados según lo pedido en la vista."""
+    consulta = ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id)
+
+    busqueda = (args.get("q") or "").strip()
+    if busqueda:
+        patron = f"%{busqueda}%"
+        consulta = consulta.filter(
+            or_(ItemConteoInventario.codigo.ilike(patron), ItemConteoInventario.nombre.ilike(patron))
+        )
+
+    consulta, filtros_columna = _filtros_de_columna(consulta, args)
+    consulta, orden, direccion = _ordenar(consulta, args, COLUMNAS_AJUSTE, "codigo")
+
+    items = consulta.all()
+
+    filtro = args.get("filtro", "todos")
+    if filtro not in FILTROS_AJUSTE:
+        filtro = "todos"
+    if filtro == "dif_costo":
+        items = [i for i in items if i.tiene_diferencia_costo]
+    elif filtro == "dif_unidad":
+        items = [i for i in items if not i.unidades_coinciden]
+    elif filtro == "dif_stock":
+        items = [i for i in items if i.diferencia_sistemas != 0]
+    elif filtro == "sin_costo":
+        items = [i for i in items if not i.tiene_costo]
+    elif filtro == "contados":
+        items = [i for i in items if i.contado]
+
+    return items, busqueda, filtros_columna, filtro, orden, direccion
+
+
+def _totales_ajuste(items):
+    """Valorización agregada del conjunto filtrado."""
+    contados = [i for i in items if i.contado]
+    return {
+        "articulos": len(items),
+        "stock_qms": sum(i.cantidad_qms or 0 for i in items),
+        "stock_defontana": sum(i.cantidad_defontana or 0 for i in items),
+        "stock_fisico": sum(i.cantidad_fisica or 0 for i in contados),
+        "valor_qms": sum(i.valor_qms for i in items),
+        "valor_defontana": sum(i.valor_defontana for i in items),
+        "valor_fisico": sum(i.valor_fisico or 0 for i in contados),
+        "valor_qms_contados": sum(i.valor_qms for i in contados),
+        "ajuste_fisico": sum(i.diferencia_valor_fisico or 0 for i in contados),
+        "contados": len(contados),
+        "dif_costo": sum(1 for i in items if i.tiene_diferencia_costo),
+        "dif_unidad": sum(1 for i in items if not i.unidades_coinciden),
+        "dif_stock": sum(1 for i in items if i.diferencia_sistemas != 0),
+        "sin_costo": sum(1 for i in items if not i.tiene_costo),
+    }
+
+
+@bp.route("/ajuste")
+@require_permission("inventario", "ver")
+def ajuste():
+    """Compara costo, unidad de medida y valorización entre QMS, Defontana y el conteo físico."""
+    items, busqueda, filtros_columna, filtro, orden, direccion = _items_ajuste(request.args)
+    totales = _totales_ajuste(items)
+
+    pagina = max(1, request.args.get("pagina", 1, type=int))
+    por_pagina = 100
+    total_paginas = max(1, (len(items) + por_pagina - 1) // por_pagina)
+    pagina = min(pagina, total_paginas)
+    visibles = items[(pagina - 1) * por_pagina : pagina * por_pagina]
+
+    # Artículos donde la diferencia de valorización pesa más
+    top_diferencias = sorted(items, key=lambda i: abs(i.diferencia_valor_sistemas), reverse=True)[:8]
+    grafico_top = [
+        serie(
+            (i.nombre or i.codigo)[:38],
+            abs(i.diferencia_valor_sistemas),
+            COLOR["rojo"] if i.diferencia_valor_sistemas > 0 else COLOR["azul"],
+            texto=format_clp(i.diferencia_valor_sistemas),
+        )
+        for i in top_diferencias
+        if i.diferencia_valor_sistemas
+    ]
+
+    grafico_valorizacion = [
+        serie("Valor QMS", totales["valor_qms"], COLOR["azul"], texto=format_clp(totales["valor_qms"])),
+        serie("Valor Defontana", totales["valor_defontana"], COLOR["azul_claro"], texto=format_clp(totales["valor_defontana"])),
+        serie("Valor físico contado", totales["valor_fisico"], COLOR["verde"], texto=format_clp(totales["valor_fisico"])),
+    ]
+
+    sin_diferencia = totales["articulos"] - totales["dif_costo"] - totales["dif_unidad"] - totales["sin_costo"]
+    grafico_calidad = [
+        serie("Costo y unidad coinciden", max(0, sin_diferencia), COLOR["verde"]),
+        serie("Diferencia de costo", totales["dif_costo"], COLOR["ambar"]),
+        serie("Diferencia de unidad", totales["dif_unidad"], COLOR["rojo"]),
+        serie("Sin costo cargado", totales["sin_costo"], COLOR["gris"]),
+    ]
+
+    return render_template(
+        "inventario/ajuste.html",
+        items=visibles,
+        totales=totales,
+        q=busqueda,
+        filtro=filtro,
+        filtros_columna=filtros_columna,
+        orden=orden,
+        direccion=direccion,
+        pagina=pagina,
+        total_paginas=total_paginas,
+        grafico_top=grafico_top,
+        grafico_valorizacion=grafico_valorizacion,
+        grafico_calidad=grafico_calidad,
+    )
+
+
+@bp.route("/ajuste.csv")
+@require_permission("inventario", "ver")
+def ajuste_csv():
+    """Exporta el ajuste con los mismos filtros aplicados en pantalla."""
+    items, _q, _fc, _filtro, _orden, _dir = _items_ajuste(request.args)
+
+    salida = io.StringIO()
+    escritor = csv.writer(salida, delimiter=";")
+    escritor.writerow([
+        "Código", "Descripción", "Unidad QMS", "Unidad Defontana", "Unidades coinciden",
+        "Costo unitario QMS", "Costo unitario Defontana", "Diferencia costo unitario",
+        "Stock QMS", "Stock Defontana", "Stock físico",
+        "Valor QMS", "Valor Defontana", "Diferencia valorización",
+        "Ajuste físico vs QMS", "Categoría", "Línea de negocio", "Ubicación",
+    ])
+    for i in items:
+        escritor.writerow([
+            i.codigo, i.nombre or "", i.unidad_qms or "", i.unidad_defontana or "",
+            "sí" if i.unidades_coinciden else "no",
+            i.costo_unitario_qms if i.costo_unitario_qms is not None else "",
+            i.costo_unitario_defontana if i.costo_unitario_defontana is not None else "",
+            i.diferencia_costo_unitario if i.diferencia_costo_unitario is not None else "",
+            i.cantidad_qms, i.cantidad_defontana,
+            i.cantidad_fisica if i.contado else "",
+            i.valor_qms, i.valor_defontana, i.diferencia_valor_sistemas,
+            i.diferencia_valor_fisico if i.contado else "",
+            i.categoria or "", i.linea_negocio or "", i.ubicacion or "",
+        ])
+
+    respuesta = make_response(salida.getvalue().encode("utf-8-sig"))
+    respuesta.headers["Content-Type"] = "text/csv; charset=utf-8"
+    respuesta.headers["Content-Disposition"] = (
+        f"attachment; filename=ajuste-inventario-{date.today().isoformat()}.csv"
+    )
+    return respuesta
 
 
 @bp.route("/conteo/importar", methods=["GET", "POST"])

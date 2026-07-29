@@ -1,72 +1,83 @@
 {% extends "base.html" %}
+{% import "partials/_graficos.html" as g %}
 {% block title %}Inventario{% endblock %}
 {% block content %}
-<h1 class="h3 mb-3">Inventario</h1>
 
-<div class="row g-3 mb-4">
-  <div class="col-6 col-lg-3">
-    <div class="card tile-inventario card-body">
-      <small>Productos activos</small>
-      <div class="h4 mb-0">{{ stats.total_activos }}</div>
-    </div>
-  </div>
-  <div class="col-6 col-lg-3">
-    <div class="card tile-inventario card-body">
-      <small>Bajo stock mínimo</small>
-      <div class="h4 mb-0 {{ 'text-danger' if stats.bajo_stock else '' }}">{{ stats.bajo_stock }}</div>
-    </div>
-  </div>
-  <div class="col-6 col-lg-3">
-    <div class="card tile-inventario card-body">
-      <small>Valor inventario (costo)</small>
-      <div class="h4 mb-0">{{ stats.valor_costo|clp }}</div>
-    </div>
-  </div>
-  <div class="col-6 col-lg-3">
-    <div class="card tile-inventario card-body">
-      <small>Valor inventario (venta)</small>
-      <div class="h4 mb-0">{{ stats.valor_venta|clp }}</div>
-    </div>
+<div class="page-head">
+  <div>
+    <h1>Inventario</h1>
+    <p class="page-sub">Estado del maestro de productos y del conteo físico en curso.</p>
   </div>
 </div>
 
-<div class="row g-3 mb-4">
+<div class="row g-3 mb-3">
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Productos activos', stats.total_activos, color='var(--mod-inventario)', href=url_for('inventario.productos')) }}
+  </div>
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Bajo stock mínimo', stats.bajo_stock, tono='danger' if stats.bajo_stock else 'ok',
+             href=url_for('inventario.productos', filtro='bajo_stock')) }}
+  </div>
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Valor inventario (costo)', stats.valor_costo|clp) }}
+  </div>
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Valor inventario (venta)', stats.valor_venta|clp) }}
+  </div>
+</div>
+
+<div class="row g-3 mb-3">
   <div class="col-6 col-lg-4">
-    <a href="{{ url_for('inventario.stock') }}" class="text-decoration-none">
-      <div class="card tile-inventario card-body h-100">
-        <small>Artículos en stock (QMS/Defontana)</small>
-        <div class="h4 mb-0">{{ stats.total_conteo }}</div>
-      </div>
-    </a>
+    {{ g.kpi('Artículos cruzados QMS/Defontana', stats.total_conteo, href=url_for('inventario.stock')) }}
   </div>
   <div class="col-6 col-lg-4">
-    <a href="{{ url_for('inventario.stock', filtro='sin_contar') }}" class="text-decoration-none">
-      <div class="card tile-inventario card-body h-100">
-        <small>Pendientes de contar</small>
-        <div class="h4 mb-0">{{ stats.conteo_pendientes }}</div>
-      </div>
-    </a>
+    {{ g.kpi('Pendientes de contar', stats.conteo_pendientes, tono='warn' if stats.conteo_pendientes else 'ok',
+             href=url_for('inventario.stock', filtro='sin_contar')) }}
   </div>
   <div class="col-12 col-lg-4">
-    <a href="{{ url_for('inventario.stock', filtro='diferencias') }}" class="text-decoration-none">
-      <div class="card tile-inventario card-body h-100">
-        <small>Con diferencias</small>
-        <div class="h4 mb-0 {{ 'text-danger' if stats.conteo_con_diferencia else '' }}">{{ stats.conteo_con_diferencia }}</div>
-      </div>
-    </a>
+    {{ g.kpi('Con diferencias', stats.conteo_con_diferencia, tono='danger' if stats.conteo_con_diferencia else 'ok',
+             href=url_for('inventario.stock', filtro='diferencias')) }}
   </div>
 </div>
 
-{% if productos_bajo_stock %}
-<div class="card">
-  <div class="card-body">
-    <h2 class="h6">⚠️ Productos bajo el stock mínimo</h2>
-    <ul class="list-unstyled small mb-0">
-      {% for p in productos_bajo_stock[:8] %}
-      <li><a href="{{ url_for('inventario.ver_producto', producto_id=p.id) }}">{{ p.nombre }}</a> — stock {{ p.stock_actual }} / mínimo {{ p.stock_minimo }}</li>
-      {% endfor %}
-    </ul>
+{% if panel %}
+<div class="row g-3 mb-4">
+  <div class="col-12 col-lg-4">
+    {% call g.tarjeta('Salud del stock', 'Productos según su stock mínimo') %}
+      {{ g.donut(panel.grafico_salud, centro_valor=panel.productos, centro_etiqueta='Productos') }}
+    {% endcall %}
+  </div>
+  <div class="col-12 col-lg-4">
+    {% call g.tarjeta('Avance del conteo físico', 'Artículos cruzados entre sistemas') %}
+      {{ g.donut(panel.grafico_conteo, centro_valor=panel.conteo_total, centro_etiqueta='Artículos') }}
+    {% endcall %}
+  </div>
+  <div class="col-12 col-lg-4">
+    {% call g.tarjeta('Valor por categoría', 'Top 5 a precio de costo') %}
+      {{ g.barras(panel.grafico_categorias, vacio='Aún no hay productos con valor registrado.') }}
+    {% endcall %}
   </div>
 </div>
+
+{% if panel.productos_bajo_stock %}
+<div class="card">
+  <div class="card-header">Productos bajo el stock mínimo</div>
+  <div class="table-responsive">
+    <table class="table table-hover mb-0">
+      <thead><tr><th>Producto</th><th class="num">Stock</th><th class="num">Mínimo</th><th class="num">Faltante</th></tr></thead>
+      <tbody>
+        {% for p in panel.productos_bajo_stock %}
+        <tr>
+          <td><a href="{{ url_for('inventario.ver_producto', producto_id=p.id) }}">{{ p.nombre }}</a></td>
+          <td class="num">{{ p.stock_actual }}</td>
+          <td class="num">{{ p.stock_minimo }}</td>
+          <td class="num"><span class="badge bg-danger">{{ p.stock_minimo - p.stock_actual }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
 {% endif %}
 {% endblock %}

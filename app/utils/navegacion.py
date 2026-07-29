@@ -37,6 +37,12 @@ MODULOS = (
                 "endpoints": ("inventario.stock", "inventario.stock_contar"),
             },
             {
+                "clave": "ajuste",
+                "etiqueta": "Ajuste inventario",
+                "endpoint": "inventario.ajuste",
+                "endpoints": ("inventario.ajuste", "inventario.ajuste_csv"),
+            },
+            {
                 "clave": "productos",
                 "etiqueta": "Productos",
                 "endpoint": "inventario.productos",

@@ -1,24 +1,23 @@
+"""Cálculo de los paneles (indicadores + series de gráficos) de cada módulo.
+
+Vive fuera de las vistas para que el tablero general y el resumen de cada módulo
+muestren exactamente los mismos números.
+"""
+
 from datetime import date
 
-from flask import render_template, send_from_directory, current_app, abort
-from flask_login import login_required, current_user
+from flask_login import current_user
 
-from app.core import bp
 from app.models.inventario import Producto
 from app.models.contrato import ContratoCliente
 from app.models.conteo_inventario import ItemConteoInventario
 from app.models.activo_fijo import ActivoFijo
 from app.models.arriendo import ArriendoEntrada, ArriendoSalida
-from app.models.documento import Documento
-from app.utils.graficos import COLOR, COLOR_ESTADO, serie, proximos_meses, widget_seguro
+from app.utils.formatting import format_clp as _clp
+from app.utils.graficos import COLOR, COLOR_ESTADO, serie, proximos_meses
 
 
-@bp.route("/healthz")
-def healthz():
-    return "ok", 200
-
-
-def _panel_inventario():
+def panel_inventario():
     """Indicadores y series del módulo de inventario para el tablero."""
     productos = Producto.query.filter_by(activo=True).all()
     bajo_stock = [p for p in productos if p.bajo_stock_minimo]
@@ -58,7 +57,7 @@ def _panel_inventario():
     }
 
 
-def _panel_contratos():
+def panel_contratos():
     """Estados de contratos, vencimientos por mes y flujo de arriendos."""
     hoy = date.today()
     contratos = ContratoCliente.query.all()
@@ -117,7 +116,7 @@ def _panel_contratos():
     }
 
 
-def _panel_activos():
+def panel_activos():
     """Valor libro por categoría y estado de la flota de activos."""
     activos = ActivoFijo.query.all()
     vigentes = [a for a in activos if a.estado == "activo"]
@@ -154,56 +153,3 @@ def _panel_activos():
             for clave, cantidad in estados.items()
         ],
     }
-
-
-def _clp(monto) -> str:
-    return "${:,.0f}".format(monto or 0).replace(",", ".")
-
-
-@bp.route("/")
-@login_required
-def dashboard():
-    """Tablero de indicadores. Cada panel se calcula por separado: si uno falla,
-    el resto de la página se sigue mostrando."""
-    inventario = None
-    contratos = None
-    activos = None
-
-    if current_user.tiene_permiso("inventario", "ver"):
-        inventario = widget_seguro(_panel_inventario, nombre="panel de inventario")
-    if current_user.tiene_permiso("contratos", "ver"):
-        contratos = widget_seguro(_panel_contratos, nombre="panel de contratos")
-    if current_user.tiene_permiso("activos_fijos", "ver"):
-        activos = widget_seguro(_panel_activos, nombre="panel de activos fijos")
-
-    return render_template(
-        "core/dashboard.html",
-        inventario=inventario,
-        contratos=contratos,
-        activos=activos,
-        hoy=date.today(),
-    )
-
-
-@bp.route("/documentos/<int:documento_id>/descargar")
-@login_required
-def descargar_documento(documento_id):
-    documento = Documento.query.get_or_404(documento_id)
-    permisos_por_entidad = {
-        "movimiento_inventario": "inventario",
-        "contrato_cliente": "contratos",
-        "activo_fijo": "activos_fijos",
-        "arriendo_salida": "arriendos",
-        "arriendo_entrada": "arriendos",
-    }
-    modulo = permisos_por_entidad.get(documento.entidad_tipo)
-    if modulo is None or not current_user.tiene_permiso(modulo, "ver"):
-        abort(403)
-
-    if current_app.config["STORAGE_BACKEND"] != "local":
-        abort(404)
-
-    carpeta_base = current_app.config["UPLOAD_FOLDER"]
-    return send_from_directory(
-        carpeta_base, documento.ruta_archivo, as_attachment=True, download_name=documento.nombre_archivo
-    )

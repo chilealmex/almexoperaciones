@@ -9,6 +9,8 @@ from app.models.contrato import ContratoCliente
 from app.models.contrato_generado import ContratoGenerado
 from app.utils.decorators import require_permission
 from app.utils.storage import guardar_documento, listar_documentos
+from app.utils.graficos import widget_seguro
+from app.utils.paneles import panel_contratos
 
 MESES_ES = (
     "enero", "febrero", "marzo", "abril", "mayo", "junio",
@@ -121,12 +123,14 @@ def resumen():
         "gasto_por_periodo": sum(e.monto_periodo for e in entradas_vigentes),
     }
     arriendos_entrada_por_vencer = [e for e in entradas if e.estado == "por_vencer"]
+    panel = widget_seguro(panel_contratos, nombre="resumen de contratos")
     return render_template(
         "contratos/resumen.html",
         stats=stats,
         stats_arriendos=stats_arriendos,
         contratos_por_vencer=contratos_por_vencer,
         arriendos_entrada_por_vencer=arriendos_entrada_por_vencer,
+        panel=panel,
     )
 
 

@@ -1,0 +1,56 @@
+{#
+  Utilidades para tablas: encabezados ordenables y fila de filtros por columna.
+  Uso:  {% import "partials/_tabla.html" as t with context %}
+
+  Los filtros se envían con un <form method="get" id="..."> que vive fuera de la
+  tabla; cada input lo referencia con el atributo form=, así el HTML sigue siendo
+  válido y funciona incluso con JavaScript desactivado (botón "Filtrar").
+#}
+
+{# Encabezado que ordena por la columna al hacer clic #}
+{% macro th(etiqueta, clave, orden, direccion, clases='') %}
+<th class="{{ clases }}">
+  <a class="th-sort{{ ' is-active' if orden == clave else '' }}"
+     href="{{ url_con(orden=clave, dir=('desc' if orden == clave and direccion == 'asc' else 'asc'), pagina=None) }}"
+     title="Ordenar por {{ etiqueta }}">
+    {{ etiqueta }}
+    <span class="caret">{% if orden == clave %}{{ '▲' if direccion == 'asc' else '▼' }}{% else %}⇅{% endif %}</span>
+  </a>
+</th>
+{% endmacro %}
+
+{# Celda de filtro de texto bajo el título de una columna #}
+{% macro filtro(nombre, valores, formulario, marcador='Filtrar', clases='') %}
+<th class="{{ clases }}">
+  <input type="search" class="form-control form-control-sm" name="{{ nombre }}"
+         value="{{ valores.get(nombre, '') }}" placeholder="{{ marcador }}"
+         form="{{ formulario }}" data-autofiltro aria-label="Filtrar por {{ marcador }}">
+</th>
+{% endmacro %}
+
+{# Celda vacía para columnas sin filtro #}
+{% macro sin_filtro(clases='') %}
+<th class="{{ clases }}"></th>
+{% endmacro %}
+
+{# Pastilla de filtro rápido #}
+{% macro pill(etiqueta, valor, actual, cantidad=None) %}
+<a class="filtro-pill{{ ' active' if actual == valor else '' }}" href="{{ url_con(filtro=valor, pagina=None) }}">
+  {{ etiqueta }}{% if cantidad is not none %} <span class="conteo">({{ cantidad }})</span>{% endif %}
+</a>
+{% endmacro %}
+
+{# Paginación simple #}
+{% macro paginacion(pagina, total_paginas, total_registros, etiqueta='registros') %}
+{% if total_paginas > 1 or total_registros %}
+<div class="table-foot d-flex flex-wrap justify-content-between align-items-center gap-2">
+  <span>{{ total_registros }} {{ etiqueta }}{% if total_paginas > 1 %} — página {{ pagina }} de {{ total_paginas }}{% endif %}</span>
+  {% if total_paginas > 1 %}
+  <div class="btn-group btn-group-sm">
+    <a class="btn btn-outline-secondary{{ ' disabled' if pagina <= 1 else '' }}" href="{{ url_con(pagina=pagina - 1) }}">Anterior</a>
+    <a class="btn btn-outline-secondary{{ ' disabled' if pagina >= total_paginas else '' }}" href="{{ url_con(pagina=pagina + 1) }}">Siguiente</a>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+{% endmacro %}
