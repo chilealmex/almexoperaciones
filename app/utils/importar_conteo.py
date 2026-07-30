@@ -1,8 +1,11 @@
 import csv
 import io
+import re
 
 from app.extensions import db
 from app.models.conteo_inventario import ItemConteoInventario
+
+_ESPACIOS_RE = re.compile(r"\s+")
 
 
 def _a_entero(valor) -> int:
@@ -71,8 +74,14 @@ def _buscar_columna(campos, *palabras_clave):
 
 
 def _normalizar_codigo(codigo) -> str:
-    """Quita apóstrofes iniciales (artefacto de Excel) y espacios para que ambos sistemas crucen."""
-    return str(codigo).strip().lstrip("'").strip()[:80]
+    """Normaliza el código para que QMS y Defontana crucen como el mismo artículo.
+
+    Quita apóstrofes iniciales (artefacto de Excel) y TODOS los espacios internos:
+    QMS suele exportar 'ROP- BCAN-M' donde Defontana trae 'ROP-BCAN-M' para el mismo
+    código, y sin esta limpieza aparecen como dos artículos distintos en el cruce.
+    """
+    texto = str(codigo).strip().lstrip("'").strip()
+    return _ESPACIOS_RE.sub("", texto)[:80]
 
 
 def _texto(valor, limite: int) -> str:

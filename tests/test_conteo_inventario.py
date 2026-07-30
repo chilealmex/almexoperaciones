@@ -200,6 +200,40 @@ def test_xlsx_sin_extension_reconocible_se_detecta_por_contenido(db, empresa):
     assert ItemConteoInventario.query.filter_by(codigo="COD-999").first() is not None
 
 
+def test_codigos_con_distinto_espaciado_cruzan_como_el_mismo_articulo(db, empresa):
+    """QMS exporta 'ROP- BCAN-M', Defontana el mismo artículo como 'ROP-BCAN-M': deben cruzar."""
+    csv_qms = (
+        "Sucursal;Linea Negocio;Categoria;Valor Total Stock CLP;Stock;Stock Critico;"
+        "Descripción;Unidad;Código Único;ubicacion_bodega\n"
+        "Casa Matriz;GOMAS;CAT-A;0;10;0;PRODUCTO ESPACIADO;UN;ROP- BCAN-M;RACK A1\n"
+    )
+    csv_defontana = (
+        "CodArticulo;Descripci\xf3n Art\xedculo;CodBodega;Nombre Bodega;Saldo Stock;Unidad\r\n"
+        '"ROP-BCAN-M";"PRODUCTO ESPACIADO";"BODEGACENTRAL";"BODEGA CENTRAL";"10";"UN"\r\n'
+    )
+
+    importar_qms(_fs(csv_qms.encode("utf-8"), "qms.csv"), empresa.id)
+    importar_defontana(_fs(csv_defontana.encode("cp1252"), "def.csv"), empresa.id)
+
+    assert ItemConteoInventario.query.count() == 1
+    item = ItemConteoInventario.query.first()
+    assert item.codigo == "ROP-BCAN-M"
+    assert item.cantidad_qms == 10
+    assert item.cantidad_defontana == 10
+    assert item.diferencia_sistemas == 0
+
+
+def test_espacios_multiples_tambien_se_colapsan(db, empresa):
+    csv_qms = (
+        "Sucursal;Linea Negocio;Categoria;Valor Total Stock CLP;Stock;Stock Critico;"
+        "Descripción;Unidad;Código Único;ubicacion_bodega\n"
+        "Casa Matriz;GOMAS;CAT-A;0;3;0;PRODUCTO;UN;A B   C;RACK A1\n"
+    )
+    importar_qms(_fs(csv_qms.encode("utf-8"), "qms.csv"), empresa.id)
+    item = ItemConteoInventario.query.first()
+    assert item.codigo == "ABC"
+
+
 def test_filas_vacias_del_xlsx_se_ignoran(db, empresa):
     archivo = _xlsx(
         ["Código Único", "Descripción", "Unidad", "Stock", "Valor Unitario Stock CLP"],
