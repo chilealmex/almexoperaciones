@@ -1,7 +1,7 @@
 {% extends "base.html" %}
-{% block title %}Nuevo proveedor{% endblock %}
+{% block title %}{{ 'Editar proveedor' if proveedor else 'Nuevo proveedor' }}{% endblock %}
 {% block content %}
-<h1 class="h3 mb-3">Nuevo proveedor</h1>
+<h1 class="h3 mb-3">{{ 'Editar proveedor' if proveedor else 'Nuevo proveedor' }}</h1>
 <form method="post" novalidate class="col-12 col-lg-6">
   {{ form.hidden_tag() }}
   <div class="row">
@@ -18,6 +18,7 @@
   <div class="mb-3">
     {{ form.razon_social.label(class="form-label") }}
     {{ form.razon_social(class="form-control") }}
+    {% for error in form.razon_social.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
   </div>
   <div class="mb-3">
     {{ form.direccion.label(class="form-label") }}
@@ -31,13 +32,18 @@
     <div class="col-6 mb-3">
       {{ form.email.label(class="form-label") }}
       {{ form.email(class="form-control") }}
+      {% for error in form.email.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
     </div>
   </div>
   <div class="mb-3">
     {{ form.contacto_nombre.label(class="form-label") }}
     {{ form.contacto_nombre(class="form-control") }}
   </div>
+  <div class="form-check mb-3">
+    {{ form.activo(class="form-check-input") }}
+    {{ form.activo.label(class="form-check-label") }}
+  </div>
   <button type="submit" class="btn btn-primary">Guardar</button>
-  <a href="{{ url_for('arriendos.proveedores') }}" class="btn btn-outline-secondary">Cancelar</a>
+  <a href="{{ url_for('datos_maestros.proveedores') }}" class="btn btn-outline-secondary">Cancelar</a>
 </form>
 {% endblock %}

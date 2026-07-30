@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Importar clientes y proveedores{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <h1>Importar</h1>
+    <p class="page-sub">Sube una planilla con varios clientes o proveedores de una vez.</p>
+  </div>
+</div>
+
+<p class="text-muted">El cruce se hace por RUT: si ya existe un registro con ese RUT, se actualizan sus datos; si no existe, se crea uno nuevo. Puedes reimportar cuantas veces quieras.</p>
+
+<div class="row g-3">
+  <div class="col-12 col-lg-6">
+    <div class="card">
+      <div class="card-body">
+        <h2 class="h5">Clientes</h2>
+        <p class="text-muted small">
+          Columnas: RUT, Razón social, Giro, Dirección, Comuna, Ciudad, Teléfono, Email, Contacto, Activo.
+          <a href="{{ url_for('datos_maestros.clientes_plantilla') }}">Descargar plantilla</a>
+        </p>
+        <form method="post" action="{{ url_for('datos_maestros.importar_clientes_excel') }}" enctype="multipart/form-data">
+          {{ form_clientes.hidden_tag() }}
+          <div class="mb-3">
+            {{ form_clientes.archivo(class="form-control") }}
+            {% for error in form_clientes.archivo.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+          </div>
+          <button type="submit" class="btn btn-primary">Importar clientes</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-lg-6">
+    <div class="card">
+      <div class="card-body">
+        <h2 class="h5">Proveedores</h2>
+        <p class="text-muted small">
+          Columnas: RUT, Razón social, Giro, Dirección, Teléfono, Email, Contacto, Activo.
+          <a href="{{ url_for('datos_maestros.proveedores_plantilla') }}">Descargar plantilla</a>
+        </p>
+        <form method="post" action="{{ url_for('datos_maestros.importar_proveedores_excel') }}" enctype="multipart/form-data">
+          {{ form_proveedores.hidden_tag() }}
+          <div class="mb-3">
+            {{ form_proveedores.archivo(class="form-control") }}
+            {% for error in form_proveedores.archivo.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+          </div>
+          <button type="submit" class="btn btn-primary">Importar proveedores</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p class="text-muted mt-4">
+  <a href="{{ url_for('datos_maestros.clientes') }}">Ir a Clientes →</a> ·
+  <a href="{{ url_for('datos_maestros.proveedores') }}">Ir a Proveedores →</a>
+</p>
+{% endblock %}

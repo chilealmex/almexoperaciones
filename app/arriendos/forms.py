@@ -1,9 +1,8 @@
 from flask_wtf import FlaskForm
 from wtforms import StringField, IntegerField, SelectField, DateField, TextAreaField
-from wtforms.validators import DataRequired, Length, NumberRange, Optional, Email
+from wtforms.validators import DataRequired, Length, NumberRange, Optional
 
 from app.models.arriendo import ArriendoSalida, ArriendoEntrada
-from app.utils.rut import validar_rut
 
 
 class ArriendoSalidaForm(FlaskForm):
@@ -18,16 +17,6 @@ class ArriendoSalidaForm(FlaskForm):
         validators=[DataRequired()],
     )
     condiciones = TextAreaField("Condiciones", validators=[Optional()])
-
-
-class ProveedorForm(FlaskForm):
-    rut = StringField("RUT", validators=[DataRequired(), validar_rut])
-    razon_social = StringField("Razón social", validators=[DataRequired(), Length(max=150)])
-    giro = StringField("Giro", validators=[Optional(), Length(max=150)])
-    direccion = StringField("Dirección", validators=[Optional(), Length(max=200)])
-    telefono = StringField("Teléfono", validators=[Optional(), Length(max=30)])
-    email = StringField("Correo electrónico", validators=[Optional(), Email()])
-    contacto_nombre = StringField("Nombre de contacto", validators=[Optional(), Length(max=120)])
 
 
 class ArriendoEntradaForm(FlaskForm):

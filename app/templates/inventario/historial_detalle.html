@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% import "partials/_tabla.html" as t with context %}
+{% block title %}Toma de inventario del {{ toma.fecha_fin|fecha }}{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <h1>Toma de inventario del {{ toma.fecha_fin|fecha }}</h1>
+    <p class="page-sub">
+      Iniciada {{ toma.fecha_inicio|fecha_hora if toma.fecha_inicio else '—' }} · Cerrada {{ toma.fecha_fin|fecha_hora }}
+      por {{ toma.cerrado_por.nombre_completo if toma.cerrado_por else '—' }}
+    </p>
+  </div>
+  <div class="d-flex gap-2">
+    <a href="{{ url_for('inventario.historial_excel', toma_id=toma.id) }}" class="btn btn-primary btn-sm">⬇ Excel</a>
+    <a href="{{ url_for('inventario.historial') }}" class="btn btn-outline-secondary btn-sm">← Historial</a>
+  </div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-6 col-lg-3">
+    <div class="card card-body">
+      <small>Contados</small>
+      <div class="h4 mb-0">{{ toma.articulos_contados }} / {{ toma.total_articulos }} <span class="fs-6 text-muted">({{ toma.porcentaje_contado }}%)</span></div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card card-body">
+      <small>Diferencia de stock</small>
+      <div class="h4 mb-0 {{ 'text-danger' if toma.dif_stock else '' }}">{{ toma.dif_stock }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card card-body">
+      <small>Diferencia de costo</small>
+      <div class="h4 mb-0 {{ 'text-warning' if toma.dif_costo else '' }}">{{ toma.dif_costo }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card card-body">
+      <small>Distinta unidad</small>
+      <div class="h4 mb-0 {{ 'text-danger' if toma.dif_unidad else '' }}">{{ toma.dif_unidad }}</div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-6 col-lg-4">
+    <div class="card card-body"><small>Valor QMS</small><div class="h5 mb-0">{{ toma.valor_qms_total|clp }}</div></div>
+  </div>
+  <div class="col-6 col-lg-4">
+    <div class="card card-body"><small>Valor Defontana</small><div class="h5 mb-0">{{ toma.valor_defontana_total|clp }}</div></div>
+  </div>
+  <div class="col-12 col-lg-4">
+    <div class="card card-body"><small>Valor físico contado</small><div class="h5 mb-0">{{ toma.valor_fisico_total|clp }}</div></div>
+  </div>
+</div>
+
+<form method="get" id="filtros-historial" class="row g-2 align-items-center mb-3">
+  <input type="hidden" name="filtro" value="{{ filtro }}">
+  <input type="hidden" name="orden" value="{{ orden }}">
+  <input type="hidden" name="dir" value="{{ direccion }}">
+  <div class="col-12 col-md-5 col-lg-4">
+    <input type="search" name="q" value="{{ q }}" class="form-control" placeholder="Buscar por código o nombre...">
+  </div>
+  <div class="col-auto">
+    <button type="submit" class="btn btn-primary">Buscar</button>
+    {% if q %}<a href="{{ url_for('inventario.historial_detalle', toma_id=toma.id, filtro=filtro) }}" class="btn btn-outline-secondary">Limpiar</a>{% endif %}
+  </div>
+</form>
+
+<div class="filtro-pills mb-3">
+  {{ t.pill('Todos', 'todos', filtro, conteos.todos if filtro == 'todos' else None) }}
+  {{ t.pill('Diferencia de stock', 'dif_stock', filtro, conteos.dif_stock if filtro == 'todos' else None) }}
+  {{ t.pill('Diferencia de costo', 'dif_costo', filtro, conteos.dif_costo if filtro == 'todos' else None) }}
+  {{ t.pill('Distinta unidad', 'dif_unidad', filtro, conteos.dif_unidad if filtro == 'todos' else None) }}
+  {{ t.pill('Sin contar', 'sin_contar', filtro, conteos.sin_contar if filtro == 'todos' else None) }}
+</div>
+
+<div class="table-card">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead>
+        <tr>
+          {{ t.th('Código', 'codigo', orden, direccion) }}
+          {{ t.th('Nombre', 'nombre', orden, direccion) }}
+          <th>Unidad</th>
+          <th class="num">Costo QMS</th>
+          <th class="num">Costo Defontana</th>
+          {{ t.th('Stock QMS', 'cantidad_qms', orden, direccion, 'num') }}
+          {{ t.th('Stock Defontana', 'cantidad_defontana', orden, direccion, 'num') }}
+          {{ t.th('Físico', 'cantidad_fisica', orden, direccion, 'num') }}
+          <th>Contado por</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in detalles %}
+        <tr>
+          <td class="text-nowrap fw-semibold">{{ d.codigo }}</td>
+          <td>{{ d.nombre or '—' }}</td>
+          <td>
+            {% if d.unidades_coinciden %}
+            {{ d.unidad_qms or d.unidad_defontana or '—' }}
+            {% else %}
+            <span class="badge bg-danger">{{ d.unidad_qms }} ≠ {{ d.unidad_defontana }}</span>
+            {% endif %}
+          </td>
+          <td class="num">{{ d.costo_unitario_qms|clp if d.costo_unitario_qms is not none else '—' }}</td>
+          <td class="num">{{ d.costo_unitario_defontana|clp if d.costo_unitario_defontana is not none else '—' }}</td>
+          <td class="num">{{ d.cantidad_qms }}</td>
+          <td class="num">{{ d.cantidad_defontana }}</td>
+          <td class="num">{{ d.cantidad_fisica if d.contado else '—' }}</td>
+          <td class="text-nowrap">
+            {% if d.contado_por %}
+            <div class="small">{{ d.contado_por.nombre_completo }}</div>
+            <div class="small text-muted">{{ d.contado_en|fecha_hora }}</div>
+            {% else %}
+            <span class="text-muted small">No contado</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="9" class="text-center text-muted py-4">Sin resultados con los filtros aplicados.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {{ t.paginacion(pagina, total_paginas, total_detalles, 'artículos') }}
+</div>
+{% endblock %}

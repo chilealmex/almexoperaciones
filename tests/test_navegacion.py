@@ -36,8 +36,14 @@ def test_endpoint_de_detalle_mantiene_su_submodulo():
 
 
 def test_arriendos_vive_bajo_contratos():
-    nav = construir_navegacion("arriendos.proveedores", _puede_todo)
+    nav = construir_navegacion("arriendos.index", _puede_todo)
     assert nav["modulo_activo"]["clave"] == "contratos"
+    assert [s["clave"] for s in nav["submodulos"] if s["activo"]] == ["arriendos"]
+
+
+def test_clientes_y_proveedores_viven_bajo_datos_maestros():
+    nav = construir_navegacion("datos_maestros.proveedores", _puede_todo)
+    assert nav["modulo_activo"]["clave"] == "datos_maestros"
     assert [s["clave"] for s in nav["submodulos"] if s["activo"]] == ["proveedores"]
 
 

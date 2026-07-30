@@ -10,7 +10,7 @@ from app.inventario import bp
 from app.inventario.forms import ProductoForm, MovimientoForm, ImportarCsvForm
 from app.extensions import db
 from app.models.inventario import Producto, CategoriaProducto, MovimientoInventario
-from app.models.conteo_inventario import ItemConteoInventario
+from app.models.conteo_inventario import ItemConteoInventario, TomaInventario, TomaInventarioDetalle
 from app.utils.decorators import require_permission
 from app.utils.storage import guardar_documento, listar_documentos
 from app.utils.importar_conteo import importar_qms, importar_defontana
@@ -350,6 +350,210 @@ def stock():
         filtros_columna=filtros_columna,
         orden=orden,
         direccion=direccion,
+        puede_cerrar_toma=current_user.es_admin_o_superior,
+    )
+
+
+# --- Toma de inventario: cierre e historial ---
+#
+# "Cerrar" una toma copia el estado completo del cruce QMS/Defontana/físico a
+# una tabla de archivo (TomaInventarioDetalle) y luego limpia el conteo físico
+# vivo para que la siguiente toma empiece de cero. Solo puede cerrar quien es
+# admin o superadmin; se permite cerrar aunque falten artículos por contar.
+
+
+@bp.route("/toma/cerrar", methods=["POST"])
+@require_permission("inventario", "ver")
+def toma_cerrar():
+    if not current_user.es_admin_o_superior:
+        abort(403)
+
+    items = ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id).all()
+    if not items:
+        flash("No hay artículos cargados para cerrar una toma.", "warning")
+        return redirect(url_for("inventario.stock"))
+
+    contados = [i for i in items if i.contado]
+    fechas_conteo = [i.contado_en for i in contados if i.contado_en is not None]
+
+    toma = TomaInventario(
+        empresa_id=current_user.empresa_id,
+        cerrado_por_id=current_user.id,
+        fecha_inicio=min(fechas_conteo) if fechas_conteo else None,
+        fecha_fin=datetime.now(timezone.utc),
+        total_articulos=len(items),
+        articulos_contados=len(contados),
+        dif_stock=sum(1 for i in items if i.diferencia_sistemas != 0),
+        dif_costo=sum(1 for i in items if i.tiene_diferencia_costo),
+        dif_unidad=sum(1 for i in items if not i.unidades_coinciden),
+        valor_qms_total=sum(i.valor_qms for i in items),
+        valor_defontana_total=sum(i.valor_defontana for i in items),
+        valor_fisico_total=sum(i.valor_fisico or 0 for i in contados),
+    )
+    db.session.add(toma)
+    db.session.flush()
+
+    detalles = [
+        TomaInventarioDetalle(
+            toma_id=toma.id,
+            codigo=i.codigo,
+            nombre=i.nombre,
+            categoria=i.categoria,
+            linea_negocio=i.linea_negocio,
+            ubicacion=i.ubicacion,
+            unidad_qms=i.unidad_qms,
+            unidad_defontana=i.unidad_defontana,
+            costo_unitario_qms=i.costo_unitario_qms,
+            costo_unitario_defontana=i.costo_unitario_defontana,
+            cantidad_qms=i.cantidad_qms,
+            cantidad_defontana=i.cantidad_defontana,
+            cantidad_fisica=i.cantidad_fisica,
+            contado_por_id=i.contado_por_id,
+            contado_en=i.contado_en,
+        )
+        for i in items
+    ]
+    db.session.add_all(detalles)
+
+    for i in items:
+        i.cantidad_fisica = None
+        i.contado_por_id = None
+        i.contado_en = None
+
+    db.session.commit()
+    flash(
+        f"Toma de inventario cerrada: {toma.articulos_contados} de {toma.total_articulos} artículos contados. "
+        "El conteo físico quedó en blanco para empezar una toma nueva.",
+        "success",
+    )
+    return redirect(url_for("inventario.historial_detalle", toma_id=toma.id))
+
+
+@bp.route("/historial")
+@require_permission("inventario", "ver")
+def historial():
+    tomas = (
+        TomaInventario.query.filter_by(empresa_id=current_user.empresa_id)
+        .order_by(TomaInventario.fecha_fin.desc())
+        .all()
+    )
+    return render_template("inventario/historial.html", tomas=tomas)
+
+
+COLUMNAS_HISTORIAL_DETALLE = {
+    "codigo": TomaInventarioDetalle.codigo,
+    "nombre": TomaInventarioDetalle.nombre,
+    "cantidad_qms": TomaInventarioDetalle.cantidad_qms,
+    "cantidad_defontana": TomaInventarioDetalle.cantidad_defontana,
+    "cantidad_fisica": TomaInventarioDetalle.cantidad_fisica,
+}
+
+
+@bp.route("/historial/<int:toma_id>")
+@require_permission("inventario", "ver")
+def historial_detalle(toma_id):
+    toma = TomaInventario.query.filter_by(id=toma_id, empresa_id=current_user.empresa_id).first_or_404()
+
+    consulta = TomaInventarioDetalle.query.filter_by(toma_id=toma.id)
+    q = (request.args.get("q") or "").strip()
+    if q:
+        patron = f"%{q}%"
+        consulta = consulta.filter(
+            or_(TomaInventarioDetalle.codigo.ilike(patron), TomaInventarioDetalle.nombre.ilike(patron))
+        )
+
+    filtro = request.args.get("filtro", "todos")
+    if filtro not in ("todos", "dif_stock", "dif_costo", "dif_unidad", "sin_contar"):
+        filtro = "todos"
+
+    consulta, orden, direccion = _ordenar(consulta, request.args, COLUMNAS_HISTORIAL_DETALLE, "codigo")
+    detalles = consulta.all()
+
+    if filtro == "dif_stock":
+        detalles = [d for d in detalles if d.diferencia_sistemas != 0]
+    elif filtro == "dif_costo":
+        detalles = [d for d in detalles if d.tiene_diferencia_costo]
+    elif filtro == "dif_unidad":
+        detalles = [d for d in detalles if not d.unidades_coinciden]
+    elif filtro == "sin_contar":
+        detalles = [d for d in detalles if not d.contado]
+
+    conteos = {
+        "todos": len(toma.detalles),
+        "dif_stock": toma.dif_stock,
+        "dif_costo": toma.dif_costo,
+        "dif_unidad": toma.dif_unidad,
+        "sin_contar": toma.articulos_sin_contar,
+    }
+
+    pagina = max(1, request.args.get("pagina", 1, type=int))
+    por_pagina = 100
+    total_paginas = max(1, (len(detalles) + por_pagina - 1) // por_pagina)
+    pagina = min(pagina, total_paginas)
+    visibles = detalles[(pagina - 1) * por_pagina : pagina * por_pagina]
+
+    return render_template(
+        "inventario/historial_detalle.html",
+        toma=toma,
+        detalles=visibles,
+        total_detalles=len(detalles),
+        conteos=conteos,
+        q=q,
+        filtro=filtro,
+        orden=orden,
+        direccion=direccion,
+        pagina=pagina,
+        total_paginas=total_paginas,
+    )
+
+
+@bp.route("/historial/<int:toma_id>.xlsx")
+@require_permission("inventario", "ver")
+def historial_excel(toma_id):
+    toma = TomaInventario.query.filter_by(id=toma_id, empresa_id=current_user.empresa_id).first_or_404()
+
+    columnas = [
+        col("Código", ancho=20, total="texto"),
+        col("Nombre", ancho=44),
+        col("Unidad QMS", ancho=12),
+        col("Unidad Defontana", ancho=17),
+        col("Costo unitario QMS", ancho=18, formato=CLP),
+        col("Costo unitario Defontana", ancho=22, formato=CLP),
+        col("Stock QMS", ancho=12, formato=ENTERO, total="suma"),
+        col("Stock Defontana", ancho=16, formato=ENTERO, total="suma"),
+        col("Stock físico", ancho=13, formato=ENTERO, total="suma"),
+        col("Contado por", ancho=26),
+        col("Fecha y hora del conteo", ancho=22),
+        col("Categoría", ancho=24),
+        col("Línea de negocio", ancho=24),
+        col("Ubicación", ancho=28),
+    ]
+    filas = [
+        [
+            d.codigo,
+            d.nombre or "",
+            d.unidad_qms or "",
+            d.unidad_defontana or "",
+            d.costo_unitario_qms,
+            d.costo_unitario_defontana,
+            d.cantidad_qms,
+            d.cantidad_defontana,
+            d.cantidad_fisica if d.contado else None,
+            d.contado_por.nombre_completo if d.contado_por else "",
+            format_fecha_hora(d.contado_en),
+            d.categoria or "",
+            d.linea_negocio or "",
+            d.ubicacion or "",
+        ]
+        for d in toma.detalles
+    ]
+
+    return responder_excel(
+        f"toma-inventario-{toma.id}",
+        f"Toma de inventario cerrada el {format_fecha_hora(toma.fecha_fin)}",
+        columnas,
+        filas,
+        f"Cerrada por {toma.cerrado_por.nombre_completo if toma.cerrado_por else '—'}",
     )
 
 

@@ -8,7 +8,7 @@
   <div class="mb-3">
     {{ form.proveedor_id.label(class="form-label") }}
     {{ form.proveedor_id(class="form-select") }}
-    {% if not form.proveedor_id.choices %}<div class="form-text text-warning">Primero debes <a href="{{ url_for('arriendos.nuevo_proveedor') }}">crear un proveedor</a>.</div>{% endif %}
+    {% if not form.proveedor_id.choices %}<div class="form-text text-warning">Primero debes <a href="{{ url_for('datos_maestros.nuevo_proveedor') }}">crear un proveedor</a>.</div>{% endif %}
   </div>
   <div class="mb-3">
     {{ form.descripcion_activo.label(class="form-label") }}

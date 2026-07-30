@@ -40,7 +40,7 @@
   <h2 class="h5 mb-0">Arrendados de proveedores (entrada)</h2>
   <div>
     <a href="{{ url_for('arriendos.entradas_excel') }}" class="btn btn-outline-secondary btn-sm">⬇ Excel</a>
-    <a href="{{ url_for('arriendos.proveedores') }}" class="btn btn-outline-secondary btn-sm">Proveedores</a>
+    <a href="{{ url_for('datos_maestros.proveedores') }}" class="btn btn-outline-secondary btn-sm">Proveedores</a>
     {% if puede('contratos', 'editar') %}
     <a href="{{ url_for('arriendos.nuevo_arriendo_entrada') }}" class="btn btn-primary btn-sm">Nuevo arriendo de entrada</a>
     {% endif %}

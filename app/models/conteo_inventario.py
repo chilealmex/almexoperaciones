@@ -3,36 +3,14 @@ from datetime import datetime, timezone
 from app.extensions import db
 
 
-class ItemConteoInventario(db.Model):
-    """Cruce de stock entre QMS y Defontana para toma de inventario físico."""
+class _CalculosConteoMixin:
+    """Propiedades derivadas del cruce QMS/Defontana/físico.
 
-    __tablename__ = "items_conteo_inventario"
-    __table_args__ = (db.UniqueConstraint("empresa_id", "codigo", name="uq_conteo_empresa_codigo"),)
-
-    id = db.Column(db.Integer, primary_key=True)
-    empresa_id = db.Column(db.Integer, db.ForeignKey("empresas.id"), nullable=False)
-    codigo = db.Column(db.String(80), nullable=False, index=True)
-    nombre = db.Column(db.String(255), nullable=True)
-    linea_negocio = db.Column(db.String(120), nullable=True)
-    ubicacion = db.Column(db.String(255), nullable=True)
-    categoria = db.Column(db.String(120), nullable=True)
-    cantidad_qms = db.Column(db.Integer, default=0, nullable=False)
-    cantidad_defontana = db.Column(db.Integer, default=0, nullable=False)
-    cantidad_fisica = db.Column(db.Integer, nullable=True)
-    # Costo unitario y unidad de medida según cada sistema (para el ajuste de inventario)
-    costo_unitario_qms = db.Column(db.Integer, nullable=True)
-    costo_unitario_defontana = db.Column(db.Integer, nullable=True)
-    unidad_qms = db.Column(db.String(20), nullable=True)
-    unidad_defontana = db.Column(db.String(20), nullable=True)
-    contado_por_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"), nullable=True)
-    contado_en = db.Column(db.DateTime, nullable=True)
-    actualizado_en = db.Column(
-        db.DateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
-    )
-
-    contado_por = db.relationship("Usuario")
+    Las comparten ItemConteoInventario (el cruce vivo, editable) y
+    TomaInventarioDetalle (la foto archivada al cerrar una toma): ambos tienen
+    exactamente las mismas columnas de cantidades, costos y unidades, así que
+    el cálculo de diferencias y valorización es idéntico en los dos casos.
+    """
 
     @property
     def contado(self) -> bool:
@@ -178,5 +156,121 @@ class ItemConteoInventario(db.Model):
             return True
         return False
 
+
+class ItemConteoInventario(db.Model, _CalculosConteoMixin):
+    """Cruce de stock entre QMS y Defontana para toma de inventario físico."""
+
+    __tablename__ = "items_conteo_inventario"
+    __table_args__ = (db.UniqueConstraint("empresa_id", "codigo", name="uq_conteo_empresa_codigo"),)
+
+    id = db.Column(db.Integer, primary_key=True)
+    empresa_id = db.Column(db.Integer, db.ForeignKey("empresas.id"), nullable=False)
+    codigo = db.Column(db.String(80), nullable=False, index=True)
+    nombre = db.Column(db.String(255), nullable=True)
+    linea_negocio = db.Column(db.String(120), nullable=True)
+    ubicacion = db.Column(db.String(255), nullable=True)
+    categoria = db.Column(db.String(120), nullable=True)
+    cantidad_qms = db.Column(db.Integer, default=0, nullable=False)
+    cantidad_defontana = db.Column(db.Integer, default=0, nullable=False)
+    cantidad_fisica = db.Column(db.Integer, nullable=True)
+    # Costo unitario y unidad de medida según cada sistema (para el ajuste de inventario)
+    costo_unitario_qms = db.Column(db.Integer, nullable=True)
+    costo_unitario_defontana = db.Column(db.Integer, nullable=True)
+    unidad_qms = db.Column(db.String(20), nullable=True)
+    unidad_defontana = db.Column(db.String(20), nullable=True)
+    contado_por_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"), nullable=True)
+    contado_en = db.Column(db.DateTime, nullable=True)
+    actualizado_en = db.Column(
+        db.DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    contado_por = db.relationship("Usuario")
+
     def __repr__(self):
         return f"<ItemConteoInventario {self.codigo}>"
+
+
+class TomaInventario(db.Model):
+    """Un ciclo de toma de inventario físico, archivado al cerrarse.
+
+    'fecha_inicio' es el primer conteo registrado del ciclo (el mínimo de
+    contado_en entre los ítems contados); 'fecha_fin' es el momento del cierre.
+    Al cerrar, se copia el estado completo del cruce a TomaInventarioDetalle y
+    luego se limpia cantidad_fisica/contado_por/contado_en en el cruce vivo
+    para que la siguiente toma empiece de cero.
+    """
+
+    __tablename__ = "tomas_inventario"
+
+    id = db.Column(db.Integer, primary_key=True)
+    empresa_id = db.Column(db.Integer, db.ForeignKey("empresas.id"), nullable=False)
+    fecha_inicio = db.Column(db.DateTime, nullable=True)
+    fecha_fin = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    cerrado_por_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"), nullable=False)
+
+    total_articulos = db.Column(db.Integer, default=0, nullable=False)
+    articulos_contados = db.Column(db.Integer, default=0, nullable=False)
+    dif_stock = db.Column(db.Integer, default=0, nullable=False)
+    dif_costo = db.Column(db.Integer, default=0, nullable=False)
+    dif_unidad = db.Column(db.Integer, default=0, nullable=False)
+    valor_qms_total = db.Column(db.Integer, default=0, nullable=False)
+    valor_defontana_total = db.Column(db.Integer, default=0, nullable=False)
+    valor_fisico_total = db.Column(db.Integer, default=0, nullable=False)
+
+    cerrado_por = db.relationship("Usuario")
+    detalles = db.relationship(
+        "TomaInventarioDetalle", back_populates="toma", cascade="all, delete-orphan",
+        order_by="TomaInventarioDetalle.codigo",
+    )
+
+    @property
+    def articulos_sin_contar(self) -> int:
+        return self.total_articulos - self.articulos_contados
+
+    @property
+    def porcentaje_contado(self) -> float:
+        if not self.total_articulos:
+            return 0.0
+        return round(self.articulos_contados / self.total_articulos * 100, 1)
+
+    @property
+    def completa(self) -> bool:
+        return self.articulos_contados >= self.total_articulos
+
+    def __repr__(self):
+        return f"<TomaInventario {self.id} cerrada {self.fecha_fin}>"
+
+
+class TomaInventarioDetalle(db.Model, _CalculosConteoMixin):
+    """Foto de un artículo del cruce al momento de cerrar una toma de inventario."""
+
+    __tablename__ = "toma_inventario_detalles"
+
+    id = db.Column(db.Integer, primary_key=True)
+    toma_id = db.Column(db.Integer, db.ForeignKey("tomas_inventario.id"), nullable=False, index=True)
+
+    codigo = db.Column(db.String(80), nullable=False)
+    nombre = db.Column(db.String(255), nullable=True)
+    categoria = db.Column(db.String(120), nullable=True)
+    linea_negocio = db.Column(db.String(120), nullable=True)
+    ubicacion = db.Column(db.String(255), nullable=True)
+
+    unidad_qms = db.Column(db.String(20), nullable=True)
+    unidad_defontana = db.Column(db.String(20), nullable=True)
+    costo_unitario_qms = db.Column(db.Integer, nullable=True)
+    costo_unitario_defontana = db.Column(db.Integer, nullable=True)
+
+    cantidad_qms = db.Column(db.Integer, default=0, nullable=False)
+    cantidad_defontana = db.Column(db.Integer, default=0, nullable=False)
+    cantidad_fisica = db.Column(db.Integer, nullable=True)
+
+    contado_por_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"), nullable=True)
+    contado_en = db.Column(db.DateTime, nullable=True)
+
+    toma = db.relationship("TomaInventario", back_populates="detalles")
+    contado_por = db.relationship("Usuario")
+
+    def __repr__(self):
+        return f"<TomaInventarioDetalle {self.codigo} toma={self.toma_id}>"

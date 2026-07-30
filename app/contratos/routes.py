@@ -4,7 +4,7 @@ from flask import render_template, redirect, url_for, flash, request
 from flask_login import current_user
 
 from app.contratos import bp
-from app.contratos.forms import ClienteForm, ContratoForm, ContratoGeneradoForm
+from app.contratos.forms import ContratoForm, ContratoGeneradoForm
 from app.extensions import db
 from app.models.cliente import Cliente
 from app.models.contrato import ContratoCliente
@@ -25,69 +25,9 @@ def _fecha_en_palabras(fecha):
     return f"{fecha.day} de {MESES_ES[fecha.month - 1]} de {fecha.year}"
 
 
-# --- Clientes ---
-
-
-@bp.route("/clientes")
-@require_permission("contratos", "ver")
-def clientes():
-    lista = Cliente.query.order_by(Cliente.razon_social).all()
-    return render_template("contratos/clientes_lista.html", clientes=lista)
-
-
-@bp.route("/clientes/nuevo", methods=["GET", "POST"])
-@require_permission("contratos", "editar")
-def nuevo_cliente():
-    form = ClienteForm()
-    if form.validate_on_submit():
-        if Cliente.query.filter_by(rut=form.rut.data.strip()).first():
-            flash("Ya existe un cliente con ese RUT.", "danger")
-            return render_template("contratos/cliente_form.html", form=form, cliente=None)
-
-        cliente = Cliente(
-            empresa_id=current_user.empresa_id,
-            rut=form.rut.data.strip(),
-            razon_social=form.razon_social.data.strip(),
-            giro=form.giro.data,
-            direccion=form.direccion.data,
-            comuna=form.comuna.data,
-            ciudad=form.ciudad.data,
-            telefono=form.telefono.data,
-            email=form.email.data,
-            contacto_nombre=form.contacto_nombre.data,
-            activo=form.activo.data,
-        )
-        db.session.add(cliente)
-        db.session.commit()
-        flash("Cliente creado correctamente.", "success")
-        return redirect(url_for("contratos.clientes"))
-
-    return render_template("contratos/cliente_form.html", form=form, cliente=None)
-
-
-@bp.route("/clientes/<int:cliente_id>/editar", methods=["GET", "POST"])
-@require_permission("contratos", "editar")
-def editar_cliente(cliente_id):
-    cliente = Cliente.query.get_or_404(cliente_id)
-    form = ClienteForm(obj=cliente)
-    if form.validate_on_submit():
-        duplicado = Cliente.query.filter(
-            Cliente.rut == form.rut.data.strip(), Cliente.id != cliente.id
-        ).first()
-        if duplicado:
-            flash("Ya existe otro cliente con ese RUT.", "danger")
-            return render_template("contratos/cliente_form.html", form=form, cliente=cliente)
-
-        form.populate_obj(cliente)
-        cliente.rut = form.rut.data.strip()
-        db.session.commit()
-        flash("Cliente actualizado correctamente.", "success")
-        return redirect(url_for("contratos.clientes"))
-
-    return render_template("contratos/cliente_form.html", form=form, cliente=cliente)
-
-
 # --- Contratos ---
+# Los clientes se gestionan en Datos maestros (app/datos_maestros); aquí solo
+# se cargan como opciones para el formulario de contrato.
 
 
 def _cargar_clientes(form):
@@ -194,45 +134,6 @@ def contratos_excel():
     ]
 
     return responder_excel("contratos", "Contratos con clientes", columnas, filas)
-
-
-@bp.route("/clientes.xlsx")
-@require_permission("contratos", "ver")
-def clientes_excel():
-    """Informe en Excel de la cartera de clientes."""
-    lista = Cliente.query.order_by(Cliente.razon_social).all()
-
-    columnas = [
-        col("RUT", ancho=15, total="texto"),
-        col("Razón social", ancho=40),
-        col("Giro", ancho=32),
-        col("Dirección", ancho=36),
-        col("Comuna", ancho=20),
-        col("Ciudad", ancho=20),
-        col("Teléfono", ancho=16),
-        col("Email", ancho=30),
-        col("Contacto", ancho=26),
-        col("Estado", ancho=12),
-        col("Contratos vigentes", ancho=18, formato=ENTERO, total="suma"),
-    ]
-    filas = [
-        [
-            c.rut,
-            c.razon_social,
-            c.giro or "",
-            c.direccion or "",
-            c.comuna or "",
-            c.ciudad or "",
-            c.telefono or "",
-            c.email or "",
-            c.contacto_nombre or "",
-            "Activo" if c.activo else "Inactivo",
-            sum(1 for contrato in c.contratos if contrato.estado in ("vigente", "por_vencer")),
-        ]
-        for c in lista
-    ]
-
-    return responder_excel("clientes", "Clientes", columnas, filas)
 
 
 @bp.route("/nuevo", methods=["GET", "POST"])
@@ -387,8 +288,8 @@ def nuevo_generado():
     form = ContratoGeneradoForm()
     _preparar_form_generado(form)
     if not form.cliente_id.choices:
-        flash("Primero debes crear un cliente en la pestaña Clientes.", "warning")
-        return redirect(url_for("contratos.clientes"))
+        flash("Primero debes crear un cliente en Datos maestros.", "warning")
+        return redirect(url_for("datos_maestros.clientes"))
 
     if form.validate_on_submit():
         if form.fiador_tipo.data == "empresa" and not form.fiador_representante.data:

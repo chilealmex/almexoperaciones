@@ -44,6 +44,44 @@
   {{ t.pill('Contados', 'contados', filtro, resumen.contados) }}
 </div>
 
+{% set pct_contado = ((resumen.contados / resumen.total * 100) if resumen.total else 0) | round(1) %}
+<div class="card mb-3">
+  <div class="card-body py-3">
+    <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+      <div class="flex-grow-1" style="min-width: 16rem;">
+        <div class="d-flex justify-content-between small text-muted mb-1">
+          <span>Avance de esta toma</span>
+          <span>{{ resumen.contados }} / {{ resumen.total }} ({{ pct_contado }}%)</span>
+        </div>
+        <div class="progress" style="height: 8px;">
+          <div class="progress-bar {{ 'bg-success' if pct_contado == 100 else '' }}" style="width: {{ pct_contado }}%;"></div>
+        </div>
+      </div>
+      <div class="d-flex gap-2">
+        <a href="{{ url_for('inventario.historial') }}" class="btn btn-outline-secondary btn-sm">Ver historial de tomas</a>
+        {% if puede_cerrar_toma %}
+        <form method="post" action="{{ url_for('inventario.toma_cerrar') }}" id="form-cerrar-toma">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-primary btn-sm">Finalizar toma</button>
+        </form>
+        <script>
+          document.getElementById('form-cerrar-toma').addEventListener('submit', function (e) {
+            var sinContar = {{ resumen.sin_contar }};
+            var mensaje = sinContar > 0
+              ? 'Quedan ' + sinContar + ' artículo(s) sin contar; se guardarán como "no contado" en el historial. '
+                + 'Al cerrar, el conteo físico se vacía para empezar una toma nueva. ¿Confirmas?'
+              : 'Se archivará esta toma completa en el historial y el conteo físico se vaciará para empezar una toma nueva. ¿Confirmas?';
+            if (!window.confirm(mensaje)) {
+              e.preventDefault();
+            }
+          });
+        </script>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
 {% if puede('inventario', 'editar') %}
 <p class="text-muted small">
   Escribe la cantidad contada en la columna <strong>Físico</strong> y presiona Enter (o sal del campo) para guardar.

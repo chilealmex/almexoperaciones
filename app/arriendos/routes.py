@@ -7,7 +7,6 @@ from app.arriendos import bp
 from app.arriendos.forms import (
     ArriendoSalidaForm,
     ArriendoEntradaForm,
-    ProveedorForm,
     DevolucionForm,
     PagoForm,
     FirmaClienteForm,
@@ -146,39 +145,8 @@ def entradas_excel():
     )
 
 
-@bp.route("/proveedores.xlsx")
-@require_permission("contratos", "ver")
-def proveedores_excel():
-    """Informe en Excel del registro de proveedores."""
-    lista = Proveedor.query.order_by(Proveedor.razon_social).all()
-
-    columnas = [
-        col("RUT", ancho=15, total="texto"),
-        col("Razón social", ancho=40),
-        col("Giro", ancho=32),
-        col("Dirección", ancho=36),
-        col("Teléfono", ancho=16),
-        col("Email", ancho=30),
-        col("Contacto", ancho=26),
-        col("Estado", ancho=12),
-        col("Arriendos vigentes", ancho=18, formato=ENTERO, total="suma"),
-    ]
-    filas = [
-        [
-            p.rut,
-            p.razon_social,
-            p.giro or "",
-            p.direccion or "",
-            p.telefono or "",
-            p.email or "",
-            p.contacto_nombre or "",
-            "Activo" if p.activo else "Inactivo",
-            sum(1 for a in p.arriendos_entrada if a.estado in ("vigente", "por_vencer")),
-        ]
-        for p in lista
-    ]
-
-    return responder_excel("proveedores", "Proveedores", columnas, filas)
+# Los proveedores se gestionan en Datos maestros (app/datos_maestros); aquí solo
+# se cargan como opciones para el formulario de arriendo de entrada.
 
 
 # --- Arriendo de salida: la empresa arrienda A un cliente ---
@@ -346,40 +314,6 @@ def marcar_facturacion_pagada(facturacion_id):
 
 
 # --- Proveedores (para arriendo de entrada) ---
-
-
-@bp.route("/proveedores")
-@require_permission("contratos", "ver")
-def proveedores():
-    lista = Proveedor.query.order_by(Proveedor.razon_social).all()
-    return render_template("arriendos/proveedores_lista.html", proveedores=lista)
-
-
-@bp.route("/proveedores/nuevo", methods=["GET", "POST"])
-@require_permission("contratos", "editar")
-def nuevo_proveedor():
-    form = ProveedorForm()
-    if form.validate_on_submit():
-        if Proveedor.query.filter_by(rut=form.rut.data.strip()).first():
-            flash("Ya existe un proveedor con ese RUT.", "danger")
-            return render_template("arriendos/proveedor_form.html", form=form)
-
-        proveedor = Proveedor(
-            empresa_id=current_user.empresa_id,
-            rut=form.rut.data.strip(),
-            razon_social=form.razon_social.data.strip(),
-            giro=form.giro.data,
-            direccion=form.direccion.data,
-            telefono=form.telefono.data,
-            email=form.email.data,
-            contacto_nombre=form.contacto_nombre.data,
-        )
-        db.session.add(proveedor)
-        db.session.commit()
-        flash("Proveedor creado correctamente.", "success")
-        return redirect(url_for("arriendos.proveedores"))
-
-    return render_template("arriendos/proveedor_form.html", form=form)
 
 
 # --- Arriendo de entrada: la empresa arrienda DE un proveedor ---

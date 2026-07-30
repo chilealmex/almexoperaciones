@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Historial de tomas{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <h1>Historial de tomas de inventario</h1>
+    <p class="page-sub">Cada toma de inventario cerrada queda archivada aquí, con las diferencias de stock, costo y unidad que existían al momento del cierre.</p>
+  </div>
+  <a href="{{ url_for('inventario.stock') }}" class="btn btn-outline-secondary btn-sm">← Volver a Stock y conteo</a>
+</div>
+
+{% if not tomas %}
+<div class="alert alert-info">
+  Aún no se ha cerrado ninguna toma de inventario. Desde <a href="{{ url_for('inventario.stock') }}">Stock y conteo</a>, un administrador puede usar el botón <strong>Finalizar toma</strong> para archivar el estado actual y empezar un conteo nuevo.
+</div>
+{% else %}
+<div class="table-card">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Iniciada</th>
+          <th>Finalizada</th>
+          <th>Cerrada por</th>
+          <th class="num">Contados</th>
+          <th class="num">Con diferencia de stock</th>
+          <th class="num">Con diferencia de costo</th>
+          <th class="num">Con distinta unidad</th>
+          <th class="num">Valor QMS al cierre</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for toma in tomas %}
+        <tr>
+          <td>{{ toma.fecha_inicio|fecha_hora if toma.fecha_inicio else '—' }}</td>
+          <td>{{ toma.fecha_fin|fecha_hora }}</td>
+          <td>{{ toma.cerrado_por.nombre_completo if toma.cerrado_por else '—' }}</td>
+          <td class="num">
+            {{ toma.articulos_contados }} / {{ toma.total_articulos }}
+            {% if not toma.completa %}<span class="badge bg-warning">parcial</span>{% endif %}
+          </td>
+          <td class="num">{{ toma.dif_stock }}</td>
+          <td class="num">{{ toma.dif_costo }}</td>
+          <td class="num">{{ toma.dif_unidad }}</td>
+          <td class="num">{{ toma.valor_qms_total|clp }}</td>
+          <td class="text-end">
+            <a href="{{ url_for('inventario.historial_detalle', toma_id=toma.id) }}" class="btn btn-sm btn-outline-secondary">Ver detalle</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

@@ -67,6 +67,12 @@ MODULOS = (
                 "endpoints": ("inventario.movimientos",),
             },
             {
+                "clave": "historial_tomas",
+                "etiqueta": "Historial de tomas",
+                "endpoint": "inventario.historial",
+                "endpoints": ("inventario.historial", "inventario.historial_detalle", "inventario.historial_excel"),
+            },
+            {
                 "clave": "importar",
                 "etiqueta": "Importar",
                 "accion": "editar",
@@ -108,16 +114,6 @@ MODULOS = (
                 ),
             },
             {
-                "clave": "clientes",
-                "etiqueta": "Clientes",
-                "endpoint": "contratos.clientes",
-                "endpoints": (
-                    "contratos.clientes",
-                    "contratos.nuevo_cliente",
-                    "contratos.editar_cliente",
-                ),
-            },
-            {
                 "clave": "arriendos",
                 "etiqueta": "Arriendos",
                 "endpoint": "arriendos.index",
@@ -137,12 +133,6 @@ MODULOS = (
                     "arriendos.nuevo_pago_entrada",
                     "arriendos.marcar_pago_realizado",
                 ),
-            },
-            {
-                "clave": "proveedores",
-                "etiqueta": "Proveedores",
-                "endpoint": "arriendos.proveedores",
-                "endpoints": ("arriendos.proveedores", "arriendos.nuevo_proveedor"),
             },
             {
                 "clave": "generados",
@@ -199,6 +189,49 @@ MODULOS = (
                     "activos_fijos.nueva_categoria",
                     "activos_fijos.eliminar_categoria",
                 ),
+            },
+        ),
+    },
+    {
+        "clave": "datos_maestros",
+        "etiqueta": "Datos maestros",
+        "icono": "🗂️",
+        "permiso": "datos_maestros",
+        "endpoint": "datos_maestros.resumen",
+        "endpoints": (),
+        "submodulos": (
+            {
+                "clave": "resumen",
+                "etiqueta": "Resumen",
+                "endpoint": "datos_maestros.resumen",
+                "endpoints": ("datos_maestros.resumen",),
+            },
+            {
+                "clave": "clientes",
+                "etiqueta": "Clientes",
+                "endpoint": "datos_maestros.clientes",
+                "endpoints": (
+                    "datos_maestros.clientes",
+                    "datos_maestros.nuevo_cliente",
+                    "datos_maestros.editar_cliente",
+                ),
+            },
+            {
+                "clave": "proveedores",
+                "etiqueta": "Proveedores",
+                "endpoint": "datos_maestros.proveedores",
+                "endpoints": (
+                    "datos_maestros.proveedores",
+                    "datos_maestros.nuevo_proveedor",
+                    "datos_maestros.editar_proveedor",
+                ),
+            },
+            {
+                "clave": "importar",
+                "etiqueta": "Importar",
+                "accion": "editar",
+                "endpoint": "datos_maestros.importar",
+                "endpoints": ("datos_maestros.importar",),
             },
         ),
     },

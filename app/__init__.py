@@ -95,6 +95,7 @@ def create_app(config_name=None):
     from app.contratos import bp as contratos_bp
     from app.activos_fijos import bp as activos_fijos_bp
     from app.arriendos import bp as arriendos_bp
+    from app.datos_maestros import bp as datos_maestros_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(core_bp)
@@ -103,6 +104,7 @@ def create_app(config_name=None):
     app.register_blueprint(contratos_bp, url_prefix="/contratos")
     app.register_blueprint(activos_fijos_bp, url_prefix="/activos-fijos")
     app.register_blueprint(arriendos_bp, url_prefix="/arriendos")
+    app.register_blueprint(datos_maestros_bp, url_prefix="/datos-maestros")
 
     _configurar_logging(app)
     _registrar_manejo_de_errores(app)

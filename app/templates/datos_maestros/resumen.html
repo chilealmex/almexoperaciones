@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% import "partials/_graficos.html" as g %}
+{% block title %}Datos maestros{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <h1>Datos maestros</h1>
+    <p class="page-sub">Clientes y proveedores usados en contratos, arriendos y activos.</p>
+  </div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Clientes activos', clientes_activos, pie=total_clientes ~ ' en total', href=url_for('datos_maestros.clientes')) }}
+  </div>
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Proveedores activos', proveedores_activos, pie=total_proveedores ~ ' en total', href=url_for('datos_maestros.proveedores')) }}
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-12 col-md-6">
+    <div class="card h-100">
+      <div class="card-body">
+        <h2 class="h6">Clientes</h2>
+        <p class="text-muted small mb-3">Empresas a las que se les emiten contratos o se les arriendan activos.</p>
+        <a href="{{ url_for('datos_maestros.clientes') }}" class="btn btn-sm btn-outline-primary">Ver clientes</a>
+        {% if puede('datos_maestros', 'editar') %}
+        <a href="{{ url_for('datos_maestros.nuevo_cliente') }}" class="btn btn-sm btn-primary">Nuevo cliente</a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col-12 col-md-6">
+    <div class="card h-100">
+      <div class="card-body">
+        <h2 class="h6">Proveedores</h2>
+        <p class="text-muted small mb-3">Empresas que arriendan activos a la compañía.</p>
+        <a href="{{ url_for('datos_maestros.proveedores') }}" class="btn btn-sm btn-outline-primary">Ver proveedores</a>
+        {% if puede('datos_maestros', 'editar') %}
+        <a href="{{ url_for('datos_maestros.nuevo_proveedor') }}" class="btn btn-sm btn-primary">Nuevo proveedor</a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+{% if puede('datos_maestros', 'editar') %}
+<p class="text-muted small mt-3">
+  ¿Tienes una planilla con varios clientes o proveedores? Súbela desde <a href="{{ url_for('datos_maestros.importar') }}">Importar</a>.
+</p>
+{% endif %}
+{% endblock %}
