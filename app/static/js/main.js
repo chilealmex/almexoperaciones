@@ -15,6 +15,13 @@ document.addEventListener("DOMContentLoaded", function () {
 
     function enviar() {
       window.clearTimeout(temporizador);
+      // Algunas páginas repiten un mismo filtro en dos layouts (tabla de
+      // escritorio y tarjetas móviles) que apuntan al mismo formulario. Antes
+      // de enviar, se deshabilitan los campos que no están visibles para que
+      // no viajen duplicados ni pisen el valor del campo que el usuario sí ve.
+      document.querySelectorAll('[form="' + formulario.id + '"]').forEach(function (dup) {
+        dup.disabled = dup.offsetParent === null;
+      });
       formulario.submit();
     }
 

@@ -37,6 +37,42 @@
   </div>
 </form>
 
+{% set filtros_columna_activos = filtros_columna.values()|select|list %}
+<div class="d-lg-none mb-3">
+  <button class="btn btn-outline-secondary btn-sm w-100 d-flex justify-content-between align-items-center"
+          type="button" data-bs-toggle="collapse" data-bs-target="#filtros-columna-movil"
+          aria-expanded="{{ 'true' if filtros_columna_activos else 'false' }}" aria-controls="filtros-columna-movil">
+    <span>Filtrar por código, ubicación, línea…{% if filtros_columna_activos %} ({{ filtros_columna_activos|length }}){% endif %}</span>
+    <span aria-hidden="true">▾</span>
+  </button>
+  <div class="collapse {{ 'show' if filtros_columna_activos else '' }} mt-2" id="filtros-columna-movil">
+    <div class="card card-body">
+      <div class="row g-2">
+        <div class="col-6">
+          <label class="form-label small mb-1">Código</label>
+          <input type="search" class="form-control form-control-sm" name="f_codigo" value="{{ filtros_columna.f_codigo }}" form="filtros-stock" data-autofiltro>
+        </div>
+        <div class="col-6">
+          <label class="form-label small mb-1">Nombre</label>
+          <input type="search" class="form-control form-control-sm" name="f_nombre" value="{{ filtros_columna.f_nombre }}" form="filtros-stock" data-autofiltro>
+        </div>
+        <div class="col-6">
+          <label class="form-label small mb-1">Unidad</label>
+          <input type="search" class="form-control form-control-sm" name="f_unidad" value="{{ filtros_columna.f_unidad }}" form="filtros-stock" data-autofiltro>
+        </div>
+        <div class="col-6">
+          <label class="form-label small mb-1">Línea de negocio</label>
+          <input type="search" class="form-control form-control-sm" name="f_linea" value="{{ filtros_columna.f_linea }}" form="filtros-stock" data-autofiltro>
+        </div>
+        <div class="col-12">
+          <label class="form-label small mb-1">Ubicación</label>
+          <input type="search" class="form-control form-control-sm" name="f_ubicacion" value="{{ filtros_columna.f_ubicacion }}" form="filtros-stock" data-autofiltro>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="filtro-pills mb-3">
   {{ t.pill('Todos', 'todos', filtro, resumen.total) }}
   {{ t.pill('Con diferencias', 'diferencias', filtro, resumen.con_diferencia) }}
