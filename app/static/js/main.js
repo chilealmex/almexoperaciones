@@ -40,4 +40,96 @@ document.addEventListener("DOMContentLoaded", function () {
       }
     });
   });
+
+  // Selects de Cliente/Proveedor: se reemplazan por un campo de texto que
+  // filtra las opciones por nombre o RUT a medida que se escribe. El <select>
+  // original se mantiene oculto pero funcional, así el formulario se sigue
+  // enviando igual.
+  document.querySelectorAll("select[data-buscable]").forEach(function (select) {
+    var envoltorio = document.createElement("div");
+    envoltorio.className = "buscable-select";
+    select.insertAdjacentElement("beforebegin", envoltorio);
+    envoltorio.appendChild(select);
+    select.classList.add("visually-hidden");
+    select.tabIndex = -1;
+
+    var input = document.createElement("input");
+    input.type = "text";
+    input.className = "form-control";
+    input.autocomplete = "off";
+    input.placeholder = "Escribe para buscar por nombre o RUT…";
+    envoltorio.appendChild(input);
+
+    var lista = document.createElement("div");
+    lista.className = "buscable-select-lista";
+    envoltorio.appendChild(lista);
+
+    function normalizar(texto) {
+      return (texto || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    }
+
+    function opciones() {
+      return Array.prototype.slice.call(select.options).filter(function (o) { return o.value; });
+    }
+
+    function textoDeSeleccion() {
+      var actual = select.options[select.selectedIndex];
+      return actual && actual.value ? actual.textContent.trim() : "";
+    }
+
+    function cerrar() {
+      envoltorio.classList.remove("is-open");
+    }
+
+    function pintar(filtro) {
+      var termino = normalizar(filtro);
+      var coincidencias = opciones().filter(function (o) {
+        return normalizar(o.textContent).indexOf(termino) !== -1;
+      });
+      lista.innerHTML = "";
+      if (!coincidencias.length) {
+        var vacio = document.createElement("div");
+        vacio.className = "buscable-select-vacio";
+        vacio.textContent = "Sin resultados";
+        lista.appendChild(vacio);
+        return;
+      }
+      coincidencias.forEach(function (o) {
+        var item = document.createElement("button");
+        item.type = "button";
+        item.className = "buscable-select-item" + (o.value === select.value ? " is-active" : "");
+        item.textContent = o.textContent;
+        item.addEventListener("mousedown", function (e) {
+          e.preventDefault();
+          select.value = o.value;
+          select.dispatchEvent(new Event("change", { bubbles: true }));
+          input.value = o.textContent.trim();
+          cerrar();
+        });
+        lista.appendChild(item);
+      });
+    }
+
+    input.value = textoDeSeleccion();
+    input.addEventListener("focus", function () {
+      input.select();
+      pintar(input.value);
+      envoltorio.classList.add("is-open");
+    });
+    input.addEventListener("input", function () {
+      pintar(input.value);
+      envoltorio.classList.add("is-open");
+    });
+    input.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") input.blur();
+    });
+    input.addEventListener("blur", function () {
+      cerrar();
+      // Si lo escrito no corresponde a ninguna opción, se restaura el nombre de la selección vigente.
+      input.value = textoDeSeleccion();
+    });
+    document.addEventListener("click", function (e) {
+      if (!envoltorio.contains(e.target)) cerrar();
+    });
+  });
 });

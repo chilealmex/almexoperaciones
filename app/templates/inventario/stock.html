@@ -139,8 +139,7 @@
           <th class="num">Dif. sistemas</th>
           {{ t.th('Físico', 'cantidad_fisica', orden, direccion, 'num') }}
           <th>Registrado por</th>
-          <th class="num">vs QMS</th>
-          <th class="num">vs Defontana</th>
+          {{ t.th('Fecha y hora', 'contado_en', orden, direccion) }}
           {{ t.th('Ubicación', 'ubicacion', orden, direccion, 'd-none d-xxl-table-cell') }}
           {{ t.th('Línea de negocio', 'linea_negocio', orden, direccion, 'd-none d-xxl-table-cell') }}
         </tr>
@@ -154,8 +153,7 @@
           {{ t.sin_filtro('num') }}
           {{ t.sin_filtro('num') }}
           {{ t.sin_filtro() }}
-          {{ t.sin_filtro('num') }}
-          {{ t.sin_filtro('num') }}
+          {{ t.sin_filtro() }}
           {{ t.filtro('f_ubicacion', filtros_columna, 'filtros-stock', 'Ubicación', 'd-none d-xxl-table-cell') }}
           {{ t.filtro('f_linea', filtros_columna, 'filtros-stock', 'Línea', 'd-none d-xxl-table-cell') }}
         </tr>
@@ -206,33 +204,19 @@
           </td>
           <td class="celda-registro text-nowrap">
             {% if i.contado and i.contado_por %}
-            <div class="small">{{ i.contado_por.nombre_completo }}</div>
-            <div class="small text-muted">{{ i.contado_en|fecha_hora }}</div>
-            {% elif i.contado %}
-            <span class="text-muted small">{{ i.contado_en|fecha_hora }}</span>
+            {{ i.contado_por.nombre_completo }}
             {% else %}
             <span class="text-muted small">—</span>
             {% endif %}
           </td>
-          <td class="num celda-dif-qms">
-            {% if i.contado %}
-            <span class="badge {{ 'bg-success' if i.diferencia_fisica_qms == 0 else 'bg-danger' }}">{{ '%+d'|format(i.diferencia_fisica_qms) }}</span>
-            {% else %}
-            <span class="text-muted small">—</span>
-            {% endif %}
-          </td>
-          <td class="num celda-dif-def">
-            {% if i.contado %}
-            <span class="badge {{ 'bg-success' if i.diferencia_fisica_defontana == 0 else 'bg-danger' }}">{{ '%+d'|format(i.diferencia_fisica_defontana) }}</span>
-            {% else %}
-            <span class="text-muted small">—</span>
-            {% endif %}
+          <td class="celda-fecha text-nowrap text-muted small">
+            {{ i.contado_en|fecha_hora if i.contado else '—' }}
           </td>
           <td class="d-none d-xl-table-cell">{{ i.ubicacion or '—' }}</td>
           <td class="d-none d-xl-table-cell">{{ i.linea_negocio or '—' }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="13" class="text-center text-muted py-4">Sin resultados{% if q %} para "{{ q }}"{% endif %}.</td></tr>
+        <tr><td colspan="12" class="text-center text-muted py-4">Sin resultados{% if q %} para "{{ q }}"{% endif %}.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -309,14 +293,9 @@
     </div>
 
     <div class="stock-card-foot">
-      <div class="celda-registro small text-muted">
-        {% if i.contado and i.contado_por %}
-        {{ i.contado_por.nombre_completo }} · {{ i.contado_en|fecha_hora }}
-        {% elif i.contado %}
-        {{ i.contado_en|fecha_hora }}
-        {% else %}
-        Sin contar
-        {% endif %}
+      <div class="small text-muted">
+        <span class="celda-registro">{% if i.contado and i.contado_por %}{{ i.contado_por.nombre_completo }}{% elif i.contado %}—{% else %}Sin contar{% endif %}</span>
+        <span class="celda-fecha">{% if i.contado %}{{ i.contado_en|fecha_hora }}{% endif %}</span>
       </div>
     </div>
   </div>
@@ -338,6 +317,7 @@
   var token = "{{ csrf_token() }}";
 
   function pintarBadge(celda, valor) {
+    if (!celda) return;
     if (valor === null || valor === undefined) {
       celda.innerHTML = '<span class="text-muted small">—</span>';
       return;
@@ -347,21 +327,15 @@
     celda.innerHTML = '<span class="badge ' + clase + '">' + signo + '</span>';
   }
 
-  function escapar(texto) {
-    var div = document.createElement('div');
-    div.textContent = texto || '';
-    return div.innerHTML;
-  }
-
   function pintarRegistro(celda, datos) {
     if (!celda) return;
-    if (!datos.contado) {
-      celda.innerHTML = '<span class="text-muted small">—</span>';
-      return;
-    }
-    celda.innerHTML =
-      '<div class="small">' + escapar(datos.registrado_por) + '</div>' +
-      '<div class="small text-muted">' + escapar(datos.registrado_en) + '</div>';
+    celda.textContent = datos.contado ? datos.registrado_por || '—' : '—';
+  }
+
+  function pintarFecha(celda, datos) {
+    if (!celda) return;
+    var esTarjeta = !!celda.closest('.stock-card-foot');
+    celda.textContent = datos.contado ? datos.registrado_en : (esTarjeta ? '' : '—');
   }
 
   function guardar(input) {
@@ -390,6 +364,7 @@
           pintarBadge(fila.querySelector('.celda-dif-qms'), res.datos.dif_qms);
           pintarBadge(fila.querySelector('.celda-dif-def'), res.datos.dif_defontana);
           pintarRegistro(fila.querySelector('.celda-registro'), res.datos);
+          pintarFecha(fila.querySelector('.celda-fecha'), res.datos);
           if (fila.tagName === 'TR') {
             fila.classList.toggle('table-warning', res.datos.tiene_diferencia);
           } else {

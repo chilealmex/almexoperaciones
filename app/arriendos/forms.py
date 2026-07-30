@@ -7,7 +7,10 @@ from app.models.arriendo import ArriendoSalida, ArriendoEntrada
 
 class ArriendoSalidaForm(FlaskForm):
     activo_fijo_id = SelectField("Activo", coerce=int, validators=[DataRequired()])
-    cliente_id = SelectField("Cliente", coerce=int, validators=[DataRequired()])
+    cliente_id = SelectField(
+        "Cliente", coerce=int, validators=[DataRequired()],
+        render_kw={"data-buscable": "1"},
+    )
     fecha_inicio = DateField("Fecha de inicio", validators=[DataRequired()])
     fecha_termino_prevista = DateField("Fecha de término prevista", validators=[DataRequired()])
     monto_periodo = IntegerField("Monto por período (CLP)", validators=[DataRequired(), NumberRange(min=0)])
@@ -20,7 +23,10 @@ class ArriendoSalidaForm(FlaskForm):
 
 
 class ArriendoEntradaForm(FlaskForm):
-    proveedor_id = SelectField("Proveedor", coerce=int, validators=[DataRequired()])
+    proveedor_id = SelectField(
+        "Proveedor", coerce=int, validators=[DataRequired()],
+        render_kw={"data-buscable": "1"},
+    )
     descripcion_activo = StringField("Descripción del activo arrendado", validators=[DataRequired(), Length(max=255)])
     numero_contrato = StringField("N° de contrato", validators=[Optional(), Length(max=50)])
     fecha_inicio = DateField("Fecha de inicio", validators=[DataRequired()])

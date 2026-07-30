@@ -158,7 +158,8 @@ def _cargar_opciones_salida(form):
         for a in ActivoFijo.query.filter_by(es_arrendable=True, estado="activo").order_by(ActivoFijo.codigo_activo).all()
     ]
     form.cliente_id.choices = [
-        (c.id, c.razon_social) for c in Cliente.query.filter_by(activo=True).order_by(Cliente.razon_social).all()
+        (c.id, f"{c.razon_social} — {c.rut}")
+        for c in Cliente.query.filter_by(activo=True).order_by(Cliente.razon_social).all()
     ]
 
 
@@ -321,7 +322,8 @@ def marcar_facturacion_pagada(facturacion_id):
 
 def _cargar_opciones_entrada(form):
     form.proveedor_id.choices = [
-        (p.id, p.razon_social) for p in Proveedor.query.filter_by(activo=True).order_by(Proveedor.razon_social).all()
+        (p.id, f"{p.razon_social} — {p.rut}")
+        for p in Proveedor.query.filter_by(activo=True).order_by(Proveedor.razon_social).all()
     ]
 
 

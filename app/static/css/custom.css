@@ -687,6 +687,50 @@ tr.filtros-fila .form-select {
   border-color: var(--brand-600);
 }
 
+/* Select de Cliente/Proveedor con búsqueda por nombre o RUT */
+.buscable-select {
+  position: relative;
+}
+.buscable-select-lista {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 0.25rem;
+  max-height: 15rem;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(21, 32, 43, 0.12);
+  z-index: 30;
+}
+.buscable-select.is-open .buscable-select-lista {
+  display: block;
+}
+.buscable-select-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.88rem;
+  color: var(--ink);
+  cursor: pointer;
+}
+.buscable-select-item:hover,
+.buscable-select-item.is-active {
+  background: var(--brand-50);
+  color: var(--brand-700);
+}
+.buscable-select-vacio {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
 /* Pastillas de filtro (segmentos) */
 .filtro-pills {
   display: flex;
@@ -834,6 +878,9 @@ tr.filtros-fila .form-select {
   margin-top: 0.65rem;
   padding-top: 0.6rem;
   border-top: 1px solid var(--line);
+}
+.stock-card-foot .celda-fecha:not(:empty)::before {
+  content: " · ";
 }
 
 /* ===== Paginación ===== */

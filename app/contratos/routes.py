@@ -32,7 +32,8 @@ def _fecha_en_palabras(fecha):
 
 def _cargar_clientes(form):
     form.cliente_id.choices = [
-        (c.id, c.razon_social) for c in Cliente.query.filter_by(activo=True).order_by(Cliente.razon_social).all()
+        (c.id, f"{c.razon_social} — {c.rut}")
+        for c in Cliente.query.filter_by(activo=True).order_by(Cliente.razon_social).all()
     ]
 
 
@@ -246,7 +247,7 @@ def subir_documento(contrato_id):
 
 def _preparar_form_generado(form):
     form.cliente_id.choices = [
-        (c.id, c.razon_social)
+        (c.id, f"{c.razon_social} — {c.rut}")
         for c in Cliente.query.filter_by(activo=True).order_by(Cliente.razon_social).all()
     ]
 

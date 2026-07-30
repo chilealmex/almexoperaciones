@@ -7,7 +7,10 @@ from app.utils.rut import validar_rut
 
 
 class ContratoGeneradoForm(FlaskForm):
-    cliente_id = SelectField("Cliente (Arrendatario)", coerce=int, validators=[DataRequired()])
+    cliente_id = SelectField(
+        "Cliente (Arrendatario)", coerce=int, validators=[DataRequired()],
+        render_kw={"data-buscable": "1"},
+    )
     fecha_contrato = DateField("Fecha del contrato", validators=[DataRequired()])
     correo_arrendador = StringField("Correo de contacto del Arrendador", validators=[Optional(), Email()])
 
@@ -18,7 +21,7 @@ class ContratoGeneradoForm(FlaskForm):
 
     fiador_tipo = SelectField(
         "Tipo de fiador",
-        choices=[("natural", "Persona natural"), ("empresa", "Empresa (SpA/S.A.)")],
+        choices=[("natural", "Persona natural"), ("empresa", "Empresa")],
         validators=[DataRequired()],
     )
     fiador_nombre = StringField("Nombre / Razón social del Fiador", validators=[DataRequired(), Length(max=150)])
@@ -29,12 +32,18 @@ class ContratoGeneradoForm(FlaskForm):
 
     cotizacion_numero = StringField("N° de Cotización", validators=[DataRequired(), Length(max=30)])
     cotizacion_fecha = DateField("Fecha de la Cotización", validators=[DataRequired()])
-    planta_ubicacion = StringField("Ubicación de la Planta Almex", validators=[DataRequired(), Length(max=255)])
+    planta_ubicacion = StringField(
+        "Ubicación de la Planta Almex", validators=[DataRequired(), Length(max=255)],
+        default="MARIA JOSEFINA #1258-C PARQ.IND.STGO.NORTE COMUNA LAMPA, CIUDAD SANTIAGO",
+    )
     deducible_uf = IntegerField("Deducible de la póliza (UF por evento)", validators=[DataRequired(), NumberRange(min=0)])
 
 
 class ContratoForm(FlaskForm):
-    cliente_id = SelectField("Cliente", coerce=int, validators=[DataRequired()])
+    cliente_id = SelectField(
+        "Cliente", coerce=int, validators=[DataRequired()],
+        render_kw={"data-buscable": "1"},
+    )
     numero_contrato = StringField("N° de contrato", validators=[DataRequired(), Length(max=50)])
     objeto = StringField("Objeto del contrato", validators=[DataRequired(), Length(max=255)])
     fecha_inicio = DateField("Fecha de inicio", validators=[DataRequired()])
