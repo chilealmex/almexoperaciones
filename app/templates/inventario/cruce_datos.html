@@ -114,7 +114,7 @@
         {% for i in items %}
         <tr>
           <td class="text-nowrap fw-semibold">{{ i.codigo }}</td>
-          <td>{{ i.nombre or '—' }}</td>
+          <td class="celda-nombre"><span class="texto-clamp-2" title="{{ i.nombre or '' }}">{{ i.nombre or '—' }}</span></td>
           <td>{{ i.unidad_qms or '—' }}</td>
           <td>
             {% if i.unidades_coinciden %}

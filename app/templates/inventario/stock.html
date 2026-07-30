@@ -89,7 +89,7 @@
 </p>
 {% endif %}
 
-<div class="table-card">
+<div class="table-card d-none d-lg-block">
   <div class="table-responsive">
     <table class="table table-hover align-middle mb-0" id="tabla-stock">
       <thead>
@@ -128,7 +128,7 @@
         {% for i in paginacion.items %}
         <tr data-fila="{{ i.id }}" class="{{ 'table-warning' if i.tiene_diferencia else '' }}">
           <td class="text-nowrap fw-semibold">{{ i.codigo }}</td>
-          <td>{{ i.nombre or '—' }}</td>
+          <td class="celda-nombre"><span class="texto-clamp-2" title="{{ i.nombre or '' }}">{{ i.nombre or '—' }}</span></td>
           <td class="text-nowrap">
             {% if i.unidades_coinciden %}
             {{ i.unidad_qms or i.unidad_defontana or '—' }}
@@ -204,6 +204,94 @@
   {{ t.paginacion(paginacion.page, paginacion.pages, paginacion.total, 'artículos') }}
 </div>
 
+<div class="d-lg-none stock-cards">
+  {% for i in paginacion.items %}
+  <div class="stock-card {{ 'is-diff' if i.tiene_diferencia else '' }}" data-fila="{{ i.id }}">
+    <div class="stock-card-head">
+      <div>
+        <div class="stock-card-codigo">{{ i.codigo }}</div>
+        <div class="stock-card-nombre" title="{{ i.nombre or '' }}">{{ i.nombre or '—' }}</div>
+      </div>
+      {% if i.diferencia_sistemas != 0 %}
+      <span class="badge bg-danger">{{ '%+d'|format(i.diferencia_sistemas) }}</span>
+      {% else %}
+      <span class="badge bg-success">0</span>
+      {% endif %}
+    </div>
+
+    <div class="stock-card-meta">
+      {% if i.unidades_coinciden %}
+      <span>{{ i.unidad_qms or i.unidad_defontana or '—' }}</span>
+      {% else %}
+      <span class="badge bg-danger" title="QMS declara {{ i.unidad_qms }} y Defontana {{ i.unidad_defontana }}">{{ i.unidad_qms }} ≠ {{ i.unidad_defontana }}</span>
+      {% endif %}
+      {% if i.ubicacion %}<span>· {{ i.ubicacion }}</span>{% endif %}
+      {% if i.linea_negocio %}<span>· {{ i.linea_negocio }}</span>{% endif %}
+    </div>
+
+    {% if i.tiene_costo and i.tiene_diferencia_costo %}
+    <div class="stock-card-costo-dif">
+      Costo unitario distinto: QMS {{ i.costo_unitario_qms|clp }} ≠ Defontana {{ i.costo_unitario_defontana|clp }}
+    </div>
+    {% endif %}
+
+    <div class="stock-card-grid">
+      <div>
+        <span class="lbl">QMS</span>
+        <span class="val">{{ i.cantidad_qms }}</span>
+      </div>
+      <div>
+        <span class="lbl">Defontana</span>
+        <span class="val">{{ i.cantidad_defontana }}</span>
+      </div>
+      <div>
+        <span class="lbl">Físico</span>
+        {% if puede('inventario', 'editar') %}
+        <input type="number" inputmode="numeric" class="form-control form-control-sm input-fisico"
+               value="{{ i.cantidad_fisica if i.contado else '' }}"
+               data-url="{{ url_for('inventario.stock_contar', item_id=i.id) }}"
+               aria-label="Cantidad física de {{ i.codigo }}">
+        {% else %}
+        <span class="val">{{ i.cantidad_fisica if i.contado else '—' }}</span>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="stock-card-diffs">
+      <div class="diff-item">
+        vs QMS
+        <span class="celda-dif-qms">
+          {% if i.contado %}<span class="badge {{ 'bg-success' if i.diferencia_fisica_qms == 0 else 'bg-danger' }}">{{ '%+d'|format(i.diferencia_fisica_qms) }}</span>{% else %}—{% endif %}
+        </span>
+      </div>
+      <div class="diff-item">
+        vs Defontana
+        <span class="celda-dif-def">
+          {% if i.contado %}<span class="badge {{ 'bg-success' if i.diferencia_fisica_defontana == 0 else 'bg-danger' }}">{{ '%+d'|format(i.diferencia_fisica_defontana) }}</span>{% else %}—{% endif %}
+        </span>
+      </div>
+    </div>
+
+    <div class="stock-card-foot">
+      <div class="celda-registro small text-muted">
+        {% if i.contado and i.contado_por %}
+        {{ i.contado_por.nombre_completo }} · {{ i.contado_en|fecha_hora }}
+        {% elif i.contado %}
+        {{ i.contado_en|fecha_hora }}
+        {% else %}
+        Sin contar
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% else %}
+  <p class="text-center text-muted py-4">Sin resultados{% if q %} para "{{ q }}"{% endif %}.</p>
+  {% endfor %}
+  {% if paginacion.items %}
+  {{ t.paginacion(paginacion.page, paginacion.pages, paginacion.total, 'artículos') }}
+  {% endif %}
+</div>
+
 {% endif %}
 {% endblock %}
 
@@ -241,7 +329,11 @@
   }
 
   function guardar(input) {
-    var fila = input.closest('tr');
+    var filaActual = input.closest('[data-fila]');
+    var itemId = filaActual ? filaActual.dataset.fila : null;
+    var filas = itemId
+      ? document.querySelectorAll('[data-fila="' + itemId + '"]')
+      : [filaActual];
     input.classList.remove('is-invalid', 'is-valid');
 
     fetch(input.dataset.url, {
@@ -257,10 +349,21 @@
           return;
         }
         input.classList.add('is-valid');
-        pintarBadge(fila.querySelector('.celda-dif-qms'), res.datos.dif_qms);
-        pintarBadge(fila.querySelector('.celda-dif-def'), res.datos.dif_defontana);
-        pintarRegistro(fila.querySelector('.celda-registro'), res.datos);
-        fila.classList.toggle('table-warning', res.datos.tiene_diferencia);
+        filas.forEach(function (fila) {
+          if (!fila) return;
+          pintarBadge(fila.querySelector('.celda-dif-qms'), res.datos.dif_qms);
+          pintarBadge(fila.querySelector('.celda-dif-def'), res.datos.dif_defontana);
+          pintarRegistro(fila.querySelector('.celda-registro'), res.datos);
+          if (fila.tagName === 'TR') {
+            fila.classList.toggle('table-warning', res.datos.tiene_diferencia);
+          } else {
+            fila.classList.toggle('is-diff', res.datos.tiene_diferencia);
+          }
+          var otroInput = fila.querySelector('.input-fisico');
+          if (otroInput && otroInput !== input && otroInput.value !== input.value) {
+            otroInput.value = input.value;
+          }
+        });
       })
       .catch(function () {
         input.classList.add('is-invalid');

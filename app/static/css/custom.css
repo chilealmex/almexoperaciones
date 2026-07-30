@@ -719,6 +719,123 @@ tr.filtros-fila .form-select {
   font-weight: 500;
 }
 
+/* Truncado de nombre de producto: evita filas de tabla excesivamente altas */
+.celda-nombre {
+  width: 22rem;
+  max-width: 22rem;
+}
+.texto-clamp-2 {
+  display: -webkit-box;
+  width: 100%;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+/* ===== Tarjetas de stock (vista móvil) ===== */
+.stock-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+.stock-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.85rem 0.95rem;
+  box-shadow: 0 1px 2px rgba(21, 32, 43, 0.04);
+}
+.stock-card.is-diff {
+  background: var(--warn-bg);
+  border-color: #ecdcbe;
+}
+.stock-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+.stock-card-codigo {
+  font-weight: 700;
+  font-size: 0.92rem;
+  color: var(--ink);
+}
+.stock-card-nombre {
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.3;
+  margin-top: 0.1rem;
+}
+.stock-card-meta {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-top: 0.35rem;
+}
+.stock-card-meta span + span {
+  margin-left: 0.3rem;
+}
+.stock-card-costo-dif {
+  margin-top: 0.55rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--danger);
+  background: var(--danger-bg);
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+}
+.stock-card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+  margin-top: 0.7rem;
+}
+.stock-card-grid .lbl {
+  display: block;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  font-weight: 700;
+  margin-bottom: 0.25rem;
+}
+.stock-card-grid .val {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.95rem;
+}
+.stock-card-grid input.input-fisico {
+  text-align: center;
+}
+.stock-card-diffs {
+  display: flex;
+  gap: 0.9rem;
+  margin-top: 0.7rem;
+  flex-wrap: wrap;
+}
+.diff-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.stock-card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.65rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--line);
+}
+
 /* ===== Paginación ===== */
 .page-link {
   color: var(--brand-700);

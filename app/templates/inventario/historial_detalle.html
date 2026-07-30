@@ -97,7 +97,7 @@
         {% for d in detalles %}
         <tr>
           <td class="text-nowrap fw-semibold">{{ d.codigo }}</td>
-          <td>{{ d.nombre or '—' }}</td>
+          <td class="celda-nombre"><span class="texto-clamp-2" title="{{ d.nombre or '' }}">{{ d.nombre or '—' }}</span></td>
           <td>
             {% if d.unidades_coinciden %}
             {{ d.unidad_qms or d.unidad_defontana or '—' }}
