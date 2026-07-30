@@ -120,6 +120,11 @@ def editar_usuario(usuario_id):
 @bp.route("/usuarios/<int:usuario_id>/permisos", methods=["GET", "POST"])
 @require_permission("admin", "editar")
 def permisos_usuario(usuario_id):
+    # Solo el superadmin define qué módulos puede ver/editar cada usuario:
+    # un admin normal ya no puede tocar esta pantalla, ni siquiera por URL directa.
+    if not current_user.es_superadmin:
+        abort(403)
+
     usuario = Usuario.query.get_or_404(usuario_id)
     if not current_user.puede_gestionar_a(usuario):
         abort(403)

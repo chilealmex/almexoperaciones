@@ -107,3 +107,51 @@ def test_admin_no_puede_editar_a_otro_admin_via_ruta(client, db, usuario_admin):
     login(client, "admin@test.cl")
     response = client.get(f"/admin/usuarios/{otro_admin.id}/editar")
     assert response.status_code == 403
+
+
+def test_admin_no_puede_configurar_permisos_ni_por_url_directa(client, db, empresa, usuario_admin):
+    rol_usuario = Rol(clave="usuario", nombre="Usuario")
+    db.session.add(rol_usuario)
+    db.session.commit()
+    normal = Usuario(
+        empresa_id=empresa.id,
+        nombre_completo="Normal",
+        nombre_usuario="normal2_prueba",
+        email="normal2@test.cl",
+        rol_id=rol_usuario.id,
+    )
+    normal.set_password("password123")
+    db.session.add(normal)
+    db.session.commit()
+
+    login(client, "admin@test.cl")
+    response = client.get(f"/admin/usuarios/{normal.id}/permisos")
+    assert response.status_code == 403
+
+
+def test_superadmin_si_puede_configurar_permisos(client, db, empresa, usuario_admin):
+    superadmin = _crear_superadmin(db, empresa)
+    rol_usuario = Rol(clave="usuario", nombre="Usuario")
+    db.session.add(rol_usuario)
+    db.session.commit()
+    normal = Usuario(
+        empresa_id=empresa.id,
+        nombre_completo="Normal",
+        nombre_usuario="normal3_prueba",
+        email="normal3@test.cl",
+        rol_id=rol_usuario.id,
+    )
+    normal.set_password("password123")
+    db.session.add(normal)
+    db.session.commit()
+
+    login(client, "super@test.cl")
+    response = client.get(f"/admin/usuarios/{normal.id}/permisos")
+    assert response.status_code == 200
+
+
+def test_link_de_permisos_no_aparece_para_admin_normal(client, usuario_admin, usuario_bodega):
+    login(client, "admin@test.cl")
+    response = client.get("/admin/usuarios")
+    assert b"Editar" in response.data
+    assert b"/permisos" not in response.data
