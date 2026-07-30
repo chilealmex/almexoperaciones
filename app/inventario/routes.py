@@ -14,9 +14,10 @@ from app.models.conteo_inventario import ItemConteoInventario
 from app.utils.decorators import require_permission
 from app.utils.storage import guardar_documento, listar_documentos
 from app.utils.importar_conteo import importar_qms, importar_defontana
-from app.utils.formatting import format_clp
+from app.utils.formatting import format_clp, format_fecha_hora
 from app.utils.graficos import COLOR, serie, widget_seguro
 from app.utils.paneles import panel_inventario
+from app.utils.exportar import responder_excel, col, CLP, ENTERO, FECHA
 
 
 def _cargar_categorias(form):
@@ -61,13 +62,14 @@ COLUMNAS_PRODUCTOS = {
 FILTROS_PRODUCTOS = ("todos", "bajo_stock", "sin_stock", "inactivos")
 
 
-@bp.route("/productos")
-@require_permission("inventario", "ver")
-def productos():
-    """Listado de productos con búsqueda, filtros por columna y orden por título."""
+def _consulta_productos(args):
+    """Consulta de productos con búsqueda, filtros por columna y orden aplicados.
+
+    La comparten el listado en pantalla y el informe en Excel.
+    """
     consulta = Producto.query.outerjoin(CategoriaProducto, Producto.categoria_id == CategoriaProducto.id)
 
-    q = (request.args.get("q") or "").strip()
+    q = (args.get("q") or "").strip()
     if q:
         patron = f"%{q}%"
         consulta = consulta.filter(or_(Producto.sku.ilike(patron), Producto.nombre.ilike(patron)))
@@ -78,12 +80,12 @@ def productos():
         ("f_nombre", Producto.nombre),
         ("f_categoria", CategoriaProducto.nombre),
     ):
-        texto = (request.args.get(parametro) or "").strip()
+        texto = (args.get(parametro) or "").strip()
         filtros_columna[parametro] = texto
         if texto:
             consulta = consulta.filter(columna.ilike(f"%{texto}%"))
 
-    filtro = request.args.get("filtro", "todos")
+    filtro = args.get("filtro", "todos")
     if filtro not in FILTROS_PRODUCTOS:
         filtro = "todos"
     if filtro == "inactivos":
@@ -95,7 +97,15 @@ def productos():
         elif filtro == "sin_stock":
             consulta = consulta.filter(Producto.stock_actual <= 0)
 
-    consulta, orden, direccion = _ordenar(consulta, request.args, COLUMNAS_PRODUCTOS, "nombre")
+    consulta, orden, direccion = _ordenar(consulta, args, COLUMNAS_PRODUCTOS, "nombre")
+    return consulta, q, filtro, filtros_columna, orden, direccion
+
+
+@bp.route("/productos")
+@require_permission("inventario", "ver")
+def productos():
+    """Listado de productos con búsqueda, filtros por columna y orden por título."""
+    consulta, q, filtro, filtros_columna, orden, direccion = _consulta_productos(request.args)
     lista = consulta.all()
 
     todos = Producto.query.all()
@@ -263,22 +273,27 @@ FILTROS_STOCK = ("todos", "diferencias", "sin_contar", "contados")
 COLUMNAS_STOCK = {
     "codigo": ItemConteoInventario.codigo,
     "nombre": ItemConteoInventario.nombre,
+    "unidad_qms": ItemConteoInventario.unidad_qms,
+    "costo_qms": ItemConteoInventario.costo_unitario_qms,
     "cantidad_qms": ItemConteoInventario.cantidad_qms,
     "cantidad_defontana": ItemConteoInventario.cantidad_defontana,
     "cantidad_fisica": ItemConteoInventario.cantidad_fisica,
+    "contado_en": ItemConteoInventario.contado_en,
     "ubicacion": ItemConteoInventario.ubicacion,
     "linea_negocio": ItemConteoInventario.linea_negocio,
 }
 
 
-@bp.route("/stock")
-@require_permission("inventario", "ver")
-def stock():
-    q = request.args.get("q", "").strip()
-    filtro = request.args.get("filtro", "todos")
+def _consulta_stock(args):
+    """Consulta del cruce de stock con búsqueda, filtros por columna y orden aplicados.
+
+    La comparte el listado en pantalla y la exportación a Excel, para que el
+    informe descargado sea exactamente lo que el usuario está viendo.
+    """
+    q = (args.get("q") or "").strip()
+    filtro = args.get("filtro", "todos")
     if filtro not in FILTROS_STOCK:
         filtro = "todos"
-    pagina = request.args.get("pagina", 1, type=int)
 
     base = ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id)
     if q:
@@ -287,7 +302,7 @@ def stock():
             or_(ItemConteoInventario.codigo.ilike(patron), ItemConteoInventario.nombre.ilike(patron))
         )
 
-    base, filtros_columna = _filtros_de_columna(base, request.args)
+    base, filtros_columna = _filtros_de_columna(base, args)
 
     if filtro == "sin_contar":
         base = base.filter(ItemConteoInventario.cantidad_fisica.is_(None))
@@ -308,8 +323,16 @@ def stock():
             )
         )
 
-    base, orden, direccion = _ordenar(base, request.args, COLUMNAS_STOCK, "codigo")
-    paginacion = base.paginate(page=max(1, pagina), per_page=100, error_out=False)
+    base, orden, direccion = _ordenar(base, args, COLUMNAS_STOCK, "codigo")
+    return base, q, filtro, filtros_columna, orden, direccion
+
+
+@bp.route("/stock")
+@require_permission("inventario", "ver")
+def stock():
+    consulta, q, filtro, filtros_columna, orden, direccion = _consulta_stock(request.args)
+    pagina = request.args.get("pagina", 1, type=int)
+    paginacion = consulta.paginate(page=max(1, pagina), per_page=100, error_out=False)
 
     todos = ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id).all()
     resumen = {
@@ -327,6 +350,94 @@ def stock():
         filtros_columna=filtros_columna,
         orden=orden,
         direccion=direccion,
+    )
+
+
+def _descripcion_filtros(q, filtro, filtros_columna, etiquetas):
+    """Texto legible con los filtros aplicados, para dejarlo escrito en el informe."""
+    partes = []
+    if filtro and filtro != "todos":
+        partes.append(etiquetas.get(filtro, filtro))
+    if q:
+        partes.append(f'búsqueda "{q}"')
+    for parametro, texto in (filtros_columna or {}).items():
+        if texto:
+            partes.append(f'{etiquetas.get(parametro, parametro)}: "{texto}"')
+    return " · ".join(partes) if partes else "Sin filtros"
+
+
+ETIQUETAS_STOCK = {
+    "diferencias": "Solo con diferencias",
+    "sin_contar": "Solo sin contar",
+    "contados": "Solo contados",
+    "f_codigo": "Código",
+    "f_nombre": "Nombre",
+    "f_ubicacion": "Ubicación",
+    "f_linea": "Línea de negocio",
+    "f_unidad": "Unidad",
+    "f_categoria": "Categoría",
+}
+
+
+@bp.route("/stock.xlsx")
+@require_permission("inventario", "ver")
+def stock_excel():
+    """Informe en Excel del cruce de stock, con los mismos filtros de la pantalla."""
+    consulta, q, filtro, filtros_columna, _orden, _dir = _consulta_stock(request.args)
+    items = consulta.all()
+
+    columnas = [
+        col("Código", ancho=20, total="texto"),
+        col("Nombre", ancho=48),
+        col("Unidad QMS", ancho=12),
+        col("Unidad Defontana", ancho=17),
+        col("Unidades coinciden", ancho=18),
+        col("Costo unitario QMS", ancho=18, formato=CLP),
+        col("Costo unitario Defontana", ancho=22, formato=CLP),
+        col("Dif. costo unitario", ancho=18, formato=CLP),
+        col("Stock QMS", ancho=12, formato=ENTERO, total="suma"),
+        col("Stock Defontana", ancho=16, formato=ENTERO, total="suma"),
+        col("Dif. sistemas", ancho=14, formato=ENTERO, total="suma"),
+        col("Stock físico", ancho=13, formato=ENTERO, total="suma"),
+        col("Físico vs QMS", ancho=14, formato=ENTERO, total="suma"),
+        col("Físico vs Defontana", ancho=18, formato=ENTERO, total="suma"),
+        col("Estado del conteo", ancho=18),
+        col("Contado por", ancho=26),
+        col("Fecha y hora del conteo", ancho=22),
+        col("Ubicación", ancho=28),
+        col("Línea de negocio", ancho=24),
+    ]
+    filas = [
+        [
+            i.codigo,
+            i.nombre or "",
+            i.unidad_qms or "",
+            i.unidad_defontana or "",
+            "Sí" if i.unidades_coinciden else "NO",
+            i.costo_unitario_qms,
+            i.costo_unitario_defontana,
+            i.diferencia_costo_unitario,
+            i.cantidad_qms,
+            i.cantidad_defontana,
+            i.diferencia_sistemas,
+            i.cantidad_fisica if i.contado else None,
+            i.diferencia_fisica_qms,
+            i.diferencia_fisica_defontana,
+            "Contado" if i.contado else "Pendiente",
+            i.contado_por.nombre_completo if i.contado_por else "",
+            format_fecha_hora(i.contado_en),
+            i.ubicacion or "",
+            i.linea_negocio or "",
+        ]
+        for i in items
+    ]
+
+    return responder_excel(
+        "stock-y-conteo",
+        "Stock y conteo",
+        columnas,
+        filas,
+        _descripcion_filtros(q, filtro, filtros_columna, ETIQUETAS_STOCK),
     )
 
 
@@ -364,6 +475,9 @@ def stock_contar(item_id):
             "dif_qms": item.diferencia_fisica_qms,
             "dif_defontana": item.diferencia_fisica_defontana,
             "tiene_diferencia": item.tiene_diferencia,
+            # Para mostrar la trazabilidad del conteo sin recargar la página
+            "registrado_por": item.contado_por.nombre_completo if item.contado_por else "",
+            "registrado_en": format_fecha_hora(item.contado_en),
         }
     )
 
@@ -565,6 +679,193 @@ def ajuste_csv():
         f"attachment; filename=ajuste-inventario-{date.today().isoformat()}.csv"
     )
     return respuesta
+
+
+ETIQUETAS_AJUSTE = {
+    "dif_costo": "Solo con diferencia de costo",
+    "dif_unidad": "Solo con distinta unidad de medida",
+    "dif_stock": "Solo con diferencia de stock",
+    "sin_costo": "Solo sin costo cargado",
+    "contados": "Solo contados",
+    "f_codigo": "Código",
+    "f_nombre": "Descripción",
+    "f_unidad": "Unidad",
+    "f_categoria": "Categoría",
+    "f_linea": "Línea de negocio",
+    "f_ubicacion": "Ubicación",
+}
+
+
+@bp.route("/ajuste.xlsx")
+@require_permission("inventario", "ver")
+def ajuste_excel():
+    """Informe en Excel del ajuste de inventario, con los filtros de la pantalla."""
+    items, q, filtros_columna, filtro, _orden, _dir = _items_ajuste(request.args)
+
+    columnas = [
+        col("Código", ancho=20, total="texto"),
+        col("Descripción", ancho=48),
+        col("Unidad QMS", ancho=12),
+        col("Unidad Defontana", ancho=17),
+        col("Unidades coinciden", ancho=18),
+        col("Costo unitario QMS", ancho=18, formato=CLP),
+        col("Costo unitario Defontana", ancho=22, formato=CLP),
+        col("Dif. costo unitario", ancho=18, formato=CLP),
+        col("Stock QMS", ancho=12, formato=ENTERO, total="suma"),
+        col("Stock Defontana", ancho=16, formato=ENTERO, total="suma"),
+        col("Stock físico", ancho=13, formato=ENTERO, total="suma"),
+        col("Valor QMS", ancho=16, formato=CLP, total="suma"),
+        col("Valor Defontana", ancho=17, formato=CLP, total="suma"),
+        col("Dif. valorización", ancho=18, formato=CLP, total="suma"),
+        col("Ajuste físico vs QMS", ancho=20, formato=CLP, total="suma"),
+        col("Categoría", ancho=24),
+        col("Línea de negocio", ancho=24),
+        col("Ubicación", ancho=28),
+    ]
+    filas = [
+        [
+            i.codigo,
+            i.nombre or "",
+            i.unidad_qms or "",
+            i.unidad_defontana or "",
+            "Sí" if i.unidades_coinciden else "NO",
+            i.costo_unitario_qms,
+            i.costo_unitario_defontana,
+            i.diferencia_costo_unitario,
+            i.cantidad_qms,
+            i.cantidad_defontana,
+            i.cantidad_fisica if i.contado else None,
+            i.valor_qms,
+            i.valor_defontana,
+            i.diferencia_valor_sistemas,
+            i.diferencia_valor_fisico,
+            i.categoria or "",
+            i.linea_negocio or "",
+            i.ubicacion or "",
+        ]
+        for i in items
+    ]
+
+    return responder_excel(
+        "ajuste-inventario",
+        "Ajuste de inventario",
+        columnas,
+        filas,
+        _descripcion_filtros(q, filtro, filtros_columna, ETIQUETAS_AJUSTE),
+    )
+
+
+ETIQUETAS_PRODUCTOS = {
+    "bajo_stock": "Solo bajo el stock mínimo",
+    "sin_stock": "Solo sin stock",
+    "inactivos": "Solo inactivos",
+    "f_sku": "SKU",
+    "f_nombre": "Producto",
+    "f_categoria": "Categoría",
+}
+
+
+@bp.route("/productos.xlsx")
+@require_permission("inventario", "ver")
+def productos_excel():
+    """Informe en Excel del maestro de productos, con los filtros de la pantalla."""
+    consulta, q, filtro, filtros_columna, _orden, _dir = _consulta_productos(request.args)
+    productos_filtrados = consulta.all()
+
+    columnas = [
+        col("SKU", ancho=18, total="texto"),
+        col("Producto", ancho=44),
+        col("Descripción", ancho=44),
+        col("Categoría", ancho=22),
+        col("Unidad", ancho=12),
+        col("Stock actual", ancho=14, formato=ENTERO, total="suma"),
+        col("Stock mínimo", ancho=14, formato=ENTERO),
+        col("Estado", ancho=16),
+        col("Precio costo", ancho=15, formato=CLP),
+        col("Precio venta", ancho=15, formato=CLP),
+        col("Valor stock (costo)", ancho=19, formato=CLP, total="suma"),
+        col("Valor stock (venta)", ancho=19, formato=CLP, total="suma"),
+    ]
+
+    def _estado(p):
+        if not p.activo:
+            return "Inactivo"
+        if p.stock_actual <= 0:
+            return "Sin stock"
+        if p.bajo_stock_minimo:
+            return "Bajo mínimo"
+        return "Disponible"
+
+    filas = [
+        [
+            p.sku,
+            p.nombre,
+            p.descripcion or "",
+            p.categoria.nombre if p.categoria else "",
+            p.unidad_medida,
+            p.stock_actual,
+            p.stock_minimo,
+            _estado(p),
+            p.precio_costo,
+            p.precio_venta,
+            p.stock_actual * p.precio_costo,
+            p.stock_actual * p.precio_venta,
+        ]
+        for p in productos_filtrados
+    ]
+
+    return responder_excel(
+        "productos",
+        "Productos",
+        columnas,
+        filas,
+        _descripcion_filtros(q, filtro, filtros_columna, ETIQUETAS_PRODUCTOS),
+    )
+
+
+@bp.route("/movimientos.xlsx")
+@require_permission("inventario", "ver")
+def movimientos_excel():
+    """Informe en Excel de los últimos movimientos de inventario."""
+    lista = (
+        MovimientoInventario.query.order_by(MovimientoInventario.fecha.desc()).limit(2000).all()
+    )
+
+    columnas = [
+        col("Fecha", ancho=14, formato=FECHA, total="texto"),
+        col("SKU", ancho=18),
+        col("Producto", ancho=44),
+        col("Tipo", ancho=12),
+        col("Cantidad", ancho=12, formato=ENTERO, total="suma"),
+        col("Documento", ancho=18),
+        col("N° documento", ancho=18),
+        col("Motivo", ancho=36),
+        col("Usuario", ancho=24),
+        col("Observaciones", ancho=40),
+    ]
+    filas = [
+        [
+            m.fecha,
+            m.producto.sku if m.producto else "",
+            m.producto.nombre if m.producto else "",
+            m.tipo,
+            m.cantidad,
+            m.tipo_documento or "",
+            m.numero_documento or "",
+            m.motivo or "",
+            m.usuario.nombre_completo if m.usuario else "",
+            m.observaciones or "",
+        ]
+        for m in lista
+    ]
+
+    return responder_excel(
+        "movimientos-inventario",
+        "Movimientos de inventario",
+        columnas,
+        filas,
+        f"Últimos {len(filas)} movimientos",
+    )
 
 
 @bp.route("/conteo/importar", methods=["GET", "POST"])

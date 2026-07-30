@@ -11,6 +11,7 @@ from app.utils.decorators import require_permission
 from app.utils.storage import guardar_documento, listar_documentos
 from app.utils.graficos import widget_seguro
 from app.utils.paneles import panel_activos
+from app.utils.exportar import responder_excel, col, CLP, ENTERO, FECHA
 
 
 def _stats_activos():
@@ -67,6 +68,111 @@ def depreciacion():
         activos=filas,
         total_arriendo=total_arriendo,
         total_administracion=total_administracion,
+    )
+
+
+ESTADOS_LEGIBLES = {
+    "activo": "En uso",
+    "en_mantenimiento": "En mantención",
+    "dado_de_baja": "Dado de baja",
+    "vendido": "Vendido",
+}
+
+
+@bp.route("/lista.xlsx")
+@require_permission("activos_fijos", "ver")
+def activos_excel():
+    """Informe en Excel del registro de activos fijos."""
+    lista, _stats = _stats_activos()
+
+    columnas = [
+        col("Código", ancho=16, total="texto"),
+        col("Nombre", ancho=40),
+        col("Descripción", ancho=40),
+        col("Categoría", ancho=22),
+        col("Estado", ancho=16),
+        col("Fecha compra", ancho=14, formato=FECHA),
+        col("Valor compra", ancho=16, formato=CLP, total="suma"),
+        col("Valor residual", ancho=15, formato=CLP),
+        col("Vida útil (meses)", ancho=17, formato=ENTERO),
+        col("Meses transcurridos", ancho=19, formato=ENTERO),
+        col("Depreciación mensual", ancho=20, formato=CLP, total="suma"),
+        col("Valor libro", ancho=16, formato=CLP, total="suma"),
+        col("Centro de costo", ancho=18),
+        col("Arrendado hoy", ancho=15),
+        col("Ubicación", ancho=26),
+        col("Responsable", ancho=26),
+        col("N° factura compra", ancho=18),
+    ]
+    filas = [
+        [
+            a.codigo_activo,
+            a.nombre,
+            a.descripcion or "",
+            a.categoria or "",
+            ESTADOS_LEGIBLES.get(a.estado, a.estado),
+            a.fecha_compra,
+            a.valor_compra,
+            a.valor_residual,
+            a.vida_util_meses,
+            a.meses_transcurridos,
+            a.depreciacion_mensual,
+            a.valor_libro,
+            a.centro_costo,
+            "Sí" if (a.es_arrendable and a.arrendado_actualmente) else "No",
+            a.ubicacion or "",
+            a.responsable.nombre_completo if a.responsable else "",
+            a.numero_factura_compra or "",
+        ]
+        for a in lista
+    ]
+
+    return responder_excel("activos-fijos", "Activos fijos", columnas, filas)
+
+
+@bp.route("/depreciacion.xlsx")
+@require_permission("activos_fijos", "ver")
+def depreciacion_excel():
+    """Informe en Excel de la depreciación mensual por centro de costo."""
+    activos_activos = (
+        ActivoFijo.query.filter_by(estado="activo").order_by(ActivoFijo.codigo_activo).all()
+    )
+    lista = [a for a in activos_activos if a.depreciacion_mensual > 0]
+
+    columnas = [
+        col("Código", ancho=16, total="texto"),
+        col("Nombre", ancho=44),
+        col("Categoría", ancho=22),
+        col("Centro de costo", ancho=18),
+        col("Fecha compra", ancho=14, formato=FECHA),
+        col("Valor compra", ancho=16, formato=CLP, total="suma"),
+        col("Vida útil (meses)", ancho=17, formato=ENTERO),
+        col("Meses transcurridos", ancho=19, formato=ENTERO),
+        col("Depreciación mensual", ancho=20, formato=CLP, total="suma"),
+        col("Valor libro", ancho=16, formato=CLP, total="suma"),
+    ]
+    filas = [
+        [
+            a.codigo_activo,
+            a.nombre,
+            a.categoria or "",
+            a.centro_costo,
+            a.fecha_compra,
+            a.valor_compra,
+            a.vida_util_meses,
+            a.meses_transcurridos,
+            a.depreciacion_mensual,
+            a.valor_libro,
+        ]
+        for a in lista
+    ]
+
+    return responder_excel(
+        "depreciacion",
+        "Depreciación mensual",
+        columnas,
+        filas,
+        f"Depreciación del mes de {date.today().strftime('%m-%Y')}",
     )
 
 

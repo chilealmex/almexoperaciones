@@ -1,3 +1,5 @@
+from datetime import date
+
 from flask import render_template, redirect, url_for, flash, request
 from flask_login import current_user
 
@@ -11,6 +13,7 @@ from app.utils.decorators import require_permission
 from app.utils.storage import guardar_documento, listar_documentos
 from app.utils.graficos import widget_seguro
 from app.utils.paneles import panel_contratos
+from app.utils.exportar import responder_excel, col, CLP, ENTERO, FECHA
 
 MESES_ES = (
     "enero", "febrero", "marzo", "abril", "mayo", "junio",
@@ -139,6 +142,97 @@ def resumen():
 def contratos():
     lista, stats = _stats_contratos()
     return render_template("contratos/lista.html", contratos=lista, stats=stats)
+
+
+ESTADOS_LEGIBLES = {
+    "vigente": "Vigente",
+    "por_vencer": "Por vencer",
+    "vencido": "Vencido",
+    "terminado": "Terminado",
+}
+
+
+@bp.route("/lista.xlsx")
+@require_permission("contratos", "ver")
+def contratos_excel():
+    """Informe en Excel de los contratos con clientes."""
+    lista, _stats = _stats_contratos()
+    hoy = date.today()
+
+    columnas = [
+        col("N° contrato", ancho=18, total="texto"),
+        col("Cliente", ancho=38),
+        col("RUT cliente", ancho=15),
+        col("Objeto", ancho=48),
+        col("Fecha inicio", ancho=14, formato=FECHA),
+        col("Fecha término", ancho=14, formato=FECHA),
+        col("Días restantes", ancho=15, formato=ENTERO),
+        col("Estado", ancho=14),
+        col("Monto", ancho=16, formato=CLP, total="suma"),
+        col("Moneda", ancho=10),
+        col("Periodicidad", ancho=14),
+        col("Responsable", ancho=26),
+        col("Notas", ancho=40),
+    ]
+    filas = [
+        [
+            c.numero_contrato,
+            c.cliente.razon_social if c.cliente else "",
+            c.cliente.rut if c.cliente else "",
+            c.objeto,
+            c.fecha_inicio,
+            c.fecha_termino,
+            (c.fecha_termino - hoy).days,
+            ESTADOS_LEGIBLES.get(c.estado, c.estado),
+            c.monto,
+            c.moneda,
+            c.periodicidad_pago,
+            c.usuario_responsable.nombre_completo if c.usuario_responsable else "",
+            c.notas or "",
+        ]
+        for c in lista
+    ]
+
+    return responder_excel("contratos", "Contratos con clientes", columnas, filas)
+
+
+@bp.route("/clientes.xlsx")
+@require_permission("contratos", "ver")
+def clientes_excel():
+    """Informe en Excel de la cartera de clientes."""
+    lista = Cliente.query.order_by(Cliente.razon_social).all()
+
+    columnas = [
+        col("RUT", ancho=15, total="texto"),
+        col("Razón social", ancho=40),
+        col("Giro", ancho=32),
+        col("Dirección", ancho=36),
+        col("Comuna", ancho=20),
+        col("Ciudad", ancho=20),
+        col("Teléfono", ancho=16),
+        col("Email", ancho=30),
+        col("Contacto", ancho=26),
+        col("Estado", ancho=12),
+        col("Contratos vigentes", ancho=18, formato=ENTERO, total="suma"),
+    ]
+    filas = [
+        [
+            c.rut,
+            c.razon_social,
+            c.giro or "",
+            c.direccion or "",
+            c.comuna or "",
+            c.ciudad or "",
+            c.telefono or "",
+            c.email or "",
+            c.contacto_nombre or "",
+            "Activo" if c.activo else "Inactivo",
+            sum(1 for contrato in c.contratos if contrato.estado in ("vigente", "por_vencer")),
+        ]
+        for c in lista
+    ]
+
+    return responder_excel("clientes", "Clientes", columnas, filas)
 
 
 @bp.route("/nuevo", methods=["GET", "POST"])

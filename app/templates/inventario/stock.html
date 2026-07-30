@@ -8,9 +8,12 @@
     <h1>Stock y conteo</h1>
     <p class="page-sub">Cruce de existencias QMS / Defontana y registro del conteo físico.</p>
   </div>
-  {% if puede('inventario', 'editar') %}
-  <a href="{{ url_for('inventario.conteo_importar') }}" class="btn btn-outline-secondary btn-sm">Importar archivos</a>
-  {% endif %}
+  <div class="d-flex gap-2">
+    <a href="{{ url_for('inventario.stock_excel', **request.args) }}" class="btn btn-outline-secondary btn-sm">⬇ Excel</a>
+    {% if puede('inventario', 'editar') %}
+    <a href="{{ url_for('inventario.conteo_importar') }}" class="btn btn-outline-secondary btn-sm">Importar archivos</a>
+    {% endif %}
+  </div>
 </div>
 
 {% if resumen.total == 0 %}
@@ -55,26 +58,32 @@
         <tr>
           {{ t.th('Código', 'codigo', orden, direccion) }}
           {{ t.th('Nombre', 'nombre', orden, direccion) }}
+          {{ t.th('Unidad', 'unidad_qms', orden, direccion) }}
+          {{ t.th('Costo unitario', 'costo_qms', orden, direccion, 'num') }}
           {{ t.th('QMS', 'cantidad_qms', orden, direccion, 'num') }}
           {{ t.th('Defontana', 'cantidad_defontana', orden, direccion, 'num') }}
           <th class="num">Dif. sistemas</th>
           {{ t.th('Físico', 'cantidad_fisica', orden, direccion, 'num') }}
+          <th>Registrado por</th>
           <th class="num">vs QMS</th>
           <th class="num">vs Defontana</th>
-          {{ t.th('Ubicación', 'ubicacion', orden, direccion, 'd-none d-xl-table-cell') }}
-          {{ t.th('Línea de negocio', 'linea_negocio', orden, direccion, 'd-none d-xl-table-cell') }}
+          {{ t.th('Ubicación', 'ubicacion', orden, direccion, 'd-none d-xxl-table-cell') }}
+          {{ t.th('Línea de negocio', 'linea_negocio', orden, direccion, 'd-none d-xxl-table-cell') }}
         </tr>
         <tr class="filtros-fila">
           {{ t.filtro('f_codigo', filtros_columna, 'filtros-stock', 'Código') }}
           {{ t.filtro('f_nombre', filtros_columna, 'filtros-stock', 'Nombre') }}
+          {{ t.filtro('f_unidad', filtros_columna, 'filtros-stock', 'Unidad') }}
           {{ t.sin_filtro('num') }}
           {{ t.sin_filtro('num') }}
           {{ t.sin_filtro('num') }}
           {{ t.sin_filtro('num') }}
           {{ t.sin_filtro('num') }}
+          {{ t.sin_filtro() }}
           {{ t.sin_filtro('num') }}
-          {{ t.filtro('f_ubicacion', filtros_columna, 'filtros-stock', 'Ubicación', 'd-none d-xl-table-cell') }}
-          {{ t.filtro('f_linea', filtros_columna, 'filtros-stock', 'Línea', 'd-none d-xl-table-cell') }}
+          {{ t.sin_filtro('num') }}
+          {{ t.filtro('f_ubicacion', filtros_columna, 'filtros-stock', 'Ubicación', 'd-none d-xxl-table-cell') }}
+          {{ t.filtro('f_linea', filtros_columna, 'filtros-stock', 'Línea', 'd-none d-xxl-table-cell') }}
         </tr>
       </thead>
       <tbody>
@@ -82,6 +91,26 @@
         <tr data-fila="{{ i.id }}" class="{{ 'table-warning' if i.tiene_diferencia else '' }}">
           <td class="text-nowrap fw-semibold">{{ i.codigo }}</td>
           <td>{{ i.nombre or '—' }}</td>
+          <td class="text-nowrap">
+            {% if i.unidades_coinciden %}
+            {{ i.unidad_qms or i.unidad_defontana or '—' }}
+            {% else %}
+            <span class="badge bg-danger" title="QMS declara {{ i.unidad_qms }} y Defontana {{ i.unidad_defontana }}">
+              {{ i.unidad_qms }} ≠ {{ i.unidad_defontana }}
+            </span>
+            {% endif %}
+          </td>
+          <td class="num text-nowrap">
+            {% if not i.tiene_costo %}
+            <span class="text-muted">—</span>
+            {% elif i.tiene_diferencia_costo %}
+            <span class="badge bg-danger" title="QMS {{ i.costo_unitario_qms|clp }} vs Defontana {{ i.costo_unitario_defontana|clp }}">
+              {{ i.costo_unitario_qms|clp }} ≠ {{ i.costo_unitario_defontana|clp }}
+            </span>
+            {% else %}
+            {{ i.costo_referencia|clp }}
+            {% endif %}
+          </td>
           <td class="num">{{ i.cantidad_qms }}</td>
           <td class="num">{{ i.cantidad_defontana }}</td>
           <td class="num">
@@ -99,6 +128,16 @@
                    aria-label="Cantidad física de {{ i.codigo }}">
             {% else %}
             {{ i.cantidad_fisica if i.contado else '—' }}
+            {% endif %}
+          </td>
+          <td class="celda-registro text-nowrap">
+            {% if i.contado and i.contado_por %}
+            <div class="small">{{ i.contado_por.nombre_completo }}</div>
+            <div class="small text-muted">{{ i.contado_en|fecha_hora }}</div>
+            {% elif i.contado %}
+            <span class="text-muted small">{{ i.contado_en|fecha_hora }}</span>
+            {% else %}
+            <span class="text-muted small">—</span>
             {% endif %}
           </td>
           <td class="num celda-dif-qms">
@@ -119,7 +158,7 @@
           <td class="d-none d-xl-table-cell">{{ i.linea_negocio or '—' }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="10" class="text-center text-muted py-4">Sin resultados{% if q %} para "{{ q }}"{% endif %}.</td></tr>
+        <tr><td colspan="13" class="text-center text-muted py-4">Sin resultados{% if q %} para "{{ q }}"{% endif %}.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -146,6 +185,23 @@
     celda.innerHTML = '<span class="badge ' + clase + '">' + signo + '</span>';
   }
 
+  function escapar(texto) {
+    var div = document.createElement('div');
+    div.textContent = texto || '';
+    return div.innerHTML;
+  }
+
+  function pintarRegistro(celda, datos) {
+    if (!celda) return;
+    if (!datos.contado) {
+      celda.innerHTML = '<span class="text-muted small">—</span>';
+      return;
+    }
+    celda.innerHTML =
+      '<div class="small">' + escapar(datos.registrado_por) + '</div>' +
+      '<div class="small text-muted">' + escapar(datos.registrado_en) + '</div>';
+  }
+
   function guardar(input) {
     var fila = input.closest('tr');
     input.classList.remove('is-invalid', 'is-valid');
@@ -165,6 +221,7 @@
         input.classList.add('is-valid');
         pintarBadge(fila.querySelector('.celda-dif-qms'), res.datos.dif_qms);
         pintarBadge(fila.querySelector('.celda-dif-def'), res.datos.dif_defontana);
+        pintarRegistro(fila.querySelector('.celda-registro'), res.datos);
         fila.classList.toggle('table-warning', res.datos.tiene_diferencia);
       })
       .catch(function () {

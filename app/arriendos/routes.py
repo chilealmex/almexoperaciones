@@ -22,6 +22,7 @@ from app.models.arriendo import (
     PagoArriendoEntrada,
 )
 from app.utils.decorators import require_permission
+from app.utils.exportar import responder_excel, col, CLP, ENTERO, FECHA
 from app.utils.storage import guardar_documento, listar_documentos, guardar_firma_png
 
 
@@ -31,6 +32,153 @@ def index():
     salidas = ArriendoSalida.query.order_by(ArriendoSalida.fecha_inicio.desc()).all()
     entradas = ArriendoEntrada.query.order_by(ArriendoEntrada.fecha_termino).all()
     return render_template("arriendos/index.html", salidas=salidas, entradas=entradas)
+
+
+ESTADOS_LEGIBLES = {
+    "activo": "Activo",
+    "finalizado": "Finalizado",
+    "atrasado": "Atrasado",
+    "vigente": "Vigente",
+    "por_vencer": "Por vencer",
+    "vencido": "Vencido",
+    "terminado": "Terminado",
+}
+
+
+@bp.route("/salidas.xlsx")
+@require_permission("contratos", "ver")
+def salidas_excel():
+    """Informe en Excel de los activos arrendados a clientes."""
+    salidas = ArriendoSalida.query.order_by(ArriendoSalida.fecha_inicio.desc()).all()
+
+    columnas = [
+        col("Activo", ancho=40, total="texto"),
+        col("Código activo", ancho=16),
+        col("Cliente", ancho=36),
+        col("RUT cliente", ancho=15),
+        col("Fecha inicio", ancho=14, formato=FECHA),
+        col("Término previsto", ancho=16, formato=FECHA),
+        col("Devolución real", ancho=16, formato=FECHA),
+        col("Estado", ancho=14),
+        col("Monto por período", ancho=18, formato=CLP, total="suma"),
+        col("Periodicidad", ancho=14),
+        col("Firmado", ancho=10),
+        col("Facturado", ancho=16, formato=CLP, total="suma"),
+        col("Pagado", ancho=16, formato=CLP, total="suma"),
+        col("Pendiente de pago", ancho=18, formato=CLP, total="suma"),
+    ]
+    filas = []
+    for s in salidas:
+        facturado = sum(f.monto for f in s.facturaciones)
+        pagado = sum(f.monto for f in s.facturaciones if f.estado_pago == "pagado")
+        filas.append([
+            s.activo_fijo.nombre if s.activo_fijo else "",
+            s.activo_fijo.codigo_activo if s.activo_fijo else "",
+            s.cliente.razon_social if s.cliente else "",
+            s.cliente.rut if s.cliente else "",
+            s.fecha_inicio,
+            s.fecha_termino_prevista,
+            s.fecha_devolucion_real,
+            ESTADOS_LEGIBLES.get(s.estado, s.estado),
+            s.monto_periodo,
+            s.periodicidad,
+            "Sí" if s.firmado else "No",
+            facturado,
+            pagado,
+            facturado - pagado,
+        ])
+
+    return responder_excel(
+        "arriendos-salida", "Arriendos a clientes", columnas, filas, "Activos entregados a clientes"
+    )
+
+
+@bp.route("/entradas.xlsx")
+@require_permission("contratos", "ver")
+def entradas_excel():
+    """Informe en Excel de los activos arrendados desde proveedores."""
+    entradas = ArriendoEntrada.query.order_by(ArriendoEntrada.fecha_termino).all()
+    hoy = date.today()
+
+    columnas = [
+        col("Activo arrendado", ancho=42, total="texto"),
+        col("Proveedor", ancho=36),
+        col("RUT proveedor", ancho=15),
+        col("N° contrato", ancho=18),
+        col("Fecha inicio", ancho=14, formato=FECHA),
+        col("Fecha término", ancho=14, formato=FECHA),
+        col("Días restantes", ancho=15, formato=ENTERO),
+        col("Estado", ancho=14),
+        col("Monto por período", ancho=18, formato=CLP, total="suma"),
+        col("Periodicidad", ancho=14),
+        col("Pagado", ancho=16, formato=CLP, total="suma"),
+        col("Pendiente de pago", ancho=18, formato=CLP, total="suma"),
+        col("Ubicación de uso", ancho=26),
+        col("Responsable", ancho=26),
+    ]
+    filas = []
+    for e in entradas:
+        pagado = sum(p.monto for p in e.pagos if p.estado_pago == "pagado")
+        pendiente = sum(p.monto for p in e.pagos if p.estado_pago != "pagado")
+        filas.append([
+            e.descripcion_activo,
+            e.proveedor.razon_social if e.proveedor else "",
+            e.proveedor.rut if e.proveedor else "",
+            e.numero_contrato or "",
+            e.fecha_inicio,
+            e.fecha_termino,
+            (e.fecha_termino - hoy).days,
+            ESTADOS_LEGIBLES.get(e.estado, e.estado),
+            e.monto_periodo,
+            e.periodicidad,
+            pagado,
+            pendiente,
+            e.ubicacion_uso or "",
+            e.responsable.nombre_completo if e.responsable else "",
+        ])
+
+    return responder_excel(
+        "arriendos-entrada",
+        "Arriendos de proveedores",
+        columnas,
+        filas,
+        "Activos arrendados a terceros",
+    )
+
+
+@bp.route("/proveedores.xlsx")
+@require_permission("contratos", "ver")
+def proveedores_excel():
+    """Informe en Excel del registro de proveedores."""
+    lista = Proveedor.query.order_by(Proveedor.razon_social).all()
+
+    columnas = [
+        col("RUT", ancho=15, total="texto"),
+        col("Razón social", ancho=40),
+        col("Giro", ancho=32),
+        col("Dirección", ancho=36),
+        col("Teléfono", ancho=16),
+        col("Email", ancho=30),
+        col("Contacto", ancho=26),
+        col("Estado", ancho=12),
+        col("Arriendos vigentes", ancho=18, formato=ENTERO, total="suma"),
+    ]
+    filas = [
+        [
+            p.rut,
+            p.razon_social,
+            p.giro or "",
+            p.direccion or "",
+            p.telefono or "",
+            p.email or "",
+            p.contacto_nombre or "",
+            "Activo" if p.activo else "Inactivo",
+            sum(1 for a in p.arriendos_entrada if a.estado in ("vigente", "por_vencer")),
+        ]
+        for p in lista
+    ]
+
+    return responder_excel("proveedores", "Proveedores", columnas, filas)
 
 
 # --- Arriendo de salida: la empresa arrienda A un cliente ---

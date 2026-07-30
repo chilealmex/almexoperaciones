@@ -1,11 +1,17 @@
 {% extends "base.html" %}
 {% block title %}Clientes{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h1 class="h3 mb-0">Contratos y Arriendos</h1>
-  {% if puede('contratos', 'editar') %}
-  <a href="{{ url_for('contratos.nuevo_cliente') }}" class="btn btn-primary">Nuevo cliente</a>
-  {% endif %}
+<div class="page-head">
+  <div>
+    <h1>Clientes</h1>
+    <p class="page-sub">Registro de clientes y sus datos de contacto.</p>
+  </div>
+  <div class="d-flex gap-2">
+    <a href="{{ url_for('contratos.clientes_excel') }}" class="btn btn-outline-secondary btn-sm">⬇ Excel</a>
+    {% if puede('contratos', 'editar') %}
+    <a href="{{ url_for('contratos.nuevo_cliente') }}" class="btn btn-primary btn-sm">Nuevo cliente</a>
+    {% endif %}
+  </div>
 </div>
 
 <div class="table-responsive">

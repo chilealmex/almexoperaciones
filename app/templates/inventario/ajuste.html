@@ -9,7 +9,10 @@
     <h1>Ajuste de inventario</h1>
     <p class="page-sub">Costo, unidad de medida y valorización comparadas entre QMS, Defontana y el conteo físico.</p>
   </div>
-  <a href="{{ url_for('inventario.ajuste_csv', **request.args) }}" class="btn btn-outline-secondary btn-sm">Exportar CSV</a>
+  <div class="d-flex gap-2">
+    <a href="{{ url_for('inventario.ajuste_excel', **request.args) }}" class="btn btn-primary btn-sm">⬇ Excel</a>
+    <a href="{{ url_for('inventario.ajuste_csv', **request.args) }}" class="btn btn-outline-secondary btn-sm">CSV</a>
+  </div>
 </div>
 
 {% if totales.articulos == 0 and not q %}

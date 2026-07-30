@@ -72,6 +72,12 @@ def _texto(valor, limite: int) -> str:
     return (valor or "").strip()[:limite]
 
 
+# IMPORTANTE: los importadores sólo actualizan lo que declara cada sistema
+# (cantidades, costo, unidad, nombre, ubicación). Nunca escriben cantidad_fisica,
+# contado_por_id ni contado_en: el conteo físico es trabajo de bodega y debe
+# sobrevivir a cualquier reimportación de QMS o Defontana.
+
+
 def _items_existentes(empresa_id: int) -> dict:
     """Trae todos los items de la empresa en una sola consulta.
 

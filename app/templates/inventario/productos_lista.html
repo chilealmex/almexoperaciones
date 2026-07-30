@@ -8,9 +8,12 @@
     <h1>Productos</h1>
     <p class="page-sub">Maestro de productos con stock, costo y precio de venta.</p>
   </div>
-  {% if puede('inventario', 'editar') %}
-  <a href="{{ url_for('inventario.nuevo_producto') }}" class="btn btn-primary">Nuevo producto</a>
-  {% endif %}
+  <div class="d-flex gap-2">
+    <a href="{{ url_for('inventario.productos_excel', **request.args) }}" class="btn btn-outline-secondary btn-sm">⬇ Excel</a>
+    {% if puede('inventario', 'editar') %}
+    <a href="{{ url_for('inventario.nuevo_producto') }}" class="btn btn-primary btn-sm">Nuevo producto</a>
+    {% endif %}
+  </div>
 </div>
 
 <form method="get" id="filtros-productos" class="row g-2 align-items-center mb-3">

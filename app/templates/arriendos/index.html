@@ -1,13 +1,21 @@
 {% extends "base.html" %}
 {% block title %}Activos en arriendo{% endblock %}
 {% block content %}
-<h1 class="h3 mb-3">Contratos y Arriendos</h1>
+<div class="page-head">
+  <div>
+    <h1>Arriendos</h1>
+    <p class="page-sub">Activos entregados a clientes y activos arrendados de proveedores.</p>
+  </div>
+</div>
 
 <div class="d-flex justify-content-between align-items-center mb-2">
   <h2 class="h5 mb-0">Arrendados a clientes (salida)</h2>
-  {% if puede('contratos', 'editar') %}
-  <a href="{{ url_for('arriendos.nuevo_arriendo_salida') }}" class="btn btn-primary btn-sm">Nuevo arriendo de salida</a>
-  {% endif %}
+  <div class="d-flex gap-2">
+    <a href="{{ url_for('arriendos.salidas_excel') }}" class="btn btn-outline-secondary btn-sm">⬇ Excel</a>
+    {% if puede('contratos', 'editar') %}
+    <a href="{{ url_for('arriendos.nuevo_arriendo_salida') }}" class="btn btn-primary btn-sm">Nuevo arriendo de salida</a>
+    {% endif %}
+  </div>
 </div>
 {% set estado_badge_salida = {'activo': 'bg-success', 'finalizado': 'bg-secondary', 'atrasado': 'bg-danger'} %}
 <div class="table-responsive mb-4">
@@ -31,6 +39,7 @@
 <div class="d-flex justify-content-between align-items-center mb-2">
   <h2 class="h5 mb-0">Arrendados de proveedores (entrada)</h2>
   <div>
+    <a href="{{ url_for('arriendos.entradas_excel') }}" class="btn btn-outline-secondary btn-sm">⬇ Excel</a>
     <a href="{{ url_for('arriendos.proveedores') }}" class="btn btn-outline-secondary btn-sm">Proveedores</a>
     {% if puede('contratos', 'editar') %}
     <a href="{{ url_for('arriendos.nuevo_arriendo_entrada') }}" class="btn btn-primary btn-sm">Nuevo arriendo de entrada</a>

@@ -1,8 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Depreciación por centro de costo{% endblock %}
 {% block content %}
-<h1 class="h3 mb-3">Activos fijos</h1>
-<h2 class="h5 mb-3">Depreciación mensual por centro de costo</h2>
+<div class="page-head">
+  <div>
+    <h1>Depreciación</h1>
+    <p class="page-sub">Depreciación mensual por centro de costo.</p>
+  </div>
+  <a href="{{ url_for('activos_fijos.depreciacion_excel') }}" class="btn btn-outline-secondary btn-sm">⬇ Excel</a>
+</div>
 <p class="text-muted">Cada activo se imputa automáticamente al centro "Arriendo" mientras está arrendado a un cliente, o a "Administración" cuando no lo está.</p>
 
 <div class="row g-3 mb-4">

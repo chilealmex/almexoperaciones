@@ -1,11 +1,17 @@
 {% extends "base.html" %}
 {% block title %}Contratos con clientes{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h1 class="h3 mb-0">Contratos y Arriendos</h1>
-  {% if puede('contratos', 'editar') %}
-  <a href="{{ url_for('contratos.nuevo_contrato') }}" class="btn btn-primary">Nuevo contrato</a>
-  {% endif %}
+<div class="page-head">
+  <div>
+    <h1>Contratos con clientes</h1>
+    <p class="page-sub">Cartera de contratos vigentes, por vencer y terminados.</p>
+  </div>
+  <div class="d-flex gap-2">
+    <a href="{{ url_for('contratos.contratos_excel') }}" class="btn btn-outline-secondary btn-sm">⬇ Excel</a>
+    {% if puede('contratos', 'editar') %}
+    <a href="{{ url_for('contratos.nuevo_contrato') }}" class="btn btn-primary btn-sm">Nuevo contrato</a>
+    {% endif %}
+  </div>
 </div>
 
 {% set estado_badge = {'vigente': 'bg-success', 'por_vencer': 'bg-warning text-dark', 'vencido': 'bg-danger', 'terminado': 'bg-secondary'} %}

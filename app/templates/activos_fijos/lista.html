@@ -1,11 +1,17 @@
 {% extends "base.html" %}
 {% block title %}Activos fijos{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h1 class="h3 mb-0">Activos fijos</h1>
-  {% if puede('activos_fijos', 'editar') %}
-  <a href="{{ url_for('activos_fijos.nuevo_activo') }}" class="btn btn-primary">Nuevo activo</a>
-  {% endif %}
+<div class="page-head">
+  <div>
+    <h1>Activos</h1>
+    <p class="page-sub">Registro de activos fijos con su valor libro y estado.</p>
+  </div>
+  <div class="d-flex gap-2">
+    <a href="{{ url_for('activos_fijos.activos_excel') }}" class="btn btn-outline-secondary btn-sm">⬇ Excel</a>
+    {% if puede('activos_fijos', 'editar') %}
+    <a href="{{ url_for('activos_fijos.nuevo_activo') }}" class="btn btn-primary btn-sm">Nuevo activo</a>
+    {% endif %}
+  </div>
 </div>
 
 {% set estado_badge = {'activo': 'bg-success', 'en_mantenimiento': 'bg-warning text-dark', 'dado_de_baja': 'bg-secondary', 'vendido': 'bg-dark'} %}

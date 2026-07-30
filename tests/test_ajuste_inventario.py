@@ -111,6 +111,62 @@ def test_exportacion_csv_respeta_los_filtros(client, empresa, usuario_admin):
     assert "COD-002" not in texto  # ese tiene el mismo costo en ambos sistemas
 
 
+def test_reimportar_no_altera_el_conteo_fisico_ni_su_trazabilidad(db, empresa, usuario_admin):
+    """Volver a subir QMS o Defontana no debe pisar lo que contó bodega."""
+    from datetime import datetime, timezone
+
+    _importar_todo(empresa)
+    item = ItemConteoInventario.query.filter_by(codigo="COD-001").first()
+    momento = datetime(2026, 7, 20, 15, 30, tzinfo=timezone.utc)
+    item.cantidad_fisica = 42
+    item.contado_por_id = usuario_admin.id
+    item.contado_en = momento
+    db.session.commit()
+
+    # Se reimportan ambos sistemas con cantidades distintas
+    csv_qms_nuevo = CSV_QMS.replace(";10;0;PRODUCTO UNO", ";99;0;PRODUCTO UNO")
+    importar_qms(_fs(csv_qms_nuevo.encode("utf-8"), "qms.csv"), empresa.id)
+    importar_defontana(_fs(CSV_DEFONTANA.encode("cp1252"), "def.csv"), empresa.id)
+
+    item = ItemConteoInventario.query.filter_by(codigo="COD-001").first()
+    assert item.cantidad_qms == 99  # el sistema sí se actualiza
+    assert item.cantidad_fisica == 42  # el conteo físico se mantiene
+    assert item.contado_por_id == usuario_admin.id
+    assert item.contado_en.replace(tzinfo=timezone.utc) == momento
+
+
+def test_el_conteo_guarda_quien_y_cuando(client, empresa, usuario_admin):
+    """Al registrar el físico se deja constancia del usuario y del momento."""
+    _importar_todo(empresa)
+    item = ItemConteoInventario.query.filter_by(codigo="COD-001").first()
+    login(client, "admin@test.cl")
+
+    respuesta = client.post(f"/inventario/stock/{item.id}/contar", json={"cantidad": "7"})
+    assert respuesta.status_code == 200
+
+    datos = respuesta.get_json()
+    assert datos["ok"] is True
+    assert datos["registrado_por"] == usuario_admin.nombre_completo
+    assert datos["registrado_en"]  # fecha y hora formateadas para la pantalla
+
+    item = ItemConteoInventario.query.filter_by(codigo="COD-001").first()
+    assert item.cantidad_fisica == 7
+    assert item.contado_por_id == usuario_admin.id
+    assert item.contado_en is not None
+
+
+def test_stock_muestra_unidades_y_costos_por_sku(client, empresa, usuario_admin):
+    """La pantalla de stock avisa cuando unidad o costo no coinciden entre sistemas."""
+    _importar_todo(empresa)
+    login(client, "admin@test.cl")
+
+    cuerpo = client.get("/inventario/stock").get_data(as_text=True)
+    assert "Costo unitario" in cuerpo
+    assert "Registrado por" in cuerpo
+    assert "RL ≠ UN" in cuerpo  # COD-002 tiene distinta unidad en cada sistema
+    assert "$10.000 ≠ $9.500" in cuerpo  # COD-001 tiene distinto costo
+
+
 def test_ajuste_exige_sesion_iniciada(client, empresa):
     respuesta = client.get("/inventario/ajuste")
     assert respuesta.status_code == 302
