@@ -127,3 +127,87 @@ def test_reimportar_no_pierde_conteo_fisico(db, empresa):
     importar_qms(_fs(CSV_QMS.encode("utf-8"), "qms.csv"), empresa.id)
     item = ItemConteoInventario.query.filter_by(codigo="COD-001").first()
     assert item.cantidad_fisica == 14
+
+
+# --- QMS ahora también exporta en .xlsx en vez de .csv ---
+
+
+def _xlsx(encabezados, filas, nombre="datos.xlsx"):
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(encabezados)
+    for fila in filas:
+        ws.append(fila)
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return FileStorage(stream=buf, filename=nombre)
+
+
+def test_importar_qms_desde_xlsx(db, empresa):
+    """El formato nuevo de QMS: mismas columnas, pero en Excel en vez de CSV."""
+    archivo = _xlsx(
+        ["Linea Negocio", "Categoria", "Valor Total Stock CLP", "Stock", "Valor Unitario Stock CLP", "Descripción", "Unidad", "Código Único"],
+        [
+            ["PRENSAS", "COMPONENTES", 49465752, 3, 16488584, "SET DE PLATOS VULCANIZADORES", "SET", "SVP-3378-R"],
+            ["FUSION", "LINNING", 17657305, 9, 1961922.7777777778, "ROLLO DE GOMA LISA", "RL", "CFW-60SB-1050"],
+        ],
+        "stock_qms.xlsx",
+    )
+    resultado = importar_qms(archivo, empresa.id)
+    assert resultado["total_codigos"] == 2
+
+    item = ItemConteoInventario.query.filter_by(codigo="SVP-3378-R").first()
+    assert item.cantidad_qms == 3
+    assert item.costo_unitario_qms == 16488584
+    assert item.unidad_qms == "SET"
+    assert item.categoria == "COMPONENTES"
+    assert item.linea_negocio == "PRENSAS"
+
+    # el costo con decimales (Excel guarda floats) se redondea a un entero de pesos
+    item2 = ItemConteoInventario.query.filter_by(codigo="CFW-60SB-1050").first()
+    assert item2.costo_unitario_qms == 1961923
+
+
+def test_importar_defontana_desde_xlsx(db, empresa):
+    archivo = _xlsx(
+        ["CodArticulo", "Descripción Artículo", "Nombre Bodega", "Saldo Stock", "Unidad", "Costo Unitario"],
+        [
+            ["COD-001", "PRODUCTO UNO", "BODEGA CENTRAL", 15, "UN", 9500],
+        ],
+        "stock_defontana.xlsx",
+    )
+    resultado = importar_defontana(archivo, empresa.id)
+    assert resultado["total_codigos"] == 1
+
+    item = ItemConteoInventario.query.filter_by(codigo="COD-001").first()
+    assert item.cantidad_defontana == 15
+    assert item.costo_unitario_defontana == 9500
+    assert item.unidad_defontana == "UN"
+
+
+def test_xlsx_sin_extension_reconocible_se_detecta_por_contenido(db, empresa):
+    """Si el archivo llega sin extensión .xlsx en el nombre, se detecta por la firma del archivo."""
+    archivo = _xlsx(
+        ["Código Único", "Descripción", "Unidad", "Stock", "Valor Unitario Stock CLP"],
+        [["COD-999", "PRODUCTO ZETA", "UN", 5, 1000]],
+        nombre="reporte_sin_extension",
+    )
+    resultado = importar_qms(archivo, empresa.id)
+    assert resultado["total_codigos"] == 1
+    assert ItemConteoInventario.query.filter_by(codigo="COD-999").first() is not None
+
+
+def test_filas_vacias_del_xlsx_se_ignoran(db, empresa):
+    archivo = _xlsx(
+        ["Código Único", "Descripción", "Unidad", "Stock", "Valor Unitario Stock CLP"],
+        [
+            ["COD-001", "PRODUCTO UNO", "UN", 5, 1000],
+            [None, None, None, None, None],
+        ],
+        "qms.xlsx",
+    )
+    resultado = importar_qms(archivo, empresa.id)
+    assert resultado["total_codigos"] == 1

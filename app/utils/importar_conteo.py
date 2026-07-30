@@ -1,16 +1,20 @@
 import csv
 import io
-from datetime import datetime, timezone
 
 from app.extensions import db
 from app.models.conteo_inventario import ItemConteoInventario
 
 
-def _a_entero(valor: str) -> int:
-    """Convierte un número de stock (típicamente entero, a veces con decimales) a int, sin asumir formato de miles."""
-    if not valor:
+def _a_entero(valor) -> int:
+    """Convierte un número de stock (típicamente entero, a veces con decimales) a int.
+
+    Acepta tanto texto (CSV) como números nativos (Excel vía openpyxl).
+    """
+    if valor is None or valor == "":
         return 0
-    limpio = valor.strip()
+    if isinstance(valor, (int, float)):
+        return round(valor)
+    limpio = str(valor).strip()
     if not limpio:
         return 0
     try:
@@ -23,15 +27,19 @@ def _a_entero(valor: str) -> int:
         return 0
 
 
-def _a_monto(valor: str):
+def _a_monto(valor):
     """Convierte un importe exportado por planilla a entero de pesos.
 
-    Acepta '19,563,554', '1.961.923', '1.234,56' y '1,234.56': el último separador
-    manda cuando quedan 1-2 dígitos a su derecha, en cualquier otro caso los
-    separadores son de miles. Devuelve None si no hay dato utilizable.
+    Acepta números nativos (Excel) y texto con distintos formatos de miles/decimales:
+    '19,563,554', '1.961.923', '1.234,56' y '1,234.56' (el último separador manda
+    cuando quedan 1-2 dígitos a su derecha; en cualquier otro caso son separadores de
+    miles). Devuelve None si no hay dato utilizable.
     """
-    if valor is None:
+    if valor is None or valor == "":
         return None
+    if isinstance(valor, (int, float)):
+        return round(valor)
+
     limpio = str(valor).strip().replace("$", "").replace(" ", "").replace("\xa0", "")
     if not limpio:
         return None
@@ -62,14 +70,69 @@ def _buscar_columna(campos, *palabras_clave):
     return None
 
 
-def _normalizar_codigo(codigo: str) -> str:
+def _normalizar_codigo(codigo) -> str:
     """Quita apóstrofes iniciales (artefacto de Excel) y espacios para que ambos sistemas crucen."""
-    return codigo.strip().lstrip("'").strip()[:80]
+    return str(codigo).strip().lstrip("'").strip()[:80]
 
 
 def _texto(valor, limite: int) -> str:
     """Recorta al límite de la columna: PostgreSQL rechaza los textos que se pasan, SQLite no."""
-    return (valor or "").strip()[:limite]
+    if valor is None:
+        return ""
+    return str(valor).strip()[:limite]
+
+
+def _es_xlsx(file_storage) -> bool:
+    nombre = (file_storage.filename or "").lower()
+    if nombre.endswith(".xlsx"):
+        return True
+    if nombre.endswith(".csv"):
+        return False
+    # Sin extensión reconocible: un .xlsx es un zip, empieza con "PK".
+    inicio = file_storage.stream.read(2)
+    file_storage.stream.seek(0)
+    return inicio == b"PK"
+
+
+def _filas_desde_xlsx(file_storage):
+    """(encabezados, filas) desde un .xlsx: cada fila es un dict encabezado -> valor nativo."""
+    from openpyxl import load_workbook
+
+    libro = load_workbook(file_storage.stream, data_only=True, read_only=True)
+    hoja = libro.active
+    filas = hoja.iter_rows(values_only=True)
+    encabezados = [str(c).strip() if c is not None else "" for c in next(filas, [])]
+
+    def generador():
+        for fila in filas:
+            if all(valor is None for valor in fila):
+                continue
+            yield dict(zip(encabezados, fila))
+
+    return encabezados, generador()
+
+
+def _filas_desde_csv(file_storage, codificaciones=("utf-8-sig",)):
+    """(encabezados, filas) desde un .csv separado por punto y coma, con las codificaciones dadas en orden."""
+    crudo = file_storage.stream.read()
+    for codificacion in codificaciones:
+        try:
+            contenido = crudo.decode(codificacion)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        raise ValueError("No se pudo leer la codificación del archivo.")
+
+    reader = csv.DictReader(io.StringIO(contenido), delimiter=";")
+    return reader.fieldnames, reader
+
+
+def _leer_filas(file_storage, codificaciones_csv=("utf-8-sig",)):
+    """Punto único de entrada: detecta si el archivo es .xlsx o .csv y devuelve (encabezados, filas)."""
+    if _es_xlsx(file_storage):
+        return _filas_desde_xlsx(file_storage)
+    return _filas_desde_csv(file_storage, codificaciones_csv)
 
 
 # IMPORTANTE: los importadores sólo actualizan lo que declara cada sistema
@@ -91,19 +154,19 @@ def _items_existentes(empresa_id: int) -> dict:
 
 
 def importar_qms(file_storage, empresa_id: int) -> dict:
-    """Archivo 'Distribución Valor Stock CLP' de QMS: código único, descripción, stock, línea de negocio, ubicación."""
-    contenido = file_storage.stream.read().decode("utf-8-sig", errors="replace")
-    reader = csv.DictReader(io.StringIO(contenido), delimiter=";")
+    """Archivo 'Distribución Valor Stock CLP' de QMS (.csv o .xlsx): código único, descripción,
+    stock, línea de negocio, categoría, unidad y costo unitario."""
+    encabezados, reader = _leer_filas(file_storage)
 
-    columna_codigo = next((c for c in reader.fieldnames if "digo" in c.lower() and "nico" in c.lower()), None)
-    columna_nombre = next((c for c in reader.fieldnames if "descripci" in c.lower()), None)
-    columna_stock = "Stock"
-    columna_linea = "Linea Negocio"
+    columna_codigo = next((c for c in encabezados if "digo" in c.lower() and "nico" in c.lower()), None)
+    columna_nombre = next((c for c in encabezados if "descripci" in c.lower()), None)
+    columna_stock = "Stock" if "Stock" in encabezados else _buscar_columna(encabezados, "stock")
+    columna_linea = "Linea Negocio" if "Linea Negocio" in encabezados else _buscar_columna(encabezados, "linea")
     columna_ubicacion = "ubicacion_bodega"
-    columna_unidad = _buscar_columna(reader.fieldnames, "unidad")
-    columna_categoria = _buscar_columna(reader.fieldnames, "categor")
-    columna_costo = _buscar_columna(reader.fieldnames, "valor", "unitario")
-    columna_valor_total = _buscar_columna(reader.fieldnames, "valor", "total")
+    columna_unidad = _buscar_columna(encabezados, "unidad")
+    columna_categoria = _buscar_columna(encabezados, "categor")
+    columna_costo = _buscar_columna(encabezados, "valor", "unitario")
+    columna_valor_total = _buscar_columna(encabezados, "valor", "total")
 
     if not columna_codigo or not columna_nombre:
         raise ValueError("No se encontraron las columnas de código/descripción esperadas en el archivo QMS.")
@@ -118,7 +181,7 @@ def importar_qms(file_storage, empresa_id: int) -> dict:
             acumulado[codigo] = {
                 "cantidad": 0,
                 "nombre": _texto(fila.get(columna_nombre), 255),
-                "linea_negocio": _texto(fila.get(columna_linea), 120),
+                "linea_negocio": _texto(fila.get(columna_linea), 120) if columna_linea else "",
                 "ubicacion": _texto(fila.get(columna_ubicacion), 255) or _texto(fila.get("Sucursal"), 255),
                 "categoria": _texto(fila.get(columna_categoria), 120) if columna_categoria else "",
                 "unidad": _texto(fila.get(columna_unidad), 20) if columna_unidad else "",
@@ -168,32 +231,24 @@ def importar_qms(file_storage, empresa_id: int) -> dict:
 
 
 def importar_defontana(file_storage, empresa_id: int) -> dict:
-    """Archivo de inventario por bodega de Defontana: CodArticulo, Descripción, CodBodega, Nombre Bodega, Saldo Stock."""
-    crudo = file_storage.stream.read()
-    for codificacion in ("cp1252", "latin-1", "utf-8-sig"):
-        try:
-            contenido = crudo.decode(codificacion)
-            break
-        except UnicodeDecodeError:
-            continue
-    else:
-        raise ValueError("No se pudo leer la codificación del archivo de Defontana.")
+    """Archivo de inventario por bodega de Defontana (.csv o .xlsx): CodArticulo, Descripción,
+    CodBodega, Nombre Bodega, Saldo Stock."""
+    encabezados, reader = _leer_filas(file_storage, codificaciones_csv=("cp1252", "latin-1", "utf-8-sig"))
 
-    reader = csv.DictReader(io.StringIO(contenido), delimiter=";")
-    columna_codigo = next((c for c in reader.fieldnames if "codarticulo" in c.lower()), None)
-    columna_nombre = next((c for c in reader.fieldnames if "descripci" in c.lower()), None)
-    columna_stock = next((c for c in reader.fieldnames if "saldo" in c.lower()), None)
-    columna_bodega = next((c for c in reader.fieldnames if "nombre bodega" in c.lower()), None)
-    columna_unidad = _buscar_columna(reader.fieldnames, "unidad")
+    columna_codigo = next((c for c in encabezados if "codarticulo" in c.lower()), None)
+    columna_nombre = next((c for c in encabezados if "descripci" in c.lower()), None)
+    columna_stock = next((c for c in encabezados if "saldo" in c.lower()), None)
+    columna_bodega = next((c for c in encabezados if "nombre bodega" in c.lower()), None)
+    columna_unidad = _buscar_columna(encabezados, "unidad")
     # Defontana exporta el costo con nombres distintos según el informe
     columna_costo = (
-        _buscar_columna(reader.fieldnames, "costo", "unitario")
-        or _buscar_columna(reader.fieldnames, "costo", "promedio")
-        or _buscar_columna(reader.fieldnames, "costo")
-        or _buscar_columna(reader.fieldnames, "valor", "unitario")
+        _buscar_columna(encabezados, "costo", "unitario")
+        or _buscar_columna(encabezados, "costo", "promedio")
+        or _buscar_columna(encabezados, "costo")
+        or _buscar_columna(encabezados, "valor", "unitario")
     )
-    columna_valor_total = _buscar_columna(reader.fieldnames, "valor", "total") or _buscar_columna(
-        reader.fieldnames, "total", "costo"
+    columna_valor_total = _buscar_columna(encabezados, "valor", "total") or _buscar_columna(
+        encabezados, "total", "costo"
     )
 
     if not columna_codigo or not columna_stock:
@@ -205,7 +260,7 @@ def importar_defontana(file_storage, empresa_id: int) -> dict:
         if not codigo:
             continue
         cantidad = _a_entero(fila.get(columna_stock, "0"))
-        bodega = (fila.get(columna_bodega) or "").strip() if columna_bodega else ""
+        bodega = _texto(fila.get(columna_bodega), 255) if columna_bodega else ""
         if codigo not in acumulado:
             acumulado[codigo] = {
                 "cantidad": 0,

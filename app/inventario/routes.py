@@ -1235,7 +1235,7 @@ def conteo_importar_qms():
         except ValueError as e:
             flash(str(e), "danger")
     else:
-        flash("Selecciona un archivo CSV válido.", "danger")
+        flash("Selecciona un archivo .csv o .xlsx válido.", "danger")
     return redirect(url_for("inventario.conteo_importar"))
 
 
@@ -1254,5 +1254,5 @@ def conteo_importar_defontana():
         except ValueError as e:
             flash(str(e), "danger")
     else:
-        flash("Selecciona un archivo CSV válido.", "danger")
+        flash("Selecciona un archivo .csv o .xlsx válido.", "danger")
     return redirect(url_for("inventario.conteo_importar"))

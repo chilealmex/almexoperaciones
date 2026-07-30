@@ -33,5 +33,8 @@ class MovimientoForm(FlaskForm):
 
 
 class ImportarCsvForm(FlaskForm):
-    archivo = FileField("Archivo CSV", validators=[DataRequired(), FileAllowed(["csv"], "Debe ser un archivo .csv")])
+    archivo = FileField(
+        "Archivo CSV o Excel",
+        validators=[DataRequired(), FileAllowed(["csv", "xlsx"], "Debe ser un archivo .csv o .xlsx")],
+    )
 
