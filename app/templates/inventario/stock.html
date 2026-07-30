@@ -133,7 +133,6 @@
           {{ t.th('Código', 'codigo', orden, direccion) }}
           {{ t.th('Nombre', 'nombre', orden, direccion) }}
           {{ t.th('Unidad', 'unidad_qms', orden, direccion) }}
-          {{ t.th('Costo unitario', 'costo_qms', orden, direccion, 'num') }}
           {{ t.th('QMS', 'cantidad_qms', orden, direccion, 'num') }}
           {{ t.th('Defontana', 'cantidad_defontana', orden, direccion, 'num') }}
           <th class="num">Dif. sistemas</th>
@@ -147,7 +146,6 @@
           {{ t.filtro('f_codigo', filtros_columna, 'filtros-stock', 'Código') }}
           {{ t.filtro('f_nombre', filtros_columna, 'filtros-stock', 'Nombre') }}
           {{ t.filtro('f_unidad', filtros_columna, 'filtros-stock', 'Unidad') }}
-          {{ t.sin_filtro('num') }}
           {{ t.sin_filtro('num') }}
           {{ t.sin_filtro('num') }}
           {{ t.sin_filtro('num') }}
@@ -170,17 +168,6 @@
             <span class="badge bg-danger" title="QMS declara {{ i.unidad_qms }} y Defontana {{ i.unidad_defontana }}">
               {{ i.unidad_qms }} ≠ {{ i.unidad_defontana }}
             </span>
-            {% endif %}
-          </td>
-          <td class="num text-nowrap">
-            {% if not i.tiene_costo %}
-            <span class="text-muted">—</span>
-            {% elif i.tiene_diferencia_costo %}
-            <span class="badge bg-danger" title="QMS {{ i.costo_unitario_qms|clp }} vs Defontana {{ i.costo_unitario_defontana|clp }}">
-              {{ i.costo_unitario_qms|clp }} ≠ {{ i.costo_unitario_defontana|clp }}
-            </span>
-            {% else %}
-            {{ i.costo_referencia|clp }}
             {% endif %}
           </td>
           <td class="num">{{ i.cantidad_qms }}</td>
@@ -216,7 +203,7 @@
           <td class="d-none d-xl-table-cell">{{ i.linea_negocio or '—' }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="12" class="text-center text-muted py-4">Sin resultados{% if q %} para "{{ q }}"{% endif %}.</td></tr>
+        <tr><td colspan="11" class="text-center text-muted py-4">Sin resultados{% if q %} para "{{ q }}"{% endif %}.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -248,12 +235,6 @@
       {% if i.ubicacion %}<span>· {{ i.ubicacion }}</span>{% endif %}
       {% if i.linea_negocio %}<span>· {{ i.linea_negocio }}</span>{% endif %}
     </div>
-
-    {% if i.tiene_costo and i.tiene_diferencia_costo %}
-    <div class="stock-card-costo-dif">
-      Costo unitario distinto: QMS {{ i.costo_unitario_qms|clp }} ≠ Defontana {{ i.costo_unitario_defontana|clp }}
-    </div>
-    {% endif %}
 
     <div class="stock-card-grid">
       <div>

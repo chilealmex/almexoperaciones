@@ -158,16 +158,18 @@ def test_el_conteo_guarda_quien_y_cuando(client, empresa, usuario_admin):
     assert item.contado_en is not None
 
 
-def test_stock_muestra_unidades_y_costos_por_sku(client, empresa, usuario_admin):
-    """La pantalla de stock avisa cuando unidad o costo no coinciden entre sistemas."""
+def test_stock_muestra_unidades_por_sku(client, empresa, usuario_admin):
+    """La pantalla de stock avisa cuando la unidad no coincide entre sistemas.
+
+    El costo unitario y sus diferencias se muestran en Cruce de datos, no aquí.
+    """
     _importar_todo(empresa)
     login(client, "admin@test.cl")
 
     cuerpo = client.get("/inventario/stock").get_data(as_text=True)
-    assert "Costo unitario" in cuerpo
+    assert "Costo unitario" not in cuerpo
     assert "Registrado por" in cuerpo
     assert "RL ≠ UN" in cuerpo  # COD-002 tiene distinta unidad en cada sistema
-    assert "$10.000 ≠ $9.500" in cuerpo  # COD-001 tiene distinto costo
 
 
 def test_ajuste_exige_sesion_iniciada(client, empresa):

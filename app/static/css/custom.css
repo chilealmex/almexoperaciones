@@ -849,15 +849,6 @@ tr.filtros-fila .form-select {
 .stock-card-meta span + span {
   margin-left: 0.3rem;
 }
-.stock-card-costo-dif {
-  margin-top: 0.55rem;
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: var(--danger);
-  background: var(--danger-bg);
-  border-radius: 6px;
-  padding: 0.4rem 0.6rem;
-}
 .stock-card-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
