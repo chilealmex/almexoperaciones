@@ -43,6 +43,12 @@ MODULOS = (
                 "endpoints": ("inventario.ajuste", "inventario.ajuste_csv"),
             },
             {
+                "clave": "cruce_datos",
+                "etiqueta": "Cruce de datos",
+                "endpoint": "inventario.cruce_datos",
+                "endpoints": ("inventario.cruce_datos",),
+            },
+            {
                 "clave": "productos",
                 "etiqueta": "Productos",
                 "endpoint": "inventario.productos",

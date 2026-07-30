@@ -17,7 +17,7 @@ from app.utils.importar_conteo import importar_qms, importar_defontana
 from app.utils.formatting import format_clp, format_fecha_hora
 from app.utils.graficos import COLOR, serie, widget_seguro
 from app.utils.paneles import panel_inventario
-from app.utils.exportar import responder_excel, col, CLP, ENTERO, FECHA
+from app.utils.exportar import responder_excel, col, CLP, ENTERO, FECHA, PORCENTAJE
 
 
 def _cargar_categorias(form):
@@ -484,7 +484,7 @@ def stock_contar(item_id):
 
 # --- Ajuste de inventario: valorización QMS vs Defontana vs conteo físico ---
 
-FILTROS_AJUSTE = ("todos", "dif_costo", "dif_unidad", "dif_stock", "sin_costo", "contados")
+FILTROS_AJUSTE = ("todos", "dif_stock", "contados")
 
 COLUMNAS_AJUSTE = {
     "codigo": ItemConteoInventario.codigo,
@@ -552,14 +552,8 @@ def _items_ajuste(args):
     filtro = args.get("filtro", "todos")
     if filtro not in FILTROS_AJUSTE:
         filtro = "todos"
-    if filtro == "dif_costo":
-        items = [i for i in items if i.tiene_diferencia_costo]
-    elif filtro == "dif_unidad":
-        items = [i for i in items if not i.unidades_coinciden]
-    elif filtro == "dif_stock":
+    if filtro == "dif_stock":
         items = [i for i in items if i.diferencia_sistemas != 0]
-    elif filtro == "sin_costo":
-        items = [i for i in items if not i.tiene_costo]
     elif filtro == "contados":
         items = [i for i in items if i.contado]
 
@@ -580,10 +574,7 @@ def _totales_ajuste(items):
         "valor_qms_contados": sum(i.valor_qms for i in contados),
         "ajuste_fisico": sum(i.diferencia_valor_fisico or 0 for i in contados),
         "contados": len(contados),
-        "dif_costo": sum(1 for i in items if i.tiene_diferencia_costo),
-        "dif_unidad": sum(1 for i in items if not i.unidades_coinciden),
         "dif_stock": sum(1 for i in items if i.diferencia_sistemas != 0),
-        "sin_costo": sum(1 for i in items if not i.tiene_costo),
     }
 
 
@@ -619,14 +610,6 @@ def ajuste():
         serie("Valor físico contado", totales["valor_fisico"], COLOR["verde"], texto=format_clp(totales["valor_fisico"])),
     ]
 
-    sin_diferencia = totales["articulos"] - totales["dif_costo"] - totales["dif_unidad"] - totales["sin_costo"]
-    grafico_calidad = [
-        serie("Costo y unidad coinciden", max(0, sin_diferencia), COLOR["verde"]),
-        serie("Diferencia de costo", totales["dif_costo"], COLOR["ambar"]),
-        serie("Diferencia de unidad", totales["dif_unidad"], COLOR["rojo"]),
-        serie("Sin costo cargado", totales["sin_costo"], COLOR["gris"]),
-    ]
-
     return render_template(
         "inventario/ajuste.html",
         items=visibles,
@@ -640,7 +623,6 @@ def ajuste():
         total_paginas=total_paginas,
         grafico_top=grafico_top,
         grafico_valorizacion=grafico_valorizacion,
-        grafico_calidad=grafico_calidad,
     )
 
 
@@ -653,19 +635,17 @@ def ajuste_csv():
     salida = io.StringIO()
     escritor = csv.writer(salida, delimiter=";")
     escritor.writerow([
-        "Código", "Descripción", "Unidad QMS", "Unidad Defontana", "Unidades coinciden",
-        "Costo unitario QMS", "Costo unitario Defontana", "Diferencia costo unitario",
+        "Código", "Descripción",
+        "Costo unitario QMS", "Costo unitario Defontana",
         "Stock QMS", "Stock Defontana", "Stock físico",
         "Valor QMS", "Valor Defontana", "Diferencia valorización",
         "Ajuste físico vs QMS", "Categoría", "Línea de negocio", "Ubicación",
     ])
     for i in items:
         escritor.writerow([
-            i.codigo, i.nombre or "", i.unidad_qms or "", i.unidad_defontana or "",
-            "sí" if i.unidades_coinciden else "no",
+            i.codigo, i.nombre or "",
             i.costo_unitario_qms if i.costo_unitario_qms is not None else "",
             i.costo_unitario_defontana if i.costo_unitario_defontana is not None else "",
-            i.diferencia_costo_unitario if i.diferencia_costo_unitario is not None else "",
             i.cantidad_qms, i.cantidad_defontana,
             i.cantidad_fisica if i.contado else "",
             i.valor_qms, i.valor_defontana, i.diferencia_valor_sistemas,
@@ -682,10 +662,7 @@ def ajuste_csv():
 
 
 ETIQUETAS_AJUSTE = {
-    "dif_costo": "Solo con diferencia de costo",
-    "dif_unidad": "Solo con distinta unidad de medida",
     "dif_stock": "Solo con diferencia de stock",
-    "sin_costo": "Solo sin costo cargado",
     "contados": "Solo contados",
     "f_codigo": "Código",
     "f_nombre": "Descripción",
@@ -705,12 +682,8 @@ def ajuste_excel():
     columnas = [
         col("Código", ancho=20, total="texto"),
         col("Descripción", ancho=48),
-        col("Unidad QMS", ancho=12),
-        col("Unidad Defontana", ancho=17),
-        col("Unidades coinciden", ancho=18),
         col("Costo unitario QMS", ancho=18, formato=CLP),
         col("Costo unitario Defontana", ancho=22, formato=CLP),
-        col("Dif. costo unitario", ancho=18, formato=CLP),
         col("Stock QMS", ancho=12, formato=ENTERO, total="suma"),
         col("Stock Defontana", ancho=16, formato=ENTERO, total="suma"),
         col("Stock físico", ancho=13, formato=ENTERO, total="suma"),
@@ -726,12 +699,8 @@ def ajuste_excel():
         [
             i.codigo,
             i.nombre or "",
-            i.unidad_qms or "",
-            i.unidad_defontana or "",
-            "Sí" if i.unidades_coinciden else "NO",
             i.costo_unitario_qms,
             i.costo_unitario_defontana,
-            i.diferencia_costo_unitario,
             i.cantidad_qms,
             i.cantidad_defontana,
             i.cantidad_fisica if i.contado else None,
@@ -752,6 +721,174 @@ def ajuste_excel():
         columnas,
         filas,
         _descripcion_filtros(q, filtro, filtros_columna, ETIQUETAS_AJUSTE),
+    )
+
+
+# --- Cruce de datos: consistencia de unidad de medida y costo entre QMS y Defontana ---
+#
+# A diferencia de Ajuste inventario (que valoriza el stock), este submódulo responde
+# una pregunta distinta: "¿el maestro de datos está bien parametrizado?" — es decir,
+# qué SKUs quedaron con distinta unidad de medida o distinto costo unitario cargado
+# en cada sistema, para poder corregirlos en el origen.
+
+FILTROS_CRUCE = ("todos", "dif_costo", "dif_unidad", "ambas", "sin_costo")
+
+ETIQUETAS_ESTADO_MAESTRO = {
+    "ok": "Costo y unidad coinciden",
+    "dif_costo": "Diferencia de costo",
+    "dif_unidad": "Diferencia de unidad",
+    "ambas": "Costo y unidad difieren",
+    "sin_costo": "Sin costo cargado",
+}
+
+ETIQUETAS_CRUCE = {
+    "dif_costo": "Solo con diferencia de costo",
+    "dif_unidad": "Solo con distinta unidad de medida",
+    "ambas": "Solo con costo y unidad distintos",
+    "sin_costo": "Solo sin costo cargado",
+    "f_codigo": "Código",
+    "f_nombre": "Descripción",
+    "f_unidad": "Unidad",
+    "f_categoria": "Categoría",
+    "f_linea": "Línea de negocio",
+    "f_ubicacion": "Ubicación",
+}
+
+
+def _items_cruce_datos(args):
+    """Items del cruce QMS/Defontana filtrados según consistencia del maestro."""
+    consulta = ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id)
+
+    busqueda = (args.get("q") or "").strip()
+    if busqueda:
+        patron = f"%{busqueda}%"
+        consulta = consulta.filter(
+            or_(ItemConteoInventario.codigo.ilike(patron), ItemConteoInventario.nombre.ilike(patron))
+        )
+
+    consulta, filtros_columna = _filtros_de_columna(consulta, args)
+    consulta, orden, direccion = _ordenar(consulta, args, COLUMNAS_AJUSTE, "codigo")
+
+    items = consulta.all()
+
+    filtro = args.get("filtro", "todos")
+    if filtro not in FILTROS_CRUCE:
+        filtro = "todos"
+    if filtro in ETIQUETAS_ESTADO_MAESTRO:
+        items = [i for i in items if i.estado_maestro == filtro]
+
+    return items, busqueda, filtros_columna, filtro, orden, direccion
+
+
+def _totales_cruce(items):
+    por_estado = {clave: 0 for clave in ETIQUETAS_ESTADO_MAESTRO}
+    for i in items:
+        por_estado[i.estado_maestro] += 1
+    return {
+        "articulos": len(items),
+        "con_costo": sum(1 for i in items if i.tiene_costo),
+        **por_estado,
+    }
+
+
+@bp.route("/cruce-datos")
+@require_permission("inventario", "ver")
+def cruce_datos():
+    """Consistencia de unidad de medida y costo unitario entre QMS y Defontana."""
+    items, busqueda, filtros_columna, filtro, orden, direccion = _items_cruce_datos(request.args)
+    totales = _totales_cruce(items)
+
+    pagina = max(1, request.args.get("pagina", 1, type=int))
+    por_pagina = 100
+    total_paginas = max(1, (len(items) + por_pagina - 1) // por_pagina)
+    pagina = min(pagina, total_paginas)
+    visibles = items[(pagina - 1) * por_pagina : pagina * por_pagina]
+
+    grafico_estado = [
+        serie(ETIQUETAS_ESTADO_MAESTRO["ok"], totales["ok"], COLOR["verde"]),
+        serie(ETIQUETAS_ESTADO_MAESTRO["dif_costo"], totales["dif_costo"], COLOR["ambar"]),
+        serie(ETIQUETAS_ESTADO_MAESTRO["dif_unidad"], totales["dif_unidad"], COLOR["rojo"]),
+        serie(ETIQUETAS_ESTADO_MAESTRO["ambas"], totales["ambas"], COLOR["morado"]),
+        serie(ETIQUETAS_ESTADO_MAESTRO["sin_costo"], totales["sin_costo"], COLOR["gris"]),
+    ]
+
+    # SKUs donde la diferencia de costo pesa más en pesos sobre el stock declarado
+    con_impacto = [i for i in items if i.impacto_diferencia_costo]
+    top_impacto = sorted(con_impacto, key=lambda i: abs(i.impacto_diferencia_costo), reverse=True)[:8]
+    grafico_impacto = [
+        serie(
+            (i.nombre or i.codigo)[:38],
+            abs(i.impacto_diferencia_costo),
+            COLOR["rojo"] if i.impacto_diferencia_costo > 0 else COLOR["azul"],
+            texto=format_clp(i.impacto_diferencia_costo),
+        )
+        for i in top_impacto
+    ]
+
+    return render_template(
+        "inventario/cruce_datos.html",
+        items=visibles,
+        totales=totales,
+        q=busqueda,
+        filtro=filtro,
+        filtros_columna=filtros_columna,
+        orden=orden,
+        direccion=direccion,
+        pagina=pagina,
+        total_paginas=total_paginas,
+        grafico_estado=grafico_estado,
+        grafico_impacto=grafico_impacto,
+    )
+
+
+@bp.route("/cruce-datos.xlsx")
+@require_permission("inventario", "ver")
+def cruce_datos_excel():
+    """Informe en Excel de consistencia de unidad y costo, con los filtros de la pantalla."""
+    items, q, filtros_columna, filtro, _orden, _dir = _items_cruce_datos(request.args)
+
+    columnas = [
+        col("Código", ancho=20, total="texto"),
+        col("Descripción", ancho=48),
+        col("Unidad QMS", ancho=12),
+        col("Unidad Defontana", ancho=17),
+        col("Unidades coinciden", ancho=18),
+        col("Costo unitario QMS", ancho=18, formato=CLP),
+        col("Costo unitario Defontana", ancho=22, formato=CLP),
+        col("Dif. costo unitario", ancho=18, formato=CLP),
+        col("Desviación costo (%)", ancho=19, formato=PORCENTAJE),
+        col("Impacto en stock QMS", ancho=20, formato=CLP, total="suma"),
+        col("Estado del maestro", ancho=22),
+        col("Categoría", ancho=24),
+        col("Línea de negocio", ancho=24),
+        col("Ubicación", ancho=28),
+    ]
+    filas = [
+        [
+            i.codigo,
+            i.nombre or "",
+            i.unidad_qms or "",
+            i.unidad_defontana or "",
+            "Sí" if i.unidades_coinciden else "NO",
+            i.costo_unitario_qms,
+            i.costo_unitario_defontana,
+            i.diferencia_costo_unitario,
+            (i.desviacion_costo_pct / 100) if i.desviacion_costo_pct is not None else None,
+            i.impacto_diferencia_costo,
+            ETIQUETAS_ESTADO_MAESTRO[i.estado_maestro],
+            i.categoria or "",
+            i.linea_negocio or "",
+            i.ubicacion or "",
+        ]
+        for i in items
+    ]
+
+    return responder_excel(
+        "cruce-datos-inventario",
+        "Cruce de unidades y costos",
+        columnas,
+        filas,
+        _descripcion_filtros(q, filtro, filtros_columna, ETIQUETAS_CRUCE),
     )
 
 

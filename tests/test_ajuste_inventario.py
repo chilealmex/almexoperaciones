@@ -91,24 +91,27 @@ def test_pagina_de_ajuste_filtra_y_totaliza(client, empresa, usuario_admin):
     assert "Ajuste de inventario" in cuerpo
     assert "$170.000" in cuerpo  # valorización QMS: 100.000 + 70.000
 
-    solo_unidad = client.get("/inventario/ajuste?filtro=dif_unidad")
-    assert solo_unidad.status_code == 200
-    assert "COD-002" in solo_unidad.get_data(as_text=True)
-    assert "COD-001" not in solo_unidad.get_data(as_text=True)
+    # COD-001 tiene stock distinto entre QMS (10) y Defontana (8); COD-002 coincide (7 y 7)
+    solo_dif_stock = client.get("/inventario/ajuste?filtro=dif_stock")
+    assert solo_dif_stock.status_code == 200
+    assert "COD-001" in solo_dif_stock.get_data(as_text=True)
+    assert "COD-002" not in solo_dif_stock.get_data(as_text=True)
 
 
 def test_exportacion_csv_respeta_los_filtros(client, empresa, usuario_admin):
     _importar_todo(empresa)
     login(client, "admin@test.cl")
 
-    respuesta = client.get("/inventario/ajuste.csv?filtro=dif_costo")
+    respuesta = client.get("/inventario/ajuste.csv?filtro=todos")
     assert respuesta.status_code == 200
     assert "text/csv" in respuesta.headers["Content-Type"]
 
     texto = respuesta.get_data(as_text=True)
-    assert "Diferencia costo unitario" in texto
-    assert "COD-001" in texto
-    assert "COD-002" not in texto  # ese tiene el mismo costo en ambos sistemas
+    assert "Costo unitario QMS" in texto
+    assert "COD-001" in texto and "COD-002" in texto
+
+    respuesta = client.get("/inventario/ajuste.csv?filtro=contados")
+    assert "COD-001" not in respuesta.get_data(as_text=True)  # ninguno se ha contado aún
 
 
 def test_reimportar_no_altera_el_conteo_fisico_ni_su_trazabilidad(db, empresa, usuario_admin):

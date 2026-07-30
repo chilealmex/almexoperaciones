@@ -115,6 +115,51 @@ class ItemConteoInventario(db.Model):
         return (self.cantidad_fisica - (self.cantidad_defontana or 0)) * (self.costo_referencia or 0)
 
     @property
+    def desviacion_costo_pct(self):
+        """Cuánto se desvía el costo de QMS respecto al de Defontana, en porcentaje.
+
+        Se mide contra Defontana; si ahí el costo es 0 no hay base de comparación.
+        """
+        diferencia = self.diferencia_costo_unitario
+        if diferencia is None or not self.costo_unitario_defontana:
+            return None
+        return diferencia / self.costo_unitario_defontana * 100
+
+    @property
+    def impacto_diferencia_costo(self):
+        """Cuánto dinero explica la diferencia de costo sobre el stock declarado.
+
+        Es la plata que se gana o se pierde en la valorización según qué sistema
+        se tome como bueno, así se puede priorizar qué SKU corregir primero.
+        """
+        diferencia = self.diferencia_costo_unitario
+        if diferencia is None:
+            return None
+        return diferencia * (self.cantidad_qms or 0)
+
+    @property
+    def par_de_unidades(self):
+        """'RL → UN' cuando las unidades no coinciden; None si están bien."""
+        if self.unidades_coinciden:
+            return None
+        return f"{self.unidad_qms} → {self.unidad_defontana}"
+
+    @property
+    def estado_maestro(self) -> str:
+        """Clasifica al SKU según la consistencia de sus datos entre sistemas."""
+        if not self.tiene_costo:
+            return "sin_costo"
+        unidad_mal = not self.unidades_coinciden
+        costo_mal = self.tiene_diferencia_costo
+        if unidad_mal and costo_mal:
+            return "ambas"
+        if unidad_mal:
+            return "dif_unidad"
+        if costo_mal:
+            return "dif_costo"
+        return "ok"
+
+    @property
     def unidades_coinciden(self) -> bool:
         """False sólo si ambos sistemas declaran unidad y no es la misma."""
         if not self.unidad_qms or not self.unidad_defontana:
