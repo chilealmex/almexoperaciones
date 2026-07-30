@@ -59,6 +59,14 @@
   </div>
 </div>
 
+<div class="row g-3 mb-4">
+  <div class="col-12">
+    {% call g.tarjeta('Valorización por línea de negocio', 'QMS vs Defontana (costo unitario × cantidad), según el cruce de Stock y conteo') %}
+      {{ g.barras_agrupadas(panel.grafico_valorizacion_lineas, vacio='Aún no hay artículos cruzados con línea de negocio.') }}
+    {% endcall %}
+  </div>
+</div>
+
 {% if panel.productos_bajo_stock %}
 <div class="card">
   <div class="card-header">Productos bajo el stock mínimo</div>

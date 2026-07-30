@@ -102,6 +102,45 @@
 {% endif %}
 {% endmacro %}
 
+{# --- Barras agrupadas: dos series (ej. QMS vs Defontana) por categoría, más
+   una diferencia. grupos: [{'etiqueta':'PRENSAS','valor_a':100,'valor_a_texto':'$100',
+   'valor_b':90,'valor_b_texto':'$90','diferencia_texto':'+$10','diferencia_es_cero':False}]
+---------------------------------------------------------------------------- #}
+{% macro barras_agrupadas(grupos, etiqueta_a='QMS', etiqueta_b='Defontana', color_a='var(--chart-1)', color_b='var(--chart-2)', vacio='Sin datos para mostrar todavía.') %}
+{% set datos = grupos | list %}
+{% set maximo = ((datos | map(attribute='valor_a') | list) + (datos | map(attribute='valor_b') | list)) | max if datos else 0 %}
+{% if datos and maximo > 0 %}
+<div class="grupos-barras">
+  {% for g in datos %}
+  <div class="grupo-linea">
+    <div class="grupo-linea-titulo">
+      <span>{{ g.etiqueta }}</span>
+      <span class="grupo-linea-dif {{ 'text-success' if g.diferencia_es_cero else 'text-danger' }}">
+        Diferencia: {{ g.diferencia_texto }}
+      </span>
+    </div>
+    <div class="bar-row">
+      <span class="bar-label">{{ etiqueta_a }}</span>
+      <span class="bar-track">
+        <span class="bar-fill" style="width: {{ (100 * g.valor_a / maximo) | round(1) }}%; background: {{ color_a }}"></span>
+      </span>
+      <span class="bar-value">{{ g.valor_a_texto }}</span>
+    </div>
+    <div class="bar-row">
+      <span class="bar-label">{{ etiqueta_b }}</span>
+      <span class="bar-track">
+        <span class="bar-fill" style="width: {{ (100 * g.valor_b / maximo) | round(1) }}%; background: {{ color_b }}"></span>
+      </span>
+      <span class="bar-value">{{ g.valor_b_texto }}</span>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="chart-empty">{{ vacio }}</div>
+{% endif %}
+{% endmacro %}
+
 {# --- Contenedor de gráfico ------------------------------------------------- #}
 {% macro tarjeta(titulo, subtitulo='') %}
 <div class="card chart-card h-100">

@@ -33,6 +33,16 @@ def panel_inventario():
         por_categoria[nombre] = por_categoria.get(nombre, 0) + p.stock_actual * p.precio_costo
     top_categorias = sorted(por_categoria.items(), key=lambda x: x[1], reverse=True)[:5]
 
+    # Valorización QMS vs Defontana por línea de negocio (costo unitario x cantidad,
+    # tomado directo del cruce de Stock y conteo, así se actualiza solo al recontar).
+    por_linea = {}
+    for i in items:
+        linea = i.linea_negocio or "Sin línea"
+        valores = por_linea.setdefault(linea, {"qms": 0, "defontana": 0})
+        valores["qms"] += i.valor_qms
+        valores["defontana"] += i.valor_defontana
+    lineas_ordenadas = sorted(por_linea.items(), key=lambda x: x[1]["qms"] + x[1]["defontana"], reverse=True)
+
     paleta = [COLOR["azul"], COLOR["azul_claro"], COLOR["teal"], COLOR["morado"], COLOR["gris"]]
     return {
         "productos": len(productos),
@@ -53,6 +63,18 @@ def panel_inventario():
         "grafico_categorias": [
             serie(nombre, valor, paleta[idx % len(paleta)], texto=_clp(valor))
             for idx, (nombre, valor) in enumerate(top_categorias)
+        ],
+        "grafico_valorizacion_lineas": [
+            {
+                "etiqueta": nombre,
+                "valor_a": v["qms"],
+                "valor_a_texto": _clp(v["qms"]),
+                "valor_b": v["defontana"],
+                "valor_b_texto": _clp(v["defontana"]),
+                "diferencia_texto": _clp(v["qms"] - v["defontana"]),
+                "diferencia_es_cero": v["qms"] == v["defontana"],
+            }
+            for nombre, v in lineas_ordenadas
         ],
     }
 
