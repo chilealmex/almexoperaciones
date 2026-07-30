@@ -75,6 +75,10 @@ def seed():
         admin = Usuario.query.filter_by(email=admin_email).first()
         if admin is None:
             password_inicial = admin_password_fija or secrets.token_urlsafe(12)
+            if Usuario.query.filter_by(nombre_usuario=admin_username).first() is not None:
+                admin_username_libre = f"{admin_username}-{secrets.token_hex(2)}"
+                print(f"Aviso: '{admin_username}' ya estaba en uso; se crea el admin como '{admin_username_libre}'.")
+                admin_username = admin_username_libre
             admin = Usuario(
                 empresa_id=empresa.id,
                 nombre_completo="Super Administrador",
@@ -100,8 +104,17 @@ def seed():
                 admin.rol_id = roles_creados["superadmin"].id
                 cambios.append("rol -> superadmin")
             if admin.nombre_usuario != admin_username:
-                admin.nombre_usuario = admin_username
-                cambios.append(f"nombre_usuario -> {admin_username}")
+                en_uso_por_otro = Usuario.query.filter(
+                    Usuario.nombre_usuario == admin_username, Usuario.id != admin.id
+                ).first()
+                if en_uso_por_otro is not None:
+                    print(
+                        f"Aviso: ADMIN_USERNAME='{admin_username}' ya lo usa otra cuenta "
+                        f"({en_uso_por_otro.email}); no se renombra el usuario {admin.email}."
+                    )
+                else:
+                    admin.nombre_usuario = admin_username
+                    cambios.append(f"nombre_usuario -> {admin_username}")
 
             if admin_password_fija:
                 admin.set_password(admin_password_fija)
