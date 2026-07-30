@@ -15,22 +15,25 @@
 <div class="documento-contrato card">
   <div class="card-body p-4 p-lg-5">
 
+    <div class="doc-logo-fila">
+      <img class="doc-logo" src="{{ url_for('static', filename='img/logo-almex.png') }}" alt="Almex">
+    </div>
+
     <h2 class="doc-titulo">CONTRATO DE ARRIENDO DE EQUIPOS VULCANIZADORES Y FIANZA SOLIDARIA</h2>
     <p class="text-center fw-bold">Shaw Almex Chile SpA</p>
 
     <p>En Santiago de Chile, a {{ fecha_contrato_palabras }}, comparecen:</p>
 
-    <p><strong>SHAW ALMEX CHILE SpA</strong>, sociedad por acciones constituida conforme a las leyes de la República de Chile, Rol Único Tributario N° 99.578.050-K, representada legalmente por don Claudio Patricio Berríos Aparicio, cédula nacional de identidad N° 13.454.087-7{% if c.correo_arrendador %}, correo electrónico de contacto: {{ c.correo_arrendador }}{% endif %}, en adelante e indistintamente el "Arrendador" o el "Acreedor";</p>
-
-    <p><strong>{{ c.cliente.razon_social }}</strong>, sociedad constituida conforme a las leyes de la República de Chile, Rol Único Tributario N° {{ c.cliente.rut }}, representada legalmente por don/doña {{ c.representante_nombre }}, cédula nacional de identidad N° {{ c.representante_cedula }}, domiciliada en {{ c.arrendatario_domicilio }}, correo electrónico de contacto: {{ c.arrendatario_correo }}, en adelante el "Arrendatario" o "Deudor Principal"; y</p>
-
-    {% if c.fiador_tipo == 'natural' %}
-    <p>Don/doña <strong>{{ c.fiador_nombre }}</strong>, persona natural, cédula de identidad N° {{ c.fiador_rut }}{% if c.fiador_domicilio %}, domiciliado/a en {{ c.fiador_domicilio }}{% endif %}{% if c.fiador_correo %}, correo electrónico de contacto: {{ c.fiador_correo }}{% endif %}, en adelante el "Fiador y Codeudor Solidario";</p>
-    {% else %}
-    <p><strong>{{ c.fiador_nombre }}</strong>, RUT {{ c.fiador_rut }}, representada legalmente por don/doña {{ c.fiador_representante }}{% if c.fiador_domicilio %}, domiciliada en {{ c.fiador_domicilio }}{% endif %}{% if c.fiador_correo %}, correo electrónico de contacto: {{ c.fiador_correo }}{% endif %}, con facultad expresa para otorgar fianzas y afianzar obligaciones de terceros según constancia de personería que se acompaña, en adelante el "Fiador y Codeudor Solidario";</p>
-    {% endif %}
-
-    <p>El Arrendador, el Arrendatario y el Fiador y Codeudor Solidario se denominarán conjuntamente las "Partes". Las Partes han convenido el siguiente Contrato de Arriendo de Equipos Vulcanizadores y Fianza Solidaria (en adelante, el "Contrato"), sujeto a los términos y condiciones que se indican a continuación:</p>
+    <p>
+      <strong>SHAW ALMEX CHILE SpA</strong>, sociedad por acciones constituida conforme a las leyes de la República de Chile, Rol Único Tributario N° 99.578.050-K, representada legalmente por don Claudio Patricio Berríos Aparicio, cédula nacional de identidad N° 13.454.087-7{% if c.correo_arrendador %}, correo electrónico de contacto: {{ c.correo_arrendador }}{% endif %}, en adelante e indistintamente el "Arrendador" o el "Acreedor";
+      <strong>{{ c.cliente.razon_social }}</strong>, sociedad constituida conforme a las leyes de la República de Chile, Rol Único Tributario N° {{ c.cliente.rut }}, representada legalmente por don/doña {{ c.representante_nombre }}, cédula nacional de identidad N° {{ c.representante_cedula }}, domiciliada en {{ c.arrendatario_domicilio }}, correo electrónico de contacto: {{ c.arrendatario_correo }}, en adelante el "Arrendatario" o "Deudor Principal"; y
+      {% if c.fiador_tipo == 'natural' %}
+      Don/doña <strong>{{ c.fiador_nombre }}</strong>, persona natural, cédula de identidad N° {{ c.fiador_rut }}{% if c.fiador_domicilio %}, domiciliado/a en {{ c.fiador_domicilio }}{% endif %}{% if c.fiador_correo %}, correo electrónico de contacto: {{ c.fiador_correo }}{% endif %}, en adelante el "Fiador y Codeudor Solidario";
+      {% else %}
+      <strong>{{ c.fiador_nombre }}</strong>, RUT {{ c.fiador_rut }}, representada legalmente por don/doña {{ c.fiador_representante }}{% if c.fiador_domicilio %}, domiciliada en {{ c.fiador_domicilio }}{% endif %}{% if c.fiador_correo %}, correo electrónico de contacto: {{ c.fiador_correo }}{% endif %}, con facultad expresa para otorgar fianzas y afianzar obligaciones de terceros según constancia de personería que se acompaña, en adelante el "Fiador y Codeudor Solidario";
+      {% endif %}
+      El Arrendador, el Arrendatario y el Fiador y Codeudor Solidario se denominarán conjuntamente las "Partes". Las Partes han convenido el siguiente Contrato de Arriendo de Equipos Vulcanizadores y Fianza Solidaria (en adelante, el "Contrato"), sujeto a los términos y condiciones que se indican a continuación:
+    </p>
 
     <h3 class="doc-clausula">PRIMERO: OBJETO DEL CONTRATO</h3>
     <p>1.1. El Arrendador da en arriendo al Arrendatario, y éste acepta en tal calidad, el o los equipos vulcanizadores y sus componentes que se describen, especifican y valorizan en la Cotización N° {{ c.cotizacion_numero }} de fecha {{ cotizacion_fecha_palabras }} emitida por el Arrendador que el Arrendatario ha aceptado, (en adelante, la "Cotización").</p>
@@ -164,6 +167,14 @@
   margin: 0 auto;
   font-size: 0.95rem;
   text-align: justify;
+}
+.doc-logo-fila {
+  text-align: right;
+  margin-bottom: 0.5rem;
+}
+.doc-logo {
+  width: 130px;
+  height: auto;
 }
 .doc-titulo {
   font-size: 1.15rem;
