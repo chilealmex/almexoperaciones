@@ -665,6 +665,12 @@ tr.filtros-fila .form-select {
   background-color: var(--warn-bg) !important;
 }
 
+/* Tabla de permisos: distingue la fila de módulo de sus submódulos indentados */
+.table-permiso-modulo td {
+  background: #f7f9fb;
+  border-top: 2px solid var(--line);
+}
+
 /* ===== Alertas ===== */
 .alert {
   border: 1px solid transparent;

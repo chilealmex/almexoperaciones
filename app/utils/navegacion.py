@@ -252,6 +252,20 @@ MODULOS = (
 )
 
 
+def _construir_endpoint_a_submodulo():
+    """Índice endpoint -> (módulo, submódulo) para exigir permiso a nivel de submódulo."""
+    indice = {}
+    for modulo in MODULOS:
+        for submodulo in modulo["submodulos"]:
+            for endpoint in submodulo["endpoints"]:
+                indice[endpoint] = (modulo["clave"], submodulo["clave"])
+    return indice
+
+
+# Se calcula una sola vez al importar: los endpoints de cada submódulo no cambian en caliente.
+ENDPOINT_A_SUBMODULO = _construir_endpoint_a_submodulo()
+
+
 def _endpoints_del_modulo(modulo):
     endpoints = set(modulo["endpoints"])
     for submodulo in modulo["submodulos"]:
@@ -265,7 +279,8 @@ def _es_visible(modulo, submodulo, puede):
     if permiso is None:
         return True
     accion = (submodulo or modulo).get("accion", "ver")
-    return puede(permiso, accion)
+    clave_submodulo = submodulo["clave"] if submodulo else None
+    return puede(permiso, accion, submodulo=clave_submodulo)
 
 
 def construir_navegacion(endpoint, puede):

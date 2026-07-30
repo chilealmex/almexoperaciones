@@ -2,11 +2,11 @@ from app.utils.navegacion import construir_navegacion
 from tests.conftest import login
 
 
-def _puede_todo(_modulo, _accion="ver"):
+def _puede_todo(_modulo, _accion="ver", submodulo=None):
     return True
 
 
-def _puede_nada(_modulo, _accion="ver"):
+def _puede_nada(_modulo, _accion="ver", submodulo=None):
     return False
 
 
@@ -48,7 +48,7 @@ def test_clientes_y_proveedores_viven_bajo_datos_maestros():
 
 
 def test_submodulo_de_edicion_requiere_permiso_de_editar():
-    def solo_ver(_modulo, accion="ver"):
+    def solo_ver(_modulo, accion="ver", submodulo=None):
         return accion == "ver"
 
     nav = construir_navegacion("inventario.stock", solo_ver)

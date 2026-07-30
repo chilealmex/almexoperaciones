@@ -19,16 +19,23 @@ class RolModuloPermiso(db.Model):
 
 
 class PermisoUsuario(db.Model):
-    """Override individual de permisos por usuario, tiene prioridad sobre el rol."""
+    """Override individual de permisos por usuario, tiene prioridad sobre el rol.
+
+    ``submodulo`` distingue un override del módulo completo (cadena vacía) de uno
+    de un submódulo puntual (ej. "stock" dentro de "inventario"); se usa cadena
+    vacía en vez de NULL para que la restricción de unicidad funcione igual en
+    SQLite y Postgres (NULL no se compara como igual a sí mismo en un UNIQUE).
+    """
 
     __tablename__ = "permisos_usuario"
     __table_args__ = (
-        db.UniqueConstraint("usuario_id", "modulo", name="uq_usuario_modulo"),
+        db.UniqueConstraint("usuario_id", "modulo", "submodulo", name="uq_usuario_modulo_submodulo"),
     )
 
     id = db.Column(db.Integer, primary_key=True)
     usuario_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"), nullable=False)
     modulo = db.Column(db.String(30), nullable=False)
+    submodulo = db.Column(db.String(40), nullable=False, default="")
     puede_ver = db.Column(db.Boolean, default=False, nullable=False)
     puede_editar = db.Column(db.Boolean, default=False, nullable=False)
 

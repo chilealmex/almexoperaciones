@@ -7,6 +7,7 @@ from app.extensions import db
 from app.models.usuario import Usuario, Rol
 from app.models.permiso import MODULOS, PermisoUsuario
 from app.utils.decorators import require_permission
+from app.utils.navegacion import MODULOS as NAV_MODULOS
 
 
 @bp.route("/usuarios")
@@ -117,11 +118,42 @@ def editar_usuario(usuario_id):
     return render_template("admin/usuario_form.html", form=form, usuario=usuario)
 
 
+def _submodulos_por_modulo():
+    """Submódulos declarados en la navegación, indexados por módulo (mismo orden que se ve en pantalla)."""
+    return {m["clave"]: m["submodulos"] for m in NAV_MODULOS if m["permiso"]}
+
+
+def _campo(sufijo, modulo, submodulo_clave=""):
+    prefijo = f"{modulo}__{submodulo_clave}" if submodulo_clave else modulo
+    return f"{sufijo}_{prefijo}"
+
+
+def _guardar_override(usuario, modulo, submodulo_clave, form):
+    puede_ver = form.get(_campo("ver", modulo, submodulo_clave)) == "on"
+    puede_editar = form.get(_campo("editar", modulo, submodulo_clave)) == "on"
+    usar_por_defecto = form.get(_campo("heredar", modulo, submodulo_clave)) == "on"
+
+    override = PermisoUsuario.query.filter_by(
+        usuario_id=usuario.id, modulo=modulo, submodulo=submodulo_clave
+    ).first()
+
+    if usar_por_defecto:
+        if override:
+            db.session.delete(override)
+        return
+
+    if override is None:
+        override = PermisoUsuario(usuario_id=usuario.id, modulo=modulo, submodulo=submodulo_clave)
+        db.session.add(override)
+    override.puede_ver = puede_ver
+    override.puede_editar = puede_editar
+
+
 @bp.route("/usuarios/<int:usuario_id>/permisos", methods=["GET", "POST"])
 @require_permission("admin", "editar")
 def permisos_usuario(usuario_id):
-    # Solo el superadmin define qué módulos puede ver/editar cada usuario:
-    # un admin normal ya no puede tocar esta pantalla, ni siquiera por URL directa.
+    # Solo el superadmin define qué módulos y submódulos puede ver/editar cada
+    # usuario: un admin normal ya no puede tocar esta pantalla, ni siquiera por URL directa.
     if not current_user.es_superadmin:
         abort(403)
 
@@ -129,31 +161,23 @@ def permisos_usuario(usuario_id):
     if not current_user.puede_gestionar_a(usuario):
         abort(403)
 
+    submodulos_por_modulo = _submodulos_por_modulo()
+
     if request.method == "POST":
         for modulo in MODULOS:
-            puede_ver = request.form.get(f"ver_{modulo}") == "on"
-            puede_editar = request.form.get(f"editar_{modulo}") == "on"
-            override = PermisoUsuario.query.filter_by(
-                usuario_id=usuario.id, modulo=modulo
-            ).first()
-
-            usar_rol_por_defecto = request.form.get(f"heredar_{modulo}") == "on"
-            if usar_rol_por_defecto:
-                if override:
-                    db.session.delete(override)
-                continue
-
-            if override is None:
-                override = PermisoUsuario(usuario_id=usuario.id, modulo=modulo)
-                db.session.add(override)
-            override.puede_ver = puede_ver
-            override.puede_editar = puede_editar
+            _guardar_override(usuario, modulo, "", request.form)
+            for submodulo in submodulos_por_modulo.get(modulo, ()):
+                _guardar_override(usuario, modulo, submodulo["clave"], request.form)
 
         db.session.commit()
         flash("Permisos actualizados correctamente.", "success")
         return redirect(url_for("admin.permisos_usuario", usuario_id=usuario.id))
 
-    overrides = {p.modulo: p for p in usuario.permisos_custom}
+    overrides = {(p.modulo, p.submodulo): p for p in usuario.permisos_custom}
     return render_template(
-        "admin/permisos.html", usuario=usuario, modulos=MODULOS, overrides=overrides
+        "admin/permisos.html",
+        usuario=usuario,
+        modulos=MODULOS,
+        submodulos_por_modulo=submodulos_por_modulo,
+        overrides=overrides,
     )

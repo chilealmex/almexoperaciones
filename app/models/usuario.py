@@ -53,14 +53,22 @@ class Usuario(UserMixin, db.Model):
     def is_active(self):
         return self.activo
 
-    def tiene_permiso(self, modulo: str, accion: str = "ver") -> bool:
+    def tiene_permiso(self, modulo: str, accion: str = "ver", submodulo: str | None = None) -> bool:
         if self.es_superadmin:
             return True
 
         from app.models.permiso import PermisoUsuario, RolModuloPermiso
 
+        if submodulo:
+            override_sub = PermisoUsuario.query.filter_by(
+                usuario_id=self.id, modulo=modulo, submodulo=submodulo
+            ).first()
+            if override_sub is not None:
+                return override_sub.puede_editar if accion == "editar" else override_sub.puede_ver
+            # Sin override propio del submódulo: hereda el permiso del módulo completo.
+
         override = PermisoUsuario.query.filter_by(
-            usuario_id=self.id, modulo=modulo
+            usuario_id=self.id, modulo=modulo, submodulo=""
         ).first()
         if override is not None:
             return override.puede_editar if accion == "editar" else override.puede_ver

@@ -2,7 +2,11 @@
 {% block title %}Permisos de {{ usuario.nombre_completo }}{% endblock %}
 {% block content %}
 <h1 class="h3 mb-1">Permisos de {{ usuario.nombre_completo }}</h1>
-<p class="text-muted">Rol base: {{ usuario.rol.nombre }}. Marca "Usar rol" para que este módulo herede el permiso del rol, o desmárcalo para definir un permiso individual.</p>
+<p class="text-muted">
+  Rol base: {{ usuario.rol.nombre }}. Marca "Usar rol" para que el módulo herede el permiso del rol, o desmárcalo
+  para definir un permiso individual. Cada submódulo, a su vez, hereda el permiso de su módulo salvo que marques
+  "Usar módulo" en desmarcado y definas uno propio.
+</p>
 
 <form method="post">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -10,19 +14,19 @@
     <table class="table align-middle">
       <thead>
         <tr>
-          <th>Módulo</th>
-          <th class="text-center">Usar rol</th>
+          <th>Módulo / submódulo</th>
+          <th class="text-center">Heredar</th>
           <th class="text-center">Ver</th>
           <th class="text-center">Editar</th>
         </tr>
       </thead>
       <tbody>
         {% for modulo in modulos %}
-        {% set override = overrides.get(modulo) %}
-        <tr>
-          <td>{{ modulo.replace('_', ' ')|capitalize }}</td>
+        {% set override = overrides.get((modulo, '')) %}
+        <tr class="table-permiso-modulo">
+          <td class="fw-bold">{{ modulo.replace('_', ' ')|capitalize }}</td>
           <td class="text-center">
-            <input type="checkbox" name="heredar_{{ modulo }}" class="form-check-input" {{ 'checked' if not override else '' }}>
+            <input type="checkbox" name="heredar_{{ modulo }}" class="form-check-input" title="Usar rol" {{ 'checked' if not override else '' }}>
           </td>
           <td class="text-center">
             <input type="checkbox" name="ver_{{ modulo }}" class="form-check-input" {{ 'checked' if override and override.puede_ver else '' }}>
@@ -31,6 +35,21 @@
             <input type="checkbox" name="editar_{{ modulo }}" class="form-check-input" {{ 'checked' if override and override.puede_editar else '' }}>
           </td>
         </tr>
+        {% for submodulo in submodulos_por_modulo.get(modulo, []) %}
+        {% set override_sub = overrides.get((modulo, submodulo.clave)) %}
+        <tr>
+          <td class="ps-4 text-muted">{{ submodulo.etiqueta }}</td>
+          <td class="text-center">
+            <input type="checkbox" name="heredar_{{ modulo }}__{{ submodulo.clave }}" class="form-check-input" title="Usar módulo" {{ 'checked' if not override_sub else '' }}>
+          </td>
+          <td class="text-center">
+            <input type="checkbox" name="ver_{{ modulo }}__{{ submodulo.clave }}" class="form-check-input" {{ 'checked' if override_sub and override_sub.puede_ver else '' }}>
+          </td>
+          <td class="text-center">
+            <input type="checkbox" name="editar_{{ modulo }}__{{ submodulo.clave }}" class="form-check-input" {{ 'checked' if override_sub and override_sub.puede_editar else '' }}>
+          </td>
+        </tr>
+        {% endfor %}
         {% endfor %}
       </tbody>
     </table>

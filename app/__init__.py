@@ -9,7 +9,9 @@ from werkzeug.exceptions import HTTPException
 from app.config import CONFIG_MAP
 from app.extensions import db, migrate, login_manager, csrf
 from app.utils.formatting import register_filters
-from app.utils.navegacion import construir_navegacion
+from app.utils.navegacion import construir_navegacion, ENDPOINT_A_SUBMODULO
+
+_SIN_ESPECIFICAR = object()
 
 
 def create_app(config_name=None):
@@ -57,8 +59,16 @@ def create_app(config_name=None):
     def inject_permission_helper():
         from flask_login import current_user
 
-        def puede(modulo, accion="ver"):
-            return current_user.is_authenticated and current_user.tiene_permiso(modulo, accion)
+        def puede(modulo, accion="ver", submodulo=_SIN_ESPECIFICAR):
+            if not current_user.is_authenticated:
+                return False
+            # Si la plantilla no indica el submódulo, se infiere del endpoint actual
+            # (así "puede('inventario', 'editar')" dentro de stock.html respeta un
+            # override puntual del submódulo "stock" sin que cada plantilla lo declare).
+            if submodulo is _SIN_ESPECIFICAR:
+                entrada = ENDPOINT_A_SUBMODULO.get(request.endpoint)
+                submodulo = entrada[1] if entrada and entrada[0] == modulo else None
+            return current_user.tiene_permiso(modulo, accion, submodulo=submodulo)
 
         nav = {"modulos": [], "modulo_activo": None, "submodulos": []}
         if current_user.is_authenticated:
