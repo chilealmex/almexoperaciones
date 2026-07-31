@@ -6,55 +6,37 @@
 <div class="page-head">
   <div>
     <h1>Inventario</h1>
-    <p class="page-sub">Estado del maestro de productos y del conteo físico en curso.</p>
+    <p class="page-sub">Cruce de existencias entre QMS y Defontana, y el conteo físico en curso.</p>
   </div>
 </div>
 
 <div class="row g-3 mb-3">
   <div class="col-6 col-lg-3">
-    {{ g.kpi('Productos activos', stats.total_activos, color='var(--mod-inventario)', href=url_for('inventario.productos')) }}
+    {{ g.kpi('Artículos cruzados', stats.total_conteo, color='var(--mod-inventario)', href=url_for('inventario.stock')) }}
   </div>
   <div class="col-6 col-lg-3">
-    {{ g.kpi('Bajo stock mínimo', stats.bajo_stock, tono='danger' if stats.bajo_stock else 'ok',
-             href=url_for('inventario.productos', filtro='bajo_stock')) }}
+    {{ g.kpi('Cuadran QMS y Defontana', stats.cuadrados, tono='ok') }}
   </div>
   <div class="col-6 col-lg-3">
-    {{ g.kpi('Valor inventario (costo)', stats.valor_costo|clp) }}
+    {{ g.kpi('Con diferencia de stock', stats.con_dif_stock, tono='danger' if stats.con_dif_stock else 'ok',
+             href=url_for('inventario.stock', filtro='diferencias')) }}
   </div>
   <div class="col-6 col-lg-3">
-    {{ g.kpi('Valor inventario (venta)', stats.valor_venta|clp) }}
-  </div>
-</div>
-
-<div class="row g-3 mb-3">
-  <div class="col-6 col-lg-4">
-    {{ g.kpi('Artículos cruzados QMS/Defontana', stats.total_conteo, href=url_for('inventario.stock')) }}
-  </div>
-  <div class="col-6 col-lg-4">
     {{ g.kpi('Pendientes de contar', stats.conteo_pendientes, tono='warn' if stats.conteo_pendientes else 'ok',
              href=url_for('inventario.stock', filtro='sin_contar')) }}
-  </div>
-  <div class="col-12 col-lg-4">
-    {{ g.kpi('Con diferencias', stats.conteo_con_diferencia, tono='danger' if stats.conteo_con_diferencia else 'ok',
-             href=url_for('inventario.stock', filtro='diferencias')) }}
   </div>
 </div>
 
 {% if panel %}
 <div class="row g-3 mb-4">
-  <div class="col-12 col-lg-4">
-    {% call g.tarjeta('Salud del stock', 'Productos según su stock mínimo') %}
-      {{ g.donut(panel.grafico_salud, centro_valor=panel.productos, centro_etiqueta='Productos') }}
+  <div class="col-12 col-lg-6">
+    {% call g.tarjeta('Consistencia QMS / Defontana', 'Artículos según coincidencia de stock entre sistemas') %}
+      {{ g.donut(panel.grafico_cuadre, centro_valor=panel.conteo_total, centro_etiqueta='Artículos') }}
     {% endcall %}
   </div>
-  <div class="col-12 col-lg-4">
+  <div class="col-12 col-lg-6">
     {% call g.tarjeta('Avance del conteo físico', 'Artículos cruzados entre sistemas') %}
       {{ g.donut(panel.grafico_conteo, centro_valor=panel.conteo_total, centro_etiqueta='Artículos') }}
-    {% endcall %}
-  </div>
-  <div class="col-12 col-lg-4">
-    {% call g.tarjeta('Valor por categoría', 'Top 5 a precio de costo') %}
-      {{ g.barras(panel.grafico_categorias, vacio='Aún no hay productos con valor registrado.') }}
     {% endcall %}
   </div>
 </div>
@@ -67,24 +49,28 @@
   </div>
 </div>
 
-{% if panel.productos_bajo_stock %}
+{% if panel.articulos_con_diferencia %}
 <div class="card">
-  <div class="card-header">Productos bajo el stock mínimo</div>
+  <div class="card-header">Mayores diferencias de stock entre QMS y Defontana</div>
   <div class="table-responsive">
     <table class="table table-hover mb-0">
-      <thead><tr><th>Producto</th><th class="num">Stock</th><th class="num">Mínimo</th><th class="num">Faltante</th></tr></thead>
+      <thead>
+        <tr><th>Código</th><th>Nombre</th><th class="num">QMS</th><th class="num">Defontana</th><th class="num">Diferencia</th></tr>
+      </thead>
       <tbody>
-        {% for p in panel.productos_bajo_stock %}
+        {% for a in panel.articulos_con_diferencia %}
         <tr>
-          <td><a href="{{ url_for('inventario.ver_producto', producto_id=p.id) }}">{{ p.nombre }}</a></td>
-          <td class="num">{{ p.stock_actual }}</td>
-          <td class="num">{{ p.stock_minimo }}</td>
-          <td class="num"><span class="badge bg-danger">{{ p.stock_minimo - p.stock_actual }}</span></td>
+          <td class="fw-semibold">{{ a.codigo }}</td>
+          <td>{{ a.nombre or '—' }}</td>
+          <td class="num">{{ a.qms }}</td>
+          <td class="num">{{ a.defontana }}</td>
+          <td class="num"><span class="badge bg-danger">{{ '%+d'|format(a.diferencia) }}</span></td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
+  <div class="table-foot"><a href="{{ url_for('inventario.stock', filtro='diferencias') }}">Ver todas en Stock y conteo →</a></div>
 </div>
 {% endif %}
 {% endif %}

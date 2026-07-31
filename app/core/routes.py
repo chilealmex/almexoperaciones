@@ -4,7 +4,6 @@ from flask import render_template, send_from_directory, current_app, abort
 from flask_login import login_required, current_user
 
 from app.core import bp
-from app.models.inventario import Producto
 from app.models.contrato import ContratoCliente
 from app.models.conteo_inventario import ItemConteoInventario
 from app.models.activo_fijo import ActivoFijo
@@ -19,41 +18,43 @@ def healthz():
 
 
 def _panel_inventario():
-    """Indicadores y series del módulo de inventario para el tablero."""
-    productos = Producto.query.filter_by(activo=True).all()
-    bajo_stock = [p for p in productos if p.bajo_stock_minimo]
-
+    """Indicadores y series del módulo de inventario para el tablero: ¿cuadran QMS y Defontana?"""
     items = ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id).all()
     contados = [i for i in items if i.contado]
     con_diferencia = [i for i in items if i.tiene_diferencia]
 
-    # Valor de inventario por categoría (top 5)
-    por_categoria = {}
-    for p in productos:
-        nombre = p.categoria.nombre if p.categoria else "Sin categoría"
-        por_categoria[nombre] = por_categoria.get(nombre, 0) + p.stock_actual * p.precio_costo
-    top_categorias = sorted(por_categoria.items(), key=lambda x: x[1], reverse=True)[:5]
+    cuadrados = sum(1 for i in items if i.diferencia_sistemas == 0)
+    con_dif_stock = len(items) - cuadrados
 
-    paleta = [COLOR["azul"], COLOR["azul_claro"], COLOR["teal"], COLOR["morado"], COLOR["gris"]]
+    top_diferencias = sorted(
+        [i for i in items if i.diferencia_sistemas != 0],
+        key=lambda i: abs(i.diferencia_sistemas),
+        reverse=True,
+    )[:6]
+
     return {
-        "productos": len(productos),
-        "bajo_stock": len(bajo_stock),
-        "valor_costo": sum(p.stock_actual * p.precio_costo for p in productos),
-        "productos_bajo_stock": sorted(bajo_stock, key=lambda p: p.stock_actual - p.stock_minimo)[:6],
-        "grafico_salud": [
-            serie("Stock suficiente", len(productos) - len(bajo_stock), COLOR["verde"]),
-            serie("Bajo el mínimo", len(bajo_stock), COLOR["rojo"]),
-        ],
         "conteo_total": len(items),
+        "cuadrados": cuadrados,
+        "con_dif_stock": con_dif_stock,
+        "grafico_cuadre": [
+            serie("Cuadran QMS y Defontana", cuadrados, COLOR["verde"]),
+            serie("Con diferencia de stock", con_dif_stock, COLOR["rojo"]),
+        ],
         "grafico_conteo": [
             serie("Contados sin diferencia", len([i for i in contados if not i.tiene_diferencia]), COLOR["verde"]),
             serie("Contados con diferencia", len([i for i in contados if i.tiene_diferencia]), COLOR["ambar"]),
             serie("Pendientes de contar", len(items) - len(contados), COLOR["gris"]),
         ],
         "con_diferencia": len(con_diferencia),
-        "grafico_categorias": [
-            serie(nombre, valor, paleta[idx % len(paleta)], texto=_clp(valor))
-            for idx, (nombre, valor) in enumerate(top_categorias)
+        "articulos_con_diferencia": [
+            {
+                "codigo": i.codigo,
+                "nombre": i.nombre,
+                "qms": i.cantidad_qms,
+                "defontana": i.cantidad_defontana,
+                "diferencia": i.diferencia_sistemas,
+            }
+            for i in top_diferencias
         ],
     }
 

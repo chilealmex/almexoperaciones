@@ -9,7 +9,7 @@ from app.extensions import db as _db
 from app.models.activo_fijo import ActivoFijo
 from app.models.cliente import Cliente
 from app.models.contrato import ContratoCliente
-from app.models.inventario import CategoriaProducto, Producto
+from app.models.conteo_inventario import ItemConteoInventario
 from app.utils.exportar import CLP, ENTERO, col, construir_libro
 from tests.conftest import login
 
@@ -60,44 +60,38 @@ def test_los_valores_none_no_rompen_los_totales():
 # --- Descargas desde las vistas ---
 
 
-def test_descarga_de_productos_con_formato_correcto(client, empresa, usuario_admin, db):
-    categoria = CategoriaProducto(empresa_id=empresa.id, nombre="Prensas")
-    db.session.add(categoria)
-    db.session.commit()
+def test_descarga_de_stock_con_formato_correcto(client, empresa, usuario_admin, db):
     db.session.add(
-        Producto(
-            empresa_id=empresa.id, sku="P-1", nombre="Perno", categoria_id=categoria.id,
-            stock_actual=4, stock_minimo=10, precio_costo=1000, precio_venta=2500,
+        ItemConteoInventario(
+            empresa_id=empresa.id, codigo="COD-001", nombre="Perno",
+            cantidad_qms=10, cantidad_defontana=4,
         )
     )
     db.session.commit()
     login(client, "admin@test.cl")
 
-    respuesta = client.get("/inventario/productos.xlsx")
+    respuesta = client.get("/inventario/stock.xlsx")
     assert respuesta.status_code == 200
     assert "spreadsheetml" in respuesta.headers["Content-Type"]
     assert ".xlsx" in respuesta.headers["Content-Disposition"]
 
     hoja = _hoja(respuesta)
-    assert hoja.cell(row=5, column=1).value == "P-1"
-    assert hoja.cell(row=5, column=8).value == "Bajo mínimo"
-    assert hoja.cell(row=5, column=11).value == 4000  # 4 unidades x $1.000 de costo
+    assert hoja.cell(row=5, column=1).value == "COD-001"
 
 
 def test_la_descarga_respeta_los_filtros_de_la_pantalla(client, empresa, usuario_admin, db):
     db.session.add_all([
-        Producto(empresa_id=empresa.id, sku="OK-1", nombre="Con stock", stock_actual=50, stock_minimo=1),
-        Producto(empresa_id=empresa.id, sku="BAJO-1", nombre="Bajo mínimo", stock_actual=1, stock_minimo=99),
+        ItemConteoInventario(empresa_id=empresa.id, codigo="OK-1", nombre="Con stock", cantidad_qms=50, cantidad_defontana=50),
+        ItemConteoInventario(empresa_id=empresa.id, codigo="DIF-1", nombre="Con diferencia", cantidad_qms=1, cantidad_defontana=99),
     ])
     db.session.commit()
     login(client, "admin@test.cl")
 
-    hoja = _hoja(client.get("/inventario/productos.xlsx?filtro=bajo_stock"))
-    skus = [hoja.cell(row=fila, column=1).value for fila in range(5, hoja.max_row)]
+    hoja = _hoja(client.get("/inventario/stock.xlsx?filtro=diferencias"))
+    codigos = [hoja.cell(row=fila, column=1).value for fila in range(5, hoja.max_row)]
 
-    assert "BAJO-1" in skus
-    assert "OK-1" not in skus
-    assert "Solo bajo el stock mínimo" in hoja["A2"].value
+    assert "DIF-1" in codigos
+    assert "OK-1" not in codigos
 
 
 def test_descarga_de_contratos(client, empresa, usuario_admin, db):
@@ -140,12 +134,12 @@ def test_las_descargas_exigen_permiso(client, empresa, usuario_bodega):
     """Bodega ve inventario pero no contratos ni activos fijos."""
     login(client, "bodega@test.cl")
 
-    assert client.get("/inventario/productos.xlsx").status_code == 200
+    assert client.get("/inventario/stock.xlsx").status_code == 200
     assert client.get("/contratos/lista.xlsx").status_code == 403
     assert client.get("/activos-fijos/lista.xlsx").status_code == 403
 
 
 def test_las_descargas_exigen_sesion(client, empresa):
-    respuesta = client.get("/inventario/productos.xlsx")
+    respuesta = client.get("/inventario/stock.xlsx")
     assert respuesta.status_code == 302
     assert "/login" in respuesta.headers["Location"]

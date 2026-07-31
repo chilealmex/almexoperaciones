@@ -22,15 +22,14 @@
 </div>
 <div class="row g-3 mb-3">
   <div class="col-6 col-lg-3">
-    {{ g.kpi('Productos activos', inventario.productos, color='var(--mod-inventario)', href=url_for('inventario.productos')) }}
+    {{ g.kpi('Artículos cruzados', inventario.conteo_total, color='var(--mod-inventario)', href=url_for('inventario.stock')) }}
   </div>
   <div class="col-6 col-lg-3">
-    {{ g.kpi('Bajo stock mínimo', inventario.bajo_stock, tono='danger' if inventario.bajo_stock else 'ok',
-             pie='Requieren reposición' if inventario.bajo_stock else 'Todo en orden',
-             href=url_for('inventario.productos')) }}
+    {{ g.kpi('Cuadran QMS y Defontana', inventario.cuadrados, tono='ok') }}
   </div>
   <div class="col-6 col-lg-3">
-    {{ g.kpi('Valor inventario (costo)', inventario.valor_costo|clp) }}
+    {{ g.kpi('Con diferencia de stock', inventario.con_dif_stock, tono='danger' if inventario.con_dif_stock else 'ok',
+             href=url_for('inventario.stock', filtro='diferencias')) }}
   </div>
   <div class="col-6 col-lg-3">
     {{ g.kpi('Diferencias de conteo', inventario.con_diferencia, tono='warn' if inventario.con_diferencia else 'ok',
@@ -39,35 +38,31 @@
   </div>
 </div>
 <div class="row g-3 mb-4">
-  <div class="col-12 col-lg-4">
-    {% call g.tarjeta('Salud del stock', 'Productos según su stock mínimo') %}
-      {{ g.donut(inventario.grafico_salud, centro_valor=inventario.productos, centro_etiqueta='Productos') }}
+  <div class="col-12 col-lg-6">
+    {% call g.tarjeta('Consistencia QMS / Defontana', 'Artículos según coincidencia de stock') %}
+      {{ g.donut(inventario.grafico_cuadre, centro_valor=inventario.conteo_total, centro_etiqueta='Artículos') }}
     {% endcall %}
   </div>
-  <div class="col-12 col-lg-4">
+  <div class="col-12 col-lg-6">
     {% call g.tarjeta('Avance del conteo físico', 'Cruce QMS / Defontana vs conteo') %}
       {{ g.donut(inventario.grafico_conteo, centro_valor=inventario.conteo_total, centro_etiqueta='Artículos') }}
     {% endcall %}
   </div>
-  <div class="col-12 col-lg-4">
-    {% call g.tarjeta('Valor por categoría', 'Top 5 a precio de costo') %}
-      {{ g.barras(inventario.grafico_categorias, vacio='Aún no hay productos con valor registrado.') }}
-    {% endcall %}
-  </div>
 </div>
-{% if inventario.productos_bajo_stock %}
+{% if inventario.articulos_con_diferencia %}
 <div class="card mb-4">
-  <div class="card-header">Productos bajo el stock mínimo</div>
+  <div class="card-header">Mayores diferencias de stock entre QMS y Defontana</div>
   <div class="table-responsive">
     <table class="table table-hover mb-0">
-      <thead><tr><th>Producto</th><th class="num">Stock</th><th class="num">Mínimo</th><th class="num">Faltante</th></tr></thead>
+      <thead><tr><th>Código</th><th>Nombre</th><th class="num">QMS</th><th class="num">Defontana</th><th class="num">Diferencia</th></tr></thead>
       <tbody>
-        {% for p in inventario.productos_bajo_stock %}
+        {% for a in inventario.articulos_con_diferencia %}
         <tr>
-          <td><a href="{{ url_for('inventario.ver_producto', producto_id=p.id) }}">{{ p.nombre }}</a></td>
-          <td class="num">{{ p.stock_actual }}</td>
-          <td class="num">{{ p.stock_minimo }}</td>
-          <td class="num"><span class="badge bg-danger">{{ p.stock_minimo - p.stock_actual }}</span></td>
+          <td class="fw-semibold">{{ a.codigo }}</td>
+          <td>{{ a.nombre or '—' }}</td>
+          <td class="num">{{ a.qms }}</td>
+          <td class="num">{{ a.defontana }}</td>
+          <td class="num"><span class="badge bg-danger">{{ '%+d'|format(a.diferencia) }}</span></td>
         </tr>
         {% endfor %}
       </tbody>

@@ -49,24 +49,6 @@ MODULOS = (
                 "endpoints": ("inventario.cruce_datos",),
             },
             {
-                "clave": "productos",
-                "etiqueta": "Productos",
-                "endpoint": "inventario.productos",
-                "endpoints": (
-                    "inventario.productos",
-                    "inventario.nuevo_producto",
-                    "inventario.editar_producto",
-                    "inventario.ver_producto",
-                    "inventario.nuevo_movimiento",
-                ),
-            },
-            {
-                "clave": "movimientos",
-                "etiqueta": "Movimientos",
-                "endpoint": "inventario.movimientos",
-                "endpoints": ("inventario.movimientos",),
-            },
-            {
                 "clave": "historial_tomas",
                 "etiqueta": "Historial de tomas",
                 "endpoint": "inventario.historial",

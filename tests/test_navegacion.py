@@ -28,13 +28,6 @@ def test_submodulos_del_modulo_activo_se_marcan():
     assert "ajuste" in submodulos
 
 
-def test_endpoint_de_detalle_mantiene_su_submodulo():
-    """Ver un producto sigue mostrando la pestaña Productos marcada."""
-    nav = construir_navegacion("inventario.ver_producto", _puede_todo)
-    activos = [s["clave"] for s in nav["submodulos"] if s["activo"]]
-    assert activos == ["productos"]
-
-
 def test_arriendos_vive_bajo_contratos():
     nav = construir_navegacion("arriendos.index", _puede_todo)
     assert nav["modulo_activo"]["clave"] == "contratos"

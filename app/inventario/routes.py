@@ -7,12 +7,10 @@ from flask_login import current_user
 from sqlalchemy import or_, and_
 
 from app.inventario import bp
-from app.inventario.forms import ProductoForm, MovimientoForm, ImportarCsvForm
+from app.inventario.forms import ImportarCsvForm
 from app.extensions import db
-from app.models.inventario import Producto, CategoriaProducto, MovimientoInventario
 from app.models.conteo_inventario import ItemConteoInventario, TomaInventario, TomaInventarioDetalle
 from app.utils.decorators import require_permission
-from app.utils.storage import guardar_documento, listar_documentos
 from app.utils.importar_conteo import importar_qms, importar_defontana
 from app.utils.formatting import format_clp, format_fecha_hora
 from app.utils.graficos import COLOR, serie, widget_seguro
@@ -20,23 +18,15 @@ from app.utils.paneles import panel_inventario
 from app.utils.exportar import responder_excel, col, CLP, ENTERO, FECHA, PORCENTAJE
 
 
-def _cargar_categorias(form):
-    form.categoria_id.choices = [(0, "— Sin categoría —")] + [
-        (c.id, c.nombre) for c in CategoriaProducto.query.order_by(CategoriaProducto.nombre).all()
-    ]
-
-
 def _stats_inventario():
-    lista = Producto.query.order_by(Producto.nombre).all()
-    activos = [p for p in lista if p.activo]
-    total_conteo = ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id).count()
+    """Indicadores simples de cuadre QMS/Defontana para las tarjetas superiores del resumen."""
     items_conteo = ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id).all()
-    return lista, {
-        "total_activos": len(activos),
-        "bajo_stock": sum(1 for p in activos if p.bajo_stock_minimo),
-        "valor_costo": sum(p.stock_actual * p.precio_costo for p in activos),
-        "valor_venta": sum(p.stock_actual * p.precio_venta for p in activos),
+    total_conteo = len(items_conteo)
+    cuadrados = sum(1 for i in items_conteo if i.diferencia_sistemas == 0)
+    return {
         "total_conteo": total_conteo,
+        "cuadrados": cuadrados,
+        "con_dif_stock": total_conteo - cuadrados,
         "conteo_con_diferencia": sum(1 for i in items_conteo if i.tiene_diferencia),
         "conteo_pendientes": sum(1 for i in items_conteo if i.cantidad_fisica is None),
     }
@@ -45,224 +35,9 @@ def _stats_inventario():
 @bp.route("/")
 @require_permission("inventario", "ver")
 def resumen():
-    _lista, stats = _stats_inventario()
+    stats = _stats_inventario()
     panel = widget_seguro(panel_inventario, nombre="resumen de inventario")
     return render_template("inventario/resumen.html", stats=stats, panel=panel)
-
-
-COLUMNAS_PRODUCTOS = {
-    "sku": Producto.sku,
-    "nombre": Producto.nombre,
-    "stock": Producto.stock_actual,
-    "stock_minimo": Producto.stock_minimo,
-    "precio_costo": Producto.precio_costo,
-    "precio_venta": Producto.precio_venta,
-}
-
-FILTROS_PRODUCTOS = ("todos", "bajo_stock", "sin_stock", "inactivos")
-
-
-def _consulta_productos(args):
-    """Consulta de productos con búsqueda, filtros por columna y orden aplicados.
-
-    La comparten el listado en pantalla y el informe en Excel.
-    """
-    consulta = Producto.query.outerjoin(CategoriaProducto, Producto.categoria_id == CategoriaProducto.id)
-
-    q = (args.get("q") or "").strip()
-    if q:
-        patron = f"%{q}%"
-        consulta = consulta.filter(or_(Producto.sku.ilike(patron), Producto.nombre.ilike(patron)))
-
-    filtros_columna = {}
-    for parametro, columna in (
-        ("f_sku", Producto.sku),
-        ("f_nombre", Producto.nombre),
-        ("f_categoria", CategoriaProducto.nombre),
-    ):
-        texto = (args.get(parametro) or "").strip()
-        filtros_columna[parametro] = texto
-        if texto:
-            consulta = consulta.filter(columna.ilike(f"%{texto}%"))
-
-    filtro = args.get("filtro", "todos")
-    if filtro not in FILTROS_PRODUCTOS:
-        filtro = "todos"
-    if filtro == "inactivos":
-        consulta = consulta.filter(Producto.activo.is_(False))
-    else:
-        consulta = consulta.filter(Producto.activo.is_(True))
-        if filtro == "bajo_stock":
-            consulta = consulta.filter(Producto.stock_actual < Producto.stock_minimo)
-        elif filtro == "sin_stock":
-            consulta = consulta.filter(Producto.stock_actual <= 0)
-
-    consulta, orden, direccion = _ordenar(consulta, args, COLUMNAS_PRODUCTOS, "nombre")
-    return consulta, q, filtro, filtros_columna, orden, direccion
-
-
-@bp.route("/productos")
-@require_permission("inventario", "ver")
-def productos():
-    """Listado de productos con búsqueda, filtros por columna y orden por título."""
-    consulta, q, filtro, filtros_columna, orden, direccion = _consulta_productos(request.args)
-    lista = consulta.all()
-
-    todos = Producto.query.all()
-    activos = [p for p in todos if p.activo]
-    conteos = {
-        "todos": len(activos),
-        "bajo_stock": sum(1 for p in activos if p.bajo_stock_minimo),
-        "sin_stock": sum(1 for p in activos if p.stock_actual <= 0),
-        "inactivos": len(todos) - len(activos),
-    }
-    resumen_filtro = {
-        "articulos": len(lista),
-        "unidades": sum(p.stock_actual for p in lista),
-        "valor_costo": sum(p.stock_actual * p.precio_costo for p in lista),
-        "valor_venta": sum(p.stock_actual * p.precio_venta for p in lista),
-    }
-
-    return render_template(
-        "inventario/productos_lista.html",
-        productos=lista,
-        q=q,
-        filtro=filtro,
-        filtros_columna=filtros_columna,
-        orden=orden,
-        direccion=direccion,
-        conteos=conteos,
-        resumen_filtro=resumen_filtro,
-    )
-
-
-@bp.route("/productos/nuevo", methods=["GET", "POST"])
-@require_permission("inventario", "editar")
-def nuevo_producto():
-    form = ProductoForm()
-    _cargar_categorias(form)
-    if form.validate_on_submit():
-        if Producto.query.filter_by(sku=form.sku.data.strip()).first():
-            flash("Ya existe un producto con ese SKU.", "danger")
-            return render_template("inventario/producto_form.html", form=form, producto=None)
-
-        producto = Producto(
-            empresa_id=current_user.empresa_id,
-            sku=form.sku.data.strip(),
-            nombre=form.nombre.data.strip(),
-            descripcion=form.descripcion.data,
-            categoria_id=form.categoria_id.data or None,
-            unidad_medida=form.unidad_medida.data.strip(),
-            stock_minimo=form.stock_minimo.data,
-            precio_costo=form.precio_costo.data,
-            precio_venta=form.precio_venta.data,
-            activo=form.activo.data,
-        )
-        db.session.add(producto)
-        db.session.commit()
-        flash("Producto creado correctamente.", "success")
-        return redirect(url_for("inventario.productos"))
-
-    return render_template("inventario/producto_form.html", form=form, producto=None)
-
-
-@bp.route("/productos/<int:producto_id>/editar", methods=["GET", "POST"])
-@require_permission("inventario", "editar")
-def editar_producto(producto_id):
-    producto = Producto.query.get_or_404(producto_id)
-    form = ProductoForm(obj=producto)
-    _cargar_categorias(form)
-    if request.method == "GET":
-        form.categoria_id.data = producto.categoria_id or 0
-
-    if form.validate_on_submit():
-        duplicado = Producto.query.filter(
-            Producto.sku == form.sku.data.strip(), Producto.id != producto.id
-        ).first()
-        if duplicado:
-            flash("Ya existe otro producto con ese SKU.", "danger")
-            return render_template("inventario/producto_form.html", form=form, producto=producto)
-
-        producto.sku = form.sku.data.strip()
-        producto.nombre = form.nombre.data.strip()
-        producto.descripcion = form.descripcion.data
-        producto.categoria_id = form.categoria_id.data or None
-        producto.unidad_medida = form.unidad_medida.data.strip()
-        producto.stock_minimo = form.stock_minimo.data
-        producto.precio_costo = form.precio_costo.data
-        producto.precio_venta = form.precio_venta.data
-        producto.activo = form.activo.data
-        db.session.commit()
-        flash("Producto actualizado correctamente.", "success")
-        return redirect(url_for("inventario.productos"))
-
-    return render_template("inventario/producto_form.html", form=form, producto=producto)
-
-
-@bp.route("/productos/<int:producto_id>")
-@require_permission("inventario", "ver")
-def ver_producto(producto_id):
-    producto = Producto.query.get_or_404(producto_id)
-    return render_template("inventario/producto_ver.html", producto=producto)
-
-
-@bp.route("/productos/<int:producto_id>/movimiento", methods=["GET", "POST"])
-@require_permission("inventario", "editar")
-def nuevo_movimiento(producto_id):
-    producto = Producto.query.get_or_404(producto_id)
-    form = MovimientoForm()
-
-    if form.validate_on_submit():
-        tipo = form.tipo.data
-        cantidad = form.cantidad.data
-
-        if tipo in ("entrada", "salida") and cantidad < 1:
-            flash("La cantidad debe ser mayor a cero.", "danger")
-            return render_template("inventario/movimiento_form.html", form=form, producto=producto)
-
-        if tipo == "salida" and cantidad > producto.stock_actual:
-            flash(
-                f"No hay stock suficiente. Stock actual: {producto.stock_actual}.", "danger"
-            )
-            return render_template("inventario/movimiento_form.html", form=form, producto=producto)
-
-        movimiento = MovimientoInventario(
-            empresa_id=current_user.empresa_id,
-            producto_id=producto.id,
-            tipo=tipo,
-            cantidad=cantidad,
-            tipo_documento=form.tipo_documento.data or None,
-            numero_documento=form.numero_documento.data,
-            motivo=form.motivo.data,
-            usuario_id=current_user.id,
-            observaciones=form.observaciones.data,
-        )
-        db.session.add(movimiento)
-
-        if tipo == "entrada":
-            producto.stock_actual += cantidad
-        elif tipo == "salida":
-            producto.stock_actual -= cantidad
-        else:  # ajuste: la cantidad ingresada es el nuevo stock absoluto
-            producto.stock_actual = cantidad
-
-        db.session.flush()
-
-        if form.archivo.data:
-            guardar_documento("movimiento_inventario", movimiento.id, form.archivo.data, current_user.id)
-
-        db.session.commit()
-        flash("Movimiento registrado correctamente.", "success")
-        return redirect(url_for("inventario.ver_producto", producto_id=producto.id))
-
-    return render_template("inventario/movimiento_form.html", form=form, producto=producto)
-
-
-@bp.route("/movimientos")
-@require_permission("inventario", "ver")
-def movimientos():
-    lista = MovimientoInventario.query.order_by(MovimientoInventario.fecha.desc()).limit(200).all()
-    return render_template("inventario/movimientos_lista.html", movimientos=lista)
 
 
 # --- Stock: cruce QMS / Defontana, conteo físico y diferencias en una sola vista ---
@@ -1094,119 +869,6 @@ def cruce_datos_excel():
         columnas,
         filas,
         _descripcion_filtros(q, filtro, filtros_columna, ETIQUETAS_CRUCE),
-    )
-
-
-ETIQUETAS_PRODUCTOS = {
-    "bajo_stock": "Solo bajo el stock mínimo",
-    "sin_stock": "Solo sin stock",
-    "inactivos": "Solo inactivos",
-    "f_sku": "SKU",
-    "f_nombre": "Producto",
-    "f_categoria": "Categoría",
-}
-
-
-@bp.route("/productos.xlsx")
-@require_permission("inventario", "ver")
-def productos_excel():
-    """Informe en Excel del maestro de productos, con los filtros de la pantalla."""
-    consulta, q, filtro, filtros_columna, _orden, _dir = _consulta_productos(request.args)
-    productos_filtrados = consulta.all()
-
-    columnas = [
-        col("SKU", ancho=18, total="texto"),
-        col("Producto", ancho=44),
-        col("Descripción", ancho=44),
-        col("Categoría", ancho=22),
-        col("Unidad", ancho=12),
-        col("Stock actual", ancho=14, formato=ENTERO, total="suma"),
-        col("Stock mínimo", ancho=14, formato=ENTERO),
-        col("Estado", ancho=16),
-        col("Precio costo", ancho=15, formato=CLP),
-        col("Precio venta", ancho=15, formato=CLP),
-        col("Valor stock (costo)", ancho=19, formato=CLP, total="suma"),
-        col("Valor stock (venta)", ancho=19, formato=CLP, total="suma"),
-    ]
-
-    def _estado(p):
-        if not p.activo:
-            return "Inactivo"
-        if p.stock_actual <= 0:
-            return "Sin stock"
-        if p.bajo_stock_minimo:
-            return "Bajo mínimo"
-        return "Disponible"
-
-    filas = [
-        [
-            p.sku,
-            p.nombre,
-            p.descripcion or "",
-            p.categoria.nombre if p.categoria else "",
-            p.unidad_medida,
-            p.stock_actual,
-            p.stock_minimo,
-            _estado(p),
-            p.precio_costo,
-            p.precio_venta,
-            p.stock_actual * p.precio_costo,
-            p.stock_actual * p.precio_venta,
-        ]
-        for p in productos_filtrados
-    ]
-
-    return responder_excel(
-        "productos",
-        "Productos",
-        columnas,
-        filas,
-        _descripcion_filtros(q, filtro, filtros_columna, ETIQUETAS_PRODUCTOS),
-    )
-
-
-@bp.route("/movimientos.xlsx")
-@require_permission("inventario", "ver")
-def movimientos_excel():
-    """Informe en Excel de los últimos movimientos de inventario."""
-    lista = (
-        MovimientoInventario.query.order_by(MovimientoInventario.fecha.desc()).limit(2000).all()
-    )
-
-    columnas = [
-        col("Fecha", ancho=14, formato=FECHA, total="texto"),
-        col("SKU", ancho=18),
-        col("Producto", ancho=44),
-        col("Tipo", ancho=12),
-        col("Cantidad", ancho=12, formato=ENTERO, total="suma"),
-        col("Documento", ancho=18),
-        col("N° documento", ancho=18),
-        col("Motivo", ancho=36),
-        col("Usuario", ancho=24),
-        col("Observaciones", ancho=40),
-    ]
-    filas = [
-        [
-            m.fecha,
-            m.producto.sku if m.producto else "",
-            m.producto.nombre if m.producto else "",
-            m.tipo,
-            m.cantidad,
-            m.tipo_documento or "",
-            m.numero_documento or "",
-            m.motivo or "",
-            m.usuario.nombre_completo if m.usuario else "",
-            m.observaciones or "",
-        ]
-        for m in lista
-    ]
-
-    return responder_excel(
-        "movimientos-inventario",
-        "Movimientos de inventario",
-        columnas,
-        filas,
-        f"Últimos {len(filas)} movimientos",
     )
 
 
