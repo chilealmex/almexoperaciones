@@ -46,14 +46,13 @@ class _CalculosConteoMixin:
 
     @property
     def valor_qms(self) -> int:
+        """Costo unitario QMS x cantidad QMS. No sustituye el costo si falta: es 0."""
         return (self.cantidad_qms or 0) * (self.costo_unitario_qms or 0)
 
     @property
     def valor_defontana(self) -> int:
-        costo = self.costo_unitario_defontana
-        if costo is None:
-            costo = self.costo_unitario_qms or 0
-        return (self.cantidad_defontana or 0) * costo
+        """Costo unitario Defontana x cantidad Defontana. Nunca usa el costo de QMS como reemplazo."""
+        return (self.cantidad_defontana or 0) * (self.costo_unitario_defontana or 0)
 
     @property
     def valor_fisico(self):
@@ -75,8 +74,16 @@ class _CalculosConteoMixin:
         return diferencia is not None and diferencia != 0
 
     @property
-    def diferencia_valor_sistemas(self) -> int:
-        """Cuánto dinero explica el descuadre entre ambos sistemas."""
+    def diferencia_valor_sistemas(self):
+        """Cuánto dinero explica el descuadre entre ambos sistemas.
+
+        None si falta el costo de alguno de los dos: sin ambos costos reales no
+        se puede comparar la valorización, y mostrar un número igual induciría
+        a error (se vería como una diferencia de plata que en realidad es solo
+        un costo que no se cargó).
+        """
+        if self.costo_unitario_qms is None or self.costo_unitario_defontana is None:
+            return None
         return self.valor_qms - self.valor_defontana
 
     @property

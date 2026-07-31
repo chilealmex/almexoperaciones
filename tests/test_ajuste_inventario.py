@@ -58,6 +58,16 @@ def test_defontana_carga_su_propio_costo_y_unidad(db, empresa):
     assert item.diferencia_valor_sistemas == 100000 - 76000
 
 
+def test_valor_defontana_no_usa_el_costo_de_qms_como_reemplazo(db, empresa):
+    """Si Defontana no informó su propio costo unitario, su valorización es 0, no la de QMS."""
+    importar_qms(_fs(CSV_QMS.encode("utf-8"), "qms.csv"), empresa.id)
+    item = ItemConteoInventario.query.filter_by(codigo="COD-001").first()
+
+    assert item.costo_unitario_defontana is None
+    assert item.valor_defontana == 0
+    assert item.diferencia_valor_sistemas is None  # no se puede comparar sin el costo real de ambos
+
+
 def test_diferencia_de_unidad_de_medida_se_detecta(db, empresa):
     _importar_todo(empresa)
 

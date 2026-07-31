@@ -134,10 +134,12 @@
           <td class="num">{{ i.cantidad_qms }}</td>
           <td class="num">{{ i.cantidad_defontana }}</td>
           <td class="num">{{ i.cantidad_fisica if i.contado else '—' }}</td>
-          <td class="num">{{ i.valor_qms|clp }}</td>
-          <td class="num">{{ i.valor_defontana|clp }}</td>
+          <td class="num">{{ i.valor_qms|clp if i.costo_unitario_qms is not none else '—' }}</td>
+          <td class="num">{{ i.valor_defontana|clp if i.costo_unitario_defontana is not none else '—' }}</td>
           <td class="num">
-            {% if i.diferencia_valor_sistemas == 0 %}
+            {% if i.diferencia_valor_sistemas is none %}
+            <span class="text-muted">—</span>
+            {% elif i.diferencia_valor_sistemas == 0 %}
             <span class="badge bg-success">0</span>
             {% else %}
             <span class="badge bg-danger">{{ i.diferencia_valor_sistemas|clp }}</span>
@@ -180,7 +182,8 @@
 
 <p class="text-muted small mt-2">
   El costo unitario proviene del archivo de QMS («Valor Unitario CLP») y del de Defontana cuando el informe lo incluye.
-  Si Defontana no trae costo, su valorización se calcula con el costo de QMS para poder comparar stock contra stock.
+  Cada valorización usa siempre el costo real de su propio sistema; si a alguno le falta el costo, esa columna y la
+  diferencia de valorización se muestran como «—» en vez de estimarse con el costo del otro sistema.
 </p>
 
 {% endif %}

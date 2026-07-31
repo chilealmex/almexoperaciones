@@ -796,7 +796,7 @@ def ajuste():
     visibles = items[(pagina - 1) * por_pagina : pagina * por_pagina]
 
     # Artículos donde la diferencia de valorización pesa más
-    top_diferencias = sorted(items, key=lambda i: abs(i.diferencia_valor_sistemas), reverse=True)[:8]
+    top_diferencias = sorted(items, key=lambda i: abs(i.diferencia_valor_sistemas or 0), reverse=True)[:8]
     grafico_top = [
         serie(
             (i.nombre or i.codigo)[:38],
@@ -852,7 +852,8 @@ def ajuste_csv():
             i.costo_unitario_defontana if i.costo_unitario_defontana is not None else "",
             i.cantidad_qms, i.cantidad_defontana,
             i.cantidad_fisica if i.contado else "",
-            i.valor_qms, i.valor_defontana, i.diferencia_valor_sistemas,
+            i.valor_qms, i.valor_defontana,
+            i.diferencia_valor_sistemas if i.diferencia_valor_sistemas is not None else "",
             i.diferencia_valor_fisico if i.contado else "",
             i.categoria or "", i.linea_negocio or "", i.ubicacion or "",
         ])
