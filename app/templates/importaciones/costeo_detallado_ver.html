@@ -14,6 +14,29 @@
   <a href="{{ url_for('importaciones.editar_costeo_detallado', costeo_id=costeo.id) }}" class="btn btn-outline-secondary btn-sm">Editar datos generales</a>
 </div>
 
+<div class="row g-2 align-items-center mb-4">
+  <div class="col-auto">
+    {% if puede('importaciones', 'editar') %}
+    <form method="post" action="{{ url_for('importaciones.cambiar_estado_costeo', costeo_id=costeo.id) }}" class="d-flex align-items-center gap-2">
+      {{ accion_form.hidden_tag() }}
+      <label class="small text-muted mb-0">Estado</label>
+      <select name="estado" class="form-select form-select-sm" onchange="this.form.submit()">
+        <option value="en_proceso" {{ 'selected' if costeo.estado == 'en_proceso' }}>En proceso</option>
+        <option value="listo" {{ 'selected' if costeo.estado == 'listo' }}>Listo para contabilizar</option>
+        <option value="contabilizado" {{ 'selected' if costeo.estado == 'contabilizado' }}>Contabilizado</option>
+      </select>
+    </form>
+    {% endif %}
+  </div>
+  {% if costeo.importacion %}
+  <div class="col-auto">
+    <a href="{{ url_for('importaciones.detalle', importacion_id=costeo.importacion.id) }}" class="btn btn-outline-secondary btn-sm">
+      Ver detalle contable de PEI {{ costeo.importacion.pei or costeo.importacion.id }} →
+    </a>
+  </div>
+  {% endif %}
+</div>
+
 <div class="row g-3 mb-4">
   <div class="col-6 col-lg-3">
     <div class="kpi"><div class="kpi-label">Total CIF</div><div class="kpi-value">{{ totales.cif_clp|clp }}</div></div>

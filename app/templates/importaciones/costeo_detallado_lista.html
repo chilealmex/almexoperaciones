@@ -17,7 +17,7 @@
     <thead>
       <tr>
         <th>N° Importación</th><th>Fecha llegada</th><th>Proveedor</th><th>OT</th>
-        <th class="num">Productos</th><th class="num">Costo total</th><th>Cuadratura</th><th></th>
+        <th class="num">Productos</th><th class="num">Costo total</th><th>Cuadratura</th><th>Estado</th><th>PEI vinculado</th><th></th>
       </tr>
     </thead>
     <tbody>
@@ -32,12 +32,33 @@
         <td>
           <span class="badge {{ 'bg-success' if fila.cuadrado else 'bg-danger' }}">{{ 'Cuadrado' if fila.cuadrado else 'Revisar' }}</span>
         </td>
+        <td>
+          {% if puede('importaciones', 'editar') %}
+          <form method="post" action="{{ url_for('importaciones.cambiar_estado_costeo', costeo_id=fila.costeo.id) }}">
+            {{ accion_form.hidden_tag() }}
+            <select name="estado" class="form-select form-select-sm" onchange="this.form.submit()">
+              <option value="en_proceso" {{ 'selected' if fila.costeo.estado == 'en_proceso' }}>En proceso</option>
+              <option value="listo" {{ 'selected' if fila.costeo.estado == 'listo' }}>Listo para contabilizar</option>
+              <option value="contabilizado" {{ 'selected' if fila.costeo.estado == 'contabilizado' }}>Contabilizado</option>
+            </select>
+          </form>
+          {% else %}
+          <span class="badge {{ 'bg-success' if fila.costeo.estado == 'contabilizado' else ('bg-warning text-dark' if fila.costeo.estado == 'listo' else 'bg-secondary') }}">
+            {{ {'en_proceso': 'En proceso', 'listo': 'Listo para contabilizar', 'contabilizado': 'Contabilizado'}[fila.costeo.estado] }}
+          </span>
+          {% endif %}
+        </td>
+        <td>
+          {% if fila.costeo.importacion %}
+          <a href="{{ url_for('importaciones.detalle', importacion_id=fila.costeo.importacion.id) }}">PEI {{ fila.costeo.importacion.pei or fila.costeo.importacion.id }} →</a>
+          {% else %}—{% endif %}
+        </td>
         <td class="text-end">
           <a href="{{ url_for('importaciones.ver_costeo_detallado', costeo_id=fila.costeo.id) }}" class="btn btn-sm btn-outline-secondary">Abrir</a>
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="8" class="text-center text-muted">Aún no hay costeos registrados.</td></tr>
+      <tr><td colspan="10" class="text-center text-muted">Aún no hay costeos registrados.</td></tr>
       {% endfor %}
     </tbody>
   </table>

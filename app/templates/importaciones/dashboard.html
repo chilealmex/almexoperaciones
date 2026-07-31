@@ -28,6 +28,16 @@
   </div>
 </div>
 
+{% if costeos_listos %}
+<div class="alert alert-warning d-flex flex-wrap align-items-center justify-content-between gap-2 mb-4">
+  <span>
+    <strong>{{ costeos_listos|length }}</strong> costeo{{ 's' if costeos_listos|length != 1 }} por producto
+    marcado{{ 's' if costeos_listos|length != 1 }} como <strong>"Listo para contabilizar"</strong>.
+  </span>
+  <a href="{{ url_for('importaciones.costeo_detallado_lista') }}" class="btn btn-sm btn-warning">Ver costeos →</a>
+</div>
+{% endif %}
+
 <div class="row g-3 mb-4">
   <div class="col-12 col-lg-6">
     {% call g.tarjeta('Importaciones por mes', 'Monto guía, últimos 12 meses con datos') %}

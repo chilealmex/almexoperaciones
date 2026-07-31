@@ -56,6 +56,15 @@
       {{ form.tasa_ad_valorem(class="form-control") }}
       <div class="form-text">Usa 0 si la importación está exenta por tratado de libre comercio.</div>
     </div>
+    <div class="col-6 col-md-4 mb-3">
+      {{ form.estado.label(class="form-label") }}
+      {{ form.estado(class="form-select") }}
+    </div>
+    <div class="col-12 col-md-4 mb-3">
+      {{ form.importacion_id.label(class="form-label") }}
+      {{ form.importacion_id(class="form-select") }}
+      <div class="form-text">Para que aparezca el acceso directo desde el Detalle contable por PEI.</div>
+    </div>
   </div>
   <button type="submit" class="btn btn-primary">Guardar</button>
   <a href="{{ url_for('importaciones.costeo_detallado_lista') }}" class="btn btn-outline-secondary">Cancelar</a>

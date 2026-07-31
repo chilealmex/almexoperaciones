@@ -270,6 +270,7 @@ MODULOS = (
                     "importaciones.editar_costeo_detallado",
                     "importaciones.eliminar_costeo_detallado",
                     "importaciones.ver_costeo_detallado",
+                    "importaciones.cambiar_estado_costeo",
                     "importaciones.guardar_documentos_costeo",
                     "importaciones.guardar_gastos_costeo",
                     "importaciones.guardar_productos_costeo",

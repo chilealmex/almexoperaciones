@@ -75,3 +75,9 @@ class CosteoImportacionForm(FlaskForm):
     tasa_ad_valorem = FloatField(
         "Tasa Ad Valorem (%)", validators=[Optional(), NumberRange(min=0, max=100)], default=6
     )
+    estado = SelectField(
+        "Estado",
+        choices=[("en_proceso", "En proceso"), ("listo", "Listo para contabilizar"), ("contabilizado", "Contabilizado")],
+        default="en_proceso",
+    )
+    importacion_id = SelectField("Importación (PEI) vinculada", coerce=int, validators=[Optional()])

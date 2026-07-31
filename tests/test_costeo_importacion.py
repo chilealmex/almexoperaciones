@@ -228,3 +228,73 @@ def test_eliminar_costeo_completo(client, usuario_admin, empresa, db):
     costeo = _crear_costeo(db, empresa, n_importacion="99")
     client.post(f"/importaciones/costeo-detallado/{costeo.id}/eliminar", follow_redirects=True)
     assert CosteoImportacion.query.get(costeo.id) is None
+
+
+# --- Flujo: estado del costeo y enlace con Detalle por PEI ----------------
+
+
+def test_costeo_nuevo_queda_en_proceso_por_defecto(db, empresa):
+    costeo = _crear_costeo(db, empresa, n_importacion="70")
+    assert costeo.estado == "en_proceso"
+
+
+def test_cambiar_estado_del_costeo_por_ruta(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    costeo = _crear_costeo(db, empresa, n_importacion="71")
+
+    client.post(
+        f"/importaciones/costeo-detallado/{costeo.id}/estado",
+        data={"estado": "listo"},
+        follow_redirects=True,
+    )
+    _db.session.refresh(costeo)
+    assert costeo.estado == "listo"
+
+
+def test_cambiar_a_estado_invalido_no_se_aplica(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    costeo = _crear_costeo(db, empresa, n_importacion="72")
+
+    client.post(
+        f"/importaciones/costeo-detallado/{costeo.id}/estado",
+        data={"estado": "no_existe"},
+        follow_redirects=True,
+    )
+    _db.session.refresh(costeo)
+    assert costeo.estado == "en_proceso"
+
+
+def test_dashboard_alerta_costeos_listos_para_contabilizar(client, usuario_admin, empresa, db):
+    from app.models.importacion import Importacion
+
+    costeo = _crear_costeo(db, empresa, n_importacion="73", estado="listo")
+    db.session.commit()
+    login(client, "admin@test.cl")
+
+    respuesta = client.get("/importaciones/")
+    cuerpo = respuesta.get_data(as_text=True)
+    assert "Listo para contabilizar" in cuerpo
+    assert "1" in cuerpo
+
+
+def test_costeo_vinculado_a_una_importacion_se_ve_desde_el_detalle_por_pei(client, usuario_admin, empresa, db):
+    from app.models.importacion import Importacion
+    from app.utils import importaciones_calculo as importaciones_calc
+
+    importacion = Importacion(empresa_id=empresa.id, pei="74", proveedor_nombre="ACME")
+    db.session.add(importacion)
+    db.session.flush()
+    importaciones_calc.sembrar_lineas_plantilla(importacion)
+    db.session.commit()
+
+    costeo = _crear_costeo(db, empresa, n_importacion="74", importacion_id=importacion.id, estado="listo")
+    login(client, "admin@test.cl")
+
+    respuesta = client.get(f"/importaciones/detalle/{importacion.id}")
+    cuerpo = respuesta.get_data(as_text=True)
+    assert "Costeo por producto vinculado" in cuerpo
+    assert f"/importaciones/costeo-detallado/{costeo.id}" in cuerpo
+
+    respuesta = client.get(f"/importaciones/costeo-detallado/{costeo.id}")
+    cuerpo = respuesta.get_data(as_text=True)
+    assert f"/importaciones/detalle/{importacion.id}" in cuerpo

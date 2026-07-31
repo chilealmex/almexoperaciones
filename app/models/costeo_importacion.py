@@ -2,6 +2,11 @@ from app.extensions import db
 
 MONEDAS = (("USD", "USD"), ("EUR", "EUR"))
 ACTIVO_FIJO = (("NO", "No"), ("SI", "Sí"))
+ESTADOS_COSTEO = (
+    ("en_proceso", "En proceso"),
+    ("listo", "Listo para contabilizar"),
+    ("contabilizado", "Contabilizado"),
+)
 
 
 class CosteoImportacion(db.Model):
@@ -11,6 +16,7 @@ class CosteoImportacion(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     empresa_id = db.Column(db.Integer, db.ForeignKey("empresas.id"), nullable=False)
+    importacion_id = db.Column(db.Integer, db.ForeignKey("importaciones.id"), nullable=True)
 
     n_importacion = db.Column(db.String(30), nullable=True)
     fecha_llegada = db.Column(db.Date, nullable=True)
@@ -23,9 +29,12 @@ class CosteoImportacion(db.Model):
     tipo_flete_proyectado = db.Column(db.String(20), nullable=True)
     solicitud_compra = db.Column(db.String(40), nullable=True)
     tasa_ad_valorem = db.Column(db.Float, nullable=False, default=0.06)
+    estado = db.Column(db.String(15), nullable=False, default="en_proceso")
 
     creado_en = db.Column(db.DateTime, server_default=db.func.now())
     actualizado_en = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now())
+
+    importacion = db.relationship("Importacion")
 
     documentos = db.relationship(
         "CosteoImportacionDocumento",

@@ -166,6 +166,12 @@ def dashboard():
         {"etiqueta": nombre, "valor": valor, "texto": format_clp(valor)} for nombre, valor in top_proveedores
     ]
 
+    costeos_listos = (
+        CosteoImportacion.query.filter_by(empresa_id=_empresa_id(), estado="listo")
+        .order_by(CosteoImportacion.fecha_llegada.desc().nullslast())
+        .all()
+    )
+
     return render_template(
         "importaciones/dashboard.html",
         total_importaciones=total_importaciones,
@@ -176,6 +182,7 @@ def dashboard():
         grafico_mes=grafico_mes,
         agencias_saldo=agencias_saldo,
         grafico_proveedores=grafico_proveedores,
+        costeos_listos=costeos_listos,
     )
 
 
@@ -337,6 +344,7 @@ def detalle(importacion_id):
         calculo.recalcular(importacion)
         db.session.commit()
     importaciones = _query_base().order_by(Importacion.fecha_pei.desc().nullslast(), Importacion.id.desc()).all()
+    costeos_vinculados = CosteoImportacion.query.filter_by(importacion_id=importacion.id).all()
     return render_template(
         "importaciones/detalle.html",
         importacion=importacion,
@@ -344,6 +352,7 @@ def detalle(importacion_id):
         importaciones=importaciones,
         accion_form=AccionForm(),
         calculado_de=calculo.es_campo_calculado,
+        costeos_vinculados=costeos_vinculados,
     )
 
 
@@ -851,6 +860,13 @@ def _get_costeo_or_404(costeo_id):
     return costeo
 
 
+def _opciones_importacion_para_costeo():
+    lista = _query_base().order_by(Importacion.fecha_pei.desc().nullslast()).all()
+    return [(0, "— Sin vincular —")] + [
+        (i.id, f"PEI {i.pei or i.id} — {i.proveedor_nombre or 'Sin proveedor'}") for i in lista
+    ]
+
+
 def _poblar_costeo_desde_form(costeo, form):
     costeo.n_importacion = form.n_importacion.data.strip() if form.n_importacion.data else None
     costeo.fecha_llegada = form.fecha_llegada.data
@@ -865,6 +881,8 @@ def _poblar_costeo_desde_form(costeo, form):
     )
     costeo.solicitud_compra = form.solicitud_compra.data.strip() if form.solicitud_compra.data else None
     costeo.tasa_ad_valorem = (form.tasa_ad_valorem.data or 0) / 100
+    costeo.estado = form.estado.data
+    costeo.importacion_id = form.importacion_id.data or None
 
 
 @bp.route("/costeo-detallado")
@@ -886,13 +904,14 @@ def costeo_detallado_lista():
                 "cuadrado": abs(costeo_calculo.diferencia_cuadratura(costeo)) < 0.01,
             }
         )
-    return render_template("importaciones/costeo_detallado_lista.html", resumen=resumen)
+    return render_template("importaciones/costeo_detallado_lista.html", resumen=resumen, accion_form=AccionForm())
 
 
 @bp.route("/costeo-detallado/nueva", methods=["GET", "POST"])
 @require_permission("importaciones", "editar")
 def nuevo_costeo_detallado():
     form = CosteoImportacionForm()
+    form.importacion_id.choices = _opciones_importacion_para_costeo()
     if form.validate_on_submit():
         costeo = CosteoImportacion(empresa_id=_empresa_id())
         _poblar_costeo_desde_form(costeo, form)
@@ -910,8 +929,10 @@ def nuevo_costeo_detallado():
 def editar_costeo_detallado(costeo_id):
     costeo = _get_costeo_or_404(costeo_id)
     form = CosteoImportacionForm(obj=costeo)
+    form.importacion_id.choices = _opciones_importacion_para_costeo()
     if request.method == "GET":
         form.tasa_ad_valorem.data = (costeo.tasa_ad_valorem or 0) * 100
+        form.importacion_id.data = costeo.importacion_id or 0
     if form.validate_on_submit():
         _poblar_costeo_desde_form(costeo, form)
         costeo_calculo.recalcular(costeo)
@@ -919,6 +940,20 @@ def editar_costeo_detallado(costeo_id):
         flash("Datos generales actualizados.", "success")
         return redirect(url_for("importaciones.ver_costeo_detallado", costeo_id=costeo.id))
     return render_template("importaciones/costeo_detallado_form.html", form=form, costeo=costeo)
+
+
+@bp.route("/costeo-detallado/<int:costeo_id>/estado", methods=["POST"])
+@require_permission("importaciones", "editar")
+def cambiar_estado_costeo(costeo_id):
+    costeo = _get_costeo_or_404(costeo_id)
+    form = AccionForm()
+    if not form.validate_on_submit():
+        abort(400)
+    nuevo_estado = request.form.get("estado", "")
+    if nuevo_estado in ("en_proceso", "listo", "contabilizado"):
+        costeo.estado = nuevo_estado
+        db.session.commit()
+    return redirect(request.referrer or url_for("importaciones.costeo_detallado_lista"))
 
 
 @bp.route("/costeo-detallado/<int:costeo_id>/eliminar", methods=["POST"])

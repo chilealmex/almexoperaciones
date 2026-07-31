@@ -35,6 +35,20 @@
   </div>
 </div>
 
+{% if costeos_vinculados %}
+<div class="alert alert-info d-flex flex-wrap align-items-center gap-2 justify-content-between">
+  <span>
+    Costeo por producto vinculado:
+    {% for c in costeos_vinculados %}
+    <span class="badge {{ 'bg-success' if c.estado == 'contabilizado' else ('bg-warning text-dark' if c.estado == 'listo' else 'bg-secondary') }}">
+      {{ {'en_proceso': 'En proceso', 'listo': 'Listo para contabilizar', 'contabilizado': 'Contabilizado'}[c.estado] }}
+    </span>
+    {% endfor %}
+  </span>
+  <a href="{{ url_for('importaciones.ver_costeo_detallado', costeo_id=costeos_vinculados[0].id) }}" class="btn btn-sm btn-outline-primary">Ver costeo por producto →</a>
+</div>
+{% endif %}
+
 {% for grupo in grupos %}
 <div class="card mb-4" id="grupo-{{ grupo.tipo }}">
   <div class="card-header d-flex align-items-center justify-content-between">
