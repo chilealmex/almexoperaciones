@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ 'Editar costeo' if costeo else 'Nuevo costeo' }}{% endblock %}
 {% block content %}
-<h1 class="h3 mb-3">{{ 'Editar datos generales' if costeo else 'Nuevo costeo por producto' }}</h1>
+<h1 class="h3 mb-3">{{ 'Editar datos generales' if costeo else 'Nuevo costeo' }}</h1>
 <form method="post" novalidate class="col-12 col-lg-9">
   {{ form.hidden_tag() }}
   <div class="row">
@@ -63,7 +63,7 @@
     <div class="col-12 col-md-4 mb-3">
       {{ form.importacion_id.label(class="form-label") }}
       {{ form.importacion_id(class="form-select") }}
-      <div class="form-text">Para que aparezca el acceso directo desde el Detalle contable por PEI.</div>
+      <div class="form-text">Para que aparezca el acceso directo desde Cuadratura contable.</div>
     </div>
   </div>
   <button type="submit" class="btn btn-primary">Guardar</button>

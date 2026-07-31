@@ -4,7 +4,7 @@
 
 <div class="page-head">
   <div>
-    <h1>Costeo por producto — Importación {{ costeo.n_importacion or '—' }}</h1>
+    <h1>Costeo — Importación {{ costeo.n_importacion or '—' }}</h1>
     <p class="page-sub">
       {{ costeo.proveedor or 'Sin proveedor' }}
       {% if costeo.orden_trabajo %} · OT {{ costeo.orden_trabajo }}{% endif %}

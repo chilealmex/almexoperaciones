@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}Detalle PEI {{ importacion.pei or importacion.id }}{% endblock %}
+{% block title %}Cuadratura contable — PEI {{ importacion.pei or importacion.id }}{% endblock %}
 {% block content %}
 
 <div class="page-head">
   <div>
-    <h1>Detalle contable — PEI {{ importacion.pei or '—' }}</h1>
+    <h1>Cuadratura contable — PEI {{ importacion.pei or '—' }}</h1>
     <p class="page-sub">
       {{ importacion.proveedor_nombre or 'Sin proveedor' }}
       {% if importacion.imp %} · IMP {{ importacion.imp }}{% endif %}
@@ -38,14 +38,14 @@
 {% if costeos_vinculados %}
 <div class="alert alert-info d-flex flex-wrap align-items-center gap-2 justify-content-between">
   <span>
-    Costeo por producto vinculado:
+    Costeo vinculado:
     {% for c in costeos_vinculados %}
     <span class="badge {{ 'bg-success' if c.estado == 'contabilizado' else ('bg-warning text-dark' if c.estado == 'listo' else 'bg-secondary') }}">
       {{ {'en_proceso': 'En proceso', 'listo': 'Listo para contabilizar', 'contabilizado': 'Contabilizado'}[c.estado] }}
     </span>
     {% endfor %}
   </span>
-  <a href="{{ url_for('importaciones.ver_costeo_detallado', costeo_id=costeos_vinculados[0].id) }}" class="btn btn-sm btn-outline-primary">Ver costeo por producto →</a>
+  <a href="{{ url_for('importaciones.ver_costeo_detallado', costeo_id=costeos_vinculados[0].id) }}" class="btn btn-sm btn-outline-primary">Ver costeo →</a>
 </div>
 {% endif %}
 
@@ -180,6 +180,9 @@
         <button type="submit" class="btn btn-primary btn-sm">Guardar cambios</button>
         <button type="submit" formaction="{{ url_for('importaciones.agregar_linea', importacion_id=importacion.id, tipo=grupo.tipo) }}" formnovalidate class="btn btn-outline-secondary btn-sm">+ Agregar línea</button>
         <button type="submit" formaction="{{ url_for('importaciones.completar_plantilla', importacion_id=importacion.id, tipo=grupo.tipo) }}" formnovalidate class="btn btn-outline-secondary btn-sm">Completar cuentas de la plantilla</button>
+        {% if grupo.tipo == 'costeo' and costeos_vinculados %}
+        <button type="submit" formaction="{{ url_for('importaciones.traer_costeo_producto', importacion_id=importacion.id) }}" formnovalidate class="btn btn-outline-primary btn-sm">↓ Traer del costeo</button>
+        {% endif %}
       </div>
       {% endif %}
     </form>

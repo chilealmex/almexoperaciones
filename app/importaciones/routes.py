@@ -446,6 +446,62 @@ def completar_plantilla(importacion_id, tipo):
     return redirect(url_for("importaciones.detalle", importacion_id=importacion.id) + f"#grupo-{tipo}")
 
 
+# Rol del asiento "Costeo importación" (Detalle por PEI) <- de dónde sale su monto
+# en el Costeo por producto vinculado. "gasto" son los 6 gastos internos fijos;
+# el resto se lee de los totales agregados de la tabla de documentos.
+MAPA_COSTEO_PRODUCTO_A_ASIENTO = {
+    "costeo_invoice": ("total", "exw_clp"),
+    "costeo_seguro": ("total", "seguro_clp"),
+    "costeo_fleteintl": ("total", "flete_clp"),
+    "costeo_crating": ("total", "crating_clp"),
+    "costeo_almacenaje": ("gasto", "almacenaje"),
+    "costeo_desconsolidacion": ("gasto", "desconsolidacion"),
+    "costeo_habilitacion": ("gasto", "habilitacion"),
+    "costeo_fletenacional": ("gasto", "flete_nacional"),
+    "costeo_gastosagencia": ("gasto", "gastos_agencia"),
+    "costeo_cargoterminal": ("gasto", "cargo_terminal"),
+}
+
+
+@bp.route("/detalle/<int:importacion_id>/grupo/costeo/traer-costeo-producto", methods=["POST"])
+@require_permission("importaciones", "editar")
+def traer_costeo_producto(importacion_id):
+    importacion = _get_importacion_or_404(importacion_id)
+    form = AccionForm()
+    if not form.validate_on_submit():
+        abort(400)
+
+    costeo_producto = CosteoImportacion.query.filter_by(importacion_id=importacion.id).first()
+    if not costeo_producto:
+        flash("Esta importación no tiene un Costeo vinculado.", "warning")
+        return redirect(url_for("importaciones.detalle", importacion_id=importacion.id) + "#grupo-costeo")
+
+    totales = costeo_calculo.totales_documentos(costeo_producto)
+    ad_valorem_total = sum(p.ad_valorem_clp or 0 for p in costeo_producto.productos)
+
+    actualizadas = 0
+    for rol, (origen, clave) in MAPA_COSTEO_PRODUCTO_A_ASIENTO.items():
+        linea = importacion.linea_por_rol("costeo", rol)
+        if not linea:
+            continue
+        if origen == "total":
+            linea.haber = totales[clave]
+        else:
+            gasto = costeo_producto.gasto_por_rol(clave)
+            linea.haber = gasto.valor_clp if gasto else 0
+        actualizadas += 1
+
+    linea_advalorem = importacion.linea_por_rol("costeo", "costeo_advalorem")
+    if linea_advalorem:
+        linea_advalorem.haber = ad_valorem_total
+        actualizadas += 1
+
+    calculo.recalcular(importacion)
+    db.session.commit()
+    flash(f"Se trajeron {actualizadas} monto(s) desde el Costeo.", "success")
+    return redirect(url_for("importaciones.detalle", importacion_id=importacion.id) + "#grupo-costeo")
+
+
 @bp.route("/detalle/linea/<int:linea_id>/eliminar", methods=["POST"])
 @require_permission("importaciones", "editar")
 def eliminar_linea(linea_id):

@@ -239,7 +239,7 @@ MODULOS = (
             },
             {
                 "clave": "detalle",
-                "etiqueta": "Detalle por PEI",
+                "etiqueta": "Cuadratura contable",
                 "endpoint": "importaciones.detalle_index",
                 "endpoints": (
                     "importaciones.detalle_index",
@@ -247,6 +247,7 @@ MODULOS = (
                     "importaciones.guardar_grupo",
                     "importaciones.agregar_linea",
                     "importaciones.completar_plantilla",
+                    "importaciones.traer_costeo_producto",
                     "importaciones.eliminar_linea",
                 ),
             },
@@ -262,7 +263,7 @@ MODULOS = (
             },
             {
                 "clave": "costeo_detallado",
-                "etiqueta": "Costeo por producto",
+                "etiqueta": "Costeo",
                 "endpoint": "importaciones.costeo_detallado_lista",
                 "endpoints": (
                     "importaciones.costeo_detallado_lista",

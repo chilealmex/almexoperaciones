@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}Costeo por producto{% endblock %}
+{% block title %}Costeo{% endblock %}
 {% block content %}
 
 <div class="page-head">
   <div>
-    <h1>Costeo por producto</h1>
+    <h1>Costeo</h1>
     <p class="page-sub">Prorratea el CIF, el flete, el seguro y los gastos internos entre los productos de cada importación, según su participación en el valor EXW.</p>
   </div>
   {% if puede('importaciones', 'editar') %}

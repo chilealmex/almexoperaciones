@@ -292,9 +292,71 @@ def test_costeo_vinculado_a_una_importacion_se_ve_desde_el_detalle_por_pei(clien
 
     respuesta = client.get(f"/importaciones/detalle/{importacion.id}")
     cuerpo = respuesta.get_data(as_text=True)
-    assert "Costeo por producto vinculado" in cuerpo
+    assert "Costeo vinculado" in cuerpo
     assert f"/importaciones/costeo-detallado/{costeo.id}" in cuerpo
 
     respuesta = client.get(f"/importaciones/costeo-detallado/{costeo.id}")
     cuerpo = respuesta.get_data(as_text=True)
     assert f"/importaciones/detalle/{importacion.id}" in cuerpo
+
+
+def test_traer_costeo_producto_copia_los_montos_al_asiento_costeo(client, usuario_admin, empresa, db):
+    from app.models.importacion import Importacion
+    from app.utils import importaciones_calculo as importaciones_calc
+
+    importacion = Importacion(empresa_id=empresa.id, pei="75", proveedor_nombre="ACME", monto=1_000_000)
+    db.session.add(importacion)
+    db.session.flush()
+    importaciones_calc.sembrar_lineas_plantilla(importacion)
+    db.session.commit()
+
+    costeo = _crear_costeo(db, empresa, n_importacion="75", importacion_id=importacion.id)
+    _cargar_ejemplo_real(costeo, db)  # trae invoice, seguro, flete, crating y gastos internos reales
+
+    login(client, "admin@test.cl")
+    client.post(
+        f"/importaciones/detalle/{importacion.id}/grupo/costeo/traer-costeo-producto",
+        follow_redirects=True,
+    )
+
+    _db.session.refresh(importacion)
+    linea_invoice = importacion.linea_por_rol("costeo", "costeo_invoice")
+    linea_seguro = importacion.linea_por_rol("costeo", "costeo_seguro")
+    linea_flete = importacion.linea_por_rol("costeo", "costeo_fleteintl")
+    linea_almacenaje = importacion.linea_por_rol("costeo", "costeo_almacenaje")
+
+    totales = calculo.totales_documentos(costeo)
+    assert linea_invoice.haber == totales["exw_clp"]
+    assert linea_seguro.haber == totales["seguro_clp"]
+    assert linea_flete.haber == totales["flete_clp"]
+    assert linea_almacenaje.haber == 60340
+
+    # El asiento se recalcula: la diferencia de costeo debe reflejar el nuevo total.
+    assert importacion.costeo_suma == sum(
+        (importacion.linea_por_rol("costeo", rol).haber or 0)
+        for rol in (
+            "costeo_invoice", "costeo_seguro", "costeo_fleteintl", "costeo_crating",
+            "costeo_advalorem", "costeo_almacenaje", "costeo_desconsolidacion",
+            "costeo_habilitacion", "costeo_fletenacional", "costeo_gastosagencia",
+            "costeo_cargoterminal",
+        )
+    )
+
+
+def test_traer_costeo_producto_sin_vinculo_avisa_y_no_falla(client, usuario_admin, empresa, db):
+    from app.models.importacion import Importacion
+    from app.utils import importaciones_calculo as importaciones_calc
+
+    importacion = Importacion(empresa_id=empresa.id, pei="76")
+    db.session.add(importacion)
+    db.session.flush()
+    importaciones_calc.sembrar_lineas_plantilla(importacion)
+    db.session.commit()
+
+    login(client, "admin@test.cl")
+    respuesta = client.post(
+        f"/importaciones/detalle/{importacion.id}/grupo/costeo/traer-costeo-producto",
+        follow_redirects=True,
+    )
+    assert respuesta.status_code == 200
+    assert "no tiene un Costeo vinculado" in respuesta.get_data(as_text=True)
