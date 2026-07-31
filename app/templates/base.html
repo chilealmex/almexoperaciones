@@ -9,12 +9,16 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/custom.css', v=version_estatica) }}">
 </head>
 <body>
-  {% include "partials/_navbar.html" %}
-
-  <main class="container my-4">
-    {% include "partials/_flash.html" %}
-    {% block content %}{% endblock %}
-  </main>
+  <div class="app-shell">
+    {% include "partials/_sidebar.html" %}
+    <div class="app-content">
+      {% include "partials/_topbar_mobile.html" %}
+      <main class="container my-4">
+        {% include "partials/_flash.html" %}
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+  </div>
 
   <script src="{{ url_for('static', filename='vendor/bootstrap/bootstrap.bundle.min.js') }}"></script>
   <script src="{{ url_for('static', filename='js/main.js') }}"></script>

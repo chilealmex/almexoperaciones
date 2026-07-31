@@ -1,0 +1,19 @@
+{# Menú lateral fijo, visible desde el ancho de escritorio (lg) hacia arriba. #}
+<aside class="app-sidebar d-none d-lg-flex flex-column">
+  <a class="sidebar-brand d-flex align-items-center gap-2"
+     href="{{ url_for('core.dashboard') if current_user.is_authenticated else url_for('auth.login') }}">
+    <span class="brand-mark">A</span>
+    <span class="brand-text">Almex <span class="brand-text-soft">Operaciones</span></span>
+  </a>
+
+  {% if current_user.is_authenticated %}
+  <nav class="sidebar-nav flex-grow-1" aria-label="Navegación principal">
+    {% include "partials/_nav_items.html" %}
+  </nav>
+
+  <div class="sidebar-footer">
+    {% set dropdown_class = "dropup" %}
+    {% include "partials/_user_menu.html" with context %}
+  </div>
+  {% endif %}
+</aside>

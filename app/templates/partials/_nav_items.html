@@ -1,0 +1,27 @@
+{#
+  Lista de módulos y submódulos, compartida entre el sidebar de escritorio y el
+  menú desplegable de celular, para no mantener el mismo árbol de navegación
+  duplicado en dos plantillas.
+  Uso: {% include "partials/_nav_items.html" %}
+#}
+<ul class="sidebar-modules list-unstyled mb-0">
+  {% for modulo in nav.modulos %}
+  <li class="sidebar-module{{ ' active' if modulo.activo else '' }}">
+    <a class="sidebar-module-link" href="{{ url_for(modulo.endpoint) }}"
+       {% if modulo.activo %}aria-current="page"{% endif %}>
+      <span class="module-icon" aria-hidden="true">{{ modulo.icono }}</span>{{ modulo.etiqueta }}
+    </a>
+    {% if modulo.activo and nav.submodulos %}
+    <ul class="sidebar-submodules list-unstyled">
+      {% for submodulo in nav.submodulos %}
+      <li>
+        <a class="sidebar-submodule-link{{ ' active' if submodulo.activo else '' }}"
+           href="{{ url_for(submodulo.endpoint) }}"
+           {% if submodulo.activo %}aria-current="page"{% endif %}>{{ submodulo.etiqueta }}</a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ul>

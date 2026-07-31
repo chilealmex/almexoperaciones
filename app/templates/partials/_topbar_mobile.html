@@ -1,0 +1,34 @@
+{# Barra superior angosta + menú deslizable, visible solo bajo el ancho de escritorio (lg). #}
+<header class="app-topbar-mobile d-lg-none d-flex align-items-center justify-content-between">
+  <a class="sidebar-brand d-flex align-items-center gap-2 mb-0"
+     href="{{ url_for('core.dashboard') if current_user.is_authenticated else url_for('auth.login') }}">
+    <span class="brand-mark">A</span>
+    <span class="brand-text">Almex <span class="brand-text-soft">Operaciones</span></span>
+  </a>
+  {% if current_user.is_authenticated %}
+  <div class="d-flex align-items-center gap-2">
+    {% include "partials/_user_menu.html" with context %}
+    <button class="topbar-toggler" type="button" data-bs-toggle="offcanvas" data-bs-target="#navOffcanvas"
+            aria-controls="navOffcanvas" aria-label="Abrir menú">
+      <span aria-hidden="true">☰</span>
+    </button>
+  </div>
+  {% endif %}
+</header>
+
+{% if current_user.is_authenticated %}
+<div class="offcanvas offcanvas-start app-offcanvas" tabindex="-1" id="navOffcanvas" aria-labelledby="navOffcanvasLabel">
+  <div class="offcanvas-header">
+    <span class="sidebar-brand d-flex align-items-center gap-2 mb-0" id="navOffcanvasLabel">
+      <span class="brand-mark">A</span>
+      <span class="brand-text">Almex <span class="brand-text-soft">Operaciones</span></span>
+    </span>
+    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas" aria-label="Cerrar"></button>
+  </div>
+  <div class="offcanvas-body d-flex flex-column">
+    <nav class="sidebar-nav flex-grow-1" aria-label="Navegación principal">
+      {% include "partials/_nav_items.html" %}
+    </nav>
+  </div>
+</div>
+{% endif %}

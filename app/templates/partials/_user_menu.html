@@ -1,0 +1,24 @@
+{#
+  Avatar + menú desplegable de la cuenta. Recibe `dropdown_class` para abrir
+  hacia arriba en el sidebar (dropup, pegado abajo) o hacia abajo en la barra
+  móvil.
+  Uso: {% include "partials/_user_menu.html" %}
+#}
+{% set partes = current_user.nombre_completo.split() %}
+{% set iniciales = (partes|map('first')|list)[:2]|join|upper if partes else '?' %}
+<div class="dropdown {{ dropdown_class|default('') }}">
+  <a class="user-link d-flex align-items-center gap-2" href="#" id="userMenu-{{ dropdown_class|default('top') }}"
+     role="button" data-bs-toggle="dropdown" aria-expanded="false">
+    <span class="user-avatar" aria-hidden="true">{{ iniciales }}</span>
+    <span class="user-name">{{ current_user.nombre_completo }}</span>
+  </a>
+  <ul class="dropdown-menu" aria-labelledby="userMenu-{{ dropdown_class|default('top') }}">
+    <li class="dropdown-header">
+      <div class="fw-semibold text-truncate">{{ current_user.nombre_completo }}</div>
+      <div class="small text-muted text-truncate">{{ current_user.email }}</div>
+    </li>
+    <li><hr class="dropdown-divider"></li>
+    <li><a class="dropdown-item" href="{{ url_for('auth.perfil') }}">Mi perfil</a></li>
+    <li><a class="dropdown-item" href="{{ url_for('auth.logout') }}">Cerrar sesión</a></li>
+  </ul>
+</div>

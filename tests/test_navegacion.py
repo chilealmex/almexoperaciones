@@ -54,10 +54,10 @@ def test_endpoint_desconocido_no_rompe_la_navegacion():
     assert nav["submodulos"] == []
 
 
-def test_la_barra_de_submodulos_se_renderiza(client, usuario_admin):
+def test_los_submodulos_se_renderizan_en_el_sidebar(client, usuario_admin):
     login(client, "admin@test.cl")
     respuesta = client.get("/inventario/stock")
     assert respuesta.status_code == 200
     cuerpo = respuesta.get_data(as_text=True)
-    assert "submodule-bar" in cuerpo
+    assert "sidebar-submodules" in cuerpo
     assert "Ajuste inventario" in cuerpo
