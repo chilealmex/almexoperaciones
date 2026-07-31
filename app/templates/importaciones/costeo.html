@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% block title %}Costeo de importaciones{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <h1>Costeo importación — vista horizontal</h1>
+    <p class="page-sub">Comparación de costeo por PEI, con la diferencia que se traslada al ajuste de existencias.</p>
+  </div>
+  <a href="{{ url_for('importaciones.costeo_matriz_excel', **request.args) }}" class="btn btn-outline-secondary btn-sm">⬇ Excel</a>
+</div>
+
+<form method="get" id="filtros-costeo" class="row g-2 align-items-center mb-4">
+  <div class="col-6 col-md-3">
+    <input type="search" name="texto" value="{{ filtros.get('texto', '') }}" class="form-control" placeholder="Buscar PEI, proveedor..." data-autofiltro>
+  </div>
+  <div class="col-6 col-md-2">
+    <input type="text" name="imp" value="{{ filtros.get('imp', '') }}" class="form-control" placeholder="N° IMP" data-autofiltro>
+  </div>
+  <div class="col-6 col-md-2">
+    <input type="text" name="oc" value="{{ filtros.get('oc', '') }}" class="form-control" placeholder="N° OC" data-autofiltro>
+  </div>
+  <div class="col-6 col-md-2">
+    <select name="agencia" class="form-select" data-autofiltro>
+      <option value="">Todas las agencias</option>
+      {% for a in agencias %}
+      <option value="{{ a }}" {{ 'selected' if filtros.get('agencia') == a }}>{{ a }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-6 col-md-1">
+    <input type="date" name="desde" value="{{ filtros.get('desde', '') }}" class="form-control" title="Desde">
+  </div>
+  <div class="col-6 col-md-1">
+    <input type="date" name="hasta" value="{{ filtros.get('hasta', '') }}" class="form-control" title="Hasta">
+  </div>
+  <div class="col-auto">
+    <button type="submit" class="btn btn-outline-secondary">Filtrar</button>
+    {% if filtros %}
+    <a href="{{ url_for('importaciones.costeo') }}" class="btn btn-link">Limpiar</a>
+    {% endif %}
+  </div>
+</form>
+
+<div class="table-responsive mb-4" style="max-width: 100%;">
+  <table class="table table-sm table-bordered align-middle" style="min-width: 900px;">
+    <thead>
+      <tr class="table-light">
+        <th rowspan="2" class="align-bottom">N° IMP</th>
+        <th rowspan="2" class="align-bottom">PEI</th>
+        <th rowspan="2" class="align-bottom">N° asiento ajuste</th>
+        {% for concepto in matriz.conceptos %}
+        <th colspan="2" class="text-center" title="{{ concepto.etiqueta }}">{{ concepto.etiqueta }}</th>
+        {% endfor %}
+        <th rowspan="2" class="num align-bottom">Diferencia</th>
+      </tr>
+      <tr class="table-light">
+        {% for concepto in matriz.conceptos %}
+        <th class="num">Valor</th><th class="num">Ecomex</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for fila in matriz.filas %}
+      <tr>
+        <td class="fw-semibold">{{ fila.importacion.imp or '—' }}</td>
+        <td class="fw-semibold">{{ fila.importacion.pei or '—' }}</td>
+        <td>
+          {% if puede('importaciones', 'editar') %}
+          <form method="post" action="{{ url_for('importaciones.actualizar_ajuste_cbte', importacion_id=fila.importacion.id) }}" class="d-flex">
+            {{ accion_form.hidden_tag() }}
+            <input type="text" name="cbte" value="{{ fila.ajuste_cbte }}" class="form-control form-control-sm" placeholder="Ej. 4582" onchange="this.form.submit()">
+          </form>
+          {% else %}
+          {{ fila.ajuste_cbte or '—' }}
+          {% endif %}
+        </td>
+        {% for celda in fila.celdas %}
+        <td class="num {{ 'text-danger' if celda.neto < 0 }}">{{ celda.neto|clp }}</td>
+        <td class="num">{{ celda.ecomex|clp }}</td>
+        {% endfor %}
+        <td class="num fw-bold {{ 'text-success' if fila.importacion.costeo_diferencia > 0 else ('text-danger' if fila.importacion.costeo_diferencia < 0 else '') }}">
+          {{ '+' if fila.importacion.costeo_diferencia > 0 else '' }}{{ fila.importacion.costeo_diferencia|clp }}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="{{ 3 + matriz.conceptos|length * 2 + 1 }}" class="text-center text-muted">No hay importaciones que calcen con estos filtros.</td></tr>
+      {% endfor %}
+    </tbody>
+    {% if matriz.filas %}
+    <tfoot>
+      <tr class="table-light fw-bold">
+        <td colspan="3">Total</td>
+        {% for total in matriz.totales_columna %}
+        <td class="num">{{ total.neto|clp }}</td>
+        <td class="num">{{ total.ecomex|clp }}</td>
+        {% endfor %}
+        <td class="num {{ 'text-success' if matriz.gran_total > 0 else ('text-danger' if matriz.gran_total < 0 else '') }}">
+          {{ '+' if matriz.gran_total > 0 else '' }}{{ matriz.gran_total|clp }}
+        </td>
+      </tr>
+    </tfoot>
+    {% endif %}
+  </table>
+</div>
+
+<div class="row g-2 align-items-center mb-4">
+  <div class="col-auto text-muted small">Ver el detalle horizontal de una importación puntual:</div>
+  <div class="col-auto">
+    <form method="get" class="d-flex gap-2">
+      {% for clave, valor in filtros.items() %}{% if clave != 'ver' %}<input type="hidden" name="{{ clave }}" value="{{ valor }}">{% endif %}{% endfor %}
+      <select name="ver" class="form-select form-select-sm" style="min-width: 220px;" onchange="this.form.submit()">
+        <option value="">Seleccionar importación...</option>
+        {% for i in todas_las_importaciones %}
+        <option value="{{ i.id }}" {{ 'selected' if importacion_vista and i.id == importacion_vista.id }}>PEI {{ i.pei or i.id }} — {{ i.proveedor_nombre or 'Sin proveedor' }}</option>
+        {% endfor %}
+      </select>
+    </form>
+  </div>
+</div>
+
+{% if importacion_vista and horizontal %}
+<div class="card">
+  <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+    <span>Detalle horizontal — PEI {{ importacion_vista.pei or importacion_vista.id }}</span>
+    <span class="small text-muted">
+      Total debe {{ importacion_vista.costeo_valor|clp }} · Total haber {{ importacion_vista.costeo_suma|clp }} ·
+      Diferencia
+      <strong class="{{ 'text-success' if importacion_vista.costeo_diferencia > 0 else ('text-danger' if importacion_vista.costeo_diferencia < 0 else '') }}">
+        {{ '+' if importacion_vista.costeo_diferencia > 0 else '' }}{{ importacion_vista.costeo_diferencia|clp }}
+      </strong>
+    </span>
+  </div>
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table table-sm">
+        <thead><tr>{% for celda in horizontal.celdas %}<th>{{ celda.etiqueta }}</th>{% endfor %}</tr></thead>
+        <tbody>
+          <tr>
+            {% for celda in horizontal.celdas %}
+            <td class="num {{ 'text-danger' if celda.neto < 0 }}">{{ celda.neto|clp }}</td>
+            {% else %}
+            <td class="text-muted">Sin líneas de costeo todavía.</td>
+            {% endfor %}
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="text-muted small mb-0">
+      La diferencia se traslada automáticamente al asiento de Ajuste de existencias al guardar el grupo de costeo.
+      N° asiento de ajuste anotado: <strong>{{ horizontal.ajuste_cbte or '—' }}</strong>.
+      <a href="{{ url_for('importaciones.detalle', importacion_id=importacion_vista.id) }}">Editar en el detalle contable →</a>
+    </p>
+  </div>
+</div>
+{% elif request.args.get('ver') %}
+<div class="alert alert-warning">No se encontró esa importación.</div>
+{% endif %}
+
+{% endblock %}

@@ -1,6 +1,6 @@
 from app.extensions import db
 
-MODULOS = ("inventario", "contratos", "activos_fijos", "datos_maestros", "admin")
+MODULOS = ("inventario", "contratos", "activos_fijos", "datos_maestros", "importaciones", "admin")
 
 
 class RolModuloPermiso(db.Model):

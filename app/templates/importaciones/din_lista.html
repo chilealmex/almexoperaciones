@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% import "partials/_graficos.html" as g %}
+{% block title %}Control de DIN{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <h1>Control de DIN</h1>
+    <p class="page-sub">Pagos de Declaraciones de Ingreso por agencia — folio, fecha de pago, vencimiento y total pagado.</p>
+  </div>
+  <div class="d-flex gap-2">
+    <a href="{{ url_for('importaciones.din_excel', **request.args) }}" class="btn btn-outline-secondary btn-sm">⬇ Excel</a>
+    {% if puede('importaciones', 'editar') %}
+    <a href="{{ url_for('importaciones.nueva_din') }}" class="btn btn-primary btn-sm">+ Nueva DIN</a>
+    {% endif %}
+  </div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('DIN registradas', registros|length, color='var(--mod-importaciones)') }}
+  </div>
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Total pagado', kpi_pagado|clp) }}
+  </div>
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Monto doc. agencia', kpi_doc_agencia|clp) }}
+  </div>
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('En revisión', kpi_revision, tono='warn' if kpi_revision else 'ok') }}
+  </div>
+</div>
+
+<form method="get" id="filtros-din" class="row g-2 align-items-center mb-3">
+  <div class="col-12 col-md-4">
+    <input type="search" name="texto" value="{{ filtros.get('texto', '') }}" class="form-control" placeholder="Buscar OC, proveedor, folio, invoice..." data-autofiltro>
+  </div>
+  <div class="col-6 col-md-2">
+    <select name="agencia" class="form-select" data-autofiltro>
+      <option value="">Todas las agencias</option>
+      {% for a in agencias %}
+      <option value="{{ a }}" {{ 'selected' if filtros.get('agencia') == a }}>{{ a }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-6 col-md-2">
+    <select name="mes" class="form-select" data-autofiltro>
+      <option value="">Todos los meses</option>
+      {% for clave, etiqueta in meses %}
+      <option value="{{ clave }}" {{ 'selected' if filtros.get('mes') == clave }}>{{ etiqueta }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-6 col-md-2">
+    <select name="estado" class="form-select" data-autofiltro>
+      <option value="">Todos los estados</option>
+      <option value="pendiente" {{ 'selected' if filtros.get('estado') == 'pendiente' }}>Pendiente</option>
+      <option value="revision" {{ 'selected' if filtros.get('estado') == 'revision' }}>Revisión</option>
+      <option value="pagado" {{ 'selected' if filtros.get('estado') == 'pagado' }}>Pagado</option>
+    </select>
+  </div>
+  <div class="col-auto">
+    <button type="submit" class="btn btn-outline-secondary">Filtrar</button>
+  </div>
+</form>
+
+<div class="table-responsive">
+  <table class="table table-striped align-middle">
+    <thead>
+      <tr>
+        <th>N°</th><th>OC</th><th>Agencia</th><th class="d-none d-lg-table-cell">N° Doc Agencia</th>
+        <th class="num">Monto Doc Agencia</th><th>Proveedor/Cliente</th><th class="d-none d-xl-table-cell">N° Invoice</th>
+        <th>Estado</th><th class="d-none d-xl-table-cell">Folio</th><th class="d-none d-lg-table-cell">Fecha pago</th>
+        <th class="d-none d-lg-table-cell">Vcto</th><th class="num">Total pagado</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in registros %}
+      <tr>
+        <td>{{ r.numero or '—' }}</td>
+        <td>{{ r.oc or '—' }}</td>
+        <td>{{ r.agencia or '—' }}</td>
+        <td class="d-none d-lg-table-cell">{{ r.n_doc_agencia or '—' }}</td>
+        <td class="num">{{ r.monto_doc_agencia|clp }}</td>
+        <td>{{ r.proveedor or '—' }}</td>
+        <td class="d-none d-xl-table-cell">{{ r.n_invoice or '—' }}</td>
+        <td>
+          <span class="badge {{ 'bg-success' if r.estado == 'pagado' else ('bg-warning text-dark' if r.estado == 'revision' else 'bg-danger') }}">
+            {{ {'pendiente': 'Pendiente', 'revision': 'Revisión', 'pagado': 'Pagado'}[r.estado] }}
+          </span>
+        </td>
+        <td class="d-none d-xl-table-cell">{{ r.folio or '—' }}</td>
+        <td class="d-none d-lg-table-cell">{{ r.fecha_pago|fecha if r.fecha_pago else '—' }}</td>
+        <td class="d-none d-lg-table-cell">{{ r.vcto|fecha if r.vcto else '—' }}</td>
+        <td class="num">{{ r.total_pagado|clp }}</td>
+        <td class="text-end text-nowrap">
+          {% if puede('importaciones', 'editar') %}
+          <a href="{{ url_for('importaciones.editar_din', din_id=r.id) }}" class="btn btn-sm btn-outline-secondary">Editar</a>
+          <form method="post" action="{{ url_for('importaciones.eliminar_din', din_id=r.id) }}" class="d-inline" onsubmit="return confirm('¿Eliminar este registro?')">
+            {{ accion_form.hidden_tag() }}
+            <button type="submit" class="btn btn-sm btn-outline-danger">Eliminar</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="13" class="text-center text-muted">No hay registros de DIN que coincidan con el filtro.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

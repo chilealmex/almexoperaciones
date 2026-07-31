@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% import "partials/_graficos.html" as g %}
+{% block title %}Importaciones{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <h1>Importaciones</h1>
+    <p class="page-sub">Panel general: PEI, proveedores, saldos con agencias y alertas.</p>
+  </div>
+  {% if puede('importaciones', 'editar') %}
+  <a href="{{ url_for('importaciones.nueva_importacion') }}" class="btn btn-primary btn-sm">+ Nueva importación</a>
+  {% endif %}
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Importaciones registradas', total_importaciones, color='var(--mod-importaciones)', href=url_for('importaciones.resumen')) }}
+  </div>
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Monto total guías', monto_total|clp) }}
+  </div>
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Saldo total a favor', favor_total|clp, tono='ok') }}
+  </div>
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Saldo total en contra', contra_total|clp, tono='danger' if contra_total else 'ok') }}
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-12 col-lg-6">
+    {% call g.tarjeta('Importaciones por mes', 'Monto guía, últimos 12 meses con datos') %}
+      {{ g.barras(grafico_mes, vacio='Aún no hay importaciones con fecha PEI.') }}
+    {% endcall %}
+  </div>
+  <div class="col-12 col-lg-6">
+    {% call g.tarjeta('Top proveedores por monto', 'Suma del monto guía') %}
+      {{ g.barras(grafico_proveedores, vacio='Aún no hay importaciones registradas.') }}
+    {% endcall %}
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-12 col-lg-6">
+    <div class="card h-100">
+      <div class="card-header">Saldo neto por agencia</div>
+      <div class="table-responsive">
+        <table class="table table-hover mb-0">
+          <thead><tr><th>Agencia</th><th class="num">Saldo</th></tr></thead>
+          <tbody>
+            {% for agencia, saldo in agencias_saldo %}
+            <tr>
+              <td>{{ agencia }}</td>
+              <td class="num">
+                <span class="{{ 'text-success' if saldo >= 0 else 'text-danger' }}">
+                  {{ '+' if saldo >= 0 else '' }}{{ saldo|clp }}
+                </span>
+              </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="2" class="text-center text-muted">Sin agencias registradas todavía.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="col-12 col-lg-6">
+    <div class="card h-100">
+      <div class="card-header">Alertas — notas o asientos descuadrados</div>
+      <div class="table-responsive">
+        <table class="table table-hover mb-0">
+          <thead><tr><th>PEI</th><th>Proveedor</th><th></th></tr></thead>
+          <tbody>
+            {% for i in alertas %}
+            <tr>
+              <td class="fw-semibold">{{ i.pei or '—' }}</td>
+              <td>{{ i.proveedor_nombre or '—' }}</td>
+              <td class="text-end"><a href="{{ url_for('importaciones.detalle', importacion_id=i.id) }}" class="small">Ver detalle →</a></td>
+            </tr>
+            {% else %}
+            <tr><td colspan="3" class="text-center text-muted">Sin alertas pendientes.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

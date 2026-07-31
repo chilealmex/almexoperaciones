@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Proveedores de importación{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <h1>Catálogo de proveedores</h1>
+    <p class="page-sub">Proveedores extranjeros, país y tratado de libre comercio.</p>
+  </div>
+  {% if puede('importaciones', 'editar') %}
+  <a href="{{ url_for('importaciones.nuevo_proveedor') }}" class="btn btn-primary btn-sm">+ Nuevo proveedor</a>
+  {% endif %}
+</div>
+
+<form method="get" class="row g-2 align-items-center mb-3">
+  <div class="col-12 col-md-4">
+    <input type="search" name="texto" value="{{ filtros.get('texto', '') }}" class="form-control" placeholder="Buscar proveedor o RUT...">
+  </div>
+  <div class="col-auto">
+    <button type="submit" class="btn btn-outline-secondary">Buscar</button>
+  </div>
+</form>
+
+<div class="table-responsive">
+  <table class="table table-striped align-middle">
+    <thead><tr><th>RUT / Aux</th><th>Nombre</th><th>País</th><th>Tratado libre comercio</th><th></th></tr></thead>
+    <tbody>
+      {% for p in proveedores %}
+      <tr>
+        <td>{{ p.rut or '—' }}</td>
+        <td>{{ p.nombre }}</td>
+        <td>{{ p.pais or '—' }}</td>
+        <td>
+          {% if p.tratado_tlc %}
+          <span class="badge {{ 'bg-success' if p.tratado_tlc == 'SI' else ('bg-warning text-dark' if p.tratado_tlc == 'PARCIAL' else 'bg-secondary') }}">
+            {{ 'Sí' if p.tratado_tlc == 'SI' else ('Parcial' if p.tratado_tlc == 'PARCIAL' else 'No') }}
+          </span>
+          {% else %}—{% endif %}
+        </td>
+        <td class="text-end text-nowrap">
+          {% if puede('importaciones', 'editar') %}
+          <a href="{{ url_for('importaciones.editar_proveedor', proveedor_id=p.id) }}" class="btn btn-sm btn-outline-secondary">Editar</a>
+          <form method="post" action="{{ url_for('importaciones.eliminar_proveedor', proveedor_id=p.id) }}" class="d-inline" onsubmit="return confirm('¿Eliminar este proveedor?')">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-sm btn-outline-danger">Eliminar</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="text-center text-muted">Aún no hay proveedores registrados.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

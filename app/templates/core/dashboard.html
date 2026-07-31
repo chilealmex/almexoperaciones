@@ -199,4 +199,27 @@
 </div>
 {% endif %}
 
+{# ===================== IMPORTACIONES ===================== #}
+{% if importaciones %}
+<div class="d-flex align-items-center justify-content-between mb-2">
+  <h2 class="h6 text-uppercase text-muted mb-0" style="letter-spacing:.08em;">🚢 Importaciones</h2>
+  <a href="{{ url_for('importaciones.dashboard') }}" class="small">Ver módulo →</a>
+</div>
+<div class="row g-3 mb-3">
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Importaciones', importaciones.total, color='var(--mod-importaciones)', href=url_for('importaciones.resumen')) }}
+  </div>
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Monto total guías', importaciones.monto_total|clp) }}
+  </div>
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Saldo a favor', importaciones.favor_total|clp, tono='ok') }}
+  </div>
+  <div class="col-6 col-lg-3">
+    {{ g.kpi('Alertas', importaciones.alertas, tono='warn' if importaciones.alertas else 'ok',
+             pie='Notas o asientos descuadrados', href=url_for('importaciones.resumen')) }}
+  </div>
+</div>
+{% endif %}
+
 {% endblock %}

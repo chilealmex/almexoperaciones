@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Editar proveedor' if proveedor else 'Nuevo proveedor' }}{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">{{ 'Editar proveedor' if proveedor else 'Nuevo proveedor' }}</h1>
+<form method="post" novalidate class="col-12 col-lg-6">
+  {{ form.hidden_tag() }}
+  <div class="row">
+    <div class="col-6 mb-3">
+      {{ form.rut.label(class="form-label") }}
+      {{ form.rut(class="form-control", placeholder="46208") }}
+    </div>
+    <div class="col-6 mb-3">
+      {{ form.pais.label(class="form-label") }}
+      {{ form.pais(class="form-control", placeholder="ASIA") }}
+    </div>
+  </div>
+  <div class="mb-3">
+    {{ form.nombre.label(class="form-label") }}
+    {{ form.nombre(class="form-control", placeholder="NOVO DR LTD") }}
+    {% for error in form.nombre.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+  </div>
+  <div class="mb-3">
+    {{ form.tratado_tlc.label(class="form-label") }}
+    {{ form.tratado_tlc(class="form-select") }}
+  </div>
+  <button type="submit" class="btn btn-primary">Guardar</button>
+  <a href="{{ url_for('importaciones.proveedores') }}" class="btn btn-outline-secondary">Cancelar</a>
+</form>
+{% endblock %}

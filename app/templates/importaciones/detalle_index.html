@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Detalle por PEI{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <h1>Detalle contable por PEI</h1>
+    <p class="page-sub">Asientos de factura agencia, DIN, cuadratura, costeo y ajuste de existencias.</p>
+  </div>
+</div>
+
+<form method="get" class="row g-2 align-items-center mb-4">
+  <div class="col-auto">
+    <input type="text" name="pei" class="form-control" placeholder="N° PEI (ej. 39)" style="width: 180px;">
+  </div>
+  <div class="col-auto">
+    <button type="submit" class="btn btn-primary">Ir</button>
+  </div>
+</form>
+
+<div class="table-responsive">
+  <table class="table table-hover align-middle">
+    <thead><tr><th>Fecha PEI</th><th>PEI</th><th>IMP</th><th>Proveedor</th><th>Estado</th><th></th></tr></thead>
+    <tbody>
+      {% for i in importaciones %}
+      <tr>
+        <td>{{ i.fecha_pei|fecha if i.fecha_pei else '—' }}</td>
+        <td class="fw-semibold">{{ i.pei or '—' }}</td>
+        <td>{{ i.imp or '—' }}</td>
+        <td>{{ i.proveedor_nombre or '—' }}</td>
+        <td>
+          <span class="badge {{ 'bg-success' if i.estado == 'cerrado' else ('bg-warning text-dark' if i.estado == 'costeando' else 'bg-danger') }}">
+            {{ {'pendiente': 'Pendiente', 'costeando': 'Costeando', 'cerrado': 'Cerrado'}[i.estado] }}
+          </span>
+        </td>
+        <td class="text-end"><a href="{{ url_for('importaciones.detalle', importacion_id=i.id) }}" class="btn btn-sm btn-outline-secondary">Ver detalle →</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="text-center text-muted">
+        Aún no hay importaciones registradas.
+        {% if puede('importaciones', 'editar') %}<a href="{{ url_for('importaciones.nueva_importacion') }}">Crea la primera en Resumen</a>.{% endif %}
+      </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

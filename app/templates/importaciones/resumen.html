@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}Resumen de importaciones{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <h1>Resumen de importaciones</h1>
+    <p class="page-sub">PEI, proveedor, montos y saldo por agencia.</p>
+  </div>
+  {% if puede('importaciones', 'editar') %}
+  <a href="{{ url_for('importaciones.nueva_importacion') }}" class="btn btn-primary btn-sm">+ Nueva importación</a>
+  {% endif %}
+</div>
+
+<form method="get" id="filtros-importaciones" class="row g-2 align-items-center mb-3">
+  <div class="col-12 col-md-4">
+    <input type="search" name="texto" value="{{ filtros.get('texto', '') }}" class="form-control" placeholder="Buscar proveedor, PEI, N° OC..." data-autofiltro>
+  </div>
+  <div class="col-6 col-md-3">
+    <select name="agencia" class="form-select" form="filtros-importaciones" data-autofiltro>
+      <option value="">Todas las agencias</option>
+      {% for a in agencias %}
+      <option value="{{ a }}" {{ 'selected' if filtros.get('agencia') == a }}>{{ a }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-6 col-md-2">
+    <select name="mes" class="form-select" form="filtros-importaciones" data-autofiltro>
+      <option value="">Todos los meses</option>
+      {% for clave, etiqueta in meses %}
+      <option value="{{ clave }}" {{ 'selected' if filtros.get('mes') == clave }}>{{ etiqueta }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-6 col-md-2">
+    <select name="estado" class="form-select" form="filtros-importaciones" data-autofiltro>
+      <option value="">Todos los estados</option>
+      <option value="pendiente" {{ 'selected' if filtros.get('estado') == 'pendiente' }}>Pendiente</option>
+      <option value="costeando" {{ 'selected' if filtros.get('estado') == 'costeando' }}>Costeando</option>
+      <option value="cerrado" {{ 'selected' if filtros.get('estado') == 'cerrado' }}>Cerrado</option>
+    </select>
+  </div>
+  <div class="col-auto">
+    <button type="submit" class="btn btn-outline-secondary">Filtrar</button>
+    {% if filtros.get('texto') or filtros.get('agencia') or filtros.get('mes') or filtros.get('estado') %}
+    <a href="{{ url_for('importaciones.resumen') }}" class="btn btn-link">Limpiar</a>
+    {% endif %}
+  </div>
+</form>
+
+<div class="table-responsive">
+  <table class="table table-striped align-middle">
+    <thead>
+      <tr>
+        <th>Fecha PEI</th><th>PEI</th><th class="d-none d-lg-table-cell">IMP</th><th>Proveedor</th>
+        <th class="d-none d-lg-table-cell">N° OC</th><th class="num">Monto guía</th><th>Agencia</th>
+        <th class="num">Saldo</th><th class="d-none d-xl-table-cell">Tratado</th><th>Estado</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for i in importaciones %}
+      <tr>
+        <td>{{ i.fecha_pei|fecha if i.fecha_pei else '—' }}</td>
+        <td class="fw-semibold"><a href="{{ url_for('importaciones.detalle', importacion_id=i.id) }}">{{ i.pei or '—' }}</a></td>
+        <td class="d-none d-lg-table-cell">{{ i.imp or '—' }}</td>
+        <td>{{ i.proveedor_nombre or '—' }}</td>
+        <td class="d-none d-lg-table-cell">{{ i.oc or '—' }}</td>
+        <td class="num">{{ i.monto|clp }}</td>
+        <td>{{ i.agencia or '—' }}</td>
+        <td class="num">
+          <span class="{{ 'text-success' if i.saldo_signado >= 0 else 'text-danger' }}">
+            {{ '+' if i.saldo_signado >= 0 else '' }}{{ i.saldo_signado|clp }}
+          </span>
+        </td>
+        <td class="d-none d-xl-table-cell">
+          {% if i.tratado_tlc %}
+          <span class="badge {{ 'bg-success' if i.tratado_tlc == 'SI' else ('bg-warning text-dark' if i.tratado_tlc == 'PARCIAL' else 'bg-secondary') }}">
+            {{ 'Sí' if i.tratado_tlc == 'SI' else ('Parcial' if i.tratado_tlc == 'PARCIAL' else 'No') }}
+          </span>
+          {% else %}—{% endif %}
+        </td>
+        <td>
+          {% if puede('importaciones', 'editar') %}
+          <form method="post" action="{{ url_for('importaciones.cambiar_estado', importacion_id=i.id) }}">
+            {{ estado_form.hidden_tag() }}
+            <select name="estado" class="form-select form-select-sm" onchange="this.form.submit()">
+              <option value="pendiente" {{ 'selected' if i.estado == 'pendiente' }}>Pendiente</option>
+              <option value="costeando" {{ 'selected' if i.estado == 'costeando' }}>Costeando</option>
+              <option value="cerrado" {{ 'selected' if i.estado == 'cerrado' }}>Cerrado</option>
+            </select>
+          </form>
+          {% else %}
+          <span class="badge {{ 'bg-success' if i.estado == 'cerrado' else ('bg-warning text-dark' if i.estado == 'costeando' else 'bg-danger') }}">
+            {{ {'pendiente': 'Pendiente', 'costeando': 'Costeando', 'cerrado': 'Cerrado'}[i.estado] }}
+          </span>
+          {% endif %}
+        </td>
+        <td class="text-end text-nowrap">
+          <a href="{{ url_for('importaciones.detalle', importacion_id=i.id) }}" class="btn btn-sm btn-outline-secondary">Detalle</a>
+          {% if puede('importaciones', 'editar') %}
+          <a href="{{ url_for('importaciones.editar_importacion', importacion_id=i.id) }}" class="btn btn-sm btn-outline-secondary">Editar</a>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="11" class="text-center text-muted">Aún no hay importaciones registradas.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

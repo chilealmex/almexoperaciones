@@ -13,6 +13,13 @@ from app.models.arriendo import (
     PagoArriendoEntrada,
 )
 from app.models.documento import Documento
+from app.models.importacion import (
+    ProveedorImportacion,
+    Importacion,
+    ImportacionAsientoLinea,
+    ImportacionGrupoMeta,
+    DinRegistro,
+)
 
 __all__ = [
     "Empresa",
@@ -33,4 +40,9 @@ __all__ = [
     "ArriendoEntrada",
     "PagoArriendoEntrada",
     "Documento",
+    "ProveedorImportacion",
+    "Importacion",
+    "ImportacionAsientoLinea",
+    "ImportacionGrupoMeta",
+    "DinRegistro",
 ]

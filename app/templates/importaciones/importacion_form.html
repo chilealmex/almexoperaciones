@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Editar importación' if importacion else 'Nueva importación' }}{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">{{ 'Editar importación' if importacion else 'Nueva importación' }}</h1>
+<form method="post" novalidate class="col-12 col-lg-9">
+  {{ form.hidden_tag() }}
+  <div class="row">
+    <div class="col-6 col-md-3 mb-3">
+      {{ form.fecha_pei.label(class="form-label") }}
+      {{ form.fecha_pei(class="form-control") }}
+    </div>
+    <div class="col-6 col-md-3 mb-3">
+      {{ form.pei.label(class="form-label") }}
+      {{ form.pei(class="form-control", placeholder="39") }}
+    </div>
+    <div class="col-6 col-md-3 mb-3">
+      {{ form.imp.label(class="form-label") }}
+      {{ form.imp(class="form-control", placeholder="1284") }}
+    </div>
+    <div class="col-6 col-md-3 mb-3">
+      {{ form.oc.label(class="form-label") }}
+      {{ form.oc(class="form-control", placeholder="14118") }}
+    </div>
+  </div>
+  <div class="row">
+    <div class="col-12 col-md-6 mb-3">
+      {{ form.proveedor_nombre.label(class="form-label") }}
+      {{ form.proveedor_nombre(class="form-control", list="proveedores-datalist", placeholder="Nombre del proveedor") }}
+      <datalist id="proveedores-datalist">
+        {% for p in proveedores %}<option value="{{ p.nombre }}">{% endfor %}
+      </datalist>
+    </div>
+    <div class="col-6 col-md-3 mb-3">
+      {{ form.pais.label(class="form-label") }}
+      {{ form.pais(class="form-control", placeholder="EEUU") }}
+    </div>
+    <div class="col-6 col-md-3 mb-3">
+      {{ form.tratado_tlc.label(class="form-label") }}
+      {{ form.tratado_tlc(class="form-select") }}
+    </div>
+  </div>
+  <div class="row">
+    <div class="col-6 col-md-3 mb-3">
+      {{ form.monto.label(class="form-label") }}
+      {{ form.monto(class="form-control") }}
+    </div>
+    <div class="col-6 col-md-3 mb-3">
+      {{ form.agencia.label(class="form-label") }}
+      {{ form.agencia(class="form-control", placeholder="DHL, UPS, Carlos Arredondo...") }}
+    </div>
+    <div class="col-6 col-md-3 mb-3">
+      {{ form.tipo_saldo.label(class="form-label") }}
+      {{ form.tipo_saldo(class="form-select") }}
+    </div>
+    <div class="col-6 col-md-3 mb-3">
+      {{ form.saldo_agencia.label(class="form-label") }}
+      {{ form.saldo_agencia(class="form-control") }}
+    </div>
+  </div>
+  <div class="row">
+    <div class="col-6 col-md-3 mb-3">
+      {{ form.estado.label(class="form-label") }}
+      {{ form.estado(class="form-select") }}
+    </div>
+  </div>
+  <div class="mb-3">
+    {{ form.notas.label(class="form-label") }}
+    {{ form.notas(class="form-control", rows=2, placeholder="Ej. con problemas en ad valorem") }}
+  </div>
+  <button type="submit" class="btn btn-primary">Guardar</button>
+  <a href="{{ url_for('importaciones.resumen') }}" class="btn btn-outline-secondary">Cancelar</a>
+</form>
+{% endblock %}

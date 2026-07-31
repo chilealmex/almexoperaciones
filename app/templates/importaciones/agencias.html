@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Movimientos por agencia{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <h1>Movimientos por agencia</h1>
+    <p class="page-sub">Saldos y movimientos de cada agencia, importación por importación.</p>
+  </div>
+</div>
+
+<form method="get" id="filtros-agencias" class="row g-2 align-items-center mb-4">
+  <div class="col-12 col-md-4">
+    <input type="search" name="texto" value="{{ filtros.get('texto', '') }}" class="form-control" placeholder="Buscar proveedor, PEI, N° OC..." data-autofiltro>
+  </div>
+  <div class="col-6 col-md-3">
+    <select name="agencia" class="form-select" data-autofiltro>
+      <option value="">Todas las agencias</option>
+      {% for a in agencias %}
+      <option value="{{ a }}" {{ 'selected' if filtros.get('agencia') == a }}>{{ a }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-6 col-md-3">
+    <select name="mes" class="form-select" data-autofiltro>
+      <option value="">Todos los meses</option>
+      {% for clave, etiqueta in meses %}
+      <option value="{{ clave }}" {{ 'selected' if filtros.get('mes') == clave }}>{{ etiqueta }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-auto">
+    <button type="submit" class="btn btn-outline-secondary">Filtrar</button>
+  </div>
+</form>
+
+{% for bloque in bloques %}
+<div class="card mb-3">
+  <div class="card-header d-flex align-items-center justify-content-between">
+    <span class="fw-semibold">{{ bloque.agencia }}</span>
+    <span class="{{ 'text-success' if bloque.saldo_total >= 0 else 'text-danger' }}">
+      Saldo neto: {{ '+' if bloque.saldo_total >= 0 else '' }}{{ bloque.saldo_total|clp }}
+    </span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm mb-0">
+      <thead><tr><th>Fecha PEI</th><th>PEI</th><th>Proveedor</th><th>N° OC</th><th class="num">Monto guía</th><th class="num">Saldo</th><th></th></tr></thead>
+      <tbody>
+        {% for i in bloque.importaciones %}
+        <tr>
+          <td>{{ i.fecha_pei|fecha if i.fecha_pei else '—' }}</td>
+          <td class="fw-semibold">{{ i.pei or '—' }}</td>
+          <td>{{ i.proveedor_nombre or '—' }}</td>
+          <td>{{ i.oc or '—' }}</td>
+          <td class="num">{{ i.monto|clp }}</td>
+          <td class="num {{ 'text-success' if i.saldo_signado >= 0 else 'text-danger' }}">
+            {{ '+' if i.saldo_signado >= 0 else '' }}{{ i.saldo_signado|clp }}
+          </td>
+          <td class="text-end"><a href="{{ url_for('importaciones.detalle', importacion_id=i.id) }}" class="small">Ver detalle →</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="alert alert-info">No hay movimientos de agencia que coincidan con el filtro.</div>
+{% endfor %}
+
+{% endblock %}

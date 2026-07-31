@@ -9,6 +9,8 @@ from app.models.conteo_inventario import ItemConteoInventario
 from app.models.activo_fijo import ActivoFijo
 from app.models.arriendo import ArriendoEntrada, ArriendoSalida
 from app.models.documento import Documento
+from app.models.importacion import Importacion
+from app.utils import importaciones_calculo as calculo_importaciones
 from app.utils.graficos import COLOR, COLOR_ESTADO, serie, proximos_meses, widget_seguro
 
 
@@ -157,6 +159,28 @@ def _panel_activos():
     }
 
 
+def _panel_importaciones():
+    """Saldos con agencias y alertas de cuadratura del módulo de importaciones."""
+    importaciones = Importacion.query.filter_by(empresa_id=current_user.empresa_id).all()
+
+    favor_total = sum(i.saldo_signado for i in importaciones if i.saldo_signado >= 0)
+    contra_total = sum(-i.saldo_signado for i in importaciones if i.saldo_signado < 0)
+    con_descuadre = [i for i in importaciones if calculo_importaciones.tiene_descuadre(i)]
+    con_notas = [i for i in importaciones if i.notas and i.notas.strip()]
+
+    return {
+        "total": len(importaciones),
+        "monto_total": sum(i.monto or 0 for i in importaciones),
+        "favor_total": favor_total,
+        "contra_total": contra_total,
+        "alertas": len({i.id for i in con_descuadre} | {i.id for i in con_notas}),
+        "grafico_saldo": [
+            serie("A favor", favor_total, COLOR["verde"]),
+            serie("En contra", contra_total, COLOR["rojo"]),
+        ],
+    }
+
+
 def _clp(monto) -> str:
     return "${:,.0f}".format(monto or 0).replace(",", ".")
 
@@ -169,6 +193,7 @@ def dashboard():
     inventario = None
     contratos = None
     activos = None
+    importaciones = None
 
     if current_user.tiene_permiso("inventario", "ver"):
         inventario = widget_seguro(_panel_inventario, nombre="panel de inventario")
@@ -176,12 +201,15 @@ def dashboard():
         contratos = widget_seguro(_panel_contratos, nombre="panel de contratos")
     if current_user.tiene_permiso("activos_fijos", "ver"):
         activos = widget_seguro(_panel_activos, nombre="panel de activos fijos")
+    if current_user.tiene_permiso("importaciones", "ver"):
+        importaciones = widget_seguro(_panel_importaciones, nombre="panel de importaciones")
 
     return render_template(
         "core/dashboard.html",
         inventario=inventario,
         contratos=contratos,
         activos=activos,
+        importaciones=importaciones,
         hoy=date.today(),
     )
 
