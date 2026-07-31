@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Editar costeo' if costeo else 'Nuevo costeo' }}{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">{{ 'Editar datos generales' if costeo else 'Nuevo costeo por producto' }}</h1>
+<form method="post" novalidate class="col-12 col-lg-9">
+  {{ form.hidden_tag() }}
+  <div class="row">
+    <div class="col-6 col-md-3 mb-3">
+      {{ form.n_importacion.label(class="form-label") }}
+      {{ form.n_importacion(class="form-control", placeholder="1299") }}
+    </div>
+    <div class="col-6 col-md-3 mb-3">
+      {{ form.fecha_llegada.label(class="form-label") }}
+      {{ form.fecha_llegada(class="form-control") }}
+    </div>
+    <div class="col-6 col-md-3 mb-3">
+      {{ form.guia_despacho.label(class="form-label") }}
+      {{ form.guia_despacho(class="form-control", placeholder="64838") }}
+    </div>
+    <div class="col-6 col-md-3 mb-3">
+      {{ form.purchase_order.label(class="form-label") }}
+      {{ form.purchase_order(class="form-control", placeholder="14387") }}
+    </div>
+  </div>
+  <div class="row">
+    <div class="col-6 col-md-4 mb-3">
+      {{ form.proveedor.label(class="form-label") }}
+      {{ form.proveedor(class="form-control", placeholder="ALMEX CANADA") }}
+    </div>
+    <div class="col-6 col-md-4 mb-3">
+      {{ form.modo_venta.label(class="form-label") }}
+      {{ form.modo_venta(class="form-control", placeholder="CRÉDITO") }}
+    </div>
+    <div class="col-6 col-md-4 mb-3">
+      {{ form.orden_trabajo.label(class="form-label") }}
+      {{ form.orden_trabajo(class="form-control", placeholder="6235-6249-STOCK") }}
+    </div>
+  </div>
+  <div class="row">
+    <div class="col-6 col-md-4 mb-3">
+      {{ form.responsable_costeo.label(class="form-label") }}
+      {{ form.responsable_costeo(class="form-control") }}
+    </div>
+    <div class="col-6 col-md-4 mb-3">
+      {{ form.tipo_flete_proyectado.label(class="form-label") }}
+      {{ form.tipo_flete_proyectado(class="form-control", placeholder="A") }}
+    </div>
+    <div class="col-6 col-md-4 mb-3">
+      {{ form.solicitud_compra.label(class="form-label") }}
+      {{ form.solicitud_compra(class="form-control", placeholder="COM-0271") }}
+    </div>
+  </div>
+  <div class="row">
+    <div class="col-6 col-md-4 mb-3">
+      {{ form.tasa_ad_valorem.label(class="form-label") }}
+      {{ form.tasa_ad_valorem(class="form-control") }}
+      <div class="form-text">Usa 0 si la importación está exenta por tratado de libre comercio.</div>
+    </div>
+  </div>
+  <button type="submit" class="btn btn-primary">Guardar</button>
+  <a href="{{ url_for('importaciones.costeo_detallado_lista') }}" class="btn btn-outline-secondary">Cancelar</a>
+</form>
+{% endblock %}

@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+{% block title %}Costeo {{ costeo.n_importacion or costeo.id }}{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <h1>Costeo por producto — Importación {{ costeo.n_importacion or '—' }}</h1>
+    <p class="page-sub">
+      {{ costeo.proveedor or 'Sin proveedor' }}
+      {% if costeo.orden_trabajo %} · OT {{ costeo.orden_trabajo }}{% endif %}
+      {% if costeo.fecha_llegada %} · Llegada {{ costeo.fecha_llegada|fecha }}{% endif %}
+    </p>
+  </div>
+  <a href="{{ url_for('importaciones.editar_costeo_detallado', costeo_id=costeo.id) }}" class="btn btn-outline-secondary btn-sm">Editar datos generales</a>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-6 col-lg-3">
+    <div class="kpi"><div class="kpi-label">Total CIF</div><div class="kpi-value">{{ totales.cif_clp|clp }}</div></div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="kpi"><div class="kpi-label">Gastos internos</div><div class="kpi-value">{{ totales.gastos_internos_clp|clp }}</div></div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="kpi"><div class="kpi-label">Costo total</div><div class="kpi-value">{{ totales.costo_total_clp|clp }}</div></div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="kpi">
+      <div class="kpi-label">Cuadratura EXW</div>
+      <div class="kpi-value {{ 'is-ok' if diferencia == 0 else 'is-danger' }}">{{ '$0' if diferencia == 0 else diferencia }}</div>
+      <div class="kpi-foot">Documentos vs. suma de productos</div>
+    </div>
+  </div>
+</div>
+
+{# ===================== DOCUMENTOS ===================== #}
+<div class="card mb-4" id="documentos">
+  <div class="card-header">Documentos (Invoice, Seguro, Flete, Crating)</div>
+  <div class="card-body">
+    <form method="post" action="{{ url_for('importaciones.guardar_documentos_costeo', costeo_id=costeo.id) }}">
+      {{ accion_form.hidden_tag() }}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-2">
+          <thead>
+            <tr>
+              <th>Documento</th><th>Moneda</th><th>N° doc</th>
+              <th class="num">Valor T/C</th><th class="num">Valor Total INV</th><th class="num">Valor CLP</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for plantilla in documento_roles %}
+            {% set doc = costeo.documento_por_rol(plantilla.rol) %}
+            {% if doc %}
+            <tr>
+              <td class="fw-semibold">{{ plantilla.etiqueta }}</td>
+              <td>
+                <select name="doc-{{ doc.id }}-moneda" class="form-select form-select-sm" {{ 'disabled' if not puede('importaciones', 'editar') }}>
+                  <option value="USD" {{ 'selected' if doc.moneda == 'USD' }}>USD</option>
+                  <option value="EUR" {{ 'selected' if doc.moneda == 'EUR' }}>EUR</option>
+                </select>
+              </td>
+              <td><input type="text" name="doc-{{ doc.id }}-nro_doc" class="form-control form-control-sm" value="{{ doc.nro_doc or '' }}" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
+              {% if plantilla.es_directo %}
+              <td class="num text-muted">—</td>
+              <td class="num text-muted">—</td>
+              <td class="num"><input type="text" inputmode="decimal" name="doc-{{ doc.id }}-valor_clp" class="form-control form-control-sm text-end" value="{{ doc.valor_clp or 0 }}" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
+              {% else %}
+              <td class="num"><input type="text" inputmode="decimal" name="doc-{{ doc.id }}-valor_tc" class="form-control form-control-sm text-end" value="{{ doc.valor_tc if doc.valor_tc is not none else '' }}" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
+              <td class="num"><input type="text" inputmode="decimal" name="doc-{{ doc.id }}-valor_total_inv" class="form-control form-control-sm text-end" value="{{ doc.valor_total_inv if doc.valor_total_inv is not none else '' }}" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
+              <td class="num">{{ (doc.valor_clp or 0)|clp }}</td>
+              {% endif %}
+            </tr>
+            {% endif %}
+            {% endfor %}
+          </tbody>
+          <tfoot>
+            <tr class="fw-bold">
+              <td colspan="5">Total CIF</td>
+              <td class="num">{{ totales.cif_clp|clp }}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      {% if puede('importaciones', 'editar') %}
+      <button type="submit" class="btn btn-primary btn-sm">Guardar documentos</button>
+      {% endif %}
+    </form>
+  </div>
+</div>
+
+{# ===================== GASTOS INTERNOS ===================== #}
+<div class="card mb-4" id="gastos">
+  <div class="card-header">Gastos internos nacionales</div>
+  <div class="card-body">
+    <form method="post" action="{{ url_for('importaciones.guardar_gastos_costeo', costeo_id=costeo.id) }}">
+      {{ accion_form.hidden_tag() }}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-2">
+          <thead><tr><th>Gasto</th><th>N° doc</th><th class="num">Valor CLP</th></tr></thead>
+          <tbody>
+            {% for plantilla in gasto_roles %}
+            {% set gasto = costeo.gasto_por_rol(plantilla.rol) %}
+            {% if gasto %}
+            <tr>
+              <td class="fw-semibold">{{ plantilla.etiqueta }}</td>
+              <td><input type="text" name="gasto-{{ gasto.id }}-nro_doc" class="form-control form-control-sm" value="{{ gasto.nro_doc or '' }}" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
+              <td class="num"><input type="text" inputmode="decimal" name="gasto-{{ gasto.id }}-valor_clp" class="form-control form-control-sm text-end" value="{{ gasto.valor_clp or 0 }}" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
+            </tr>
+            {% endif %}
+            {% endfor %}
+          </tbody>
+          <tfoot>
+            <tr class="fw-bold">
+              <td colspan="2">Total gastos internos</td>
+              <td class="num">{{ totales.gastos_internos_clp|clp }}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      {% if puede('importaciones', 'editar') %}
+      <button type="submit" class="btn btn-primary btn-sm">Guardar gastos internos</button>
+      {% endif %}
+    </form>
+  </div>
+</div>
+
+{# ===================== PRODUCTOS ===================== #}
+<div class="card mb-4" id="productos">
+  <div class="card-header">Productos — prorrateo de costos</div>
+  <div class="card-body">
+    <form method="post" action="{{ url_for('importaciones.guardar_productos_costeo', costeo_id=costeo.id) }}">
+      {{ accion_form.hidden_tag() }}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-2">
+          <thead>
+            <tr>
+              <th>Producto</th><th>Código</th><th class="num">Valor unit. T/C</th><th class="num">Cantidad</th>
+              <th>Unidad</th><th>Activo fijo</th>
+              <th class="num d-none d-xl-table-cell">EXW CLP</th>
+              <th class="num d-none d-xl-table-cell">CIF CLP</th>
+              <th class="num d-none d-xl-table-cell">Ad Valorem</th>
+              <th class="num d-none d-xl-table-cell">Gastos int.</th>
+              <th class="num">Costo total</th>
+              <th class="num">Costo unit. final</th>
+              <th class="num d-none d-lg-table-cell">Impacto %</th>
+              {% if puede('importaciones', 'editar') %}<th></th>{% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for p in costeo.productos %}
+            <tr>
+              <td><input type="text" name="prod-{{ p.id }}-producto" class="form-control form-control-sm" value="{{ p.producto or '' }}" style="min-width:220px;" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
+              <td><input type="text" name="prod-{{ p.id }}-codigo" class="form-control form-control-sm" value="{{ p.codigo or '' }}" style="min-width:110px;" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
+              <td class="num"><input type="text" inputmode="decimal" name="prod-{{ p.id }}-valor_unitario_tc" class="form-control form-control-sm text-end" value="{{ p.valor_unitario_tc }}" style="min-width:90px;" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
+              <td class="num"><input type="text" inputmode="decimal" name="prod-{{ p.id }}-cantidad" class="form-control form-control-sm text-end" value="{{ p.cantidad }}" style="min-width:80px;" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
+              <td>
+                <select name="prod-{{ p.id }}-unidad_tc" class="form-select form-select-sm" {{ 'disabled' if not puede('importaciones', 'editar') }}>
+                  <option value="USD" {{ 'selected' if p.unidad_tc == 'USD' }}>USD</option>
+                  <option value="EUR" {{ 'selected' if p.unidad_tc == 'EUR' }}>EUR</option>
+                </select>
+              </td>
+              <td>
+                <select name="prod-{{ p.id }}-activo_fijo" class="form-select form-select-sm" {{ 'disabled' if not puede('importaciones', 'editar') }}>
+                  <option value="NO" {{ 'selected' if p.activo_fijo == 'NO' }}>No</option>
+                  <option value="SI" {{ 'selected' if p.activo_fijo == 'SI' }}>Sí</option>
+                </select>
+              </td>
+              <td class="num d-none d-xl-table-cell">{{ p.exw_clp|clp }}</td>
+              <td class="num d-none d-xl-table-cell">{{ p.cif_clp|clp }}</td>
+              <td class="num d-none d-xl-table-cell">{{ p.ad_valorem_clp|clp }}</td>
+              <td class="num d-none d-xl-table-cell">{{ p.gastos_internos_clp|clp }}</td>
+              <td class="num fw-semibold">{{ p.costo_total_clp|clp }}</td>
+              <td class="num fw-semibold">{{ p.costo_unitario_final_clp|clp }}</td>
+              <td class="num d-none d-lg-table-cell">{{ '%+.1f%%'|format(p.impacto_pct * 100) }}</td>
+              {% if puede('importaciones', 'editar') %}
+              <td class="text-end">
+                <button type="submit" formaction="{{ url_for('importaciones.eliminar_producto_costeo', producto_id=p.id) }}" formnovalidate class="btn btn-sm btn-outline-danger" onclick="return confirm('¿Eliminar este producto?')" title="Eliminar">🗑</button>
+              </td>
+              {% endif %}
+            </tr>
+            {% else %}
+            <tr><td colspan="13" class="text-center text-muted">Sin productos todavía.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if puede('importaciones', 'editar') %}
+      <div class="d-flex gap-2 flex-wrap">
+        <button type="submit" class="btn btn-primary btn-sm">Guardar productos</button>
+        <button type="submit" formaction="{{ url_for('importaciones.agregar_producto_costeo', costeo_id=costeo.id) }}" formnovalidate class="btn btn-outline-secondary btn-sm">+ Agregar producto</button>
+      </div>
+      {% endif %}
+    </form>
+  </div>
+</div>
+
+{% if puede('importaciones', 'editar') %}
+<form method="post" action="{{ url_for('importaciones.eliminar_costeo_detallado', costeo_id=costeo.id) }}" onsubmit="return confirm('¿Eliminar este costeo completo?')">
+  {{ accion_form.hidden_tag() }}
+  <button type="submit" class="btn btn-outline-danger btn-sm">Eliminar este costeo</button>
+</form>
+{% endif %}
+
+{% endblock %}

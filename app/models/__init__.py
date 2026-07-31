@@ -20,6 +20,12 @@ from app.models.importacion import (
     ImportacionGrupoMeta,
     DinRegistro,
 )
+from app.models.costeo_importacion import (
+    CosteoImportacion,
+    CosteoImportacionDocumento,
+    CosteoImportacionGastoInterno,
+    CosteoImportacionProducto,
+)
 
 __all__ = [
     "Empresa",
@@ -45,4 +51,8 @@ __all__ = [
     "ImportacionAsientoLinea",
     "ImportacionGrupoMeta",
     "DinRegistro",
+    "CosteoImportacion",
+    "CosteoImportacionDocumento",
+    "CosteoImportacionGastoInterno",
+    "CosteoImportacionProducto",
 ]

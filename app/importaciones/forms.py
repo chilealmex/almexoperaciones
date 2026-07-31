@@ -1,5 +1,5 @@
 from flask_wtf import FlaskForm
-from wtforms import DateField, IntegerField, SelectField, StringField, TextAreaField
+from wtforms import DateField, FloatField, IntegerField, SelectField, StringField, TextAreaField
 from wtforms.validators import DataRequired, Length, NumberRange, Optional
 
 TRATADO_CHOICES = [("SI", "Sí"), ("NO", "No"), ("PARCIAL", "Parcial")]
@@ -59,3 +59,19 @@ class DinRegistroForm(FlaskForm):
 
 class AccionForm(FlaskForm):
     """Formulario vacío, solo para llevar el token CSRF en botones de acción (eliminar, agregar línea...)."""
+
+
+class CosteoImportacionForm(FlaskForm):
+    n_importacion = StringField("N° Importación", validators=[Optional(), Length(max=30)])
+    fecha_llegada = DateField("Fecha llegada", validators=[Optional()])
+    guia_despacho = StringField("Guía de despacho", validators=[Optional(), Length(max=40)])
+    proveedor = StringField("Proveedor", validators=[Optional(), Length(max=150)])
+    modo_venta = StringField("Modo de venta", validators=[Optional(), Length(max=40)])
+    purchase_order = StringField("Purchase Order", validators=[Optional(), Length(max=40)])
+    orden_trabajo = StringField("Orden de trabajo", validators=[Optional(), Length(max=60)])
+    responsable_costeo = StringField("Responsable costeo", validators=[Optional(), Length(max=120)])
+    tipo_flete_proyectado = StringField("Tipo de flete proyectado", validators=[Optional(), Length(max=20)])
+    solicitud_compra = StringField("Solicitud de compra", validators=[Optional(), Length(max=40)])
+    tasa_ad_valorem = FloatField(
+        "Tasa Ad Valorem (%)", validators=[Optional(), NumberRange(min=0, max=100)], default=6
+    )

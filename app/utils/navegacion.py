@@ -252,12 +252,29 @@ MODULOS = (
             },
             {
                 "clave": "costeo",
-                "etiqueta": "Costeo",
+                "etiqueta": "Costeo (asientos)",
                 "endpoint": "importaciones.costeo",
                 "endpoints": (
                     "importaciones.costeo",
                     "importaciones.actualizar_ajuste_cbte",
                     "importaciones.costeo_matriz_excel",
+                ),
+            },
+            {
+                "clave": "costeo_detallado",
+                "etiqueta": "Costeo por producto",
+                "endpoint": "importaciones.costeo_detallado_lista",
+                "endpoints": (
+                    "importaciones.costeo_detallado_lista",
+                    "importaciones.nuevo_costeo_detallado",
+                    "importaciones.editar_costeo_detallado",
+                    "importaciones.eliminar_costeo_detallado",
+                    "importaciones.ver_costeo_detallado",
+                    "importaciones.guardar_documentos_costeo",
+                    "importaciones.guardar_gastos_costeo",
+                    "importaciones.guardar_productos_costeo",
+                    "importaciones.agregar_producto_costeo",
+                    "importaciones.eliminar_producto_costeo",
                 ),
             },
             {

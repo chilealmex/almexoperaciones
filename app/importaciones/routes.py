@@ -5,9 +5,20 @@ from flask_login import current_user
 
 from app.extensions import db
 from app.importaciones import bp
-from app.importaciones.forms import AccionForm, DinRegistroForm, ImportacionForm, ProveedorImportacionForm
+from app.importaciones.forms import (
+    AccionForm,
+    CosteoImportacionForm,
+    DinRegistroForm,
+    ImportacionForm,
+    ProveedorImportacionForm,
+)
 from app.models.importacion import DinRegistro, Importacion, ImportacionAsientoLinea, ProveedorImportacion
+from app.models.costeo_importacion import (
+    CosteoImportacion,
+    CosteoImportacionProducto,
+)
 from app.utils import importaciones_calculo as calculo
+from app.utils import costeo_importacion_calculo as costeo_calculo
 from app.utils.decorators import require_permission
 from app.utils.exportar import CLP, FECHA, col, responder_excel
 from app.utils.formatting import format_clp
@@ -828,3 +839,210 @@ def din_excel():
     ]
 
     return responder_excel("control-din", "Control de DIN", columnas, filas)
+
+
+# --- Costeo detallado (prorrateo por producto) ---------------------------
+
+
+def _get_costeo_or_404(costeo_id):
+    costeo = CosteoImportacion.query.get_or_404(costeo_id)
+    if costeo.empresa_id != _empresa_id():
+        abort(404)
+    return costeo
+
+
+def _poblar_costeo_desde_form(costeo, form):
+    costeo.n_importacion = form.n_importacion.data.strip() if form.n_importacion.data else None
+    costeo.fecha_llegada = form.fecha_llegada.data
+    costeo.guia_despacho = form.guia_despacho.data.strip() if form.guia_despacho.data else None
+    costeo.proveedor = form.proveedor.data.strip() if form.proveedor.data else None
+    costeo.modo_venta = form.modo_venta.data.strip() if form.modo_venta.data else None
+    costeo.purchase_order = form.purchase_order.data.strip() if form.purchase_order.data else None
+    costeo.orden_trabajo = form.orden_trabajo.data.strip() if form.orden_trabajo.data else None
+    costeo.responsable_costeo = form.responsable_costeo.data.strip() if form.responsable_costeo.data else None
+    costeo.tipo_flete_proyectado = (
+        form.tipo_flete_proyectado.data.strip() if form.tipo_flete_proyectado.data else None
+    )
+    costeo.solicitud_compra = form.solicitud_compra.data.strip() if form.solicitud_compra.data else None
+    costeo.tasa_ad_valorem = (form.tasa_ad_valorem.data or 0) / 100
+
+
+@bp.route("/costeo-detallado")
+@require_permission("importaciones", "ver")
+def costeo_detallado_lista():
+    lista = (
+        CosteoImportacion.query.filter_by(empresa_id=_empresa_id())
+        .order_by(CosteoImportacion.fecha_llegada.desc().nullslast(), CosteoImportacion.id.desc())
+        .all()
+    )
+    resumen = []
+    for costeo in lista:
+        totales = costeo_calculo.totales_documentos(costeo)
+        resumen.append(
+            {
+                "costeo": costeo,
+                "costo_total_clp": totales["costo_total_clp"],
+                "cantidad_productos": len(costeo.productos),
+                "cuadrado": abs(costeo_calculo.diferencia_cuadratura(costeo)) < 0.01,
+            }
+        )
+    return render_template("importaciones/costeo_detallado_lista.html", resumen=resumen)
+
+
+@bp.route("/costeo-detallado/nueva", methods=["GET", "POST"])
+@require_permission("importaciones", "editar")
+def nuevo_costeo_detallado():
+    form = CosteoImportacionForm()
+    if form.validate_on_submit():
+        costeo = CosteoImportacion(empresa_id=_empresa_id())
+        _poblar_costeo_desde_form(costeo, form)
+        db.session.add(costeo)
+        db.session.flush()
+        costeo_calculo.sembrar_lineas_fijas(costeo)
+        db.session.commit()
+        flash("Costeo creado correctamente.", "success")
+        return redirect(url_for("importaciones.ver_costeo_detallado", costeo_id=costeo.id))
+    return render_template("importaciones/costeo_detallado_form.html", form=form, costeo=None)
+
+
+@bp.route("/costeo-detallado/<int:costeo_id>/editar", methods=["GET", "POST"])
+@require_permission("importaciones", "editar")
+def editar_costeo_detallado(costeo_id):
+    costeo = _get_costeo_or_404(costeo_id)
+    form = CosteoImportacionForm(obj=costeo)
+    if request.method == "GET":
+        form.tasa_ad_valorem.data = (costeo.tasa_ad_valorem or 0) * 100
+    if form.validate_on_submit():
+        _poblar_costeo_desde_form(costeo, form)
+        costeo_calculo.recalcular(costeo)
+        db.session.commit()
+        flash("Datos generales actualizados.", "success")
+        return redirect(url_for("importaciones.ver_costeo_detallado", costeo_id=costeo.id))
+    return render_template("importaciones/costeo_detallado_form.html", form=form, costeo=costeo)
+
+
+@bp.route("/costeo-detallado/<int:costeo_id>/eliminar", methods=["POST"])
+@require_permission("importaciones", "editar")
+def eliminar_costeo_detallado(costeo_id):
+    costeo = _get_costeo_or_404(costeo_id)
+    form = AccionForm()
+    if not form.validate_on_submit():
+        abort(400)
+    db.session.delete(costeo)
+    db.session.commit()
+    flash("Costeo eliminado.", "success")
+    return redirect(url_for("importaciones.costeo_detallado_lista"))
+
+
+@bp.route("/costeo-detallado/<int:costeo_id>")
+@require_permission("importaciones", "ver")
+def ver_costeo_detallado(costeo_id):
+    costeo = _get_costeo_or_404(costeo_id)
+    if not costeo.documentos or not costeo.gastos_internos:
+        costeo_calculo.sembrar_lineas_fijas(costeo)
+        costeo_calculo.recalcular(costeo)
+        db.session.commit()
+    totales = costeo_calculo.totales_documentos(costeo)
+    diferencia = costeo_calculo.diferencia_cuadratura(costeo)
+    return render_template(
+        "importaciones/costeo_detallado_ver.html",
+        costeo=costeo,
+        totales=totales,
+        diferencia=diferencia,
+        documento_roles=costeo_calculo.DOCUMENTO_ROLES,
+        gasto_roles=costeo_calculo.GASTO_INTERNO_ROLES,
+        accion_form=AccionForm(),
+    )
+
+
+@bp.route("/costeo-detallado/<int:costeo_id>/documentos/guardar", methods=["POST"])
+@require_permission("importaciones", "editar")
+def guardar_documentos_costeo(costeo_id):
+    costeo = _get_costeo_or_404(costeo_id)
+    form = AccionForm()
+    if not form.validate_on_submit():
+        abort(400)
+    for plantilla in costeo_calculo.DOCUMENTO_ROLES:
+        doc = costeo.documento_por_rol(plantilla["rol"])
+        if not doc:
+            continue
+        prefijo = f"doc-{doc.id}-"
+        doc.moneda = request.form.get(prefijo + "moneda", doc.moneda) or "USD"
+        doc.nro_doc = (request.form.get(prefijo + "nro_doc") or "").strip() or None
+        if plantilla["es_directo"]:
+            doc.valor_clp = _parse_int(request.form.get(prefijo + "valor_clp"))
+        else:
+            doc.valor_tc = _parse_float(request.form.get(prefijo + "valor_tc"))
+            doc.valor_total_inv = _parse_float(request.form.get(prefijo + "valor_total_inv"))
+    costeo_calculo.recalcular(costeo)
+    db.session.commit()
+    flash("Documentos guardados.", "success")
+    return redirect(url_for("importaciones.ver_costeo_detallado", costeo_id=costeo.id) + "#documentos")
+
+
+@bp.route("/costeo-detallado/<int:costeo_id>/gastos/guardar", methods=["POST"])
+@require_permission("importaciones", "editar")
+def guardar_gastos_costeo(costeo_id):
+    costeo = _get_costeo_or_404(costeo_id)
+    form = AccionForm()
+    if not form.validate_on_submit():
+        abort(400)
+    for gasto in costeo.gastos_internos:
+        prefijo = f"gasto-{gasto.id}-"
+        gasto.nro_doc = (request.form.get(prefijo + "nro_doc") or "").strip() or None
+        gasto.valor_clp = _parse_int(request.form.get(prefijo + "valor_clp"))
+    costeo_calculo.recalcular(costeo)
+    db.session.commit()
+    flash("Gastos internos guardados.", "success")
+    return redirect(url_for("importaciones.ver_costeo_detallado", costeo_id=costeo.id) + "#gastos")
+
+
+@bp.route("/costeo-detallado/<int:costeo_id>/productos/guardar", methods=["POST"])
+@require_permission("importaciones", "editar")
+def guardar_productos_costeo(costeo_id):
+    costeo = _get_costeo_or_404(costeo_id)
+    form = AccionForm()
+    if not form.validate_on_submit():
+        abort(400)
+    for producto in costeo.productos:
+        prefijo = f"prod-{producto.id}-"
+        if prefijo + "producto" not in request.form:
+            continue
+        producto.producto = (request.form.get(prefijo + "producto") or "").strip() or None
+        producto.codigo = (request.form.get(prefijo + "codigo") or "").strip() or None
+        producto.valor_unitario_tc = _parse_float(request.form.get(prefijo + "valor_unitario_tc"))
+        producto.cantidad = _parse_float(request.form.get(prefijo + "cantidad"))
+        producto.unidad_tc = request.form.get(prefijo + "unidad_tc") or "USD"
+        producto.activo_fijo = request.form.get(prefijo + "activo_fijo") or "NO"
+    costeo_calculo.recalcular(costeo)
+    db.session.commit()
+    flash("Productos guardados.", "success")
+    return redirect(url_for("importaciones.ver_costeo_detallado", costeo_id=costeo.id) + "#productos")
+
+
+@bp.route("/costeo-detallado/<int:costeo_id>/productos/agregar", methods=["POST"])
+@require_permission("importaciones", "editar")
+def agregar_producto_costeo(costeo_id):
+    costeo = _get_costeo_or_404(costeo_id)
+    form = AccionForm()
+    if not form.validate_on_submit():
+        abort(400)
+    orden = len(costeo.productos)
+    db.session.add(CosteoImportacionProducto(costeo=costeo, orden=orden, unidad_tc="USD", activo_fijo="NO"))
+    db.session.commit()
+    return redirect(url_for("importaciones.ver_costeo_detallado", costeo_id=costeo.id) + "#productos")
+
+
+@bp.route("/costeo-detallado/producto/<int:producto_id>/eliminar", methods=["POST"])
+@require_permission("importaciones", "editar")
+def eliminar_producto_costeo(producto_id):
+    producto = CosteoImportacionProducto.query.get_or_404(producto_id)
+    costeo = _get_costeo_or_404(producto.costeo_id)
+    form = AccionForm()
+    if not form.validate_on_submit():
+        abort(400)
+    db.session.delete(producto)
+    db.session.flush()
+    costeo_calculo.recalcular(costeo)
+    db.session.commit()
+    return redirect(url_for("importaciones.ver_costeo_detallado", costeo_id=costeo.id) + "#productos")

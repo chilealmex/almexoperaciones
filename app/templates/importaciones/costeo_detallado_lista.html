@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Costeo por producto{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <h1>Costeo por producto</h1>
+    <p class="page-sub">Prorratea el CIF, el flete, el seguro y los gastos internos entre los productos de cada importación, según su participación en el valor EXW.</p>
+  </div>
+  {% if puede('importaciones', 'editar') %}
+  <a href="{{ url_for('importaciones.nuevo_costeo_detallado') }}" class="btn btn-primary btn-sm">+ Nuevo costeo</a>
+  {% endif %}
+</div>
+
+<div class="table-responsive">
+  <table class="table table-striped align-middle">
+    <thead>
+      <tr>
+        <th>N° Importación</th><th>Fecha llegada</th><th>Proveedor</th><th>OT</th>
+        <th class="num">Productos</th><th class="num">Costo total</th><th>Cuadratura</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for fila in resumen %}
+      <tr>
+        <td class="fw-semibold"><a href="{{ url_for('importaciones.ver_costeo_detallado', costeo_id=fila.costeo.id) }}">{{ fila.costeo.n_importacion or '—' }}</a></td>
+        <td>{{ fila.costeo.fecha_llegada|fecha if fila.costeo.fecha_llegada else '—' }}</td>
+        <td>{{ fila.costeo.proveedor or '—' }}</td>
+        <td>{{ fila.costeo.orden_trabajo or '—' }}</td>
+        <td class="num">{{ fila.cantidad_productos }}</td>
+        <td class="num">{{ fila.costo_total_clp|clp }}</td>
+        <td>
+          <span class="badge {{ 'bg-success' if fila.cuadrado else 'bg-danger' }}">{{ 'Cuadrado' if fila.cuadrado else 'Revisar' }}</span>
+        </td>
+        <td class="text-end">
+          <a href="{{ url_for('importaciones.ver_costeo_detallado', costeo_id=fila.costeo.id) }}" class="btn btn-sm btn-outline-secondary">Abrir</a>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="text-center text-muted">Aún no hay costeos registrados.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
