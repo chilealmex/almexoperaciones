@@ -3,7 +3,7 @@ services:
     name: gestor-pyme
     runtime: python
     plan: free
-    buildCommand: "pip install -r requirements.txt && flask db upgrade && python seeds/seed_dev.py"
+    buildCommand: "pip install -r requirements.txt && flask db upgrade && python seeds/seed_dev.py && python scripts/importar_respaldo_html.py seeds/respaldo_importaciones_20260731.json"
     startCommand: "gunicorn wsgi:app --workers 3 --timeout 120 --bind 0.0.0.0:$PORT"
     healthCheckPath: /healthz
     autoDeploy: true
