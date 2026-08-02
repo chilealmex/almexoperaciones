@@ -797,20 +797,6 @@ def _poblar_costeo_desde_form(costeo, form):
     costeo.estado = form.estado.data
     costeo.importacion_id = form.importacion_id.data or None
 
-    costeo.din_agencia = form.din_agencia.data.strip() if form.din_agencia.data else None
-    costeo.din_n_doc_agencia = form.din_n_doc_agencia.data.strip() if form.din_n_doc_agencia.data else None
-    costeo.din_monto_doc_agencia = form.din_monto_doc_agencia.data
-    costeo.din_n_invoice = form.din_n_invoice.data.strip() if form.din_n_invoice.data else None
-    costeo.din_estado = form.din_estado.data or None
-    costeo.din_rut = form.din_rut.data.strip() if form.din_rut.data else None
-    costeo.din_razon_social = form.din_razon_social.data.strip() if form.din_razon_social.data else None
-    costeo.din_formulario = form.din_formulario.data.strip() if form.din_formulario.data else None
-    costeo.din_folio = form.din_folio.data.strip() if form.din_folio.data else None
-    costeo.din_fecha_pago = form.din_fecha_pago.data
-    costeo.din_vcto = form.din_vcto.data
-    costeo.din_advalorem_clp = form.din_advalorem_clp.data
-    costeo.din_total_pagado = form.din_total_pagado.data
-
 
 @bp.route("/costeo-detallado")
 @require_permission("importaciones", "ver")

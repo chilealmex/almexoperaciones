@@ -66,68 +66,6 @@
       <div class="form-text">Para que aparezca el acceso directo desde Cuadratura contable.</div>
     </div>
   </div>
-  <h2 class="h5 mt-4 mb-3">Control DIN</h2>
-  <p class="page-sub">Datos de pago de la Declaración de Ingreso de esta importación.</p>
-  <div class="row">
-    <div class="col-6 col-md-3 mb-3">
-      {{ form.din_agencia.label(class="form-label") }}
-      {{ form.din_agencia(class="form-control", placeholder="UPS, DHL, Carlos Arredondo...") }}
-    </div>
-    <div class="col-6 col-md-3 mb-3">
-      {{ form.din_n_doc_agencia.label(class="form-label") }}
-      {{ form.din_n_doc_agencia(class="form-control", placeholder="1110653") }}
-    </div>
-    <div class="col-6 col-md-3 mb-3">
-      {{ form.din_monto_doc_agencia.label(class="form-label") }}
-      {{ form.din_monto_doc_agencia(class="form-control") }}
-    </div>
-    <div class="col-6 col-md-3 mb-3">
-      {{ form.din_n_invoice.label(class="form-label") }}
-      {{ form.din_n_invoice(class="form-control", placeholder="62321828") }}
-    </div>
-  </div>
-  <div class="row">
-    <div class="col-6 col-md-3 mb-3">
-      {{ form.din_estado.label(class="form-label") }}
-      {{ form.din_estado(class="form-select") }}
-    </div>
-    <div class="col-6 col-md-3 mb-3">
-      {{ form.din_rut.label(class="form-label") }}
-      {{ form.din_rut(class="form-control", placeholder="99578050-K") }}
-    </div>
-    <div class="col-12 col-md-6 mb-3">
-      {{ form.din_razon_social.label(class="form-label") }}
-      {{ form.din_razon_social(class="form-control", placeholder="SHAW ALMEX CHILE SPA") }}
-    </div>
-  </div>
-  <div class="row">
-    <div class="col-6 col-md-3 mb-3">
-      {{ form.din_formulario.label(class="form-label") }}
-      {{ form.din_formulario(class="form-control", placeholder="17") }}
-    </div>
-    <div class="col-6 col-md-3 mb-3">
-      {{ form.din_folio.label(class="form-label") }}
-      {{ form.din_folio(class="form-control", placeholder="402360883") }}
-    </div>
-    <div class="col-6 col-md-3 mb-3">
-      {{ form.din_fecha_pago.label(class="form-label") }}
-      {{ form.din_fecha_pago(class="form-control") }}
-    </div>
-    <div class="col-6 col-md-3 mb-3">
-      {{ form.din_vcto.label(class="form-label") }}
-      {{ form.din_vcto(class="form-control") }}
-    </div>
-  </div>
-  <div class="row">
-    <div class="col-6 col-md-3 mb-3">
-      {{ form.din_advalorem_clp.label(class="form-label") }}
-      {{ form.din_advalorem_clp(class="form-control") }}
-    </div>
-    <div class="col-6 col-md-3 mb-3">
-      {{ form.din_total_pagado.label(class="form-label") }}
-      {{ form.din_total_pagado(class="form-control") }}
-    </div>
-  </div>
   <button type="submit" class="btn btn-primary">Guardar</button>
   <a href="{{ url_for('importaciones.costeo_detallado_lista') }}" class="btn btn-outline-secondary">Cancelar</a>
 </form>

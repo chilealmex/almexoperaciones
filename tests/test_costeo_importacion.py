@@ -466,30 +466,15 @@ def test_se_puede_editar_el_cbte_del_ajuste_desde_cuadratura_contable(client, us
     assert importacion.meta_de("ajuste").cbte == "4582"
 
 
-def test_campos_din_se_guardan_dentro_del_costeo(client, usuario_admin, empresa, db):
+def test_control_din_ya_no_aparece_en_la_pagina_del_costeo(client, usuario_admin, empresa, db):
     login(client, "admin@test.cl")
-    client.post(
-        "/importaciones/costeo-detallado/nueva",
-        data={
-            "n_importacion": "81",
-            "din_agencia": "UPS",
-            "din_folio": "402360883",
-            "din_estado": "pagado",
-            "din_total_pagado": "109170",
-        },
-        follow_redirects=True,
-    )
-    costeo = CosteoImportacion.query.filter_by(empresa_id=empresa.id, n_importacion="81").first()
-    assert costeo is not None
-    assert costeo.din_agencia == "UPS"
-    assert costeo.din_folio == "402360883"
-    assert costeo.din_estado == "pagado"
-    assert costeo.din_total_pagado == 109170
+    costeo = _crear_costeo(db, empresa, n_importacion="81")
 
     respuesta = client.get(f"/importaciones/costeo-detallado/{costeo.id}")
-    cuerpo = respuesta.get_data(as_text=True)
-    assert "Control DIN" in cuerpo
-    assert "402360883" in cuerpo
+    assert "Control DIN" not in respuesta.get_data(as_text=True)
+
+    respuesta = client.get(f"/importaciones/costeo-detallado/{costeo.id}/editar")
+    assert "Control DIN" not in respuesta.get_data(as_text=True)
 
 
 def test_din_historico_sigue_disponible_aunque_no_este_en_el_menu(client, usuario_admin, empresa, db):
