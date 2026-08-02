@@ -906,6 +906,10 @@ def ver_costeo_detallado(costeo_id):
         db.session.commit()
     totales = costeo_calculo.totales_documentos(costeo)
     diferencia = costeo_calculo.diferencia_cuadratura(costeo)
+    datos_form = CosteoImportacionForm(obj=costeo)
+    datos_form.importacion_id.choices = _opciones_importacion_para_costeo()
+    datos_form.tasa_ad_valorem.data = (costeo.tasa_ad_valorem or 0) * 100
+    datos_form.importacion_id.data = costeo.importacion_id or 0
     return render_template(
         "importaciones/costeo_detallado_ver.html",
         costeo=costeo,
@@ -914,6 +918,7 @@ def ver_costeo_detallado(costeo_id):
         documento_roles=costeo_calculo.DOCUMENTO_ROLES,
         gasto_roles=costeo_calculo.GASTO_INTERNO_ROLES,
         accion_form=AccionForm(),
+        datos_form=datos_form,
     )
 
 

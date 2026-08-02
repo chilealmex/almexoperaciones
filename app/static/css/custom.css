@@ -616,6 +616,88 @@ a.kpi:hover {
   color: var(--muted);
 }
 
+/* Filas de producto del Costeo: grilla que se reacomoda sola, nunca requiere scroll horizontal */
+.producto-costeo {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.75rem 0.9rem;
+  background: var(--surface);
+}
+.producto-costeo + .producto-costeo {
+  margin-top: 0.6rem;
+}
+.producto-costeo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 0.6rem;
+}
+.producto-costeo-grid .campo-ancho {
+  grid-column: 1 / -1;
+}
+.producto-costeo-grid .lbl,
+.producto-costeo-calc .lbl {
+  display: block;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  font-weight: 700;
+  margin-bottom: 0.2rem;
+}
+.producto-costeo-calc {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 0.6rem;
+  margin-top: 0.65rem;
+  padding-top: 0.6rem;
+  border-top: 1px dashed var(--line);
+}
+.producto-costeo-valor {
+  display: block;
+  font-size: 0.88rem;
+  font-variant-numeric: tabular-nums;
+}
+.producto-costeo-destacado {
+  font-weight: 700;
+  color: var(--ink);
+}
+.producto-costeo-foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.6rem;
+}
+
+/* "Hoja de cálculo": el submódulo Costeo usa los mismos códigos de color que la
+   planilla Excel de origen (amarillo = campo que se llena a mano, encabezado de
+   color = sección), para que quien viene del Excel reconozca de inmediato la
+   pantalla y qué le corresponde llenar. */
+.costeo-card-header {
+  background: var(--mod-importaciones);
+  color: #fff;
+}
+.costeo-card-header .text-muted,
+.costeo-card-header .small {
+  color: rgba(255, 255, 255, 0.75) !important;
+}
+input.campo-excel,
+select.campo-excel,
+textarea.campo-excel {
+  background-color: #fffde7;
+  border-color: #e3d68a;
+}
+input.campo-excel:focus,
+select.campo-excel:focus,
+textarea.campo-excel:focus {
+  background-color: #fffbe0;
+  border-color: #d9c94a;
+  box-shadow: 0 0 0 0.2rem rgba(217, 201, 74, 0.3);
+}
+input.campo-excel:disabled,
+select.campo-excel:disabled {
+  background-color: #f5f5f0;
+  opacity: 0.75;
+}
+
 /* Encabezados con orden y filtro por columna */
 .th-sort {
   color: var(--muted);

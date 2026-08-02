@@ -11,7 +11,6 @@
       {% if costeo.fecha_llegada %} · Llegada {{ costeo.fecha_llegada|fecha }}{% endif %}
     </p>
   </div>
-  <a href="{{ url_for('importaciones.editar_costeo_detallado', costeo_id=costeo.id) }}" class="btn btn-outline-secondary btn-sm">Editar datos generales</a>
 </div>
 
 <div class="row g-2 align-items-center mb-4">
@@ -56,36 +55,147 @@
   </div>
 </div>
 
-{% if costeo.din_folio or costeo.din_agencia or costeo.din_total_pagado or costeo.din_estado %}
-<div class="card mb-4" id="din">
-  <div class="card-header d-flex align-items-center justify-content-between">
-    <span>Control DIN</span>
-    {% if costeo.din_estado %}
-    <span class="badge {{ 'bg-success' if costeo.din_estado == 'pagado' else ('bg-warning text-dark' if costeo.din_estado == 'revision' else 'bg-danger') }}">
-      {{ {'pendiente': 'Pendiente', 'revision': 'Revisión', 'pagado': 'Pagado'}[costeo.din_estado] }}
-    </span>
-    {% endif %}
-  </div>
-  <div class="card-body">
-    <div class="row g-3">
-      <div class="col-6 col-lg-3"><div class="small text-muted">Agencia</div><div>{{ costeo.din_agencia or '—' }}</div></div>
-      <div class="col-6 col-lg-3"><div class="small text-muted">N° Doc Agencia</div><div>{{ costeo.din_n_doc_agencia or '—' }}</div></div>
-      <div class="col-6 col-lg-3"><div class="small text-muted">Monto Doc Agencia</div><div>{{ costeo.din_monto_doc_agencia|clp if costeo.din_monto_doc_agencia else '—' }}</div></div>
-      <div class="col-6 col-lg-3"><div class="small text-muted">N° Invoice</div><div>{{ costeo.din_n_invoice or '—' }}</div></div>
-      <div class="col-6 col-lg-3"><div class="small text-muted">Folio</div><div>{{ costeo.din_folio or '—' }}</div></div>
-      <div class="col-6 col-lg-3"><div class="small text-muted">Form.</div><div>{{ costeo.din_formulario or '—' }}</div></div>
-      <div class="col-6 col-lg-3"><div class="small text-muted">Fecha pago</div><div>{{ costeo.din_fecha_pago|fecha if costeo.din_fecha_pago else '—' }}</div></div>
-      <div class="col-6 col-lg-3"><div class="small text-muted">Vencimiento</div><div>{{ costeo.din_vcto|fecha if costeo.din_vcto else '—' }}</div></div>
-      <div class="col-6 col-lg-3"><div class="small text-muted">Advalorem</div><div>{{ costeo.din_advalorem_clp|clp if costeo.din_advalorem_clp else '—' }}</div></div>
-      <div class="col-6 col-lg-3"><div class="small text-muted">Total pagado</div><div>{{ costeo.din_total_pagado|clp if costeo.din_total_pagado else '—' }}</div></div>
+{% set puede_editar = puede('importaciones', 'editar') %}
+<form method="post" action="{{ url_for('importaciones.editar_costeo_detallado', costeo_id=costeo.id) }}">
+  {{ datos_form.hidden_tag() }}
+
+  {# ===================== DATOS GENERALES ===================== #}
+  <div class="card mb-4" id="datos-generales">
+    <div class="card-header costeo-card-header">Datos generales</div>
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-6 col-md-3">
+          {{ datos_form.n_importacion.label(class="form-label small mb-1") }}
+          {{ datos_form.n_importacion(class="form-control form-control-sm campo-excel", placeholder="1299", disabled=not puede_editar) }}
+        </div>
+        <div class="col-6 col-md-3">
+          {{ datos_form.fecha_llegada.label(class="form-label small mb-1") }}
+          {{ datos_form.fecha_llegada(class="form-control form-control-sm campo-excel", disabled=not puede_editar) }}
+        </div>
+        <div class="col-6 col-md-3">
+          {{ datos_form.guia_despacho.label(class="form-label small mb-1") }}
+          {{ datos_form.guia_despacho(class="form-control form-control-sm campo-excel", placeholder="64838", disabled=not puede_editar) }}
+        </div>
+        <div class="col-6 col-md-3">
+          {{ datos_form.purchase_order.label(class="form-label small mb-1") }}
+          {{ datos_form.purchase_order(class="form-control form-control-sm campo-excel", placeholder="14387", disabled=not puede_editar) }}
+        </div>
+        <div class="col-6 col-md-4">
+          {{ datos_form.proveedor.label(class="form-label small mb-1") }}
+          {{ datos_form.proveedor(class="form-control form-control-sm campo-excel", placeholder="ALMEX CANADA", disabled=not puede_editar) }}
+        </div>
+        <div class="col-6 col-md-4">
+          {{ datos_form.modo_venta.label(class="form-label small mb-1") }}
+          {{ datos_form.modo_venta(class="form-control form-control-sm campo-excel", placeholder="CRÉDITO", disabled=not puede_editar) }}
+        </div>
+        <div class="col-6 col-md-4">
+          {{ datos_form.orden_trabajo.label(class="form-label small mb-1") }}
+          {{ datos_form.orden_trabajo(class="form-control form-control-sm campo-excel", placeholder="6235-6249-STOCK", disabled=not puede_editar) }}
+        </div>
+        <div class="col-6 col-md-4">
+          {{ datos_form.responsable_costeo.label(class="form-label small mb-1") }}
+          {{ datos_form.responsable_costeo(class="form-control form-control-sm campo-excel", disabled=not puede_editar) }}
+        </div>
+        <div class="col-6 col-md-4">
+          {{ datos_form.tipo_flete_proyectado.label(class="form-label small mb-1") }}
+          {{ datos_form.tipo_flete_proyectado(class="form-control form-control-sm campo-excel", placeholder="A", disabled=not puede_editar) }}
+        </div>
+        <div class="col-6 col-md-4">
+          {{ datos_form.solicitud_compra.label(class="form-label small mb-1") }}
+          {{ datos_form.solicitud_compra(class="form-control form-control-sm campo-excel", placeholder="COM-0271", disabled=not puede_editar) }}
+        </div>
+        <div class="col-6 col-md-4">
+          {{ datos_form.tasa_ad_valorem.label(class="form-label small mb-1") }}
+          {{ datos_form.tasa_ad_valorem(class="form-control form-control-sm campo-excel", disabled=not puede_editar) }}
+          <div class="form-text">Usa 0 si está exenta por tratado de libre comercio.</div>
+        </div>
+        <div class="col-12 col-md-4">
+          {{ datos_form.importacion_id.label(class="form-label small mb-1") }}
+          {{ datos_form.importacion_id(class="form-select form-select-sm campo-excel", disabled=not puede_editar) }}
+          <div class="form-text">Para que aparezca el acceso directo desde Cuadratura contable.</div>
+        </div>
+      </div>
     </div>
   </div>
-</div>
-{% endif %}
+
+  {# ===================== CONTROL DIN ===================== #}
+  <div class="card mb-4" id="din">
+    <div class="card-header costeo-card-header d-flex align-items-center justify-content-between">
+      <span>Control DIN</span>
+      {% if costeo.din_estado %}
+      <span class="badge {{ 'bg-success' if costeo.din_estado == 'pagado' else ('bg-warning text-dark' if costeo.din_estado == 'revision' else 'bg-danger') }}">
+        {{ {'pendiente': 'Pendiente', 'revision': 'Revisión', 'pagado': 'Pagado'}[costeo.din_estado] }}
+      </span>
+      {% endif %}
+    </div>
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-6 col-md-3">
+          {{ datos_form.din_agencia.label(class="form-label small mb-1") }}
+          {{ datos_form.din_agencia(class="form-control form-control-sm campo-excel", placeholder="UPS, DHL, Carlos Arredondo...", disabled=not puede_editar) }}
+        </div>
+        <div class="col-6 col-md-3">
+          {{ datos_form.din_n_doc_agencia.label(class="form-label small mb-1") }}
+          {{ datos_form.din_n_doc_agencia(class="form-control form-control-sm campo-excel", placeholder="1110653", disabled=not puede_editar) }}
+        </div>
+        <div class="col-6 col-md-3">
+          {{ datos_form.din_monto_doc_agencia.label(class="form-label small mb-1") }}
+          {{ datos_form.din_monto_doc_agencia(class="form-control form-control-sm campo-excel", disabled=not puede_editar) }}
+        </div>
+        <div class="col-6 col-md-3">
+          {{ datos_form.din_n_invoice.label(class="form-label small mb-1") }}
+          {{ datos_form.din_n_invoice(class="form-control form-control-sm campo-excel", placeholder="62321828", disabled=not puede_editar) }}
+        </div>
+        <div class="col-6 col-md-3">
+          {{ datos_form.din_estado.label(class="form-label small mb-1") }}
+          {{ datos_form.din_estado(class="form-select form-select-sm campo-excel", disabled=not puede_editar) }}
+        </div>
+        <div class="col-6 col-md-3">
+          {{ datos_form.din_rut.label(class="form-label small mb-1") }}
+          {{ datos_form.din_rut(class="form-control form-control-sm campo-excel", placeholder="99578050-K", disabled=not puede_editar) }}
+        </div>
+        <div class="col-12 col-md-6">
+          {{ datos_form.din_razon_social.label(class="form-label small mb-1") }}
+          {{ datos_form.din_razon_social(class="form-control form-control-sm campo-excel", placeholder="SHAW ALMEX CHILE SPA", disabled=not puede_editar) }}
+        </div>
+        <div class="col-6 col-md-3">
+          {{ datos_form.din_formulario.label(class="form-label small mb-1") }}
+          {{ datos_form.din_formulario(class="form-control form-control-sm campo-excel", placeholder="17", disabled=not puede_editar) }}
+        </div>
+        <div class="col-6 col-md-3">
+          {{ datos_form.din_folio.label(class="form-label small mb-1") }}
+          {{ datos_form.din_folio(class="form-control form-control-sm campo-excel", placeholder="402360883", disabled=not puede_editar) }}
+        </div>
+        <div class="col-6 col-md-3">
+          {{ datos_form.din_fecha_pago.label(class="form-label small mb-1") }}
+          {{ datos_form.din_fecha_pago(class="form-control form-control-sm campo-excel", disabled=not puede_editar) }}
+        </div>
+        <div class="col-6 col-md-3">
+          {{ datos_form.din_vcto.label(class="form-label small mb-1") }}
+          {{ datos_form.din_vcto(class="form-control form-control-sm campo-excel", disabled=not puede_editar) }}
+        </div>
+        <div class="col-6 col-md-3">
+          {{ datos_form.din_advalorem_clp.label(class="form-label small mb-1") }}
+          {{ datos_form.din_advalorem_clp(class="form-control form-control-sm campo-excel", disabled=not puede_editar) }}
+        </div>
+        <div class="col-6 col-md-3">
+          {{ datos_form.din_total_pagado.label(class="form-label small mb-1") }}
+          {{ datos_form.din_total_pagado(class="form-control form-control-sm campo-excel", disabled=not puede_editar) }}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if puede_editar %}
+  <div class="mb-4">
+    <button type="submit" class="btn btn-primary btn-sm">Guardar datos generales</button>
+  </div>
+  {% endif %}
+</form>
 
 {# ===================== DOCUMENTOS ===================== #}
 <div class="card mb-4" id="documentos">
-  <div class="card-header">Documentos (Invoice, Seguro, Flete, Crating)</div>
+  <div class="card-header costeo-card-header">Documentos (Invoice, Seguro, Flete, Crating)</div>
   <div class="card-body">
     <form method="post" action="{{ url_for('importaciones.guardar_documentos_costeo', costeo_id=costeo.id) }}">
       {{ accion_form.hidden_tag() }}
@@ -104,19 +214,19 @@
             <tr>
               <td class="fw-semibold">{{ plantilla.etiqueta }}</td>
               <td>
-                <select name="doc-{{ doc.id }}-moneda" class="form-select form-select-sm" {{ 'disabled' if not puede('importaciones', 'editar') }}>
+                <select name="doc-{{ doc.id }}-moneda" class="form-select form-select-sm campo-excel" {{ 'disabled' if not puede('importaciones', 'editar') }}>
                   <option value="USD" {{ 'selected' if doc.moneda == 'USD' }}>USD</option>
                   <option value="EUR" {{ 'selected' if doc.moneda == 'EUR' }}>EUR</option>
                 </select>
               </td>
-              <td><input type="text" name="doc-{{ doc.id }}-nro_doc" class="form-control form-control-sm" value="{{ doc.nro_doc or '' }}" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
+              <td><input type="text" name="doc-{{ doc.id }}-nro_doc" class="form-control form-control-sm campo-excel" value="{{ doc.nro_doc or '' }}" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
               {% if plantilla.es_directo %}
               <td class="num text-muted">—</td>
               <td class="num text-muted">—</td>
-              <td class="num"><input type="text" inputmode="decimal" name="doc-{{ doc.id }}-valor_clp" class="form-control form-control-sm text-end" value="{{ doc.valor_clp or 0 }}" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
+              <td class="num"><input type="text" inputmode="decimal" name="doc-{{ doc.id }}-valor_clp" class="form-control form-control-sm text-end campo-excel" value="{{ doc.valor_clp or 0 }}" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
               {% else %}
-              <td class="num"><input type="text" inputmode="decimal" name="doc-{{ doc.id }}-valor_tc" class="form-control form-control-sm text-end" value="{{ doc.valor_tc if doc.valor_tc is not none else '' }}" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
-              <td class="num"><input type="text" inputmode="decimal" name="doc-{{ doc.id }}-valor_total_inv" class="form-control form-control-sm text-end" value="{{ doc.valor_total_inv if doc.valor_total_inv is not none else '' }}" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
+              <td class="num"><input type="text" inputmode="decimal" name="doc-{{ doc.id }}-valor_tc" class="form-control form-control-sm text-end campo-excel" value="{{ doc.valor_tc if doc.valor_tc is not none else '' }}" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
+              <td class="num"><input type="text" inputmode="decimal" name="doc-{{ doc.id }}-valor_total_inv" class="form-control form-control-sm text-end campo-excel" value="{{ doc.valor_total_inv if doc.valor_total_inv is not none else '' }}" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
               <td class="num">{{ (doc.valor_clp or 0)|clp }}</td>
               {% endif %}
             </tr>
@@ -140,7 +250,7 @@
 
 {# ===================== GASTOS INTERNOS ===================== #}
 <div class="card mb-4" id="gastos">
-  <div class="card-header">Gastos internos nacionales</div>
+  <div class="card-header costeo-card-header">Gastos internos nacionales</div>
   <div class="card-body">
     <form method="post" action="{{ url_for('importaciones.guardar_gastos_costeo', costeo_id=costeo.id) }}">
       {{ accion_form.hidden_tag() }}
@@ -153,8 +263,8 @@
             {% if gasto %}
             <tr>
               <td class="fw-semibold">{{ plantilla.etiqueta }}</td>
-              <td><input type="text" name="gasto-{{ gasto.id }}-nro_doc" class="form-control form-control-sm" value="{{ gasto.nro_doc or '' }}" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
-              <td class="num"><input type="text" inputmode="decimal" name="gasto-{{ gasto.id }}-valor_clp" class="form-control form-control-sm text-end" value="{{ gasto.valor_clp or 0 }}" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
+              <td><input type="text" name="gasto-{{ gasto.id }}-nro_doc" class="form-control form-control-sm campo-excel" value="{{ gasto.nro_doc or '' }}" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
+              <td class="num"><input type="text" inputmode="decimal" name="gasto-{{ gasto.id }}-valor_clp" class="form-control form-control-sm text-end campo-excel" value="{{ gasto.valor_clp or 0 }}" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
             </tr>
             {% endif %}
             {% endfor %}
@@ -176,72 +286,71 @@
 
 {# ===================== PRODUCTOS ===================== #}
 <div class="card mb-4" id="productos">
-  <div class="card-header">Productos — prorrateo de costos</div>
+  <div class="card-header costeo-card-header">Productos — prorrateo de costos</div>
   <div class="card-body">
     <form method="post" action="{{ url_for('importaciones.guardar_productos_costeo', costeo_id=costeo.id) }}">
       {{ accion_form.hidden_tag() }}
-      <div class="table-responsive">
-        <table class="table table-sm align-middle mb-2">
-          <thead>
-            <tr>
-              <th>Producto</th><th>Código</th><th class="num">Valor unit. T/C</th><th class="num">Cantidad</th>
-              <th>Unidad</th><th>Activo fijo</th><th>¿Ad Valorem?</th>
-              <th class="num d-none d-xl-table-cell">EXW CLP</th>
-              <th class="num d-none d-xl-table-cell">CIF CLP</th>
-              <th class="num d-none d-xl-table-cell">Ad Valorem</th>
-              <th class="num d-none d-xl-table-cell">Gastos int.</th>
-              <th class="num">Costo total</th>
-              <th class="num">Costo unit. final</th>
-              <th class="num d-none d-lg-table-cell">Impacto %</th>
-              {% if puede('importaciones', 'editar') %}<th></th>{% endif %}
-            </tr>
-          </thead>
-          <tbody>
-            {% for p in costeo.productos %}
-            <tr>
-              <td><input type="text" name="prod-{{ p.id }}-producto" class="form-control form-control-sm" value="{{ p.producto or '' }}" style="min-width:220px;" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
-              <td><input type="text" name="prod-{{ p.id }}-codigo" class="form-control form-control-sm" value="{{ p.codigo or '' }}" style="min-width:110px;" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
-              <td class="num"><input type="text" inputmode="decimal" name="prod-{{ p.id }}-valor_unitario_tc" class="form-control form-control-sm text-end" value="{{ p.valor_unitario_tc }}" style="min-width:90px;" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
-              <td class="num"><input type="text" inputmode="decimal" name="prod-{{ p.id }}-cantidad" class="form-control form-control-sm text-end" value="{{ p.cantidad }}" style="min-width:80px;" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
-              <td>
-                <select name="prod-{{ p.id }}-unidad_tc" class="form-select form-select-sm" {{ 'disabled' if not puede('importaciones', 'editar') }}>
-                  <option value="USD" {{ 'selected' if p.unidad_tc == 'USD' }}>USD</option>
-                  <option value="EUR" {{ 'selected' if p.unidad_tc == 'EUR' }}>EUR</option>
-                </select>
-              </td>
-              <td>
-                <select name="prod-{{ p.id }}-activo_fijo" class="form-select form-select-sm" {{ 'disabled' if not puede('importaciones', 'editar') }}>
-                  <option value="NO" {{ 'selected' if p.activo_fijo == 'NO' }}>No</option>
-                  <option value="SI" {{ 'selected' if p.activo_fijo == 'SI' }}>Sí</option>
-                </select>
-              </td>
-              <td>
-                <select name="prod-{{ p.id }}-tiene_ad_valorem" class="form-select form-select-sm" {{ 'disabled' if not puede('importaciones', 'editar') }}>
-                  <option value="SI" {{ 'selected' if p.tiene_ad_valorem == 'SI' }}>Sí</option>
-                  <option value="NO" {{ 'selected' if p.tiene_ad_valorem == 'NO' }}>No</option>
-                </select>
-              </td>
-              <td class="num d-none d-xl-table-cell">{{ p.exw_clp|clp }}</td>
-              <td class="num d-none d-xl-table-cell">{{ p.cif_clp|clp }}</td>
-              <td class="num d-none d-xl-table-cell">{{ p.ad_valorem_clp|clp }}</td>
-              <td class="num d-none d-xl-table-cell">{{ p.gastos_internos_clp|clp }}</td>
-              <td class="num fw-semibold">{{ p.costo_total_clp|clp }}</td>
-              <td class="num fw-semibold">{{ p.costo_unitario_final_clp|clp }}</td>
-              <td class="num d-none d-lg-table-cell">{{ '%+.1f%%'|format(p.impacto_pct * 100) }}</td>
-              {% if puede('importaciones', 'editar') %}
-              <td class="text-end">
-                <button type="submit" formaction="{{ url_for('importaciones.eliminar_producto_costeo', producto_id=p.id) }}" formnovalidate class="btn btn-sm btn-outline-danger" onclick="return confirm('¿Eliminar este producto?')" title="Eliminar">🗑</button>
-              </td>
-              {% endif %}
-            </tr>
-            {% else %}
-            <tr><td colspan="13" class="text-center text-muted">Sin productos todavía.</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
+      {% for p in costeo.productos %}
+      <div class="producto-costeo">
+        <div class="producto-costeo-grid">
+          <div class="campo-ancho">
+            <label class="lbl">Producto</label>
+            <input type="text" name="prod-{{ p.id }}-producto" class="form-control form-control-sm campo-excel" value="{{ p.producto or '' }}" {{ 'disabled' if not puede('importaciones', 'editar') }}>
+          </div>
+          <div>
+            <label class="lbl">Código</label>
+            <input type="text" name="prod-{{ p.id }}-codigo" class="form-control form-control-sm campo-excel" value="{{ p.codigo or '' }}" {{ 'disabled' if not puede('importaciones', 'editar') }}>
+          </div>
+          <div>
+            <label class="lbl">Valor unit. T/C</label>
+            <input type="text" inputmode="decimal" name="prod-{{ p.id }}-valor_unitario_tc" class="form-control form-control-sm text-end campo-excel" value="{{ p.valor_unitario_tc }}" {{ 'disabled' if not puede('importaciones', 'editar') }}>
+          </div>
+          <div>
+            <label class="lbl">Cantidad</label>
+            <input type="text" inputmode="decimal" name="prod-{{ p.id }}-cantidad" class="form-control form-control-sm text-end campo-excel" value="{{ p.cantidad }}" {{ 'disabled' if not puede('importaciones', 'editar') }}>
+          </div>
+          <div>
+            <label class="lbl">Unidad</label>
+            <select name="prod-{{ p.id }}-unidad_tc" class="form-select form-select-sm campo-excel" {{ 'disabled' if not puede('importaciones', 'editar') }}>
+              <option value="USD" {{ 'selected' if p.unidad_tc == 'USD' }}>USD</option>
+              <option value="EUR" {{ 'selected' if p.unidad_tc == 'EUR' }}>EUR</option>
+            </select>
+          </div>
+          <div>
+            <label class="lbl">Activo fijo</label>
+            <select name="prod-{{ p.id }}-activo_fijo" class="form-select form-select-sm campo-excel" {{ 'disabled' if not puede('importaciones', 'editar') }}>
+              <option value="NO" {{ 'selected' if p.activo_fijo == 'NO' }}>No</option>
+              <option value="SI" {{ 'selected' if p.activo_fijo == 'SI' }}>Sí</option>
+            </select>
+          </div>
+          <div>
+            <label class="lbl">¿Ad Valorem?</label>
+            <select name="prod-{{ p.id }}-tiene_ad_valorem" class="form-select form-select-sm campo-excel" {{ 'disabled' if not puede('importaciones', 'editar') }}>
+              <option value="SI" {{ 'selected' if p.tiene_ad_valorem == 'SI' }}>Sí</option>
+              <option value="NO" {{ 'selected' if p.tiene_ad_valorem == 'NO' }}>No</option>
+            </select>
+          </div>
+        </div>
+        <div class="producto-costeo-calc">
+          <div><span class="lbl">EXW CLP</span><span class="producto-costeo-valor">{{ p.exw_clp|clp }}</span></div>
+          <div><span class="lbl">CIF CLP</span><span class="producto-costeo-valor">{{ p.cif_clp|clp }}</span></div>
+          <div><span class="lbl">Ad Valorem</span><span class="producto-costeo-valor">{{ p.ad_valorem_clp|clp }}</span></div>
+          <div><span class="lbl">Gastos int.</span><span class="producto-costeo-valor">{{ p.gastos_internos_clp|clp }}</span></div>
+          <div><span class="lbl">Costo total</span><span class="producto-costeo-valor producto-costeo-destacado">{{ p.costo_total_clp|clp }}</span></div>
+          <div><span class="lbl">Costo unit. final</span><span class="producto-costeo-valor producto-costeo-destacado">{{ p.costo_unitario_final_clp|clp }}</span></div>
+          <div><span class="lbl">Impacto %</span><span class="producto-costeo-valor">{{ '%+.1f%%'|format(p.impacto_pct * 100) }}</span></div>
+        </div>
+        {% if puede('importaciones', 'editar') %}
+        <div class="producto-costeo-foot">
+          <button type="submit" formaction="{{ url_for('importaciones.eliminar_producto_costeo', producto_id=p.id) }}" formnovalidate class="btn btn-sm btn-outline-danger" onclick="return confirm('¿Eliminar este producto?')">🗑 Eliminar producto</button>
+        </div>
+        {% endif %}
       </div>
+      {% else %}
+      <p class="text-center text-muted mb-2">Sin productos todavía.</p>
+      {% endfor %}
       {% if puede('importaciones', 'editar') %}
-      <div class="d-flex gap-2 flex-wrap">
+      <div class="d-flex gap-2 flex-wrap mt-3">
         <button type="submit" class="btn btn-primary btn-sm">Guardar productos</button>
         <button type="submit" formaction="{{ url_for('importaciones.agregar_producto_costeo', costeo_id=costeo.id) }}" formnovalidate class="btn btn-outline-secondary btn-sm">+ Agregar producto</button>
       </div>

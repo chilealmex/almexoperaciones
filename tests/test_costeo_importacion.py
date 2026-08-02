@@ -194,6 +194,36 @@ def test_admin_crea_y_ve_costeo_detallado(client, usuario_admin, empresa, db):
     assert "Invoice 1" in respuesta.get_data(as_text=True)
 
 
+def test_datos_generales_se_ven_y_editan_sin_salir_de_la_pagina_del_costeo(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    costeo = _crear_costeo(db, empresa, n_importacion="1299", proveedor="ALMEX CANADA")
+
+    respuesta = client.get(f"/importaciones/costeo-detallado/{costeo.id}")
+    texto = respuesta.get_data(as_text=True)
+    assert "Datos generales" in texto
+    assert 'value="1299"' in texto
+    assert 'value="ALMEX CANADA"' in texto
+
+    respuesta = client.post(
+        f"/importaciones/costeo-detallado/{costeo.id}/editar",
+        data={
+            "n_importacion": "1299",
+            "proveedor": "ALMEX CANADA SPA",
+            "orden_trabajo": "6235-STOCK",
+            "tasa_ad_valorem": "6",
+            "estado": "en_proceso",
+            "importacion_id": "0",
+            "din_estado": "",
+        },
+        follow_redirects=False,
+    )
+    assert respuesta.status_code == 302
+    assert respuesta.headers["Location"].endswith(f"/importaciones/costeo-detallado/{costeo.id}")
+
+    _db.session.refresh(costeo)
+    assert costeo.proveedor == "ALMEX CANADA SPA"
+
+
 def test_agregar_editar_y_eliminar_producto_por_ruta(client, usuario_admin, empresa, db):
     login(client, "admin@test.cl")
     costeo = _crear_costeo(db, empresa, n_importacion="55")
