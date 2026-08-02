@@ -48,7 +48,7 @@ ETIQUETAS_COLUMNA = {
 COLUMNAS_NUMERICAS = {"debe", "haber", "ecomex", "dif"}
 COLUMNAS_FECHA = {"fecha"}
 
-TIENE_CBTE = {"factura_agencia", "din", "cuadratura", "cuadratura_ups_dhl"}
+TIENE_CBTE = {"factura_agencia", "din", "cuadratura", "cuadratura_ups_dhl", "ajuste"}
 TIENE_SALDO_BOX = {"cuadratura", "cuadratura_ups_dhl"}
 TIENE_HEADER_COMPARTIDO = {"factura_agencia", "din"}
 TIENE_DIN_CALC = {"din"}

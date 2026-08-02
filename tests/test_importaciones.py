@@ -171,7 +171,7 @@ def test_admin_ve_el_dashboard_y_las_vistas_principales(client, usuario_admin):
         "/importaciones/",
         "/importaciones/resumen",
         "/importaciones/detalle",
-        "/importaciones/costeo",
+        "/importaciones/costeo-detallado",
         "/importaciones/agencias",
         "/importaciones/proveedores",
         "/importaciones/din",
@@ -303,13 +303,9 @@ def test_crud_registro_din(client, usuario_admin, empresa, db):
     assert DinRegistro.query.get(registro.id) is None
 
 
-def test_descarga_excel_de_din_y_matriz_de_costeo(client, usuario_admin, empresa, db):
+def test_descarga_excel_de_din(client, usuario_admin, empresa, db):
     _crear_importacion(db, empresa, pei="10", monto=100_000)
     login(client, "admin@test.cl")
     respuesta = client.get("/importaciones/din.xlsx")
-    assert respuesta.status_code == 200
-    assert "spreadsheetml" in respuesta.headers["Content-Type"]
-
-    respuesta = client.get("/importaciones/costeo/matriz.xlsx")
     assert respuesta.status_code == 200
     assert "spreadsheetml" in respuesta.headers["Content-Type"]

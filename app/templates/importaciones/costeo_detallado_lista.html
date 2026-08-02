@@ -63,4 +63,9 @@
     </tbody>
   </table>
 </div>
+<p class="text-muted small mt-3">
+  El control DIN ahora se carga directo dentro de cada costeo (sección "Control DIN").
+  Los registros de DIN antiguos, cargados antes de este cambio, siguen disponibles en
+  <a href="{{ url_for('importaciones.din') }}">el historial de DIN</a>.
+</p>
 {% endblock %}

@@ -56,6 +56,33 @@
   </div>
 </div>
 
+{% if costeo.din_folio or costeo.din_agencia or costeo.din_total_pagado or costeo.din_estado %}
+<div class="card mb-4" id="din">
+  <div class="card-header d-flex align-items-center justify-content-between">
+    <span>Control DIN</span>
+    {% if costeo.din_estado %}
+    <span class="badge {{ 'bg-success' if costeo.din_estado == 'pagado' else ('bg-warning text-dark' if costeo.din_estado == 'revision' else 'bg-danger') }}">
+      {{ {'pendiente': 'Pendiente', 'revision': 'Revisión', 'pagado': 'Pagado'}[costeo.din_estado] }}
+    </span>
+    {% endif %}
+  </div>
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-6 col-lg-3"><div class="small text-muted">Agencia</div><div>{{ costeo.din_agencia or '—' }}</div></div>
+      <div class="col-6 col-lg-3"><div class="small text-muted">N° Doc Agencia</div><div>{{ costeo.din_n_doc_agencia or '—' }}</div></div>
+      <div class="col-6 col-lg-3"><div class="small text-muted">Monto Doc Agencia</div><div>{{ costeo.din_monto_doc_agencia|clp if costeo.din_monto_doc_agencia else '—' }}</div></div>
+      <div class="col-6 col-lg-3"><div class="small text-muted">N° Invoice</div><div>{{ costeo.din_n_invoice or '—' }}</div></div>
+      <div class="col-6 col-lg-3"><div class="small text-muted">Folio</div><div>{{ costeo.din_folio or '—' }}</div></div>
+      <div class="col-6 col-lg-3"><div class="small text-muted">Form.</div><div>{{ costeo.din_formulario or '—' }}</div></div>
+      <div class="col-6 col-lg-3"><div class="small text-muted">Fecha pago</div><div>{{ costeo.din_fecha_pago|fecha if costeo.din_fecha_pago else '—' }}</div></div>
+      <div class="col-6 col-lg-3"><div class="small text-muted">Vencimiento</div><div>{{ costeo.din_vcto|fecha if costeo.din_vcto else '—' }}</div></div>
+      <div class="col-6 col-lg-3"><div class="small text-muted">Advalorem</div><div>{{ costeo.din_advalorem_clp|clp if costeo.din_advalorem_clp else '—' }}</div></div>
+      <div class="col-6 col-lg-3"><div class="small text-muted">Total pagado</div><div>{{ costeo.din_total_pagado|clp if costeo.din_total_pagado else '—' }}</div></div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 {# ===================== DOCUMENTOS ===================== #}
 <div class="card mb-4" id="documentos">
   <div class="card-header">Documentos (Invoice, Seguro, Flete, Crating)</div>

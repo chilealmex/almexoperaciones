@@ -81,3 +81,22 @@ class CosteoImportacionForm(FlaskForm):
         default="en_proceso",
     )
     importacion_id = SelectField("Importación (PEI) vinculada", coerce=int, validators=[Optional()])
+
+    # --- Control DIN de esta importación ---
+    din_agencia = StringField("Agencia", validators=[Optional(), Length(max=100)])
+    din_n_doc_agencia = StringField("N° Doc Agencia", validators=[Optional(), Length(max=40)])
+    din_monto_doc_agencia = IntegerField("Monto Doc Agencia", validators=[Optional(), NumberRange(min=0)])
+    din_n_invoice = StringField("N° Invoice", validators=[Optional(), Length(max=40)])
+    din_estado = SelectField(
+        "Estado DIN",
+        choices=[("", "—"), ("pendiente", "Pendiente"), ("revision", "Revisión"), ("pagado", "Pagado")],
+        validators=[Optional()],
+    )
+    din_rut = StringField("RUT", validators=[Optional(), Length(max=20)])
+    din_razon_social = StringField("Nombre / Razón social", validators=[Optional(), Length(max=150)])
+    din_formulario = StringField("Form.", validators=[Optional(), Length(max=10)])
+    din_folio = StringField("Folio", validators=[Optional(), Length(max=30)])
+    din_fecha_pago = DateField("Fecha pago", validators=[Optional()])
+    din_vcto = DateField("Vencimiento", validators=[Optional()])
+    din_advalorem_clp = IntegerField("Advalorem", validators=[Optional(), NumberRange(min=0)])
+    din_total_pagado = IntegerField("Total pagado", validators=[Optional(), NumberRange(min=0)])

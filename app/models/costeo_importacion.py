@@ -31,6 +31,21 @@ class CosteoImportacion(db.Model):
     tasa_ad_valorem = db.Column(db.Float, nullable=False, default=0.06)
     estado = db.Column(db.String(15), nullable=False, default="en_proceso")
 
+    # --- Control DIN de esta importación (antes era un submódulo aparte) ---
+    din_agencia = db.Column(db.String(100), nullable=True)
+    din_n_doc_agencia = db.Column(db.String(40), nullable=True)
+    din_monto_doc_agencia = db.Column(db.Integer, nullable=True)
+    din_n_invoice = db.Column(db.String(40), nullable=True)
+    din_estado = db.Column(db.String(15), nullable=True)
+    din_rut = db.Column(db.String(20), nullable=True)
+    din_razon_social = db.Column(db.String(150), nullable=True)
+    din_formulario = db.Column(db.String(10), nullable=True)
+    din_folio = db.Column(db.String(30), nullable=True)
+    din_fecha_pago = db.Column(db.Date, nullable=True)
+    din_vcto = db.Column(db.Date, nullable=True)
+    din_advalorem_clp = db.Column(db.Integer, nullable=True)
+    din_total_pagado = db.Column(db.Integer, nullable=True)
+
     creado_en = db.Column(db.DateTime, server_default=db.func.now())
     actualizado_en = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now())
 

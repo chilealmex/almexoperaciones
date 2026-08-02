@@ -360,3 +360,69 @@ def test_traer_costeo_producto_sin_vinculo_avisa_y_no_falla(client, usuario_admi
     )
     assert respuesta.status_code == 200
     assert "no tiene un Costeo vinculado" in respuesta.get_data(as_text=True)
+
+
+# --- Costeo (asientos) eliminado, y control DIN unificado en Costeo -------
+
+
+def test_submodulo_costeo_asientos_ya_no_existe(client, usuario_admin):
+    login(client, "admin@test.cl")
+    assert client.get("/importaciones/costeo").status_code == 404
+    assert client.get("/importaciones/costeo/matriz.xlsx").status_code == 404
+
+
+def test_se_puede_editar_el_cbte_del_ajuste_desde_cuadratura_contable(client, usuario_admin, empresa, db):
+    from app.models.importacion import Importacion
+    from app.utils import importaciones_calculo as importaciones_calc
+
+    importacion = Importacion(empresa_id=empresa.id, pei="80")
+    db.session.add(importacion)
+    db.session.flush()
+    importaciones_calc.sembrar_lineas_plantilla(importacion)
+    db.session.commit()
+
+    login(client, "admin@test.cl")
+    client.post(
+        f"/importaciones/detalle/{importacion.id}/grupo/ajuste/guardar",
+        data={"meta-cbte": "4582"},
+        follow_redirects=True,
+    )
+    _db.session.refresh(importacion)
+    assert importacion.meta_de("ajuste").cbte == "4582"
+
+
+def test_campos_din_se_guardan_dentro_del_costeo(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    client.post(
+        "/importaciones/costeo-detallado/nueva",
+        data={
+            "n_importacion": "81",
+            "din_agencia": "UPS",
+            "din_folio": "402360883",
+            "din_estado": "pagado",
+            "din_total_pagado": "109170",
+        },
+        follow_redirects=True,
+    )
+    costeo = CosteoImportacion.query.filter_by(empresa_id=empresa.id, n_importacion="81").first()
+    assert costeo is not None
+    assert costeo.din_agencia == "UPS"
+    assert costeo.din_folio == "402360883"
+    assert costeo.din_estado == "pagado"
+    assert costeo.din_total_pagado == 109170
+
+    respuesta = client.get(f"/importaciones/costeo-detallado/{costeo.id}")
+    cuerpo = respuesta.get_data(as_text=True)
+    assert "Control DIN" in cuerpo
+    assert "402360883" in cuerpo
+
+
+def test_din_historico_sigue_disponible_aunque_no_este_en_el_menu(client, usuario_admin, empresa, db):
+    from app.models.importacion import DinRegistro
+
+    db.session.add(DinRegistro(empresa_id=empresa.id, numero="1289", folio="402360883", total_pagado=109170))
+    db.session.commit()
+    login(client, "admin@test.cl")
+    respuesta = client.get("/importaciones/din")
+    assert respuesta.status_code == 200
+    assert "402360883" in respuesta.get_data(as_text=True)

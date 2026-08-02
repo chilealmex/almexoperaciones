@@ -252,16 +252,6 @@ MODULOS = (
                 ),
             },
             {
-                "clave": "costeo",
-                "etiqueta": "Costeo (asientos)",
-                "endpoint": "importaciones.costeo",
-                "endpoints": (
-                    "importaciones.costeo",
-                    "importaciones.actualizar_ajuste_cbte",
-                    "importaciones.costeo_matriz_excel",
-                ),
-            },
-            {
                 "clave": "costeo_detallado",
                 "etiqueta": "Costeo",
                 "endpoint": "importaciones.costeo_detallado_lista",
@@ -294,18 +284,6 @@ MODULOS = (
                     "importaciones.nuevo_proveedor",
                     "importaciones.editar_proveedor",
                     "importaciones.eliminar_proveedor",
-                ),
-            },
-            {
-                "clave": "din",
-                "etiqueta": "Control DIN",
-                "endpoint": "importaciones.din",
-                "endpoints": (
-                    "importaciones.din",
-                    "importaciones.nueva_din",
-                    "importaciones.editar_din",
-                    "importaciones.eliminar_din",
-                    "importaciones.din_excel",
                 ),
             },
         ),

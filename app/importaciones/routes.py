@@ -518,149 +518,6 @@ def eliminar_linea(linea_id):
     return redirect(url_for("importaciones.detalle", importacion_id=importacion.id) + f"#grupo-{tipo}")
 
 
-# --- Costeo horizontal y matriz comparativa ------------------------------
-
-
-def _construir_matriz_costeo(importaciones):
-    conceptos = [
-        {"rol": plantilla["rol"], "etiqueta": plantilla["descripcion"]}
-        for plantilla in calculo.ROW_TEMPLATES["costeo"]
-    ]
-    filas = []
-    for importacion in importaciones:
-        celdas = []
-        for concepto in conceptos:
-            linea = importacion.linea_por_rol("costeo", concepto["rol"])
-            neto = calculo.neto_linea(linea) if linea else 0
-            ecomex = (linea.ecomex or 0) if linea else 0
-            celdas.append({"neto": neto, "ecomex": ecomex})
-        meta_ajuste = importacion.meta_de("ajuste")
-        filas.append(
-            {
-                "importacion": importacion,
-                "celdas": celdas,
-                "ajuste_cbte": (meta_ajuste.cbte if meta_ajuste else None) or "",
-            }
-        )
-    totales_columna = []
-    for indice, concepto in enumerate(conceptos):
-        totales_columna.append(
-            {
-                "neto": sum(f["celdas"][indice]["neto"] for f in filas),
-                "ecomex": sum(f["celdas"][indice]["ecomex"] for f in filas),
-            }
-        )
-    gran_total = sum(i.costeo_diferencia or 0 for i in importaciones)
-    return {"conceptos": conceptos, "filas": filas, "totales_columna": totales_columna, "gran_total": gran_total}
-
-
-def _construir_costeo_horizontal(importacion):
-    filas = importacion.lineas_de("costeo")
-    celdas = []
-    for f in filas:
-        etiqueta = (f.cuenta or "").strip() or (f.descripcion or "").strip() or (f.proveedor or "").strip() or "Línea"
-        celdas.append({"etiqueta": etiqueta, "neto": calculo.neto_linea(f)})
-    meta_ajuste = importacion.meta_de("ajuste")
-    return {
-        "celdas": celdas,
-        "ajuste_cbte": (meta_ajuste.cbte if meta_ajuste else None) or "",
-    }
-
-
-@bp.route("/costeo")
-@require_permission("importaciones", "ver")
-def costeo():
-    query = _aplicar_filtros_costeo(_query_base(), request.args)
-    importaciones = query.order_by(Importacion.fecha_pei.desc().nullslast(), Importacion.id.desc()).all()
-    matriz = _construir_matriz_costeo(importaciones)
-
-    ver_id = request.args.get("ver", type=int)
-    importacion_vista = None
-    horizontal = None
-    if ver_id:
-        importacion_vista = _query_base().filter_by(id=ver_id).first()
-        if importacion_vista:
-            horizontal = _construir_costeo_horizontal(importacion_vista)
-
-    return render_template(
-        "importaciones/costeo.html",
-        importaciones=importaciones,
-        matriz=matriz,
-        agencias=_agencias_disponibles(),
-        filtros=request.args,
-        importacion_vista=importacion_vista,
-        horizontal=horizontal,
-        todas_las_importaciones=_query_base().order_by(Importacion.fecha_pei.desc().nullslast()).all(),
-        accion_form=AccionForm(),
-    )
-
-
-@bp.route("/costeo/<int:importacion_id>/ajuste-cbte", methods=["POST"])
-@require_permission("importaciones", "editar")
-def actualizar_ajuste_cbte(importacion_id):
-    importacion = _get_importacion_or_404(importacion_id)
-    form = AccionForm()
-    if not form.validate_on_submit():
-        abort(400)
-    meta_ajuste = importacion.meta_de("ajuste")
-    if meta_ajuste is not None:
-        meta_ajuste.cbte = (request.form.get("cbte") or "").strip() or None
-        db.session.commit()
-    return redirect(request.referrer or url_for("importaciones.costeo"))
-
-
-@bp.route("/costeo/matriz.xlsx")
-@require_permission("importaciones", "ver")
-def costeo_matriz_excel():
-    query = _aplicar_filtros_costeo(_query_base(), request.args)
-    importaciones = query.order_by(Importacion.fecha_pei.desc().nullslast()).all()
-    matriz = _construir_matriz_costeo(importaciones)
-
-    columnas = [col("N° IMP", ancho=12), col("PEI", ancho=10), col("N° asiento ajuste", ancho=16)]
-    for concepto in matriz["conceptos"]:
-        columnas.append(col(f"{concepto['etiqueta']} — Valor", ancho=16, formato=CLP, total="suma"))
-        columnas.append(col(f"{concepto['etiqueta']} — Ecomex", ancho=16, formato=CLP, total="suma"))
-    columnas.append(col("Diferencia", ancho=14, formato=CLP, total="suma"))
-
-    filas = []
-    for fila in matriz["filas"]:
-        valores = [fila["importacion"].imp or "", fila["importacion"].pei or "", fila["ajuste_cbte"] or ""]
-        for celda in fila["celdas"]:
-            valores.append(celda["neto"])
-            valores.append(celda["ecomex"])
-        valores.append(fila["importacion"].costeo_diferencia or 0)
-        filas.append(valores)
-
-    return responder_excel("costeo-importaciones", "Costeo importaciones — matriz comparativa", columnas, filas)
-
-
-def _aplicar_filtros_costeo(query, args):
-    texto = args.get("texto", "").strip()
-    imp_filtro = args.get("imp", "").strip()
-    oc_filtro = args.get("oc", "").strip()
-    agencia = args.get("agencia", "").strip()
-    desde = args.get("desde", "").strip()
-    hasta = args.get("hasta", "").strip()
-    if texto:
-        comodin = f"%{texto}%"
-        query = query.filter(db.or_(Importacion.pei.ilike(comodin), Importacion.proveedor_nombre.ilike(comodin)))
-    if imp_filtro:
-        query = query.filter(Importacion.imp.ilike(f"%{imp_filtro}%"))
-    if oc_filtro:
-        query = query.filter(Importacion.oc.ilike(f"%{oc_filtro}%"))
-    if agencia:
-        query = query.filter(Importacion.agencia == agencia)
-    if desde:
-        fecha_desde = _parse_date(desde)
-        if fecha_desde:
-            query = query.filter(Importacion.fecha_pei >= fecha_desde)
-    if hasta:
-        fecha_hasta = _parse_date(hasta)
-        if fecha_hasta:
-            query = query.filter(Importacion.fecha_pei <= fecha_hasta)
-    return query
-
-
 # --- Agencias (vista derivada) --------------------------------------------
 
 
@@ -939,6 +796,20 @@ def _poblar_costeo_desde_form(costeo, form):
     costeo.tasa_ad_valorem = (form.tasa_ad_valorem.data or 0) / 100
     costeo.estado = form.estado.data
     costeo.importacion_id = form.importacion_id.data or None
+
+    costeo.din_agencia = form.din_agencia.data.strip() if form.din_agencia.data else None
+    costeo.din_n_doc_agencia = form.din_n_doc_agencia.data.strip() if form.din_n_doc_agencia.data else None
+    costeo.din_monto_doc_agencia = form.din_monto_doc_agencia.data
+    costeo.din_n_invoice = form.din_n_invoice.data.strip() if form.din_n_invoice.data else None
+    costeo.din_estado = form.din_estado.data or None
+    costeo.din_rut = form.din_rut.data.strip() if form.din_rut.data else None
+    costeo.din_razon_social = form.din_razon_social.data.strip() if form.din_razon_social.data else None
+    costeo.din_formulario = form.din_formulario.data.strip() if form.din_formulario.data else None
+    costeo.din_folio = form.din_folio.data.strip() if form.din_folio.data else None
+    costeo.din_fecha_pago = form.din_fecha_pago.data
+    costeo.din_vcto = form.din_vcto.data
+    costeo.din_advalorem_clp = form.din_advalorem_clp.data
+    costeo.din_total_pagado = form.din_total_pagado.data
 
 
 @bp.route("/costeo-detallado")
