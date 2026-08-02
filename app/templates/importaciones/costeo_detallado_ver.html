@@ -185,7 +185,7 @@
           <thead>
             <tr>
               <th>Producto</th><th>Código</th><th class="num">Valor unit. T/C</th><th class="num">Cantidad</th>
-              <th>Unidad</th><th>Activo fijo</th>
+              <th>Unidad</th><th>Activo fijo</th><th>¿Ad Valorem?</th>
               <th class="num d-none d-xl-table-cell">EXW CLP</th>
               <th class="num d-none d-xl-table-cell">CIF CLP</th>
               <th class="num d-none d-xl-table-cell">Ad Valorem</th>
@@ -213,6 +213,12 @@
                 <select name="prod-{{ p.id }}-activo_fijo" class="form-select form-select-sm" {{ 'disabled' if not puede('importaciones', 'editar') }}>
                   <option value="NO" {{ 'selected' if p.activo_fijo == 'NO' }}>No</option>
                   <option value="SI" {{ 'selected' if p.activo_fijo == 'SI' }}>Sí</option>
+                </select>
+              </td>
+              <td>
+                <select name="prod-{{ p.id }}-tiene_ad_valorem" class="form-select form-select-sm" {{ 'disabled' if not puede('importaciones', 'editar') }}>
+                  <option value="SI" {{ 'selected' if p.tiene_ad_valorem == 'SI' }}>Sí</option>
+                  <option value="NO" {{ 'selected' if p.tiene_ad_valorem == 'NO' }}>No</option>
                 </select>
               </td>
               <td class="num d-none d-xl-table-cell">{{ p.exw_clp|clp }}</td>

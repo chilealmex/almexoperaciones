@@ -139,6 +139,7 @@ class CosteoImportacionProducto(db.Model):
     cantidad = db.Column(db.Float, nullable=False, default=0)
     unidad_tc = db.Column(db.String(6), nullable=False, default="USD")
     activo_fijo = db.Column(db.String(3), nullable=False, default="NO")
+    tiene_ad_valorem = db.Column(db.String(3), nullable=False, default="SI")
 
     # --- Prorrateo calculado por recalcular() (columnas I:U de la planilla) ---
     exw_moneda = db.Column(db.Float, nullable=False, default=0)

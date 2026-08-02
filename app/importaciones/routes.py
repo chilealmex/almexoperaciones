@@ -976,6 +976,7 @@ def guardar_productos_costeo(costeo_id):
         producto.cantidad = _parse_float(request.form.get(prefijo + "cantidad"))
         producto.unidad_tc = request.form.get(prefijo + "unidad_tc") or "USD"
         producto.activo_fijo = request.form.get(prefijo + "activo_fijo") or "NO"
+        producto.tiene_ad_valorem = request.form.get(prefijo + "tiene_ad_valorem") or "NO"
     costeo_calculo.recalcular(costeo)
     db.session.commit()
     flash("Productos guardados.", "success")
@@ -990,7 +991,11 @@ def agregar_producto_costeo(costeo_id):
     if not form.validate_on_submit():
         abort(400)
     orden = len(costeo.productos)
-    db.session.add(CosteoImportacionProducto(costeo=costeo, orden=orden, unidad_tc="USD", activo_fijo="NO"))
+    db.session.add(
+        CosteoImportacionProducto(
+            costeo=costeo, orden=orden, unidad_tc="USD", activo_fijo="NO", tiene_ad_valorem="SI"
+        )
+    )
     db.session.commit()
     return redirect(url_for("importaciones.ver_costeo_detallado", costeo_id=costeo.id) + "#productos")
 

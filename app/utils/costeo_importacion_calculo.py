@@ -120,7 +120,7 @@ def recalcular(costeo):
         flete_clp = totales["flete_clp"] * porcentaje
         seguro_clp = totales["seguro_clp"] * porcentaje
         cif_clp = exw_clp + crating_clp + flete_clp + seguro_clp
-        ad_valorem_clp = cif_clp * _num(costeo.tasa_ad_valorem)
+        ad_valorem_clp = cif_clp * _num(costeo.tasa_ad_valorem) if producto.tiene_ad_valorem == "SI" else 0.0
         gastos_internos_clp = totales["gastos_internos_clp"] * porcentaje
         costo_total_clp = cif_clp + ad_valorem_clp + gastos_internos_clp
 

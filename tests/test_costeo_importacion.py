@@ -132,6 +132,26 @@ def test_tratado_libre_comercio_exento_no_aplica_ad_valorem(db, empresa):
     assert all(p.ad_valorem_clp == 0 for p in costeo.productos)
 
 
+def test_producto_marcado_sin_ad_valorem_queda_en_cero_y_no_afecta_a_los_demas(db, empresa):
+    costeo = _crear_costeo(db, empresa)
+    _cargar_ejemplo_real(costeo, db)
+
+    sin_advalorem = costeo.productos[0]
+    otro = costeo.productos[1]
+    cif_otro_antes = otro.cif_clp
+    ad_valorem_otro_antes = otro.ad_valorem_clp
+
+    sin_advalorem.tiene_ad_valorem = "NO"
+    _db.session.commit()
+    calculo.recalcular(costeo)
+    _db.session.commit()
+
+    assert sin_advalorem.ad_valorem_clp == 0
+    # El resto de los productos sigue prorrateando el CIF y su propio ad valorem igual que antes.
+    assert otro.cif_clp == cif_otro_antes
+    assert otro.ad_valorem_clp == ad_valorem_otro_antes
+
+
 def test_producto_sin_cantidad_no_revienta_el_calculo(db, empresa):
     costeo = _crear_costeo(db, empresa)
     db.session.add(CosteoImportacionProducto(costeo=costeo, orden=0, producto="Sin cantidad", cantidad=0))
@@ -202,6 +222,31 @@ def test_agregar_editar_y_eliminar_producto_por_ruta(client, usuario_admin, empr
     client.post(f"/importaciones/costeo-detallado/producto/{producto.id}/eliminar", follow_redirects=True)
     _db.session.refresh(costeo)
     assert len(costeo.productos) == 0
+
+
+def test_marcar_producto_sin_ad_valorem_por_ruta_lo_deja_en_cero(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    costeo = _crear_costeo(db, empresa, n_importacion="88")
+    _cargar_ejemplo_real(costeo, db)
+    producto = costeo.productos[0]
+    assert producto.ad_valorem_clp > 0  # por defecto viene en "SI"
+
+    client.post(
+        f"/importaciones/costeo-detallado/{costeo.id}/productos/guardar",
+        data={
+            f"prod-{producto.id}-producto": producto.producto,
+            f"prod-{producto.id}-codigo": producto.codigo,
+            f"prod-{producto.id}-valor_unitario_tc": str(producto.valor_unitario_tc),
+            f"prod-{producto.id}-cantidad": str(producto.cantidad),
+            f"prod-{producto.id}-unidad_tc": "USD",
+            f"prod-{producto.id}-activo_fijo": "NO",
+            f"prod-{producto.id}-tiene_ad_valorem": "NO",
+        },
+        follow_redirects=True,
+    )
+    _db.session.refresh(producto)
+    assert producto.tiene_ad_valorem == "NO"
+    assert producto.ad_valorem_clp == 0
 
 
 def test_guardar_documentos_recalcula_totales(client, usuario_admin, empresa, db):
