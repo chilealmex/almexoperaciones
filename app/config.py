@@ -49,17 +49,23 @@ class Config:
 
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
+    # Flask-Login no hereda las opciones SESSION_COOKIE_*: la cookie de "recordarme"
+    # necesita sus propias directivas, si no quedan sin HttpOnly/Secure por defecto.
+    REMEMBER_COOKIE_HTTPONLY = True
+    REMEMBER_COOKIE_SAMESITE = "Lax"
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16 MB por archivo subido
 
 
 class DevConfig(Config):
     DEBUG = True
     SESSION_COOKIE_SECURE = False
+    REMEMBER_COOKIE_SECURE = False
 
 
 class ProdConfig(Config):
     DEBUG = False
     SESSION_COOKIE_SECURE = True
+    REMEMBER_COOKIE_SECURE = True
 
 
 class TestConfig(Config):
@@ -70,6 +76,7 @@ class TestConfig(Config):
     )
     SQLALCHEMY_ENGINE_OPTIONS = {}
     SESSION_COOKIE_SECURE = False
+    REMEMBER_COOKIE_SECURE = False
     PROPAGAR_ERRORES = True  # en tests interesa ver la excepción real, no la página 500
 
 

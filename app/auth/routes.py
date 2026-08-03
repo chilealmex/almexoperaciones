@@ -1,6 +1,7 @@
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 from flask import render_template, redirect, url_for, flash, request
 from flask_login import login_user, logout_user, login_required, current_user
@@ -13,6 +14,18 @@ from app.models.usuario import Usuario
 _INTENTOS_LOGIN = defaultdict(list)
 _MAX_INTENTOS = 10
 _VENTANA_SEGUNDOS = 5 * 60
+
+
+def _next_seguro(destino: str | None) -> str | None:
+    """Evita el open redirect: solo se sigue un 'next' que sea una ruta relativa propia."""
+    if not destino:
+        return None
+    partes = urlparse(destino)
+    if partes.netloc or partes.scheme:
+        return None
+    if not destino.startswith("/"):
+        return None
+    return destino
 
 
 def _rate_limit_ok(ip: str) -> bool:
@@ -50,7 +63,7 @@ def login():
         login_user(usuario, remember=form.recordarme.data)
         usuario.ultimo_login = datetime.now(timezone.utc)
         db.session.commit()
-        siguiente = request.args.get("next")
+        siguiente = _next_seguro(request.args.get("next"))
         return redirect(siguiente or url_for("core.dashboard"))
 
     return render_template("auth/login.html", form=form)

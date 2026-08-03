@@ -120,6 +120,7 @@ def create_app(config_name=None):
 
     _configurar_logging(app)
     _registrar_manejo_de_errores(app)
+    _registrar_cabeceras_de_seguridad(app)
 
     return app
 
@@ -221,3 +222,38 @@ def _registrar_manejo_de_errores(app):
                 db.session.rollback()
             except Exception:
                 app.logger.exception("No se pudo revertir la transacción al cerrar la petición")
+
+
+def _registrar_cabeceras_de_seguridad(app):
+    """Cabeceras de seguridad en toda respuesta.
+
+    Sin dominios externos que permitir: todo el CSS/JS de la app está servido
+    desde /static (ver base.html), así que default-src 'self' no rompe nada.
+    'unsafe-inline' queda en script-src/style-src porque varias plantillas usan
+    onclick/onchange en línea (confirmaciones, auto-submit) y algún <script> con
+    datos de Jinja incrustados; sacarlo del todo requeriría moverlos a JS externo.
+    """
+    csp = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "font-src 'self'; "
+        "object-src 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self'; "
+        "frame-ancestors 'none'"
+    )
+
+    @app.after_request
+    def _cabeceras(response):
+        response.headers["Content-Security-Policy"] = csp
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        # HSTS solo tiene sentido si el sitio se sirve por HTTPS (así está configurado en
+        # Render); en Dev/Test no se envía para no romper el http:// local.
+        if app.config.get("SESSION_COOKIE_SECURE"):
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
