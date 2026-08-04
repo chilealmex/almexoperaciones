@@ -2,7 +2,7 @@
 
 from app.extensions import db as _db
 from app.models.costeo_importacion import CosteoImportacion, CosteoImportacionProducto
-from app.models.importacion import Importacion
+from app.models.importacion import Importacion, ProveedorImportacion
 from app.utils import costeo_importacion_calculo as calculo
 from app.utils import importaciones_calculo as importacion_calculo
 from tests.conftest import login
@@ -40,7 +40,8 @@ def _cargar_ejemplo_real(costeo, db):
     seguro.valor_total_inv = 25
 
     flete = costeo.documento_por_rol("flete_intl")
-    flete.valor_clp = 1071938  # entrada directa, sin T/C
+    flete.valor_tc = 1
+    flete.valor_total_inv = 1071938
 
     crating_usd = costeo.documento_por_rol("crating_usd")
     crating_usd.valor_tc = 921.42
@@ -93,12 +94,13 @@ def test_documento_normal_calcula_valor_clp_como_tc_por_monto(db, empresa):
     assert inv1.valor_clp == 900_000
 
 
-def test_documento_directo_no_usa_formula(db, empresa):
+def test_flete_internacional_se_calcula_con_tc_y_monto_total_como_los_demas(db, empresa):
     costeo = _crear_costeo(db, empresa)
     flete = costeo.documento_por_rol("flete_intl")
-    flete.valor_clp = 1_071_938
+    flete.valor_tc = 900
+    flete.valor_total_inv = 1190.0
     calculo.recalcular(costeo)
-    assert flete.valor_clp == 1_071_938  # no se pisa con una fórmula
+    assert flete.valor_clp == 1_071_000
 
 
 def test_ejemplo_real_reparte_el_exw_correctamente(db, empresa):
@@ -275,6 +277,55 @@ def test_las_secciones_del_costeo_son_plegables(client, usuario_admin, empresa, 
         assert f'id="{objetivo}"' in texto
 
 
+def test_selector_de_proveedor_muestra_los_del_catalogo(client, usuario_admin, empresa, db):
+    db.session.add(ProveedorImportacion(empresa_id=empresa.id, nombre="ALMEX CANADA"))
+    db.session.add(ProveedorImportacion(empresa_id=empresa.id, nombre="DONGGUAN FANGKUN MACHINERY"))
+    db.session.commit()
+    login(client, "admin@test.cl")
+
+    respuesta = client.get("/importaciones/costeo-detallado/nueva")
+    texto = respuesta.get_data(as_text=True)
+    assert '<option value="ALMEX CANADA"' in texto
+    assert '<option value="DONGGUAN FANGKUN MACHINERY"' in texto
+    assert "Crear nuevo proveedor" in texto
+
+
+def test_al_guardar_costeo_con_proveedor_nuevo_se_agrega_al_catalogo(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    client.post(
+        "/importaciones/costeo-detallado/nueva",
+        data={
+            "n_importacion": "1310",
+            "proveedor": "NUEVO PROVEEDOR SPA",
+            "tasa_ad_valorem": "6",
+            "estado": "en_proceso",
+            "importacion_id": "0",
+        },
+        follow_redirects=True,
+    )
+    proveedor = ProveedorImportacion.query.filter_by(empresa_id=empresa.id, nombre="NUEVO PROVEEDOR SPA").first()
+    assert proveedor is not None
+
+
+def test_proveedor_existente_no_se_duplica_en_el_catalogo(client, usuario_admin, empresa, db):
+    db.session.add(ProveedorImportacion(empresa_id=empresa.id, nombre="ALMEX CANADA"))
+    db.session.commit()
+    login(client, "admin@test.cl")
+
+    client.post(
+        "/importaciones/costeo-detallado/nueva",
+        data={
+            "n_importacion": "1311",
+            "proveedor": "almex canada",
+            "tasa_ad_valorem": "6",
+            "estado": "en_proceso",
+            "importacion_id": "0",
+        },
+        follow_redirects=True,
+    )
+    assert ProveedorImportacion.query.filter_by(empresa_id=empresa.id).count() == 1
+
+
 def test_agregar_editar_y_eliminar_producto_por_ruta(client, usuario_admin, empresa, db):
     login(client, "admin@test.cl")
     costeo = _crear_costeo(db, empresa, n_importacion="55")
@@ -347,6 +398,14 @@ def test_guardar_documentos_recalcula_totales(client, usuario_admin, empresa, db
     )
     _db.session.refresh(inv1)
     assert inv1.valor_clp == 900_000
+
+
+def test_selector_de_moneda_incluye_clp(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    costeo = _crear_costeo(db, empresa, n_importacion="78")
+    respuesta = client.get(f"/importaciones/costeo-detallado/{costeo.id}")
+    texto = respuesta.get_data(as_text=True)
+    assert '<option value="CLP"' in texto
 
 
 def test_eliminar_costeo_completo(client, usuario_admin, empresa, db):

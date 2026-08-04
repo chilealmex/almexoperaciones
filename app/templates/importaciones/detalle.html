@@ -51,9 +51,9 @@
 
 {% for grupo in grupos %}
 <div class="card mb-4" id="grupo-{{ grupo.tipo }}">
-  <div class="card-header d-flex align-items-center justify-content-between card-header-plegable"
+  <div class="card-header d-flex align-items-center justify-content-between card-header-plegable collapsed"
        data-bs-toggle="collapse" data-bs-target="#colapsar-{{ grupo.tipo }}" role="button"
-       aria-expanded="true" aria-controls="colapsar-{{ grupo.tipo }}">
+       aria-expanded="false" aria-controls="colapsar-{{ grupo.tipo }}">
     <span><span class="chevron">▾</span> {{ grupo.etiqueta }}</span>
     <div class="d-flex align-items-center gap-2">
       {% if grupo.tiene_cbte %}
@@ -70,7 +70,7 @@
       {% endif %}
     </div>
   </div>
-  <div class="collapse show" id="colapsar-{{ grupo.tipo }}">
+  <div class="collapse" id="colapsar-{{ grupo.tipo }}">
   <div class="card-body">
     <form method="post" action="{{ url_for('importaciones.guardar_grupo', importacion_id=importacion.id, tipo=grupo.tipo) }}">
       {{ accion_form.hidden_tag() }}

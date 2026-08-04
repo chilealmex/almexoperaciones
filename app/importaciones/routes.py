@@ -315,6 +315,18 @@ def _proveedores_catalogo():
     return ProveedorImportacion.query.filter_by(empresa_id=_empresa_id()).order_by(ProveedorImportacion.nombre).all()
 
 
+def _asegurar_proveedor_en_catalogo(nombre):
+    """Si el proveedor escrito no existe en el catálogo, lo agrega para que quede
+    disponible la próxima vez en la lista desplegable."""
+    if not nombre:
+        return
+    existe = ProveedorImportacion.query.filter_by(empresa_id=_empresa_id()).filter(
+        db.func.lower(ProveedorImportacion.nombre) == nombre.lower()
+    ).first()
+    if not existe:
+        db.session.add(ProveedorImportacion(empresa_id=_empresa_id(), nombre=nombre))
+
+
 # --- Detalle contable por PEI --------------------------------------------
 
 
@@ -817,6 +829,7 @@ def _poblar_costeo_desde_form(costeo, form):
     costeo.fecha_llegada = form.fecha_llegada.data
     costeo.guia_despacho = form.guia_despacho.data.strip() if form.guia_despacho.data else None
     costeo.proveedor = form.proveedor.data.strip() if form.proveedor.data else None
+    _asegurar_proveedor_en_catalogo(costeo.proveedor)
     costeo.modo_venta = form.modo_venta.data.strip() if form.modo_venta.data else None
     costeo.purchase_order = form.purchase_order.data.strip() if form.purchase_order.data else None
     costeo.orden_trabajo = form.orden_trabajo.data.strip() if form.orden_trabajo.data else None
@@ -947,7 +960,9 @@ def nuevo_costeo_detallado():
         db.session.commit()
         flash("Costeo creado correctamente.", "success")
         return redirect(url_for("importaciones.ver_costeo_detallado", costeo_id=costeo.id))
-    return render_template("importaciones/costeo_detallado_form.html", form=form, costeo=None)
+    return render_template(
+        "importaciones/costeo_detallado_form.html", form=form, costeo=None, proveedores=_proveedores_catalogo()
+    )
 
 
 @bp.route("/costeo-detallado/<int:costeo_id>/editar", methods=["GET", "POST"])
@@ -966,7 +981,9 @@ def editar_costeo_detallado(costeo_id):
         db.session.commit()
         flash("Datos generales actualizados.", "success")
         return redirect(url_for("importaciones.ver_costeo_detallado", costeo_id=costeo.id))
-    return render_template("importaciones/costeo_detallado_form.html", form=form, costeo=costeo)
+    return render_template(
+        "importaciones/costeo_detallado_form.html", form=form, costeo=costeo, proveedores=_proveedores_catalogo()
+    )
 
 
 @bp.route("/costeo-detallado/<int:costeo_id>/generar-cuadratura", methods=["POST"])
@@ -1042,6 +1059,7 @@ def ver_costeo_detallado(costeo_id):
         gasto_roles=costeo_calculo.GASTO_INTERNO_ROLES,
         accion_form=AccionForm(),
         datos_form=datos_form,
+        proveedores=_proveedores_catalogo(),
     )
 
 
@@ -1059,11 +1077,8 @@ def guardar_documentos_costeo(costeo_id):
         prefijo = f"doc-{doc.id}-"
         doc.moneda = request.form.get(prefijo + "moneda", doc.moneda) or "USD"
         doc.nro_doc = (request.form.get(prefijo + "nro_doc") or "").strip() or None
-        if plantilla["es_directo"]:
-            doc.valor_clp = _parse_int(request.form.get(prefijo + "valor_clp"))
-        else:
-            doc.valor_tc = _parse_float(request.form.get(prefijo + "valor_tc"))
-            doc.valor_total_inv = _parse_float(request.form.get(prefijo + "valor_total_inv"))
+        doc.valor_tc = _parse_float(request.form.get(prefijo + "valor_tc"))
+        doc.valor_total_inv = _parse_float(request.form.get(prefijo + "valor_total_inv"))
     costeo_calculo.recalcular(costeo)
     db.session.commit()
     flash("Documentos guardados.", "success")

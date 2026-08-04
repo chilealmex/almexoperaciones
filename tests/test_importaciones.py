@@ -448,3 +448,13 @@ def test_resumen_muestra_boton_reabrir_solo_a_superadmin(client, empresa, db):
     login(client, superadmin.email)
     respuesta = client.get("/importaciones/resumen")
     assert "Reabrir" in respuesta.get_data(as_text=True)
+
+
+def test_secciones_de_cuadratura_contable_aparecen_plegadas_por_defecto(client, usuario_admin, empresa, db):
+    importacion = _crear_importacion(db, empresa, pei="25")
+    login(client, "admin@test.cl")
+    respuesta = client.get(f"/importaciones/detalle/{importacion.id}")
+    texto = respuesta.get_data(as_text=True)
+    assert 'aria-expanded="false"' in texto
+    assert 'class="collapse show"' not in texto
+    assert 'aria-expanded="true"' not in texto

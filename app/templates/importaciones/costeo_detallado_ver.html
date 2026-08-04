@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "partials/_proveedor_selector.html" as prov %}
 {% block title %}Costeo {{ costeo.n_importacion or costeo.id }}{% endblock %}
 {% block content %}
 
@@ -92,7 +93,7 @@
         </div>
         <div class="col-6 col-md-4">
           {{ datos_form.proveedor.label(class="form-label small mb-1") }}
-          {{ datos_form.proveedor(class="form-control form-control-sm campo-excel", placeholder="ALMEX CANADA", disabled=not puede_editar) }}
+          {{ prov.selector(datos_form.proveedor, proveedores, datos_form.proveedor.data, disabled=not puede_editar, select_clases="form-select form-select-sm campo-excel", input_clases="form-control form-control-sm campo-excel") }}
         </div>
         <div class="col-6 col-md-4">
           {{ datos_form.modo_venta.label(class="form-label small mb-1") }}
@@ -150,7 +151,7 @@
           <thead>
             <tr>
               <th>Documento</th><th>Moneda</th><th>N° doc</th>
-              <th class="num">Valor T/C</th><th class="num">Valor Total INV</th><th class="num">Valor CLP</th>
+              <th class="num">Valor T/C</th><th class="num">Monto Total</th><th class="num">Valor CLP</th>
             </tr>
           </thead>
           <tbody>
@@ -163,18 +164,13 @@
                 <select name="doc-{{ doc.id }}-moneda" class="form-select form-select-sm campo-excel" {{ 'disabled' if not puede('importaciones', 'editar') }}>
                   <option value="USD" {{ 'selected' if doc.moneda == 'USD' }}>USD</option>
                   <option value="EUR" {{ 'selected' if doc.moneda == 'EUR' }}>EUR</option>
+                  <option value="CLP" {{ 'selected' if doc.moneda == 'CLP' }}>CLP</option>
                 </select>
               </td>
               <td><input type="text" name="doc-{{ doc.id }}-nro_doc" class="form-control form-control-sm campo-excel" value="{{ doc.nro_doc or '' }}" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
-              {% if plantilla.es_directo %}
-              <td class="num text-muted">—</td>
-              <td class="num text-muted">—</td>
-              <td class="num"><input type="text" inputmode="decimal" name="doc-{{ doc.id }}-valor_clp" class="form-control form-control-sm text-end campo-excel" value="{{ doc.valor_clp or 0 }}" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
-              {% else %}
               <td class="num"><input type="text" inputmode="decimal" name="doc-{{ doc.id }}-valor_tc" class="form-control form-control-sm text-end campo-excel" value="{{ doc.valor_tc if doc.valor_tc is not none else '' }}" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
               <td class="num"><input type="text" inputmode="decimal" name="doc-{{ doc.id }}-valor_total_inv" class="form-control form-control-sm text-end campo-excel" value="{{ doc.valor_total_inv if doc.valor_total_inv is not none else '' }}" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
               <td class="num">{{ (doc.valor_clp or 0)|clp }}</td>
-              {% endif %}
             </tr>
             {% endif %}
             {% endfor %}
@@ -268,7 +264,7 @@
               <td class="num"><input type="text" inputmode="decimal" name="prod-{{ p.id }}-valor_unitario_tc" class="form-control form-control-sm text-end campo-excel" value="{{ p.valor_unitario_tc }}" style="min-width:90px;" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
               <td class="num"><input type="text" inputmode="decimal" name="prod-{{ p.id }}-cantidad" class="form-control form-control-sm text-end campo-excel" value="{{ p.cantidad }}" style="min-width:80px;" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
               <td>
-                <select name="prod-{{ p.id }}-unidad_tc" class="form-select form-select-sm campo-excel" {{ 'disabled' if not puede('importaciones', 'editar') }}>
+                <select name="prod-{{ p.id }}-unidad_tc" class="form-select form-select-sm campo-excel" style="min-width:80px;" {{ 'disabled' if not puede('importaciones', 'editar') }}>
                   <option value="USD" {{ 'selected' if p.unidad_tc == 'USD' }}>USD</option>
                   <option value="EUR" {{ 'selected' if p.unidad_tc == 'EUR' }}>EUR</option>
                 </select>

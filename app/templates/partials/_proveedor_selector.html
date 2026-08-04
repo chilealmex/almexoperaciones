@@ -1,0 +1,17 @@
+{% macro selector(campo, proveedores, valor_actual, disabled=False, select_clases="form-select", input_clases="form-control", campo_id="proveedor") %}
+{% set nombres = proveedores|map(attribute="nombre")|list %}
+{% set es_nuevo = valor_actual and valor_actual not in nombres %}
+<select id="{{ campo_id }}-select" class="{{ select_clases }} mb-1" {{ 'disabled' if disabled }}
+        onchange="
+          var campo = document.getElementById('{{ campo_id }}-input');
+          if (this.value === '__nuevo__') { campo.style.display = ''; campo.value = ''; campo.focus(); }
+          else { campo.style.display = 'none'; campo.value = this.value; }
+        ">
+  <option value="">— Selecciona un proveedor —</option>
+  {% for nombre in nombres %}
+  <option value="{{ nombre }}" {{ 'selected' if valor_actual == nombre }}>{{ nombre }}</option>
+  {% endfor %}
+  <option value="__nuevo__" {{ 'selected' if es_nuevo }}>+ Crear nuevo proveedor…</option>
+</select>
+{{ campo(id=campo_id + "-input", class=input_clases, placeholder="Nombre del nuevo proveedor", disabled=disabled, style="" if es_nuevo else "display:none") }}
+{% endmacro %}

@@ -9,14 +9,14 @@ de fábrica.
 """
 
 DOCUMENTO_ROLES = (
-    {"rol": "inv1", "etiqueta": "Invoice 1", "es_directo": False},
-    {"rol": "inv2", "etiqueta": "Invoice 2", "es_directo": False},
-    {"rol": "inv3", "etiqueta": "Invoice 3", "es_directo": False},
-    {"rol": "inv4", "etiqueta": "Invoice 4", "es_directo": False},
-    {"rol": "seguro", "etiqueta": "Seguro Cert", "es_directo": False},
-    {"rol": "flete_intl", "etiqueta": "Flete Internacional", "es_directo": True},
-    {"rol": "crating_usd", "etiqueta": "Crating USD", "es_directo": False},
-    {"rol": "crating_eur", "etiqueta": "Crating EUR", "es_directo": False},
+    {"rol": "inv1", "etiqueta": "Invoice 1"},
+    {"rol": "inv2", "etiqueta": "Invoice 2"},
+    {"rol": "inv3", "etiqueta": "Invoice 3"},
+    {"rol": "inv4", "etiqueta": "Invoice 4"},
+    {"rol": "seguro", "etiqueta": "Seguro Cert"},
+    {"rol": "flete_intl", "etiqueta": "Flete Internacional"},
+    {"rol": "crating_usd", "etiqueta": "Crating USD"},
+    {"rol": "crating_eur", "etiqueta": "Crating EUR"},
 )
 ROLES_INVOICE = ("inv1", "inv2", "inv3", "inv4")
 
@@ -104,8 +104,6 @@ def recalcular(costeo):
         doc = costeo.documento_por_rol(plantilla["rol"])
         if not doc:
             continue
-        if plantilla["es_directo"]:
-            continue  # su valor_clp se edita directo (Flete Internacional)
         doc.valor_clp = _clp(_num(doc.valor_tc) * _num(doc.valor_total_inv))
 
     totales = totales_documentos(costeo)
