@@ -288,6 +288,25 @@
   {% endif %}
 </div>
 
+{% if puede('inventario', 'editar') %}
+<div class="modal fade" id="modal-confirmar-fisico" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Cambiar conteo físico</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <p id="modal-confirmar-fisico-texto" class="mb-0"></p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">No</button>
+        <button type="button" class="btn btn-primary" id="modal-confirmar-fisico-si">Sí, cambiar</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
 {% endif %}
 {% endblock %}
 
@@ -354,6 +373,7 @@
           var otroInput = fila.querySelector('.input-fisico');
           if (otroInput && otroInput !== input && otroInput.value !== input.value) {
             otroInput.value = input.value;
+            otroInput._valorPrevio = input.value;
           }
         });
       })
@@ -363,13 +383,55 @@
       });
   }
 
-  document.querySelectorAll('.input-fisico').forEach(function (input) {
-    var valorPrevio = input.value;
-    input.addEventListener('change', function () {
-      if (input.value !== valorPrevio) {
-        valorPrevio = input.value;
-        guardar(input);
+  // Si el campo ya tenía un conteo guardado, cambiarlo pide confirmación en vez de
+  // guardar directo — para no pisar por accidente lo que registró otra persona.
+  var modalEl = document.getElementById('modal-confirmar-fisico');
+  var modal = modalEl && window.bootstrap ? new bootstrap.Modal(modalEl) : null;
+  var modalTexto = document.getElementById('modal-confirmar-fisico-texto');
+  var modalBtnSi = document.getElementById('modal-confirmar-fisico-si');
+  var pendiente = null;
+
+  if (modalBtnSi) {
+    modalBtnSi.addEventListener('click', function () {
+      var p = pendiente;
+      pendiente = null; // ya no hay nada que revertir cuando se cierre el modal
+      modal.hide();
+      if (p) {
+        p.input._valorPrevio = p.input.value;
+        guardar(p.input);
       }
+    });
+  }
+
+  if (modalEl) {
+    modalEl.addEventListener('hidden.bs.modal', function () {
+      if (pendiente) {
+        pendiente.input.value = pendiente.input._valorPrevio;
+        pendiente = null;
+      }
+    });
+  }
+
+  document.querySelectorAll('.input-fisico').forEach(function (input) {
+    input._valorPrevio = input.value;
+    input.addEventListener('change', function () {
+      if (input.value === input._valorPrevio) return;
+
+      if (input._valorPrevio !== '' && modal) {
+        var fila = input.closest('[data-fila]');
+        var registro = fila ? fila.querySelector('.celda-registro') : null;
+        var fecha = fila ? fila.querySelector('.celda-fecha') : null;
+        var quien = registro && registro.textContent.trim() ? registro.textContent.trim() : 'Alguien';
+        var cuando = fecha && fecha.textContent.trim() ? ' el ' + fecha.textContent.trim() : '';
+        modalTexto.textContent = quien + ' ya registró ' + input._valorPrevio + cuando +
+          '. ¿Seguro que quieres cambiarlo a ' + (input.value || 'vacío') + '?';
+        pendiente = { input: input };
+        modal.show();
+        return;
+      }
+
+      input._valorPrevio = input.value;
+      guardar(input);
     });
     input.addEventListener('keydown', function (e) {
       if (e.key === 'Enter') {
