@@ -256,11 +256,14 @@ def test_secciones_de_asientos_muestran_alerta_de_comprobante_faltante(client, u
     assert "N° comprobante 4582" in texto
 
 
-def test_select_de_estado_en_resumen_tiene_la_clase_de_color_correspondiente(client, usuario_admin, empresa, db):
+def test_resumen_muestra_el_estado_como_badge_de_solo_lectura(client, usuario_admin, empresa, db):
     _crear_importacion(db, empresa, pei="20", estado="costeando")
     login(client, "admin@test.cl")
     respuesta = client.get("/importaciones/resumen")
-    assert 'select-estado estado-costeando' in respuesta.get_data(as_text=True)
+    texto = respuesta.get_data(as_text=True)
+    assert "bg-warning" in texto
+    assert "Costeando" in texto
+    assert "select-estado" not in texto
 
 
 def test_filtro_por_mes_no_usa_strftime_y_filtra_bien(client, usuario_admin, empresa, db):
@@ -387,7 +390,10 @@ def test_descarga_excel_de_din(client, usuario_admin, empresa, db):
     assert "spreadsheetml" in respuesta.headers["Content-Type"]
 
 
-def test_usuario_normal_no_puede_reabrir_una_importacion_cerrada(client, usuario_admin, empresa, db):
+# --- Bloqueo del estado Cerrado -----------------------------------------
+
+
+def test_usuario_normal_no_puede_reabrir_una_importacion_cerrada_via_ruta_estado(client, usuario_admin, empresa, db):
     importacion = _crear_importacion(db, empresa, pei="20", estado="cerrado")
     login(client, "admin@test.cl")
 
@@ -400,8 +406,21 @@ def test_usuario_normal_no_puede_reabrir_una_importacion_cerrada(client, usuario
     assert importacion.estado == "cerrado"
 
 
-def test_superadmin_si_puede_reabrir_una_importacion_cerrada(client, empresa, db):
+def test_usuario_normal_no_puede_reabrir_una_importacion_cerrada_via_editar(client, usuario_admin, empresa, db):
     importacion = _crear_importacion(db, empresa, pei="21", estado="cerrado")
+    login(client, "admin@test.cl")
+
+    client.post(
+        f"/importaciones/resumen/{importacion.id}/editar",
+        data={"estado": "pendiente", "tipo_saldo": "a_favor", "monto": "0", "saldo_agencia": "0"},
+        follow_redirects=True,
+    )
+    _db.session.refresh(importacion)
+    assert importacion.estado == "cerrado"
+
+
+def test_superadmin_si_puede_reabrir_una_importacion_cerrada(client, empresa, db):
+    importacion = _crear_importacion(db, empresa, pei="22", estado="cerrado")
     superadmin = _crear_superadmin(db, empresa)
     login(client, superadmin.email)
 
@@ -414,10 +433,18 @@ def test_superadmin_si_puede_reabrir_una_importacion_cerrada(client, empresa, db
     assert importacion.estado == "pendiente"
 
 
-def test_resumen_muestra_candado_en_importacion_cerrada_para_usuario_normal(client, usuario_admin, empresa, db):
-    _crear_importacion(db, empresa, pei="22", estado="cerrado")
+def test_resumen_muestra_candado_y_no_select_editable(client, usuario_admin, empresa, db):
+    _crear_importacion(db, empresa, pei="23", estado="cerrado")
     login(client, "admin@test.cl")
     respuesta = client.get("/importaciones/resumen")
     texto = respuesta.get_data(as_text=True)
-    assert "🔒 Cerrado" in texto
-    assert 'class="select-estado' not in texto
+    assert "🔒" in texto
+    assert "select-estado" not in texto
+
+
+def test_resumen_muestra_boton_reabrir_solo_a_superadmin(client, empresa, db):
+    _crear_importacion(db, empresa, pei="24", estado="cerrado")
+    superadmin = _crear_superadmin(db, empresa)
+    login(client, superadmin.email)
+    respuesta = client.get("/importaciones/resumen")
+    assert "Reabrir" in respuesta.get_data(as_text=True)

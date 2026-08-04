@@ -2,7 +2,9 @@
 
 from app.extensions import db as _db
 from app.models.costeo_importacion import CosteoImportacion, CosteoImportacionProducto
+from app.models.importacion import Importacion
 from app.utils import costeo_importacion_calculo as calculo
+from app.utils import importaciones_calculo as importacion_calculo
 from tests.conftest import login
 
 
@@ -13,6 +15,18 @@ def _crear_costeo(db, empresa, **kwargs):
     calculo.sembrar_lineas_fijas(costeo)
     db.session.commit()
     return costeo
+
+
+def _crear_importacion(db, empresa, **kwargs):
+    datos = {"empresa_id": empresa.id, "monto": 0}
+    datos.update(kwargs)
+    importacion = Importacion(**datos)
+    db.session.add(importacion)
+    db.session.flush()
+    importacion_calculo.sembrar_lineas_plantilla(importacion)
+    importacion_calculo.recalcular(importacion)
+    db.session.commit()
+    return importacion
 
 
 def _cargar_ejemplo_real(costeo, db):
@@ -248,6 +262,17 @@ def test_datos_generales_se_ven_y_editan_sin_salir_de_la_pagina_del_costeo(clien
 
     _db.session.refresh(costeo)
     assert costeo.proveedor == "ALMEX CANADA SPA"
+
+
+def test_las_secciones_del_costeo_son_plegables(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    costeo = _crear_costeo(db, empresa, n_importacion="1299")
+
+    respuesta = client.get(f"/importaciones/costeo-detallado/{costeo.id}")
+    texto = respuesta.get_data(as_text=True)
+    for objetivo in ("colapsar-datos-generales", "colapsar-documentos", "colapsar-gastos", "colapsar-productos"):
+        assert f'data-bs-target="#{objetivo}"' in texto
+        assert f'id="{objetivo}"' in texto
 
 
 def test_agregar_editar_y_eliminar_producto_por_ruta(client, usuario_admin, empresa, db):
@@ -512,3 +537,68 @@ def test_din_historico_sigue_disponible_aunque_no_este_en_el_menu(client, usuari
     respuesta = client.get("/importaciones/din")
     assert respuesta.status_code == 200
     assert "402360883" in respuesta.get_data(as_text=True)
+
+
+# --- Sincronización Costeo -> Cuadratura contable vinculada --------------
+
+
+def test_al_guardar_el_costeo_la_importacion_vinculada_hereda_proveedor_oc_e_imp(client, usuario_admin, empresa, db):
+    importacion = _crear_importacion(db, empresa, pei="50")
+    login(client, "admin@test.cl")
+    costeo = _crear_costeo(db, empresa, n_importacion="1288")
+
+    client.post(
+        f"/importaciones/costeo-detallado/{costeo.id}/editar",
+        data={
+            "n_importacion": "1288",
+            "proveedor": "DONGGUAN FANGKUN MACHINERY",
+            "purchase_order": "14152",
+            "tasa_ad_valorem": "6",
+            "estado": "en_proceso",
+            "importacion_id": str(importacion.id),
+        },
+        follow_redirects=True,
+    )
+    _db.session.refresh(importacion)
+    assert importacion.proveedor_nombre == "DONGGUAN FANGKUN MACHINERY"
+    assert importacion.oc == "14152"
+    assert importacion.imp == "1288"
+
+
+def test_generar_cuadratura_desde_costeo_crea_una_importacion_vinculada(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    costeo = _crear_costeo(db, empresa, n_importacion="1300", proveedor="ALMEX CANADA", purchase_order="14400")
+
+    respuesta = client.post(
+        f"/importaciones/costeo-detallado/{costeo.id}/generar-cuadratura",
+        follow_redirects=True,
+    )
+    assert respuesta.status_code == 200
+    _db.session.refresh(costeo)
+    assert costeo.importacion_id is not None
+    importacion = Importacion.query.get(costeo.importacion_id)
+    assert importacion.proveedor_nombre == "ALMEX CANADA"
+    assert importacion.oc == "14400"
+    assert importacion.imp == "1300"
+    assert importacion.pei is None
+
+
+def test_generar_cuadratura_no_duplica_si_ya_esta_vinculado(client, usuario_admin, empresa, db):
+    importacion = _crear_importacion(db, empresa, pei="51")
+    login(client, "admin@test.cl")
+    costeo = _crear_costeo(db, empresa, n_importacion="1301", importacion_id=importacion.id)
+
+    client.post(f"/importaciones/costeo-detallado/{costeo.id}/generar-cuadratura", follow_redirects=True)
+    _db.session.refresh(costeo)
+    assert costeo.importacion_id == importacion.id
+    assert Importacion.query.filter_by(empresa_id=empresa.id).count() == 1
+
+
+def test_bodega_no_puede_generar_cuadratura_desde_costeo(client, usuario_bodega, empresa, db):
+    costeo = _crear_costeo(db, empresa, n_importacion="1302")
+    login(client, "bodega@test.cl")
+
+    respuesta = client.post(f"/importaciones/costeo-detallado/{costeo.id}/generar-cuadratura")
+    assert respuesta.status_code == 403
+    _db.session.refresh(costeo)
+    assert costeo.importacion_id is None

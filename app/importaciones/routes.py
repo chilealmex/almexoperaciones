@@ -252,6 +252,7 @@ def nueva_importacion():
 def editar_importacion(importacion_id):
     importacion = _get_importacion_or_404(importacion_id)
     form = ImportacionForm(obj=importacion)
+    estado_bloqueado = importacion.estado == "cerrado" and not current_user.es_superadmin
     if form.validate_on_submit():
         importacion.fecha_pei = form.fecha_pei.data
         importacion.pei = form.pei.data.strip() if form.pei.data else None
@@ -264,14 +265,19 @@ def editar_importacion(importacion_id):
         importacion.saldo_agencia = form.saldo_agencia.data or 0
         importacion.pais = form.pais.data.strip() if form.pais.data else None
         importacion.tratado_tlc = form.tratado_tlc.data or None
-        importacion.estado = form.estado.data
+        if not estado_bloqueado:
+            importacion.estado = form.estado.data
         importacion.notas = form.notas.data
         calculo.recalcular(importacion)
         db.session.commit()
         flash("Importación actualizada correctamente.", "success")
         return redirect(url_for("importaciones.resumen"))
     return render_template(
-        "importaciones/importacion_form.html", form=form, importacion=importacion, proveedores=_proveedores_catalogo()
+        "importaciones/importacion_form.html",
+        form=form,
+        importacion=importacion,
+        proveedores=_proveedores_catalogo(),
+        estado_bloqueado=estado_bloqueado,
     )
 
 
@@ -824,6 +830,22 @@ def _poblar_costeo_desde_form(costeo, form):
     costeo.importacion_id = form.importacion_id.data or None
 
 
+def _sincronizar_importacion_vinculada(costeo):
+    """Al guardar un costeo vinculado a una Cuadratura contable, esta última toma
+    Proveedor, N° OC y N° Importación desde el costeo (que es donde se ingresan primero)."""
+    if not costeo.importacion_id:
+        return
+    importacion = Importacion.query.get(costeo.importacion_id)
+    if not importacion:
+        return
+    if costeo.proveedor:
+        importacion.proveedor_nombre = costeo.proveedor
+    if costeo.purchase_order:
+        importacion.oc = costeo.purchase_order
+    if costeo.n_importacion:
+        importacion.imp = costeo.n_importacion
+
+
 COLUMNAS_FILTRO_COSTEO = {
     "f_n_importacion": CosteoImportacion.n_importacion,
     "f_proveedor": CosteoImportacion.proveedor,
@@ -921,6 +943,7 @@ def nuevo_costeo_detallado():
         db.session.add(costeo)
         db.session.flush()
         costeo_calculo.sembrar_lineas_fijas(costeo)
+        _sincronizar_importacion_vinculada(costeo)
         db.session.commit()
         flash("Costeo creado correctamente.", "success")
         return redirect(url_for("importaciones.ver_costeo_detallado", costeo_id=costeo.id))
@@ -939,10 +962,34 @@ def editar_costeo_detallado(costeo_id):
     if form.validate_on_submit():
         _poblar_costeo_desde_form(costeo, form)
         costeo_calculo.recalcular(costeo)
+        _sincronizar_importacion_vinculada(costeo)
         db.session.commit()
         flash("Datos generales actualizados.", "success")
         return redirect(url_for("importaciones.ver_costeo_detallado", costeo_id=costeo.id))
     return render_template("importaciones/costeo_detallado_form.html", form=form, costeo=costeo)
+
+
+@bp.route("/costeo-detallado/<int:costeo_id>/generar-cuadratura", methods=["POST"])
+@require_permission("importaciones", "editar")
+def generar_cuadratura_desde_costeo(costeo_id):
+    costeo = _get_costeo_or_404(costeo_id)
+    form = AccionForm()
+    if not form.validate_on_submit():
+        abort(400)
+    if costeo.importacion_id:
+        flash("Este costeo ya tiene una Cuadratura contable vinculada.", "warning")
+        return redirect(url_for("importaciones.ver_costeo_detallado", costeo_id=costeo.id))
+    importacion = _crear_importacion_completa(
+        imp=costeo.n_importacion,
+        proveedor_nombre=costeo.proveedor,
+        oc=costeo.purchase_order,
+        fecha_pei=costeo.fecha_llegada,
+    )
+    db.session.flush()
+    costeo.importacion_id = importacion.id
+    db.session.commit()
+    flash("Cuadratura contable generada. Ingresa el N° PEI para completarla.", "success")
+    return redirect(url_for("importaciones.editar_importacion", importacion_id=importacion.id))
 
 
 @bp.route("/costeo-detallado/<int:costeo_id>/estado", methods=["POST"])

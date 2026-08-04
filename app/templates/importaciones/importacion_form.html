@@ -60,7 +60,10 @@
   <div class="row">
     <div class="col-6 col-md-3 mb-3">
       {{ form.estado.label(class="form-label") }}
-      {{ form.estado(class="form-select") }}
+      {{ form.estado(class="form-select", disabled=estado_bloqueado) }}
+      {% if estado_bloqueado %}
+      <div class="form-text text-danger">🔒 Cerrada. Solo un superadmin puede reabrirla.</div>
+      {% endif %}
     </div>
   </div>
   <div class="mb-3">

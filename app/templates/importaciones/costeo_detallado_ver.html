@@ -33,6 +33,13 @@
       Ver detalle contable de PEI {{ costeo.importacion.pei or costeo.importacion.id }} →
     </a>
   </div>
+  {% elif puede('importaciones', 'editar') %}
+  <div class="col-auto">
+    <form method="post" action="{{ url_for('importaciones.generar_cuadratura_desde_costeo', costeo_id=costeo.id) }}">
+      {{ accion_form.hidden_tag() }}
+      <button type="submit" class="btn btn-outline-primary btn-sm">+ Generar Cuadratura contable</button>
+    </form>
+  </div>
   {% endif %}
 </div>
 
@@ -61,7 +68,10 @@
 
   {# ===================== DATOS GENERALES ===================== #}
   <div class="card mb-4" id="datos-generales">
-    <div class="card-header costeo-card-header">Datos generales</div>
+    <div class="card-header costeo-card-header card-header-plegable" data-bs-toggle="collapse" data-bs-target="#colapsar-datos-generales" role="button" aria-expanded="true" aria-controls="colapsar-datos-generales">
+      <span class="chevron">▾</span> Datos generales
+    </div>
+    <div class="collapse show" id="colapsar-datos-generales">
     <div class="card-body">
       <div class="row g-3">
         <div class="col-6 col-md-3">
@@ -116,6 +126,7 @@
         </div>
       </div>
     </div>
+    </div>
   </div>
 
   {% if puede_editar %}
@@ -127,7 +138,10 @@
 
 {# ===================== DOCUMENTOS ===================== #}
 <div class="card mb-4" id="documentos">
-  <div class="card-header costeo-card-header">Documentos (Invoice, Seguro, Flete, Crating)</div>
+  <div class="card-header costeo-card-header card-header-plegable" data-bs-toggle="collapse" data-bs-target="#colapsar-documentos" role="button" aria-expanded="true" aria-controls="colapsar-documentos">
+    <span class="chevron">▾</span> Documentos (Invoice, Seguro, Flete, Crating)
+  </div>
+  <div class="collapse show" id="colapsar-documentos">
   <div class="card-body">
     <form method="post" action="{{ url_for('importaciones.guardar_documentos_costeo', costeo_id=costeo.id) }}">
       {{ accion_form.hidden_tag() }}
@@ -178,11 +192,15 @@
       {% endif %}
     </form>
   </div>
+  </div>
 </div>
 
 {# ===================== GASTOS INTERNOS ===================== #}
 <div class="card mb-4" id="gastos">
-  <div class="card-header costeo-card-header">Gastos internos nacionales</div>
+  <div class="card-header costeo-card-header card-header-plegable" data-bs-toggle="collapse" data-bs-target="#colapsar-gastos" role="button" aria-expanded="true" aria-controls="colapsar-gastos">
+    <span class="chevron">▾</span> Gastos internos nacionales
+  </div>
+  <div class="collapse show" id="colapsar-gastos">
   <div class="card-body">
     <form method="post" action="{{ url_for('importaciones.guardar_gastos_costeo', costeo_id=costeo.id) }}">
       {{ accion_form.hidden_tag() }}
@@ -214,11 +232,15 @@
       {% endif %}
     </form>
   </div>
+  </div>
 </div>
 
 {# ===================== PRODUCTOS ===================== #}
 <div class="card mb-4" id="productos">
-  <div class="card-header costeo-card-header">Productos — prorrateo de costos</div>
+  <div class="card-header costeo-card-header card-header-plegable" data-bs-toggle="collapse" data-bs-target="#colapsar-productos" role="button" aria-expanded="true" aria-controls="colapsar-productos">
+    <span class="chevron">▾</span> Productos — prorrateo de costos
+  </div>
+  <div class="collapse show" id="colapsar-productos">
   <div class="card-body">
     <form method="post" action="{{ url_for('importaciones.guardar_productos_costeo', costeo_id=costeo.id) }}">
       {{ accion_form.hidden_tag() }}
@@ -289,6 +311,7 @@
       </div>
       {% endif %}
     </form>
+  </div>
   </div>
 </div>
 

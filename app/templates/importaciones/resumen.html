@@ -80,22 +80,15 @@
           {% else %}—{% endif %}
         </td>
         <td>
-          {% if i.estado == 'cerrado' and not current_user.es_superadmin %}
-          <span class="badge bg-success" title="Cerrado. Solo un superadmin puede reabrirla.">🔒 Cerrado</span>
-          {% elif puede('importaciones', 'editar') %}
-          <form method="post" action="{{ url_for('importaciones.cambiar_estado', importacion_id=i.id) }}" class="d-flex align-items-center gap-1">
-            {{ estado_form.hidden_tag() }}
-            <select name="estado" class="form-select form-select-sm select-estado estado-{{ i.estado }}" onchange="this.form.submit()">
-              <option value="pendiente" {{ 'selected' if i.estado == 'pendiente' }}>Pendiente</option>
-              <option value="costeando" {{ 'selected' if i.estado == 'costeando' }}>Costeando</option>
-              <option value="cerrado" {{ 'selected' if i.estado == 'cerrado' }}>Cerrado</option>
-            </select>
-            {% if i.estado == 'cerrado' %}<span class="badge bg-success" title="Cerrado">🔒</span>{% endif %}
-          </form>
-          {% else %}
           <span class="badge {{ 'bg-success' if i.estado == 'cerrado' else ('bg-warning text-dark' if i.estado == 'costeando' else 'bg-danger') }}">
-            {{ {'pendiente': 'Pendiente', 'costeando': 'Costeando', 'cerrado': 'Cerrado'}[i.estado] }}
+            {{ '🔒 ' if i.estado == 'cerrado' }}{{ {'pendiente': 'Pendiente', 'costeando': 'Costeando', 'cerrado': 'Cerrado'}[i.estado] }}
           </span>
+          {% if i.estado == 'cerrado' and current_user.es_superadmin %}
+          <form method="post" action="{{ url_for('importaciones.cambiar_estado', importacion_id=i.id) }}" class="d-inline">
+            {{ estado_form.hidden_tag() }}
+            <input type="hidden" name="estado" value="pendiente">
+            <button type="submit" class="btn btn-link btn-sm p-0 ms-1" title="Reabrir (solo superadmin)" onclick="return confirm('¿Reabrir esta importación y dejarla en Pendiente?')">🔓 Reabrir</button>
+          </form>
           {% endif %}
         </td>
         <td class="text-end text-nowrap">

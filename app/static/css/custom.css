@@ -641,6 +641,9 @@ a.kpi:hover {
 .costeo-card-header .small {
   color: rgba(255, 255, 255, 0.75) !important;
 }
+.costeo-card-header.card-header-plegable .chevron {
+  color: rgba(255, 255, 255, 0.85);
+}
 input.campo-excel,
 select.campo-excel,
 textarea.campo-excel {
