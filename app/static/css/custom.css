@@ -359,6 +359,19 @@ a:hover {
   font-weight: 700;
   font-size: 0.95rem;
 }
+.card-header-plegable {
+  cursor: pointer;
+  user-select: none;
+}
+.card-header-plegable .chevron {
+  display: inline-block;
+  color: var(--muted);
+  transition: transform 0.2s ease;
+  margin-right: 0.15rem;
+}
+.card-header-plegable.collapsed .chevron {
+  transform: rotate(-90deg);
+}
 .card-body small {
   display: block;
   text-transform: uppercase;
