@@ -17,8 +17,7 @@
 <div class="filtro-pills mb-3">
   {{ t.pill('Todos', 'todos', filtro_estado, conteo_estados.todos) }}
   {{ t.pill('En proceso', 'en_proceso', filtro_estado, conteo_estados.en_proceso) }}
-  {{ t.pill('Listo para contabilizar', 'listo', filtro_estado, conteo_estados.listo) }}
-  {{ t.pill('Contabilizado', 'contabilizado', filtro_estado, conteo_estados.contabilizado) }}
+  {{ t.pill('Cerrado', 'cerrado', filtro_estado, conteo_estados.cerrado) }}
 </div>
 
 <div class="table-responsive">
@@ -57,19 +56,25 @@
           <span class="badge {{ 'bg-success' if fila.cuadrado else 'bg-danger' }}">{{ 'Cuadrado' if fila.cuadrado else 'Revisar' }}</span>
         </td>
         <td>
-          {% if puede('importaciones', 'editar') %}
+          {% if fila.costeo.estado == 'cerrado' %}
+          <span class="badge bg-success">🔒 Cerrado</span>
+          {% if current_user.es_superadmin %}
+          <form method="post" action="{{ url_for('importaciones.cambiar_estado_costeo', costeo_id=fila.costeo.id) }}" class="d-inline">
+            {{ accion_form.hidden_tag() }}
+            <input type="hidden" name="estado" value="en_proceso">
+            <button type="submit" class="btn btn-link btn-sm p-0 ms-1" title="Reabrir (solo superadmin)" onclick="return confirm('¿Reabrir este costeo y dejarlo en proceso?')">🔓 Reabrir</button>
+          </form>
+          {% endif %}
+          {% elif puede('importaciones', 'editar') %}
           <form method="post" action="{{ url_for('importaciones.cambiar_estado_costeo', costeo_id=fila.costeo.id) }}">
             {{ accion_form.hidden_tag() }}
             <select name="estado" class="form-select form-select-sm" onchange="this.form.submit()">
               <option value="en_proceso" {{ 'selected' if fila.costeo.estado == 'en_proceso' }}>En proceso</option>
-              <option value="listo" {{ 'selected' if fila.costeo.estado == 'listo' }}>Listo para contabilizar</option>
-              <option value="contabilizado" {{ 'selected' if fila.costeo.estado == 'contabilizado' }}>Contabilizado</option>
+              <option value="cerrado">Cerrado</option>
             </select>
           </form>
           {% else %}
-          <span class="badge {{ 'bg-success' if fila.costeo.estado == 'contabilizado' else ('bg-warning text-dark' if fila.costeo.estado == 'listo' else 'bg-secondary') }}">
-            {{ {'en_proceso': 'En proceso', 'listo': 'Listo para contabilizar', 'contabilizado': 'Contabilizado'}[fila.costeo.estado] }}
-          </span>
+          <span class="badge bg-secondary">En proceso</span>
           {% endif %}
         </td>
         <td>

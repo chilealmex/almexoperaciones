@@ -77,7 +77,7 @@ class CosteoImportacionForm(FlaskForm):
     )
     estado = SelectField(
         "Estado",
-        choices=[("en_proceso", "En proceso"), ("listo", "Listo para contabilizar"), ("contabilizado", "Contabilizado")],
+        choices=[("en_proceso", "En proceso"), ("cerrado", "Cerrado")],
         default="en_proceso",
     )
     importacion_id = SelectField("Importación (PEI) vinculada", coerce=int, validators=[Optional()])

@@ -40,14 +40,24 @@
   <span>
     Costeo vinculado:
     {% for c in costeos_vinculados %}
-    <span class="badge {{ 'bg-success' if c.estado == 'contabilizado' else ('bg-warning text-dark' if c.estado == 'listo' else 'bg-secondary') }}">
-      {{ {'en_proceso': 'En proceso', 'listo': 'Listo para contabilizar', 'contabilizado': 'Contabilizado'}[c.estado] }}
+    <span class="badge {{ 'bg-success' if c.estado == 'cerrado' else 'bg-secondary' }}">
+      {{ '🔒 Cerrado' if c.estado == 'cerrado' else 'En proceso' }}
     </span>
     {% endfor %}
   </span>
   <a href="{{ url_for('importaciones.ver_costeo_detallado', costeo_id=costeos_vinculados[0].id) }}" class="btn btn-sm btn-outline-primary">Ver costeo →</a>
 </div>
 {% endif %}
+
+{% set puede_editar = puede('importaciones', 'editar') %}
+<form method="post" action="{{ url_for('importaciones.guardar_cuadratura_completa', importacion_id=importacion.id) }}">
+  {{ accion_form.hidden_tag() }}
+
+  {% if puede_editar %}
+  <div class="mb-4">
+    <button type="submit" class="btn btn-primary">Guardar todo</button>
+  </div>
+  {% endif %}
 
 {% for grupo in grupos %}
 <div class="card mb-4" id="grupo-{{ grupo.tipo }}">
@@ -72,43 +82,40 @@
   </div>
   <div class="collapse" id="colapsar-{{ grupo.tipo }}">
   <div class="card-body">
-    <form method="post" action="{{ url_for('importaciones.guardar_grupo', importacion_id=importacion.id, tipo=grupo.tipo) }}">
-      {{ accion_form.hidden_tag() }}
-
       {% if grupo.tiene_header_compartido or grupo.tiene_cbte or grupo.tiene_din_calc %}
       <div class="row g-2 mb-3">
         {% if grupo.tiene_header_compartido %}
         <div class="col-6 col-md-3">
           <label class="form-label small mb-1">Proveedor</label>
-          <input type="text" name="meta-proveedor" class="form-control form-control-sm" value="{{ grupo.meta.proveedor or '' }}" {{ 'disabled' if not puede('importaciones', 'editar') }}>
+          <input type="text" name="meta-{{ grupo.tipo }}-proveedor" class="form-control form-control-sm" value="{{ grupo.meta.proveedor or '' }}" {{ 'disabled' if not puede_editar }}>
         </div>
         <div class="col-6 col-md-2">
           <label class="form-label small mb-1">Fecha</label>
-          <input type="date" name="meta-fecha" class="form-control form-control-sm" value="{{ grupo.meta.fecha.isoformat() if grupo.meta.fecha else '' }}" {{ 'disabled' if not puede('importaciones', 'editar') }}>
+          <input type="date" name="meta-{{ grupo.tipo }}-fecha" class="form-control form-control-sm" value="{{ grupo.meta.fecha.isoformat() if grupo.meta.fecha else '' }}" {{ 'disabled' if not puede_editar }}>
         </div>
         <div class="col-6 col-md-2">
           <label class="form-label small mb-1">Tipo doc</label>
-          <input type="text" name="meta-tipo_doc" class="form-control form-control-sm" value="{{ grupo.meta.tipo_doc or '' }}" {{ 'disabled' if not puede('importaciones', 'editar') }}>
+          <input type="text" name="meta-{{ grupo.tipo }}-tipo_doc" class="form-control form-control-sm" value="{{ grupo.meta.tipo_doc or '' }}" {{ 'disabled' if not puede_editar }}>
         </div>
         <div class="col-6 col-md-2">
           <label class="form-label small mb-1">N° doc</label>
-          <input type="text" name="meta-n_doc" class="form-control form-control-sm" value="{{ grupo.meta.n_doc or '' }}" {{ 'disabled' if not puede('importaciones', 'editar') }}>
+          <input type="text" name="meta-{{ grupo.tipo }}-n_doc" class="form-control form-control-sm" value="{{ grupo.meta.n_doc or '' }}" {{ 'disabled' if not puede_editar }}>
         </div>
         {% endif %}
         {% if grupo.tiene_cbte %}
         <div class="col-6 col-md-2">
           <label class="form-label small mb-1">N° comprobante</label>
-          <input type="text" name="meta-cbte" class="form-control form-control-sm" placeholder="Ej. 4582" value="{{ grupo.meta.cbte or '' }}" {{ 'disabled' if not puede('importaciones', 'editar') }}>
+          <input type="text" name="meta-{{ grupo.tipo }}-cbte" class="form-control form-control-sm" placeholder="Ej. 4582" value="{{ grupo.meta.cbte or '' }}" {{ 'disabled' if not puede_editar }}>
         </div>
         {% endif %}
         {% if grupo.tiene_din_calc %}
         <div class="col-6 col-md-2">
           <label class="form-label small mb-1">Monto DIN (USD)</label>
-          <input type="text" inputmode="decimal" name="meta-monto_usd" class="form-control form-control-sm" placeholder="Ej. 2859.28" value="{{ grupo.meta.monto_usd or '' }}" {{ 'disabled' if not puede('importaciones', 'editar') }}>
+          <input type="text" inputmode="decimal" name="meta-{{ grupo.tipo }}-monto_usd" class="form-control form-control-sm" placeholder="Ej. 2859.28" value="{{ grupo.meta.monto_usd or '' }}" {{ 'disabled' if not puede_editar }}>
         </div>
         <div class="col-6 col-md-2">
           <label class="form-label small mb-1">Tipo de cambio</label>
-          <input type="text" inputmode="decimal" name="meta-tipo_cambio" class="form-control form-control-sm" value="{{ grupo.meta.tipo_cambio or '' }}" {{ 'disabled' if not puede('importaciones', 'editar') }}>
+          <input type="text" inputmode="decimal" name="meta-{{ grupo.tipo }}-tipo_cambio" class="form-control form-control-sm" value="{{ grupo.meta.tipo_cambio or '' }}" {{ 'disabled' if not puede_editar }}>
         </div>
         {% endif %}
       </div>
@@ -118,22 +125,22 @@
       <div class="row g-2 mb-3 border-top pt-2">
         <div class="col-6 col-md-3">
           <label class="form-label small mb-1">Saldo anterior</label>
-          <input type="text" inputmode="decimal" name="meta-saldo_anterior_monto" class="form-control form-control-sm" placeholder="0" value="{{ grupo.meta.saldo_anterior_monto or '' }}" {{ 'disabled' if not puede('importaciones', 'editar') }}>
+          <input type="text" inputmode="decimal" name="meta-{{ grupo.tipo }}-saldo_anterior_monto" class="form-control form-control-sm" placeholder="0" value="{{ grupo.meta.saldo_anterior_monto or '' }}" {{ 'disabled' if not puede_editar }}>
         </div>
         <div class="col-6 col-md-3">
           <label class="form-label small mb-1">Saldo nuevo</label>
-          <select name="meta-saldo_nuevo_tipo" class="form-select form-select-sm" {{ 'disabled' if not puede('importaciones', 'editar') }}>
+          <select name="meta-{{ grupo.tipo }}-saldo_nuevo_tipo" class="form-select form-select-sm" {{ 'disabled' if not puede_editar }}>
             <option value="a_favor" {{ 'selected' if (grupo.meta.saldo_nuevo_tipo or 'a_favor') == 'a_favor' }}>A favor</option>
             <option value="en_contra" {{ 'selected' if grupo.meta.saldo_nuevo_tipo == 'en_contra' }}>En contra</option>
           </select>
         </div>
         <div class="col-6 col-md-3">
           <label class="form-label small mb-1">Cuenta</label>
-          <input type="text" name="meta-saldo_nuevo_cuenta" class="form-control form-control-sm" value="{{ grupo.meta.saldo_nuevo_cuenta or '' }}" {{ 'disabled' if not puede('importaciones', 'editar') }}>
+          <input type="text" name="meta-{{ grupo.tipo }}-saldo_nuevo_cuenta" class="form-control form-control-sm" value="{{ grupo.meta.saldo_nuevo_cuenta or '' }}" {{ 'disabled' if not puede_editar }}>
         </div>
         <div class="col-6 col-md-3">
           <label class="form-label small mb-1">Monto</label>
-          <input type="text" inputmode="decimal" name="meta-saldo_nuevo_monto" class="form-control form-control-sm" placeholder="0" value="{{ grupo.meta.saldo_nuevo_monto or '' }}" {{ 'disabled' if not puede('importaciones', 'editar') }}>
+          <input type="text" inputmode="decimal" name="meta-{{ grupo.tipo }}-saldo_nuevo_monto" class="form-control form-control-sm" placeholder="0" value="{{ grupo.meta.saldo_nuevo_monto or '' }}" {{ 'disabled' if not puede_editar }}>
         </div>
       </div>
       {% endif %}
@@ -145,7 +152,7 @@
               {% for campo in grupo.columnas %}
               <th class="{{ 'num' if campo in grupo.columnas_numericas }}">{{ grupo.etiquetas_columna[campo] }}</th>
               {% endfor %}
-              {% if puede('importaciones', 'editar') %}<th></th>{% endif %}
+              {% if puede_editar %}<th></th>{% endif %}
             </tr>
           </thead>
           <tbody>
@@ -155,7 +162,7 @@
               {% set valor = linea[campo] %}
               {% set calculado = calculado_de(grupo.tipo, linea.rol, campo) %}
               <td class="{{ 'num' if campo in grupo.columnas_numericas }}">
-                {% if calculado or not puede('importaciones', 'editar') %}
+                {% if calculado or not puede_editar %}
                   {% if campo in grupo.columnas_numericas %}
                     <span class="{{ 'text-decoration-none fw-semibold' if calculado }}">{{ (valor or 0)|clp }}</span>
                   {% elif campo in grupo.columnas_fecha %}
@@ -174,7 +181,7 @@
                 {% endif %}
               </td>
               {% endfor %}
-              {% if puede('importaciones', 'editar') %}
+              {% if puede_editar %}
               <td class="text-end">
                 <button type="submit" formaction="{{ url_for('importaciones.eliminar_linea', linea_id=linea.id) }}" formnovalidate class="btn btn-sm btn-outline-danger" title="Eliminar línea" onclick="return confirm('¿Eliminar esta línea?')">🗑</button>
               </td>
@@ -187,9 +194,8 @@
         </table>
       </div>
 
-      {% if puede('importaciones', 'editar') %}
+      {% if puede_editar %}
       <div class="d-flex gap-2 flex-wrap">
-        <button type="submit" class="btn btn-primary btn-sm">Guardar cambios</button>
         <button type="submit" formaction="{{ url_for('importaciones.agregar_linea', importacion_id=importacion.id, tipo=grupo.tipo) }}" formnovalidate class="btn btn-outline-secondary btn-sm">+ Agregar línea</button>
         <button type="submit" formaction="{{ url_for('importaciones.completar_plantilla', importacion_id=importacion.id, tipo=grupo.tipo) }}" formnovalidate class="btn btn-outline-secondary btn-sm">Completar cuentas de la plantilla</button>
         {% if grupo.tipo == 'costeo' and costeos_vinculados %}
@@ -197,10 +203,16 @@
         {% endif %}
       </div>
       {% endif %}
-    </form>
   </div>
   </div>
 </div>
 {% endfor %}
+
+  {% if puede_editar %}
+  <div class="mb-4">
+    <button type="submit" class="btn btn-primary">Guardar todo</button>
+  </div>
+  {% endif %}
+</form>
 
 {% endblock %}

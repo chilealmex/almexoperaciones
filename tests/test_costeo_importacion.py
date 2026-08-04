@@ -6,6 +6,7 @@ from app.models.importacion import Importacion, ProveedorImportacion
 from app.utils import costeo_importacion_calculo as calculo
 from app.utils import importaciones_calculo as importacion_calculo
 from tests.conftest import login
+from tests.test_permissions import _crear_superadmin
 
 
 def _crear_costeo(db, empresa, **kwargs):
@@ -211,7 +212,7 @@ def test_admin_crea_y_ve_costeo_detallado(client, usuario_admin, empresa, db):
 
 
 def test_lista_de_costeo_se_puede_filtrar_por_columna_y_por_estado(client, usuario_admin, empresa, db):
-    _crear_costeo(db, empresa, n_importacion="10", proveedor="ALMEX CANADA", orden_trabajo="OT-10", estado="listo")
+    _crear_costeo(db, empresa, n_importacion="10", proveedor="ALMEX CANADA", orden_trabajo="OT-10", estado="cerrado")
     _crear_costeo(db, empresa, n_importacion="11", proveedor="DONGGUAN FANGKUN", orden_trabajo="OT-11", estado="en_proceso")
     login(client, "admin@test.cl")
 
@@ -220,7 +221,7 @@ def test_lista_de_costeo_se_puede_filtrar_por_columna_y_por_estado(client, usuar
     assert "DONGGUAN FANGKUN" in texto
     assert "ALMEX CANADA" not in texto
 
-    respuesta = client.get("/importaciones/costeo-detallado", query_string={"filtro": "listo"})
+    respuesta = client.get("/importaciones/costeo-detallado", query_string={"filtro": "cerrado"})
     texto = respuesta.get_data(as_text=True)
     assert "ALMEX CANADA" in texto
     assert "DONGGUAN FANGKUN" not in texto
@@ -429,11 +430,11 @@ def test_cambiar_estado_del_costeo_por_ruta(client, usuario_admin, empresa, db):
 
     client.post(
         f"/importaciones/costeo-detallado/{costeo.id}/estado",
-        data={"estado": "listo"},
+        data={"estado": "cerrado"},
         follow_redirects=True,
     )
     _db.session.refresh(costeo)
-    assert costeo.estado == "listo"
+    assert costeo.estado == "cerrado"
 
 
 def test_cambiar_a_estado_invalido_no_se_aplica(client, usuario_admin, empresa, db):
@@ -450,15 +451,13 @@ def test_cambiar_a_estado_invalido_no_se_aplica(client, usuario_admin, empresa, 
 
 
 def test_dashboard_alerta_costeos_listos_para_contabilizar(client, usuario_admin, empresa, db):
-    from app.models.importacion import Importacion
-
-    costeo = _crear_costeo(db, empresa, n_importacion="73", estado="listo")
+    costeo = _crear_costeo(db, empresa, n_importacion="73", estado="en_proceso")
     db.session.commit()
     login(client, "admin@test.cl")
 
     respuesta = client.get("/importaciones/")
     cuerpo = respuesta.get_data(as_text=True)
-    assert "Listo para contabilizar" in cuerpo
+    assert "listo" in cuerpo.lower() and "cerrar" in cuerpo.lower()
     assert "1" in cuerpo
 
 
@@ -472,7 +471,7 @@ def test_costeo_vinculado_a_una_importacion_se_ve_desde_el_detalle_por_pei(clien
     importaciones_calc.sembrar_lineas_plantilla(importacion)
     db.session.commit()
 
-    costeo = _crear_costeo(db, empresa, n_importacion="74", importacion_id=importacion.id, estado="listo")
+    costeo = _crear_costeo(db, empresa, n_importacion="74", importacion_id=importacion.id, estado="cerrado")
     login(client, "admin@test.cl")
 
     respuesta = client.get(f"/importaciones/detalle/{importacion.id}")
@@ -569,7 +568,7 @@ def test_se_puede_editar_el_cbte_del_ajuste_desde_cuadratura_contable(client, us
     login(client, "admin@test.cl")
     client.post(
         f"/importaciones/detalle/{importacion.id}/grupo/ajuste/guardar",
-        data={"meta-cbte": "4582"},
+        data={"meta-ajuste-cbte": "4582"},
         follow_redirects=True,
     )
     _db.session.refresh(importacion)
@@ -661,3 +660,116 @@ def test_bodega_no_puede_generar_cuadratura_desde_costeo(client, usuario_bodega,
     assert respuesta.status_code == 403
     _db.session.refresh(costeo)
     assert costeo.importacion_id is None
+
+
+# --- Un único botón "Guardar todo" ---------------------------------------
+
+
+def test_pagina_del_costeo_solo_tiene_un_boton_guardar(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    costeo = _crear_costeo(db, empresa, n_importacion="1400")
+    respuesta = client.get(f"/importaciones/costeo-detallado/{costeo.id}")
+    texto = respuesta.get_data(as_text=True)
+    assert "Guardar todo" in texto
+    assert "Guardar datos generales" not in texto
+    assert "Guardar documentos" not in texto
+    assert "Guardar gastos internos" not in texto
+    assert "Guardar productos" not in texto
+
+
+def test_guardar_todo_actualiza_datos_generales_documentos_gastos_y_productos(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    costeo = _crear_costeo(db, empresa, n_importacion="1401")
+    inv1 = costeo.documento_por_rol("inv1")
+    gasto = costeo.gastos_internos[0]
+    db.session.add(CosteoImportacionProducto(costeo=costeo, orden=0, unidad_tc="USD", activo_fijo="NO", tiene_ad_valorem="SI"))
+    db.session.commit()
+    producto = costeo.productos[0]
+
+    respuesta = client.post(
+        f"/importaciones/costeo-detallado/{costeo.id}/guardar",
+        data={
+            "n_importacion": "1401",
+            "proveedor": "ALMEX CANADA",
+            "tasa_ad_valorem": "6",
+            "estado": "en_proceso",
+            "importacion_id": "0",
+            f"doc-{inv1.id}-moneda": "USD",
+            f"doc-{inv1.id}-valor_tc": "900",
+            f"doc-{inv1.id}-valor_total_inv": "1000",
+            f"gasto-{gasto.id}-valor_clp": "$61.199",
+            f"prod-{producto.id}-producto": "Producto A",
+            f"prod-{producto.id}-valor_unitario_tc": "100",
+            f"prod-{producto.id}-cantidad": "2",
+        },
+        follow_redirects=True,
+    )
+    assert respuesta.status_code == 200
+    _db.session.refresh(costeo)
+    assert costeo.proveedor == "ALMEX CANADA"
+    _db.session.refresh(inv1)
+    assert inv1.valor_clp == 900_000
+    _db.session.refresh(gasto)
+    assert gasto.valor_clp == 61199
+    _db.session.refresh(producto)
+    assert producto.producto == "Producto A"
+
+
+# --- Bloqueo del estado Cerrado -------------------------------------------
+
+
+def test_usuario_normal_no_puede_reabrir_un_costeo_cerrado(client, usuario_admin, empresa, db):
+    costeo = _crear_costeo(db, empresa, n_importacion="1410", estado="cerrado")
+    login(client, "admin@test.cl")
+
+    client.post(f"/importaciones/costeo-detallado/{costeo.id}/estado", data={"estado": "en_proceso"}, follow_redirects=True)
+    _db.session.refresh(costeo)
+    assert costeo.estado == "cerrado"
+
+
+def test_superadmin_si_puede_reabrir_un_costeo_cerrado(client, empresa, db):
+    costeo = _crear_costeo(db, empresa, n_importacion="1411", estado="cerrado")
+    superadmin = _crear_superadmin(db, empresa)
+    login(client, superadmin.email)
+
+    client.post(f"/importaciones/costeo-detallado/{costeo.id}/estado", data={"estado": "en_proceso"}, follow_redirects=True)
+    _db.session.refresh(costeo)
+    assert costeo.estado == "en_proceso"
+
+
+def test_usuario_normal_no_puede_modificar_un_costeo_cerrado(client, usuario_admin, empresa, db):
+    costeo = _crear_costeo(db, empresa, n_importacion="1412", estado="cerrado", proveedor="ALMEX CANADA")
+    login(client, "admin@test.cl")
+
+    client.post(
+        f"/importaciones/costeo-detallado/{costeo.id}/guardar",
+        data={
+            "n_importacion": "1412",
+            "proveedor": "OTRO PROVEEDOR",
+            "tasa_ad_valorem": "6",
+            "estado": "cerrado",
+            "importacion_id": "0",
+        },
+        follow_redirects=True,
+    )
+    _db.session.refresh(costeo)
+    assert costeo.proveedor == "ALMEX CANADA"
+
+
+def test_costeo_cerrado_muestra_candado_y_campos_deshabilitados(client, usuario_admin, empresa, db):
+    costeo = _crear_costeo(db, empresa, n_importacion="1413", estado="cerrado")
+    login(client, "admin@test.cl")
+
+    respuesta = client.get(f"/importaciones/costeo-detallado/{costeo.id}")
+    texto = respuesta.get_data(as_text=True)
+    assert "🔒 Cerrado" in texto
+    assert "Guardar todo" not in texto
+
+
+def test_lista_de_costeo_muestra_boton_reabrir_solo_a_superadmin(client, empresa, db):
+    _crear_costeo(db, empresa, n_importacion="1414", estado="cerrado")
+    superadmin = _crear_superadmin(db, empresa)
+    login(client, superadmin.email)
+
+    respuesta = client.get("/importaciones/costeo-detallado")
+    assert "Reabrir" in respuesta.get_data(as_text=True)

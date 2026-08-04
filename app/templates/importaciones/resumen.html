@@ -54,7 +54,8 @@
       <tr>
         <th>Fecha PEI</th><th>PEI</th><th class="d-none d-lg-table-cell">IMP</th><th>Proveedor</th>
         <th class="d-none d-lg-table-cell">N° OC</th><th class="num">Monto guía</th><th>Agencia</th>
-        <th class="num">Saldo</th><th class="d-none d-xl-table-cell">Tratado</th><th>Estado</th><th></th>
+        <th class="num">Saldo</th><th class="d-none d-xl-table-cell">Tratado</th><th>Estado</th>
+        <th class="d-none d-xl-table-cell">Notas</th><th></th>
       </tr>
     </thead>
     <tbody>
@@ -91,6 +92,9 @@
           </form>
           {% endif %}
         </td>
+        <td class="d-none d-xl-table-cell text-truncate" style="max-width: 220px;" title="{{ i.notas or '' }}">
+          {{ i.notas or '—' }}
+        </td>
         <td class="text-end text-nowrap">
           <a href="{{ url_for('importaciones.detalle', importacion_id=i.id) }}" class="btn btn-sm btn-outline-secondary">Detalle</a>
           {% if puede('importaciones', 'editar') %}
@@ -99,7 +103,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="11" class="text-center text-muted">Aún no hay importaciones registradas.</td></tr>
+      <tr><td colspan="12" class="text-center text-muted">Aún no hay importaciones registradas.</td></tr>
       {% endfor %}
     </tbody>
   </table>

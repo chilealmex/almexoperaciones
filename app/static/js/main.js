@@ -132,4 +132,23 @@ document.addEventListener("DOMContentLoaded", function () {
       if (!envoltorio.contains(e.target)) cerrar();
     });
   });
+
+  // Campos de plata en CLP (ej. Gastos internos del Costeo): se muestran
+  // formateados con separador de miles ($1.234). Al enfocarlos se muestran
+  // como número simple para editar cómodo, y se reformatean al salir.
+  function formatearCLP(valor) {
+    var digitos = (valor || "").toString().replace(/[^0-9-]/g, "");
+    if (!digitos) return "";
+    var numero = parseInt(digitos, 10);
+    if (isNaN(numero)) return "";
+    return "$" + numero.toLocaleString("es-CL");
+  }
+  document.querySelectorAll(".campo-clp").forEach(function (campo) {
+    campo.addEventListener("focus", function () {
+      campo.value = campo.value.replace(/[^0-9-]/g, "");
+    });
+    campo.addEventListener("blur", function () {
+      campo.value = formatearCLP(campo.value);
+    });
+  });
 });

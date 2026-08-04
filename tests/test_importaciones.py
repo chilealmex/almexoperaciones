@@ -310,6 +310,47 @@ def test_guardar_grupo_recalcula_y_persiste(client, usuario_admin, empresa, db):
     assert fa_iva.debe == 19_000
 
 
+def test_pagina_de_cuadratura_contable_solo_tiene_un_boton_guardar(client, usuario_admin, empresa, db):
+    importacion = _crear_importacion(db, empresa, pei="90")
+    login(client, "admin@test.cl")
+    respuesta = client.get(f"/importaciones/detalle/{importacion.id}")
+    texto = respuesta.get_data(as_text=True)
+    assert "Guardar todo" in texto
+    assert "Guardar cambios" not in texto
+
+
+def test_guardar_todo_actualiza_meta_de_varios_grupos_sin_pisarse(client, usuario_admin, empresa, db):
+    importacion = _crear_importacion(db, empresa, pei="91")
+    login(client, "admin@test.cl")
+
+    respuesta = client.post(
+        f"/importaciones/detalle/{importacion.id}/guardar",
+        data={
+            "meta-factura_agencia-proveedor": "PROVEEDOR FA",
+            "meta-factura_agencia-cbte": "1001",
+            "meta-din-proveedor": "PROVEEDOR DIN",
+            "meta-din-cbte": "2002",
+            "meta-din-monto_usd": "500",
+            "meta-din-tipo_cambio": "900",
+            "meta-cuadratura-cbte": "3003",
+            "meta-cuadratura_ups_dhl-cbte": "4004",
+            "meta-ajuste-cbte": "5005",
+        },
+        follow_redirects=True,
+    )
+    assert respuesta.status_code == 200
+
+    _db.session.refresh(importacion)
+    assert importacion.meta_de("factura_agencia").proveedor == "PROVEEDOR FA"
+    assert importacion.meta_de("factura_agencia").cbte == "1001"
+    assert importacion.meta_de("din").proveedor == "PROVEEDOR DIN"
+    assert importacion.meta_de("din").cbte == "2002"
+    assert importacion.meta_de("din").monto_usd == 500
+    assert importacion.meta_de("cuadratura").cbte == "3003"
+    assert importacion.meta_de("cuadratura_ups_dhl").cbte == "4004"
+    assert importacion.meta_de("ajuste").cbte == "5005"
+
+
 def test_agregar_y_eliminar_linea_libre(client, usuario_admin, empresa, db):
     importacion = _crear_importacion(db, empresa)
     login(client, "admin@test.cl")
@@ -448,6 +489,13 @@ def test_resumen_muestra_boton_reabrir_solo_a_superadmin(client, empresa, db):
     login(client, superadmin.email)
     respuesta = client.get("/importaciones/resumen")
     assert "Reabrir" in respuesta.get_data(as_text=True)
+
+
+def test_resumen_muestra_las_notas(client, usuario_admin, empresa, db):
+    _crear_importacion(db, empresa, pei="25", notas="Falta factura de agencia")
+    login(client, "admin@test.cl")
+    respuesta = client.get("/importaciones/resumen")
+    assert "Falta factura de agencia" in respuesta.get_data(as_text=True)
 
 
 def test_secciones_de_cuadratura_contable_aparecen_plegadas_por_defecto(client, usuario_admin, empresa, db):

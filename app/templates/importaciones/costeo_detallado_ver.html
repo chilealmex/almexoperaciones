@@ -2,6 +2,7 @@
 {% import "partials/_proveedor_selector.html" as prov %}
 {% block title %}Costeo {{ costeo.n_importacion or costeo.id }}{% endblock %}
 {% block content %}
+{% set puede_editar = puede('importaciones', 'editar') and (costeo.estado != 'cerrado' or current_user.es_superadmin) %}
 
 <div class="page-head">
   <div>
@@ -16,16 +17,26 @@
 
 <div class="row g-2 align-items-center mb-4">
   <div class="col-auto">
-    {% if puede('importaciones', 'editar') %}
+    {% if costeo.estado == 'cerrado' %}
+    <span class="badge bg-success">🔒 Cerrado</span>
+    {% if current_user.es_superadmin %}
+    <form method="post" action="{{ url_for('importaciones.cambiar_estado_costeo', costeo_id=costeo.id) }}" class="d-inline">
+      {{ accion_form.hidden_tag() }}
+      <input type="hidden" name="estado" value="en_proceso">
+      <button type="submit" class="btn btn-link btn-sm p-0 ms-1" title="Reabrir (solo superadmin)" onclick="return confirm('¿Reabrir este costeo y dejarlo en proceso?')">🔓 Reabrir</button>
+    </form>
+    {% endif %}
+    {% elif puede('importaciones', 'editar') %}
     <form method="post" action="{{ url_for('importaciones.cambiar_estado_costeo', costeo_id=costeo.id) }}" class="d-flex align-items-center gap-2">
       {{ accion_form.hidden_tag() }}
       <label class="small text-muted mb-0">Estado</label>
       <select name="estado" class="form-select form-select-sm" onchange="this.form.submit()">
-        <option value="en_proceso" {{ 'selected' if costeo.estado == 'en_proceso' }}>En proceso</option>
-        <option value="listo" {{ 'selected' if costeo.estado == 'listo' }}>Listo para contabilizar</option>
-        <option value="contabilizado" {{ 'selected' if costeo.estado == 'contabilizado' }}>Contabilizado</option>
+        <option value="en_proceso" selected>En proceso</option>
+        <option value="cerrado">Cerrado</option>
       </select>
     </form>
+    {% else %}
+    <span class="badge bg-secondary">En proceso</span>
     {% endif %}
   </div>
   {% if costeo.importacion %}
@@ -34,7 +45,7 @@
       Ver detalle contable de PEI {{ costeo.importacion.pei or costeo.importacion.id }} →
     </a>
   </div>
-  {% elif puede('importaciones', 'editar') %}
+  {% elif puede_editar %}
   <div class="col-auto">
     <form method="post" action="{{ url_for('importaciones.generar_cuadratura_desde_costeo', costeo_id=costeo.id) }}">
       {{ accion_form.hidden_tag() }}
@@ -63,9 +74,14 @@
   </div>
 </div>
 
-{% set puede_editar = puede('importaciones', 'editar') %}
-<form method="post" action="{{ url_for('importaciones.editar_costeo_detallado', costeo_id=costeo.id) }}">
+<form method="post" action="{{ url_for('importaciones.guardar_costeo_completo', costeo_id=costeo.id) }}">
   {{ datos_form.hidden_tag() }}
+
+  {% if puede_editar %}
+  <div class="mb-4">
+    <button type="submit" class="btn btn-primary">Guardar todo</button>
+  </div>
+  {% endif %}
 
   {# ===================== DATOS GENERALES ===================== #}
   <div class="card mb-4" id="datos-generales">
@@ -130,22 +146,13 @@
     </div>
   </div>
 
-  {% if puede_editar %}
-  <div class="mb-4">
-    <button type="submit" class="btn btn-primary btn-sm">Guardar datos generales</button>
-  </div>
-  {% endif %}
-</form>
-
-{# ===================== DOCUMENTOS ===================== #}
-<div class="card mb-4" id="documentos">
-  <div class="card-header costeo-card-header card-header-plegable" data-bs-toggle="collapse" data-bs-target="#colapsar-documentos" role="button" aria-expanded="true" aria-controls="colapsar-documentos">
-    <span class="chevron">▾</span> Documentos (Invoice, Seguro, Flete, Crating)
-  </div>
-  <div class="collapse show" id="colapsar-documentos">
-  <div class="card-body">
-    <form method="post" action="{{ url_for('importaciones.guardar_documentos_costeo', costeo_id=costeo.id) }}">
-      {{ accion_form.hidden_tag() }}
+  {# ===================== DOCUMENTOS ===================== #}
+  <div class="card mb-4" id="documentos">
+    <div class="card-header costeo-card-header card-header-plegable" data-bs-toggle="collapse" data-bs-target="#colapsar-documentos" role="button" aria-expanded="true" aria-controls="colapsar-documentos">
+      <span class="chevron">▾</span> Documentos (Invoice, Seguro, Flete, Crating)
+    </div>
+    <div class="collapse show" id="colapsar-documentos">
+    <div class="card-body">
       <div class="table-responsive">
         <table class="table table-sm align-middle mb-2">
           <thead>
@@ -161,15 +168,15 @@
             <tr>
               <td class="fw-semibold">{{ plantilla.etiqueta }}</td>
               <td>
-                <select name="doc-{{ doc.id }}-moneda" class="form-select form-select-sm campo-excel" {{ 'disabled' if not puede('importaciones', 'editar') }}>
+                <select name="doc-{{ doc.id }}-moneda" class="form-select form-select-sm campo-excel" {{ 'disabled' if not puede_editar }}>
                   <option value="USD" {{ 'selected' if doc.moneda == 'USD' }}>USD</option>
                   <option value="EUR" {{ 'selected' if doc.moneda == 'EUR' }}>EUR</option>
                   <option value="CLP" {{ 'selected' if doc.moneda == 'CLP' }}>CLP</option>
                 </select>
               </td>
-              <td><input type="text" name="doc-{{ doc.id }}-nro_doc" class="form-control form-control-sm campo-excel" value="{{ doc.nro_doc or '' }}" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
-              <td class="num"><input type="text" inputmode="decimal" name="doc-{{ doc.id }}-valor_tc" class="form-control form-control-sm text-end campo-excel" value="{{ doc.valor_tc if doc.valor_tc is not none else '' }}" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
-              <td class="num"><input type="text" inputmode="decimal" name="doc-{{ doc.id }}-valor_total_inv" class="form-control form-control-sm text-end campo-excel" value="{{ doc.valor_total_inv if doc.valor_total_inv is not none else '' }}" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
+              <td><input type="text" name="doc-{{ doc.id }}-nro_doc" class="form-control form-control-sm campo-excel" value="{{ doc.nro_doc or '' }}" {{ 'disabled' if not puede_editar }}></td>
+              <td class="num"><input type="text" inputmode="decimal" name="doc-{{ doc.id }}-valor_tc" class="form-control form-control-sm text-end campo-excel" value="{{ doc.valor_tc if doc.valor_tc is not none else '' }}" {{ 'disabled' if not puede_editar }}></td>
+              <td class="num"><input type="text" inputmode="decimal" name="doc-{{ doc.id }}-valor_total_inv" class="form-control form-control-sm text-end campo-excel" value="{{ doc.valor_total_inv if doc.valor_total_inv is not none else '' }}" {{ 'disabled' if not puede_editar }}></td>
               <td class="num">{{ (doc.valor_clp or 0)|clp }}</td>
             </tr>
             {% endif %}
@@ -183,23 +190,17 @@
           </tfoot>
         </table>
       </div>
-      {% if puede('importaciones', 'editar') %}
-      <button type="submit" class="btn btn-primary btn-sm">Guardar documentos</button>
-      {% endif %}
-    </form>
+    </div>
+    </div>
   </div>
-  </div>
-</div>
 
-{# ===================== GASTOS INTERNOS ===================== #}
-<div class="card mb-4" id="gastos">
-  <div class="card-header costeo-card-header card-header-plegable" data-bs-toggle="collapse" data-bs-target="#colapsar-gastos" role="button" aria-expanded="true" aria-controls="colapsar-gastos">
-    <span class="chevron">▾</span> Gastos internos nacionales
-  </div>
-  <div class="collapse show" id="colapsar-gastos">
-  <div class="card-body">
-    <form method="post" action="{{ url_for('importaciones.guardar_gastos_costeo', costeo_id=costeo.id) }}">
-      {{ accion_form.hidden_tag() }}
+  {# ===================== GASTOS INTERNOS ===================== #}
+  <div class="card mb-4" id="gastos">
+    <div class="card-header costeo-card-header card-header-plegable" data-bs-toggle="collapse" data-bs-target="#colapsar-gastos" role="button" aria-expanded="true" aria-controls="colapsar-gastos">
+      <span class="chevron">▾</span> Gastos internos nacionales
+    </div>
+    <div class="collapse show" id="colapsar-gastos">
+    <div class="card-body">
       <div class="table-responsive">
         <table class="table table-sm align-middle mb-2">
           <thead><tr><th>Gasto</th><th>N° doc</th><th class="num">Valor CLP</th></tr></thead>
@@ -209,8 +210,8 @@
             {% if gasto %}
             <tr>
               <td class="fw-semibold">{{ plantilla.etiqueta }}</td>
-              <td><input type="text" name="gasto-{{ gasto.id }}-nro_doc" class="form-control form-control-sm campo-excel" value="{{ gasto.nro_doc or '' }}" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
-              <td class="num"><input type="text" inputmode="decimal" name="gasto-{{ gasto.id }}-valor_clp" class="form-control form-control-sm text-end campo-excel" value="{{ gasto.valor_clp or 0 }}" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
+              <td><input type="text" name="gasto-{{ gasto.id }}-nro_doc" class="form-control form-control-sm campo-excel" value="{{ gasto.nro_doc or '' }}" {{ 'disabled' if not puede_editar }}></td>
+              <td class="num"><input type="text" inputmode="decimal" name="gasto-{{ gasto.id }}-valor_clp" class="form-control form-control-sm text-end campo-excel campo-clp" value="{{ (gasto.valor_clp or 0)|clp }}" {{ 'disabled' if not puede_editar }}></td>
             </tr>
             {% endif %}
             {% endfor %}
@@ -223,23 +224,17 @@
           </tfoot>
         </table>
       </div>
-      {% if puede('importaciones', 'editar') %}
-      <button type="submit" class="btn btn-primary btn-sm">Guardar gastos internos</button>
-      {% endif %}
-    </form>
+    </div>
+    </div>
   </div>
-  </div>
-</div>
 
-{# ===================== PRODUCTOS ===================== #}
-<div class="card mb-4" id="productos">
-  <div class="card-header costeo-card-header card-header-plegable" data-bs-toggle="collapse" data-bs-target="#colapsar-productos" role="button" aria-expanded="true" aria-controls="colapsar-productos">
-    <span class="chevron">▾</span> Productos — prorrateo de costos
-  </div>
-  <div class="collapse show" id="colapsar-productos">
-  <div class="card-body">
-    <form method="post" action="{{ url_for('importaciones.guardar_productos_costeo', costeo_id=costeo.id) }}">
-      {{ accion_form.hidden_tag() }}
+  {# ===================== PRODUCTOS ===================== #}
+  <div class="card mb-4" id="productos">
+    <div class="card-header costeo-card-header card-header-plegable" data-bs-toggle="collapse" data-bs-target="#colapsar-productos" role="button" aria-expanded="true" aria-controls="colapsar-productos">
+      <span class="chevron">▾</span> Productos — prorrateo de costos
+    </div>
+    <div class="collapse show" id="colapsar-productos">
+    <div class="card-body">
       <div class="table-responsive">
         <table class="table table-sm align-middle mb-2">
           <thead>
@@ -253,30 +248,30 @@
               <th class="num">Costo total</th>
               <th class="num">Costo unit. final</th>
               <th class="num d-none d-lg-table-cell">Impacto %</th>
-              {% if puede('importaciones', 'editar') %}<th></th>{% endif %}
+              {% if puede_editar %}<th></th>{% endif %}
             </tr>
           </thead>
           <tbody>
             {% for p in costeo.productos %}
             <tr>
-              <td><input type="text" name="prod-{{ p.id }}-producto" class="form-control form-control-sm campo-excel" value="{{ p.producto or '' }}" style="min-width:220px;" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
-              <td><input type="text" name="prod-{{ p.id }}-codigo" class="form-control form-control-sm campo-excel" value="{{ p.codigo or '' }}" style="min-width:110px;" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
-              <td class="num"><input type="text" inputmode="decimal" name="prod-{{ p.id }}-valor_unitario_tc" class="form-control form-control-sm text-end campo-excel" value="{{ p.valor_unitario_tc }}" style="min-width:90px;" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
-              <td class="num"><input type="text" inputmode="decimal" name="prod-{{ p.id }}-cantidad" class="form-control form-control-sm text-end campo-excel" value="{{ p.cantidad }}" style="min-width:80px;" {{ 'disabled' if not puede('importaciones', 'editar') }}></td>
+              <td><input type="text" name="prod-{{ p.id }}-producto" class="form-control form-control-sm campo-excel" value="{{ p.producto or '' }}" style="min-width:220px;" {{ 'disabled' if not puede_editar }}></td>
+              <td><input type="text" name="prod-{{ p.id }}-codigo" class="form-control form-control-sm campo-excel" value="{{ p.codigo or '' }}" style="min-width:110px;" {{ 'disabled' if not puede_editar }}></td>
+              <td class="num"><input type="text" inputmode="decimal" name="prod-{{ p.id }}-valor_unitario_tc" class="form-control form-control-sm text-end campo-excel" value="{{ p.valor_unitario_tc }}" style="min-width:90px;" {{ 'disabled' if not puede_editar }}></td>
+              <td class="num"><input type="text" inputmode="decimal" name="prod-{{ p.id }}-cantidad" class="form-control form-control-sm text-end campo-excel" value="{{ p.cantidad }}" style="min-width:80px;" {{ 'disabled' if not puede_editar }}></td>
               <td>
-                <select name="prod-{{ p.id }}-unidad_tc" class="form-select form-select-sm campo-excel" style="min-width:80px;" {{ 'disabled' if not puede('importaciones', 'editar') }}>
+                <select name="prod-{{ p.id }}-unidad_tc" class="form-select form-select-sm campo-excel" style="min-width:80px;" {{ 'disabled' if not puede_editar }}>
                   <option value="USD" {{ 'selected' if p.unidad_tc == 'USD' }}>USD</option>
                   <option value="EUR" {{ 'selected' if p.unidad_tc == 'EUR' }}>EUR</option>
                 </select>
               </td>
               <td>
-                <select name="prod-{{ p.id }}-activo_fijo" class="form-select form-select-sm campo-excel" {{ 'disabled' if not puede('importaciones', 'editar') }}>
+                <select name="prod-{{ p.id }}-activo_fijo" class="form-select form-select-sm campo-excel" {{ 'disabled' if not puede_editar }}>
                   <option value="NO" {{ 'selected' if p.activo_fijo == 'NO' }}>No</option>
                   <option value="SI" {{ 'selected' if p.activo_fijo == 'SI' }}>Sí</option>
                 </select>
               </td>
               <td>
-                <select name="prod-{{ p.id }}-tiene_ad_valorem" class="form-select form-select-sm campo-excel" {{ 'disabled' if not puede('importaciones', 'editar') }}>
+                <select name="prod-{{ p.id }}-tiene_ad_valorem" class="form-select form-select-sm campo-excel" {{ 'disabled' if not puede_editar }}>
                   <option value="SI" {{ 'selected' if p.tiene_ad_valorem == 'SI' }}>Sí</option>
                   <option value="NO" {{ 'selected' if p.tiene_ad_valorem == 'NO' }}>No</option>
                 </select>
@@ -288,7 +283,7 @@
               <td class="num fw-semibold">{{ p.costo_total_clp|clp }}</td>
               <td class="num fw-semibold">{{ p.costo_unitario_final_clp|clp }}</td>
               <td class="num d-none d-lg-table-cell">{{ '%+.1f%%'|format(p.impacto_pct * 100) }}</td>
-              {% if puede('importaciones', 'editar') %}
+              {% if puede_editar %}
               <td class="text-end">
                 <button type="submit" formaction="{{ url_for('importaciones.eliminar_producto_costeo', producto_id=p.id) }}" formnovalidate class="btn btn-sm btn-outline-danger" onclick="return confirm('¿Eliminar este producto?')" title="Eliminar">🗑</button>
               </td>
@@ -300,18 +295,23 @@
           </tbody>
         </table>
       </div>
-      {% if puede('importaciones', 'editar') %}
+      {% if puede_editar %}
       <div class="d-flex gap-2 flex-wrap">
-        <button type="submit" class="btn btn-primary btn-sm">Guardar productos</button>
         <button type="submit" formaction="{{ url_for('importaciones.agregar_producto_costeo', costeo_id=costeo.id) }}" formnovalidate class="btn btn-outline-secondary btn-sm">+ Agregar producto</button>
       </div>
       {% endif %}
-    </form>
+    </div>
+    </div>
   </div>
-  </div>
-</div>
 
-{% if puede('importaciones', 'editar') %}
+  {% if puede_editar %}
+  <div class="mb-4">
+    <button type="submit" class="btn btn-primary">Guardar todo</button>
+  </div>
+  {% endif %}
+</form>
+
+{% if puede_editar %}
 <form method="post" action="{{ url_for('importaciones.eliminar_costeo_detallado', costeo_id=costeo.id) }}" onsubmit="return confirm('¿Eliminar este costeo completo?')">
   {{ accion_form.hidden_tag() }}
   <button type="submit" class="btn btn-outline-danger btn-sm">Eliminar este costeo</button>

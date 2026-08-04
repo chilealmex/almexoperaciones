@@ -61,6 +61,17 @@ def _parse_float(valor):
         return 0.0
 
 
+def _parse_clp_formateado(valor):
+    """Convierte un CLP mostrado como '$1.234' (separador de miles) a entero."""
+    if valor in (None, ""):
+        return 0
+    texto = str(valor).replace("$", "").replace(" ", "").replace(".", "").strip()
+    try:
+        return int(texto)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _parse_date(valor):
     if not valor:
         return None
@@ -181,11 +192,12 @@ def dashboard():
         {"etiqueta": nombre, "valor": valor, "texto": format_clp(valor)} for nombre, valor in top_proveedores
     ]
 
-    costeos_listos = (
-        CosteoImportacion.query.filter_by(empresa_id=_empresa_id(), estado="listo")
+    en_proceso = (
+        CosteoImportacion.query.filter_by(empresa_id=_empresa_id(), estado="en_proceso")
         .order_by(CosteoImportacion.fecha_llegada.desc().nullslast())
         .all()
     )
+    costeos_listos = [c for c in en_proceso if abs(costeo_calculo.diferencia_cuadratura(c)) < 0.01]
 
     return render_template(
         "importaciones/dashboard.html",
@@ -411,34 +423,26 @@ def _asignar_campo_linea(linea, campo, valor):
 
 
 def _actualizar_meta_grupo(meta, tipo, formulario):
+    prefijo = f"meta-{tipo}-"
     if tipo in calculo.TIENE_CBTE:
-        meta.cbte = (formulario.get("meta-cbte") or "").strip() or None
+        meta.cbte = (formulario.get(prefijo + "cbte") or "").strip() or None
     if tipo in calculo.TIENE_SALDO_BOX:
-        meta.saldo_anterior_monto = _parse_int(formulario.get("meta-saldo_anterior_monto"))
-        tipo_nuevo = formulario.get("meta-saldo_nuevo_tipo")
+        meta.saldo_anterior_monto = _parse_int(formulario.get(prefijo + "saldo_anterior_monto"))
+        tipo_nuevo = formulario.get(prefijo + "saldo_nuevo_tipo")
         meta.saldo_nuevo_tipo = tipo_nuevo if tipo_nuevo in ("a_favor", "en_contra") else "a_favor"
-        meta.saldo_nuevo_cuenta = (formulario.get("meta-saldo_nuevo_cuenta") or "").strip() or None
-        meta.saldo_nuevo_monto = _parse_int(formulario.get("meta-saldo_nuevo_monto"))
+        meta.saldo_nuevo_cuenta = (formulario.get(prefijo + "saldo_nuevo_cuenta") or "").strip() or None
+        meta.saldo_nuevo_monto = _parse_int(formulario.get(prefijo + "saldo_nuevo_monto"))
     if tipo in calculo.TIENE_DIN_CALC:
-        meta.monto_usd = _parse_float(formulario.get("meta-monto_usd"))
-        meta.tipo_cambio = _parse_float(formulario.get("meta-tipo_cambio"))
+        meta.monto_usd = _parse_float(formulario.get(prefijo + "monto_usd"))
+        meta.tipo_cambio = _parse_float(formulario.get(prefijo + "tipo_cambio"))
     if tipo in calculo.TIENE_HEADER_COMPARTIDO:
-        meta.proveedor = (formulario.get("meta-proveedor") or "").strip() or None
-        meta.fecha = _parse_date(formulario.get("meta-fecha"))
-        meta.tipo_doc = (formulario.get("meta-tipo_doc") or "").strip() or None
-        meta.n_doc = (formulario.get("meta-n_doc") or "").strip() or None
+        meta.proveedor = (formulario.get(prefijo + "proveedor") or "").strip() or None
+        meta.fecha = _parse_date(formulario.get(prefijo + "fecha"))
+        meta.tipo_doc = (formulario.get(prefijo + "tipo_doc") or "").strip() or None
+        meta.n_doc = (formulario.get(prefijo + "n_doc") or "").strip() or None
 
 
-@bp.route("/detalle/<int:importacion_id>/grupo/<tipo>/guardar", methods=["POST"])
-@require_permission("importaciones", "editar")
-def guardar_grupo(importacion_id, tipo):
-    importacion = _get_importacion_or_404(importacion_id)
-    if tipo not in calculo.TIPOS_ASIENTO:
-        abort(404)
-    form = AccionForm()
-    if not form.validate_on_submit():
-        abort(400)
-
+def _guardar_campos_grupo(importacion, tipo):
     for linea in importacion.lineas_de(tipo):
         for campo in calculo.COLUMNAS_TIPO[tipo]:
             if calculo.es_campo_calculado(tipo, linea.rol, campo):
@@ -451,6 +455,32 @@ def guardar_grupo(importacion_id, tipo):
     if meta is not None:
         _actualizar_meta_grupo(meta, tipo, request.form)
 
+
+@bp.route("/detalle/<int:importacion_id>/guardar", methods=["POST"])
+@require_permission("importaciones", "editar")
+def guardar_cuadratura_completa(importacion_id):
+    importacion = _get_importacion_or_404(importacion_id)
+    form = AccionForm()
+    if not form.validate_on_submit():
+        abort(400)
+    for tipo in calculo.TIPOS_ASIENTO:
+        _guardar_campos_grupo(importacion, tipo)
+    calculo.recalcular(importacion)
+    db.session.commit()
+    flash("Cuadratura contable guardada correctamente.", "success")
+    return redirect(url_for("importaciones.detalle", importacion_id=importacion.id))
+
+
+@bp.route("/detalle/<int:importacion_id>/grupo/<tipo>/guardar", methods=["POST"])
+@require_permission("importaciones", "editar")
+def guardar_grupo(importacion_id, tipo):
+    importacion = _get_importacion_or_404(importacion_id)
+    if tipo not in calculo.TIPOS_ASIENTO:
+        abort(404)
+    form = AccionForm()
+    if not form.validate_on_submit():
+        abort(400)
+    _guardar_campos_grupo(importacion, tipo)
     calculo.recalcular(importacion)
     db.session.commit()
     flash("Cambios guardados.", "success")
@@ -817,6 +847,11 @@ def _get_costeo_or_404(costeo_id):
     return costeo
 
 
+def _costeo_bloqueado(costeo):
+    """Un costeo Cerrado solo lo puede modificar un superadmin."""
+    return costeo.estado == "cerrado" and not current_user.es_superadmin
+
+
 def _opciones_importacion_para_costeo():
     lista = _query_base().order_by(Importacion.fecha_pei.desc().nullslast()).all()
     return [(0, "— Sin vincular —")] + [
@@ -871,7 +906,7 @@ COLUMNAS_ORDEN_COSTEO = {
     "proveedor": CosteoImportacion.proveedor,
 }
 
-ESTADOS_COSTEO_FILTRO = ("todos", "en_proceso", "listo", "contabilizado")
+ESTADOS_COSTEO_FILTRO = ("todos", "en_proceso", "cerrado")
 
 
 def _filtros_de_columna(query, args, columnas):
@@ -918,8 +953,7 @@ def costeo_detallado_lista():
     conteo_estados = {
         "todos": len(todos),
         "en_proceso": sum(1 for c in todos if c.estado == "en_proceso"),
-        "listo": sum(1 for c in todos if c.estado == "listo"),
-        "contabilizado": sum(1 for c in todos if c.estado == "contabilizado"),
+        "cerrado": sum(1 for c in todos if c.estado == "cerrado"),
     }
 
     resumen = []
@@ -974,7 +1008,7 @@ def editar_costeo_detallado(costeo_id):
     if request.method == "GET":
         form.tasa_ad_valorem.data = (costeo.tasa_ad_valorem or 0) * 100
         form.importacion_id.data = costeo.importacion_id or 0
-    if form.validate_on_submit():
+    if form.validate_on_submit() and not _costeo_bloqueado(costeo):
         _poblar_costeo_desde_form(costeo, form)
         costeo_calculo.recalcular(costeo)
         _sincronizar_importacion_vinculada(costeo)
@@ -993,6 +1027,9 @@ def generar_cuadratura_desde_costeo(costeo_id):
     form = AccionForm()
     if not form.validate_on_submit():
         abort(400)
+    if _costeo_bloqueado(costeo):
+        flash("Este costeo está cerrado. Solo un superadmin puede modificarlo.", "warning")
+        return redirect(url_for("importaciones.ver_costeo_detallado", costeo_id=costeo.id))
     if costeo.importacion_id:
         flash("Este costeo ya tiene una Cuadratura contable vinculada.", "warning")
         return redirect(url_for("importaciones.ver_costeo_detallado", costeo_id=costeo.id))
@@ -1016,8 +1053,11 @@ def cambiar_estado_costeo(costeo_id):
     form = AccionForm()
     if not form.validate_on_submit():
         abort(400)
+    if costeo.estado == "cerrado" and not current_user.es_superadmin:
+        flash("Este costeo está cerrado. Solo un superadmin puede reabrirlo.", "warning")
+        return redirect(request.referrer or url_for("importaciones.costeo_detallado_lista"))
     nuevo_estado = request.form.get("estado", "")
-    if nuevo_estado in ("en_proceso", "listo", "contabilizado"):
+    if nuevo_estado in ("en_proceso", "cerrado"):
         costeo.estado = nuevo_estado
         db.session.commit()
     return redirect(request.referrer or url_for("importaciones.costeo_detallado_lista"))
@@ -1030,6 +1070,9 @@ def eliminar_costeo_detallado(costeo_id):
     form = AccionForm()
     if not form.validate_on_submit():
         abort(400)
+    if _costeo_bloqueado(costeo):
+        flash("Este costeo está cerrado. Solo un superadmin puede eliminarlo.", "warning")
+        return redirect(url_for("importaciones.ver_costeo_detallado", costeo_id=costeo.id))
     db.session.delete(costeo)
     db.session.commit()
     flash("Costeo eliminado.", "success")
@@ -1063,13 +1106,7 @@ def ver_costeo_detallado(costeo_id):
     )
 
 
-@bp.route("/costeo-detallado/<int:costeo_id>/documentos/guardar", methods=["POST"])
-@require_permission("importaciones", "editar")
-def guardar_documentos_costeo(costeo_id):
-    costeo = _get_costeo_or_404(costeo_id)
-    form = AccionForm()
-    if not form.validate_on_submit():
-        abort(400)
+def _guardar_campos_documentos(costeo):
     for plantilla in costeo_calculo.DOCUMENTO_ROLES:
         doc = costeo.documento_por_rol(plantilla["rol"])
         if not doc:
@@ -1079,6 +1116,62 @@ def guardar_documentos_costeo(costeo_id):
         doc.nro_doc = (request.form.get(prefijo + "nro_doc") or "").strip() or None
         doc.valor_tc = _parse_float(request.form.get(prefijo + "valor_tc"))
         doc.valor_total_inv = _parse_float(request.form.get(prefijo + "valor_total_inv"))
+
+
+def _guardar_campos_gastos(costeo):
+    for gasto in costeo.gastos_internos:
+        prefijo = f"gasto-{gasto.id}-"
+        gasto.nro_doc = (request.form.get(prefijo + "nro_doc") or "").strip() or None
+        gasto.valor_clp = _parse_clp_formateado(request.form.get(prefijo + "valor_clp"))
+
+
+def _guardar_campos_productos(costeo):
+    for producto in costeo.productos:
+        prefijo = f"prod-{producto.id}-"
+        if prefijo + "producto" not in request.form:
+            continue
+        producto.producto = (request.form.get(prefijo + "producto") or "").strip() or None
+        producto.codigo = (request.form.get(prefijo + "codigo") or "").strip() or None
+        producto.valor_unitario_tc = _parse_float(request.form.get(prefijo + "valor_unitario_tc"))
+        producto.cantidad = _parse_float(request.form.get(prefijo + "cantidad"))
+        producto.unidad_tc = request.form.get(prefijo + "unidad_tc") or "USD"
+        producto.activo_fijo = request.form.get(prefijo + "activo_fijo") or "NO"
+        producto.tiene_ad_valorem = request.form.get(prefijo + "tiene_ad_valorem") or "NO"
+
+
+@bp.route("/costeo-detallado/<int:costeo_id>/guardar", methods=["POST"])
+@require_permission("importaciones", "editar")
+def guardar_costeo_completo(costeo_id):
+    costeo = _get_costeo_or_404(costeo_id)
+    form = CosteoImportacionForm(obj=costeo)
+    form.importacion_id.choices = _opciones_importacion_para_costeo()
+    if not form.validate_on_submit():
+        abort(400)
+    if _costeo_bloqueado(costeo):
+        flash("Este costeo está cerrado. Solo un superadmin puede modificarlo.", "warning")
+        return redirect(url_for("importaciones.ver_costeo_detallado", costeo_id=costeo.id))
+    _poblar_costeo_desde_form(costeo, form)
+    _guardar_campos_documentos(costeo)
+    _guardar_campos_gastos(costeo)
+    _guardar_campos_productos(costeo)
+    costeo_calculo.recalcular(costeo)
+    _sincronizar_importacion_vinculada(costeo)
+    db.session.commit()
+    flash("Costeo guardado correctamente.", "success")
+    return redirect(url_for("importaciones.ver_costeo_detallado", costeo_id=costeo.id))
+
+
+@bp.route("/costeo-detallado/<int:costeo_id>/documentos/guardar", methods=["POST"])
+@require_permission("importaciones", "editar")
+def guardar_documentos_costeo(costeo_id):
+    costeo = _get_costeo_or_404(costeo_id)
+    form = AccionForm()
+    if not form.validate_on_submit():
+        abort(400)
+    if _costeo_bloqueado(costeo):
+        flash("Este costeo está cerrado. Solo un superadmin puede modificarlo.", "warning")
+        return redirect(url_for("importaciones.ver_costeo_detallado", costeo_id=costeo.id))
+    _guardar_campos_documentos(costeo)
     costeo_calculo.recalcular(costeo)
     db.session.commit()
     flash("Documentos guardados.", "success")
@@ -1092,10 +1185,10 @@ def guardar_gastos_costeo(costeo_id):
     form = AccionForm()
     if not form.validate_on_submit():
         abort(400)
-    for gasto in costeo.gastos_internos:
-        prefijo = f"gasto-{gasto.id}-"
-        gasto.nro_doc = (request.form.get(prefijo + "nro_doc") or "").strip() or None
-        gasto.valor_clp = _parse_int(request.form.get(prefijo + "valor_clp"))
+    if _costeo_bloqueado(costeo):
+        flash("Este costeo está cerrado. Solo un superadmin puede modificarlo.", "warning")
+        return redirect(url_for("importaciones.ver_costeo_detallado", costeo_id=costeo.id))
+    _guardar_campos_gastos(costeo)
     costeo_calculo.recalcular(costeo)
     db.session.commit()
     flash("Gastos internos guardados.", "success")
@@ -1109,17 +1202,10 @@ def guardar_productos_costeo(costeo_id):
     form = AccionForm()
     if not form.validate_on_submit():
         abort(400)
-    for producto in costeo.productos:
-        prefijo = f"prod-{producto.id}-"
-        if prefijo + "producto" not in request.form:
-            continue
-        producto.producto = (request.form.get(prefijo + "producto") or "").strip() or None
-        producto.codigo = (request.form.get(prefijo + "codigo") or "").strip() or None
-        producto.valor_unitario_tc = _parse_float(request.form.get(prefijo + "valor_unitario_tc"))
-        producto.cantidad = _parse_float(request.form.get(prefijo + "cantidad"))
-        producto.unidad_tc = request.form.get(prefijo + "unidad_tc") or "USD"
-        producto.activo_fijo = request.form.get(prefijo + "activo_fijo") or "NO"
-        producto.tiene_ad_valorem = request.form.get(prefijo + "tiene_ad_valorem") or "NO"
+    if _costeo_bloqueado(costeo):
+        flash("Este costeo está cerrado. Solo un superadmin puede modificarlo.", "warning")
+        return redirect(url_for("importaciones.ver_costeo_detallado", costeo_id=costeo.id))
+    _guardar_campos_productos(costeo)
     costeo_calculo.recalcular(costeo)
     db.session.commit()
     flash("Productos guardados.", "success")
@@ -1133,6 +1219,9 @@ def agregar_producto_costeo(costeo_id):
     form = AccionForm()
     if not form.validate_on_submit():
         abort(400)
+    if _costeo_bloqueado(costeo):
+        flash("Este costeo está cerrado. Solo un superadmin puede modificarlo.", "warning")
+        return redirect(url_for("importaciones.ver_costeo_detallado", costeo_id=costeo.id))
     orden = len(costeo.productos)
     db.session.add(
         CosteoImportacionProducto(
@@ -1151,6 +1240,9 @@ def eliminar_producto_costeo(producto_id):
     form = AccionForm()
     if not form.validate_on_submit():
         abort(400)
+    if _costeo_bloqueado(costeo):
+        flash("Este costeo está cerrado. Solo un superadmin puede modificarlo.", "warning")
+        return redirect(url_for("importaciones.ver_costeo_detallado", costeo_id=costeo.id))
     db.session.delete(producto)
     db.session.flush()
     costeo_calculo.recalcular(costeo)

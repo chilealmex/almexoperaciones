@@ -32,7 +32,7 @@
 <div class="alert alert-warning d-flex flex-wrap align-items-center justify-content-between gap-2 mb-4">
   <span>
     <strong>{{ costeos_listos|length }}</strong> costeo{{ 's' if costeos_listos|length != 1 }}
-    marcado{{ 's' if costeos_listos|length != 1 }} como <strong>"Listo para contabilizar"</strong>.
+    cuadrado{{ 's' if costeos_listos|length != 1 }} y <strong>listo{{ 's' if costeos_listos|length != 1 }} para cerrar</strong>.
   </span>
   <a href="{{ url_for('importaciones.costeo_detallado_lista') }}" class="btn btn-sm btn-warning">Ver costeos →</a>
 </div>

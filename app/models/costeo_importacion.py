@@ -1,11 +1,10 @@
 from app.extensions import db
 
-MONEDAS = (("USD", "USD"), ("EUR", "EUR"))
+MONEDAS = (("USD", "USD"), ("EUR", "EUR"), ("CLP", "CLP"))
 ACTIVO_FIJO = (("NO", "No"), ("SI", "Sí"))
 ESTADOS_COSTEO = (
     ("en_proceso", "En proceso"),
-    ("listo", "Listo para contabilizar"),
-    ("contabilizado", "Contabilizado"),
+    ("cerrado", "Cerrado"),
 )
 
 
