@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "partials/_tabla.html" as t with context %}
 {% block title %}Costeo{% endblock %}
 {% block content %}
 
@@ -12,12 +13,35 @@
   {% endif %}
 </div>
 
+<form method="get" id="filtros-costeo"></form>
+<div class="filtro-pills mb-3">
+  {{ t.pill('Todos', 'todos', filtro_estado, conteo_estados.todos) }}
+  {{ t.pill('En proceso', 'en_proceso', filtro_estado, conteo_estados.en_proceso) }}
+  {{ t.pill('Listo para contabilizar', 'listo', filtro_estado, conteo_estados.listo) }}
+  {{ t.pill('Contabilizado', 'contabilizado', filtro_estado, conteo_estados.contabilizado) }}
+</div>
+
 <div class="table-responsive">
   <table class="table table-striped align-middle">
     <thead>
       <tr>
-        <th>N° Importación</th><th>Fecha llegada</th><th>Proveedor</th><th>OT</th>
+        {{ t.th('N° Importación', 'n_importacion', orden, direccion) }}
+        {{ t.th('Fecha llegada', 'fecha_llegada', orden, direccion) }}
+        {{ t.th('Proveedor', 'proveedor', orden, direccion) }}
+        <th>OT</th>
         <th class="num">Productos</th><th class="num">Costo total</th><th>Cuadratura</th><th>Estado</th><th>PEI vinculado</th><th></th>
+      </tr>
+      <tr class="filtros-fila">
+        {{ t.filtro('f_n_importacion', filtros_columna, 'filtros-costeo', 'N° Importación') }}
+        {{ t.sin_filtro() }}
+        {{ t.filtro('f_proveedor', filtros_columna, 'filtros-costeo', 'Proveedor') }}
+        {{ t.filtro('f_ot', filtros_columna, 'filtros-costeo', 'OT') }}
+        {{ t.sin_filtro('num') }}
+        {{ t.sin_filtro('num') }}
+        {{ t.sin_filtro() }}
+        {{ t.sin_filtro() }}
+        {{ t.sin_filtro() }}
+        {{ t.sin_filtro() }}
       </tr>
     </thead>
     <tbody>

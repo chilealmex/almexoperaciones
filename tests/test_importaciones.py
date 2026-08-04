@@ -237,6 +237,33 @@ def test_select_de_estado_en_resumen_tiene_la_clase_de_color_correspondiente(cli
     assert 'select-estado estado-costeando' in respuesta.get_data(as_text=True)
 
 
+def test_filtro_por_mes_no_usa_strftime_y_filtra_bien(client, usuario_admin, empresa, db):
+    """func.strftime() no existe en PostgreSQL (producción) y revienta con un 500;
+    el filtro debe armarse con extract(), que sí es portable entre motores."""
+    from datetime import date
+
+    _crear_importacion(db, empresa, pei="30", proveedor_nombre="ALMEX AGOSTO", fecha_pei=date(2026, 8, 15))
+    _crear_importacion(db, empresa, pei="31", proveedor_nombre="ALMEX JULIO", fecha_pei=date(2026, 7, 10))
+    login(client, "admin@test.cl")
+
+    for ruta in ("/importaciones/resumen", "/importaciones/detalle", "/importaciones/agencias"):
+        respuesta = client.get(ruta, query_string={"mes": "2026-08"})
+        assert respuesta.status_code == 200, ruta
+        texto = respuesta.get_data(as_text=True)
+        assert "ALMEX AGOSTO" in texto, ruta
+        assert "ALMEX JULIO" not in texto, ruta
+
+
+def test_filtro_din_por_mes_no_revienta(client, usuario_admin, empresa, db):
+    from datetime import date
+
+    db.session.add(DinRegistro(empresa_id=empresa.id, numero="1", oc="14000", fecha_pago=date(2026, 8, 1)))
+    db.session.commit()
+    login(client, "admin@test.cl")
+    respuesta = client.get("/importaciones/din", query_string={"mes": "2026-08"})
+    assert respuesta.status_code == 200
+
+
 def test_guardar_grupo_recalcula_y_persiste(client, usuario_admin, empresa, db):
     importacion = _crear_importacion(db, empresa)
     fa_l1 = importacion.linea_por_rol("factura_agencia", "fa_l1")

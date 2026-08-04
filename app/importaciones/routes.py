@@ -100,6 +100,22 @@ def _query_base():
     return Importacion.query.filter_by(empresa_id=_empresa_id())
 
 
+def _filtro_mes(query, columna, mes):
+    """Filtra una columna de fecha por 'YYYY-MM'.
+
+    No usa func.strftime(): esa función solo existe en SQLite y revienta con un 500
+    en PostgreSQL (producción). extract() sí es portable entre ambos motores.
+    """
+    if not mes:
+        return query
+    try:
+        anio_texto, mes_texto = mes.split("-")
+        anio, mes_num = int(anio_texto), int(mes_texto)
+    except ValueError:
+        return query
+    return query.filter(db.extract("year", columna) == anio, db.extract("month", columna) == mes_num)
+
+
 def _aplicar_filtros_lista(query, args):
     texto = args.get("texto", "").strip()
     agencia = args.get("agencia", "").strip()
@@ -116,8 +132,7 @@ def _aplicar_filtros_lista(query, args):
         )
     if agencia:
         query = query.filter(Importacion.agencia == agencia)
-    if mes:
-        query = query.filter(db.func.strftime("%Y-%m", Importacion.fecha_pei) == mes)
+    query = _filtro_mes(query, Importacion.fecha_pei, mes)
     if estado:
         query = query.filter(Importacion.estado == estado)
     return query
@@ -648,8 +663,7 @@ def din():
         )
     if agencia:
         query = query.filter(DinRegistro.agencia == agencia)
-    if mes:
-        query = query.filter(db.func.strftime("%Y-%m", DinRegistro.fecha_pago) == mes)
+    query = _filtro_mes(query, DinRegistro.fecha_pago, mes)
     if estado:
         query = query.filter(DinRegistro.estado == estado)
 
@@ -807,14 +821,69 @@ def _poblar_costeo_desde_form(costeo, form):
     costeo.importacion_id = form.importacion_id.data or None
 
 
+COLUMNAS_FILTRO_COSTEO = {
+    "f_n_importacion": CosteoImportacion.n_importacion,
+    "f_proveedor": CosteoImportacion.proveedor,
+    "f_ot": CosteoImportacion.orden_trabajo,
+}
+
+COLUMNAS_ORDEN_COSTEO = {
+    "n_importacion": CosteoImportacion.n_importacion,
+    "fecha_llegada": CosteoImportacion.fecha_llegada,
+    "proveedor": CosteoImportacion.proveedor,
+}
+
+ESTADOS_COSTEO_FILTRO = ("todos", "en_proceso", "listo", "contabilizado")
+
+
+def _filtros_de_columna(query, args, columnas):
+    """Aplica los filtros de texto escritos bajo cada título de columna. Devuelve (query, valores)."""
+    valores = {}
+    for parametro, columna in columnas.items():
+        texto = (args.get(parametro) or "").strip()
+        valores[parametro] = texto
+        if texto:
+            query = query.filter(columna.ilike(f"%{texto}%"))
+    return query, valores
+
+
+def _ordenar(query, args, columnas, por_defecto, direccion_por_defecto="asc"):
+    """Ordena por la columna pedida en el encabezado; ignora columnas desconocidas."""
+    orden = args.get("orden") or por_defecto
+    if orden not in columnas:
+        orden = por_defecto
+    dir_param = args.get("dir")
+    descendente = (dir_param == "desc") if dir_param else (direccion_por_defecto == "desc")
+    columna = columnas[orden]
+    query = query.order_by(columna.desc() if descendente else columna.asc())
+    return query, orden, ("desc" if descendente else "asc")
+
+
 @bp.route("/costeo-detallado")
 @require_permission("importaciones", "ver")
 def costeo_detallado_lista():
-    lista = (
-        CosteoImportacion.query.filter_by(empresa_id=_empresa_id())
-        .order_by(CosteoImportacion.fecha_llegada.desc().nullslast(), CosteoImportacion.id.desc())
-        .all()
+    query = CosteoImportacion.query.filter_by(empresa_id=_empresa_id())
+    query, filtros_columna = _filtros_de_columna(query, request.args, COLUMNAS_FILTRO_COSTEO)
+
+    filtro_estado = request.args.get("filtro", "todos")
+    if filtro_estado not in ESTADOS_COSTEO_FILTRO:
+        filtro_estado = "todos"
+    if filtro_estado != "todos":
+        query = query.filter(CosteoImportacion.estado == filtro_estado)
+
+    query, orden, direccion = _ordenar(
+        query, request.args, COLUMNAS_ORDEN_COSTEO, "fecha_llegada", direccion_por_defecto="desc"
     )
+    lista = query.order_by(CosteoImportacion.id.desc()).all()
+
+    todos = CosteoImportacion.query.filter_by(empresa_id=_empresa_id()).all()
+    conteo_estados = {
+        "todos": len(todos),
+        "en_proceso": sum(1 for c in todos if c.estado == "en_proceso"),
+        "listo": sum(1 for c in todos if c.estado == "listo"),
+        "contabilizado": sum(1 for c in todos if c.estado == "contabilizado"),
+    }
+
     resumen = []
     for costeo in lista:
         totales = costeo_calculo.totales_documentos(costeo)
@@ -826,7 +895,16 @@ def costeo_detallado_lista():
                 "cuadrado": abs(costeo_calculo.diferencia_cuadratura(costeo)) < 0.01,
             }
         )
-    return render_template("importaciones/costeo_detallado_lista.html", resumen=resumen, accion_form=AccionForm())
+    return render_template(
+        "importaciones/costeo_detallado_lista.html",
+        resumen=resumen,
+        accion_form=AccionForm(),
+        filtros_columna=filtros_columna,
+        filtro_estado=filtro_estado,
+        conteo_estados=conteo_estados,
+        orden=orden,
+        direccion=direccion,
+    )
 
 
 @bp.route("/costeo-detallado/nueva", methods=["GET", "POST"])

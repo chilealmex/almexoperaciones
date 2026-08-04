@@ -194,6 +194,32 @@ def test_admin_crea_y_ve_costeo_detallado(client, usuario_admin, empresa, db):
     assert "Invoice 1" in respuesta.get_data(as_text=True)
 
 
+def test_lista_de_costeo_se_puede_filtrar_por_columna_y_por_estado(client, usuario_admin, empresa, db):
+    _crear_costeo(db, empresa, n_importacion="10", proveedor="ALMEX CANADA", orden_trabajo="OT-10", estado="listo")
+    _crear_costeo(db, empresa, n_importacion="11", proveedor="DONGGUAN FANGKUN", orden_trabajo="OT-11", estado="en_proceso")
+    login(client, "admin@test.cl")
+
+    respuesta = client.get("/importaciones/costeo-detallado", query_string={"f_proveedor": "DONGGUAN"})
+    texto = respuesta.get_data(as_text=True)
+    assert "DONGGUAN FANGKUN" in texto
+    assert "ALMEX CANADA" not in texto
+
+    respuesta = client.get("/importaciones/costeo-detallado", query_string={"filtro": "listo"})
+    texto = respuesta.get_data(as_text=True)
+    assert "ALMEX CANADA" in texto
+    assert "DONGGUAN FANGKUN" not in texto
+
+
+def test_lista_de_costeo_se_puede_ordenar_por_encabezado(client, usuario_admin, empresa, db):
+    _crear_costeo(db, empresa, n_importacion="20", proveedor="ZETA")
+    _crear_costeo(db, empresa, n_importacion="21", proveedor="ALFA")
+    login(client, "admin@test.cl")
+
+    respuesta = client.get("/importaciones/costeo-detallado", query_string={"orden": "proveedor", "dir": "asc"})
+    texto = respuesta.get_data(as_text=True)
+    assert texto.index("ALFA") < texto.index("ZETA")
+
+
 def test_datos_generales_se_ven_y_editan_sin_salir_de_la_pagina_del_costeo(client, usuario_admin, empresa, db):
     login(client, "admin@test.cl")
     costeo = _crear_costeo(db, empresa, n_importacion="1299", proveedor="ALMEX CANADA")
