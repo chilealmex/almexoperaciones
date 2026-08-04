@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% import "partials/_proveedor_selector.html" as prov %}
 {% block title %}Costeo {{ costeo.n_importacion or costeo.id }}{% endblock %}
+{% block main_class %}container-fluid px-3 px-lg-4{% endblock %}
 {% block content %}
 {% set puede_editar = puede('importaciones', 'editar') and (costeo.estado != 'cerrado' or current_user.es_superadmin) %}
 
@@ -236,7 +237,7 @@
     <div class="collapse show" id="colapsar-productos">
     <div class="card-body">
       <div class="table-responsive">
-        <table class="table table-sm align-middle mb-2">
+        <table class="table table-sm align-middle mb-2 tabla-compacta">
           <thead>
             <tr>
               <th>Producto</th><th>Cód. único</th><th class="num">Valor unit. T/C</th><th class="num">Cantidad</th>
@@ -244,15 +245,15 @@
               <th class="num">EXW</th>
               <th class="num">%</th>
               <th class="num">EXW CLP</th>
-              <th class="num">Crating CLP</th>
-              <th class="num">Flete CLP</th>
-              <th class="num">Seguro CLP</th>
-              <th class="num">CIF CLP</th>
+              <th class="num">Crating</th>
+              <th class="num">Flete</th>
+              <th class="num">Seguro</th>
+              <th class="num">CIF</th>
               <th>¿Ad Valorem?</th>
-              <th class="num">Ad Valorem CLP ({{ '%g'|format((costeo.tasa_ad_valorem or 0) * 100) }}%)</th>
-              <th class="num">TT. Gasto int. CLP</th>
+              <th class="num">Ad Valorem ({{ '%g'|format((costeo.tasa_ad_valorem or 0) * 100) }}%)</th>
+              <th class="num">TT. Gasto inter.</th>
               <th class="num">Costo total</th>
-              <th class="num">Costo unit. inicial (EXW)</th>
+              <th class="num">Costo unit. inicial</th>
               <th class="num">Costo unit. final</th>
               <th class="num">Impacto %</th>
               {% if puede_editar %}<th></th>{% endif %}
@@ -261,18 +262,18 @@
           <tbody>
             {% for p in costeo.productos %}
             <tr>
-              <td><input type="text" name="prod-{{ p.id }}-producto" class="form-control form-control-sm campo-excel" value="{{ p.producto or '' }}" style="min-width:220px;" {{ 'disabled' if not puede_editar }}></td>
-              <td><input type="text" name="prod-{{ p.id }}-codigo" class="form-control form-control-sm campo-excel" value="{{ p.codigo or '' }}" style="min-width:110px;" {{ 'disabled' if not puede_editar }}></td>
-              <td class="num"><input type="text" inputmode="decimal" name="prod-{{ p.id }}-valor_unitario_tc" class="form-control form-control-sm text-end campo-excel" value="{{ p.valor_unitario_tc }}" style="min-width:90px;" {{ 'disabled' if not puede_editar }}></td>
-              <td class="num"><input type="text" inputmode="decimal" name="prod-{{ p.id }}-cantidad" class="form-control form-control-sm text-end campo-excel" value="{{ p.cantidad }}" style="min-width:80px;" {{ 'disabled' if not puede_editar }}></td>
+              <td><input type="text" name="prod-{{ p.id }}-producto" class="form-control form-control-sm campo-excel" value="{{ p.producto or '' }}" style="min-width:170px;" {{ 'disabled' if not puede_editar }}></td>
+              <td><input type="text" name="prod-{{ p.id }}-codigo" class="form-control form-control-sm campo-excel" value="{{ p.codigo or '' }}" style="min-width:95px;" {{ 'disabled' if not puede_editar }}></td>
+              <td class="num"><input type="text" inputmode="decimal" name="prod-{{ p.id }}-valor_unitario_tc" class="form-control form-control-sm text-end campo-excel" value="{{ p.valor_unitario_tc }}" style="min-width:78px;" {{ 'disabled' if not puede_editar }}></td>
+              <td class="num"><input type="text" inputmode="decimal" name="prod-{{ p.id }}-cantidad" class="form-control form-control-sm text-end campo-excel" value="{{ p.cantidad }}" style="min-width:68px;" {{ 'disabled' if not puede_editar }}></td>
               <td>
-                <select name="prod-{{ p.id }}-unidad_tc" class="form-select form-select-sm campo-excel" style="min-width:80px;" {{ 'disabled' if not puede_editar }}>
+                <select name="prod-{{ p.id }}-unidad_tc" class="form-select form-select-sm campo-excel" style="min-width:70px;" {{ 'disabled' if not puede_editar }}>
                   <option value="USD" {{ 'selected' if p.unidad_tc == 'USD' }}>USD</option>
                   <option value="EUR" {{ 'selected' if p.unidad_tc == 'EUR' }}>EUR</option>
                 </select>
               </td>
               <td>
-                <select name="prod-{{ p.id }}-activo_fijo" class="form-select form-select-sm campo-excel" style="min-width:150px;" {{ 'disabled' if not puede_editar }}>
+                <select name="prod-{{ p.id }}-activo_fijo" class="form-select form-select-sm campo-excel" style="min-width:125px;" {{ 'disabled' if not puede_editar }}>
                   <option value="NO" {{ 'selected' if p.activo_fijo == 'NO' }}>No</option>
                   {% for categoria in categorias_activo %}
                   <option value="{{ categoria.nombre }}" {{ 'selected' if p.activo_fijo == categoria.nombre }}>{{ categoria.descripcion or categoria.nombre }}</option>
@@ -292,7 +293,18 @@
                   <option value="NO" {{ 'selected' if p.tiene_ad_valorem == 'NO' }}>No</option>
                 </select>
               </td>
-              <td class="num">{{ p.ad_valorem_clp|clp }}</td>
+              <td class="num">
+                {% if puede_editar %}
+                <input type="text" inputmode="numeric" name="prod-{{ p.id }}-ad_valorem_manual_clp"
+                       class="form-control form-control-sm text-end campo-excel campo-clp"
+                       style="min-width:92px;"
+                       value="{{ p.ad_valorem_manual_clp|clp if p.ad_valorem_manual_clp is not none else '' }}"
+                       placeholder="{{ p.ad_valorem_clp|clp }}"
+                       title="Déjalo vacío para calcularlo solo (CIF × tasa). Escribe un monto para fijarlo a mano.">
+                {% else %}
+                {{ p.ad_valorem_clp|clp }}
+                {% endif %}
+              </td>
               <td class="num">{{ p.gastos_internos_clp|clp }}</td>
               <td class="num fw-semibold">{{ p.costo_total_clp|clp }}</td>
               <td class="num">{{ p.costo_unitario_inicial_clp|clp }}</td>

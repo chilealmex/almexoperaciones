@@ -118,7 +118,13 @@ def recalcular(costeo):
         flete_clp = totales["flete_clp"] * porcentaje
         seguro_clp = totales["seguro_clp"] * porcentaje
         cif_clp = exw_clp + crating_clp + flete_clp + seguro_clp
-        ad_valorem_clp = cif_clp * _num(costeo.tasa_ad_valorem) if producto.tiene_ad_valorem == "SI" else 0.0
+        if producto.tiene_ad_valorem != "SI":
+            ad_valorem_clp = 0.0
+        elif producto.ad_valorem_manual_clp is not None:
+            # Monto escrito a mano: manda por sobre el cálculo de CIF x tasa.
+            ad_valorem_clp = _num(producto.ad_valorem_manual_clp)
+        else:
+            ad_valorem_clp = cif_clp * _num(costeo.tasa_ad_valorem)
         gastos_internos_clp = totales["gastos_internos_clp"] * porcentaje
         costo_total_clp = cif_clp + ad_valorem_clp + gastos_internos_clp
 

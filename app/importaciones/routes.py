@@ -44,12 +44,22 @@ def _get_importacion_or_404(importacion_id):
     return importacion
 
 
+# Tope para los montos en pesos. Un número más grande que esto no es un monto
+# real (viene de un pegado o de un tipeo largo) y, si llegara a la base, la
+# haría fallar con un error 500. Se acota en vez de reventar.
+MONTO_MAXIMO = 10 ** 15
+
+
+def _acotar_monto(numero):
+    return max(-MONTO_MAXIMO, min(MONTO_MAXIMO, numero))
+
+
 def _parse_int(valor):
     if valor in (None, ""):
         return 0
     try:
-        return int(round(float(str(valor).replace(",", "."))))
-    except (TypeError, ValueError):
+        return _acotar_monto(int(round(float(str(valor).replace(",", ".")))))
+    except (TypeError, ValueError, OverflowError):
         return 0
 
 
@@ -68,7 +78,7 @@ def _parse_clp_formateado(valor):
         return 0
     texto = str(valor).replace("$", "").replace(" ", "").replace(".", "").strip()
     try:
-        return int(texto)
+        return _acotar_monto(int(texto))
     except (TypeError, ValueError):
         return 0
 
@@ -1166,6 +1176,9 @@ def _guardar_campos_productos(costeo):
         producto.unidad_tc = request.form.get(prefijo + "unidad_tc") or "USD"
         producto.activo_fijo = request.form.get(prefijo + "activo_fijo") or "NO"
         producto.tiene_ad_valorem = request.form.get(prefijo + "tiene_ad_valorem") or "NO"
+        # Vacío = vuelve al cálculo automático (CIF x tasa).
+        manual = (request.form.get(prefijo + "ad_valorem_manual_clp") or "").strip()
+        producto.ad_valorem_manual_clp = _parse_clp_formateado(manual) if manual else None
 
 
 @bp.route("/costeo-detallado/<int:costeo_id>/guardar", methods=["POST"])

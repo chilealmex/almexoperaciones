@@ -839,9 +839,9 @@ def test_tabla_de_productos_sigue_el_orden_de_columnas_de_la_planilla(client, us
     cabecera = texto[inicio : texto.index("</thead>", inicio)]
     encabezados = [
         "Producto", "Cód. único", "Valor unit. T/C", "Cantidad", "Unidad T/C", "Activo fijo",
-        "EXW", "%", "EXW CLP", "Crating CLP", "Flete CLP", "Seguro CLP", "CIF CLP",
-        "¿Ad Valorem?", "Ad Valorem CLP", "TT. Gasto int. CLP", "Costo total",
-        "Costo unit. inicial (EXW)", "Costo unit. final", "Impacto %",
+        "EXW", "%", "EXW CLP", "Crating", "Flete", "Seguro", "CIF",
+        "¿Ad Valorem?", "Ad Valorem (", "TT. Gasto inter.", "Costo total",
+        "Costo unit. inicial", "Costo unit. final", "Impacto %",
     ]
     posiciones = [cabecera.index(">" + e) for e in encabezados]
     assert posiciones == sorted(posiciones)
@@ -859,3 +859,95 @@ def test_documentos_y_gastos_traen_los_enganches_para_sumar_en_vivo(client, usua
     assert 'id="total-gastos-internos"' in texto
     assert "gasto-valor-clp" in texto
     assert 'id="kpi-costo-total"' in texto
+
+
+def test_ad_valorem_manual_manda_por_sobre_el_calculo_automatico(db, empresa):
+    costeo = _crear_costeo(db, empresa)
+    _cargar_ejemplo_real(costeo, db)
+
+    producto = costeo.productos[0]
+    producto.ad_valorem_manual_clp = 175_020
+    _db.session.commit()
+    calculo.recalcular(costeo)
+    _db.session.commit()
+
+    assert producto.ad_valorem_clp == 175_020
+    # Y el costo total lo toma en cuenta.
+    assert producto.costo_total_clp == (
+        producto.cif_clp + 175_020 + producto.gastos_internos_clp
+    )
+
+
+def test_ad_valorem_manual_vacio_vuelve_al_calculo_automatico(db, empresa):
+    costeo = _crear_costeo(db, empresa)
+    _cargar_ejemplo_real(costeo, db)
+
+    producto = costeo.productos[0]
+    producto.ad_valorem_manual_clp = 999_999
+    _db.session.commit()
+    calculo.recalcular(costeo)
+    _db.session.commit()
+    assert producto.ad_valorem_clp == 999_999
+
+    producto.ad_valorem_manual_clp = None
+    _db.session.commit()
+    calculo.recalcular(costeo)
+    _db.session.commit()
+    assert abs(producto.ad_valorem_clp - round(producto.cif_clp * 0.06)) <= 1
+
+
+def test_producto_sin_ad_valorem_ignora_el_monto_manual(db, empresa):
+    costeo = _crear_costeo(db, empresa)
+    _cargar_ejemplo_real(costeo, db)
+
+    producto = costeo.productos[0]
+    producto.tiene_ad_valorem = "NO"
+    producto.ad_valorem_manual_clp = 500_000
+    _db.session.commit()
+    calculo.recalcular(costeo)
+    _db.session.commit()
+    assert producto.ad_valorem_clp == 0
+
+
+def test_se_puede_escribir_el_ad_valorem_a_mano_desde_la_pantalla(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    costeo = _crear_costeo(db, empresa, n_importacion="59")
+    client.post(f"/importaciones/costeo-detallado/{costeo.id}/productos/agregar", follow_redirects=True)
+    _db.session.refresh(costeo)
+    producto = costeo.productos[0]
+
+    datos = {
+        f"prod-{producto.id}-producto": "ENCHUFE",
+        f"prod-{producto.id}-valor_unitario_tc": "100",
+        f"prod-{producto.id}-cantidad": "1",
+        f"prod-{producto.id}-unidad_tc": "USD",
+        f"prod-{producto.id}-activo_fijo": "NO",
+        f"prod-{producto.id}-tiene_ad_valorem": "SI",
+        f"prod-{producto.id}-ad_valorem_manual_clp": "$175.020",
+    }
+    client.post(f"/importaciones/costeo-detallado/{costeo.id}/productos/guardar", data=datos, follow_redirects=True)
+    _db.session.refresh(producto)
+    assert producto.ad_valorem_manual_clp == 175_020
+    assert producto.ad_valorem_clp == 175_020
+
+    # Al borrarlo vuelve a calcularse solo.
+    datos[f"prod-{producto.id}-ad_valorem_manual_clp"] = ""
+    client.post(f"/importaciones/costeo-detallado/{costeo.id}/productos/guardar", data=datos, follow_redirects=True)
+    _db.session.refresh(producto)
+    assert producto.ad_valorem_manual_clp is None
+
+
+def test_un_monto_absurdamente_largo_no_rompe_el_guardado(client, usuario_admin, empresa, db):
+    """Un número gigante (pegado por error) se acota en vez de tirar un error 500."""
+    login(client, "admin@test.cl")
+    costeo = _crear_costeo(db, empresa, n_importacion="60")
+    gasto = costeo.gastos_internos[0]
+
+    respuesta = client.post(
+        f"/importaciones/costeo-detallado/{costeo.id}/gastos/guardar",
+        data={f"gasto-{gasto.id}-valor_clp": "150638150638150624150638"},
+        follow_redirects=True,
+    )
+    assert respuesta.status_code == 200
+    _db.session.refresh(gasto)
+    assert gasto.valor_clp == 10 ** 15

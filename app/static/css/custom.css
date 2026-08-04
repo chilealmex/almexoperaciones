@@ -1039,3 +1039,30 @@ tr.filtros-fila .form-select {
   border-radius: 14px;
   box-shadow: 0 10px 34px rgba(21, 32, 43, 0.1);
 }
+
+/* Tabla de Productos del Costeo: son ~20 columnas, así que se aprieta el
+   relleno y la letra para que quepan lo más posible sin desplazar de lado. */
+.tabla-compacta {
+  font-size: 0.8rem;
+}
+.tabla-compacta > :not(caption) > * > * {
+  padding: 0.3rem 0.35rem;
+}
+.tabla-compacta th {
+  white-space: nowrap;
+}
+.tabla-compacta .form-control-sm,
+.tabla-compacta .form-select-sm {
+  font-size: 0.8rem;
+  padding: 0.15rem 0.35rem;
+}
+.tabla-compacta .form-select-sm {
+  padding-right: 1.4rem;
+  background-position: right 0.3rem center;
+}
+/* Separador vertical muy tenue entre columnas: ayuda a seguir la fila sin
+   competir con los datos. */
+.tabla-compacta th + th,
+.tabla-compacta td + td {
+  border-left: 1px solid rgba(15, 35, 60, 0.07);
+}

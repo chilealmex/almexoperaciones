@@ -138,6 +138,9 @@ class CosteoImportacionProducto(db.Model):
     unidad_tc = db.Column(db.String(6), nullable=False, default="USD")
     activo_fijo = db.Column(db.String(80), nullable=False, default="NO")
     tiene_ad_valorem = db.Column(db.String(3), nullable=False, default="SI")
+    # Monto de ad valorem escrito a mano. Si viene vacío se calcula como
+    # CIF x tasa; sirve para cuando la DIN trae un monto distinto al teórico.
+    ad_valorem_manual_clp = db.Column(db.Integer, nullable=True)
 
     # --- Prorrateo calculado por recalcular() (columnas I:U de la planilla) ---
     exw_moneda = db.Column(db.Float, nullable=False, default=0)
