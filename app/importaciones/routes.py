@@ -346,11 +346,13 @@ def _proveedores_catalogo_datos(proveedores):
 
 
 def _categorias_activo_disponibles():
-    return (
-        CategoriaActivo.query.filter_by(empresa_id=_empresa_id(), activa=True)
-        .order_by(CategoriaActivo.nombre)
-        .all()
-    )
+    """Categorías de activo fijo, ordenadas por el texto que se ve en la lista.
+
+    En la lista se muestra la descripción (el nombre legible, ej. "MAQUINARIAS Y
+    EQUIPOS") y no el nombre, porque ahí suele ir el código de la cuenta contable.
+    """
+    categorias = CategoriaActivo.query.filter_by(empresa_id=_empresa_id(), activa=True).all()
+    return sorted(categorias, key=lambda c: (c.descripcion or c.nombre).upper())
 
 
 def _asegurar_proveedor_en_catalogo(nombre):

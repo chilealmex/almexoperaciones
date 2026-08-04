@@ -275,7 +275,7 @@
                 <select name="prod-{{ p.id }}-activo_fijo" class="form-select form-select-sm campo-excel" style="min-width:150px;" {{ 'disabled' if not puede_editar }}>
                   <option value="NO" {{ 'selected' if p.activo_fijo == 'NO' }}>No</option>
                   {% for categoria in categorias_activo %}
-                  <option value="{{ categoria.nombre }}" {{ 'selected' if p.activo_fijo == categoria.nombre }}>{{ categoria.nombre }}</option>
+                  <option value="{{ categoria.nombre }}" {{ 'selected' if p.activo_fijo == categoria.nombre }}>{{ categoria.descripcion or categoria.nombre }}</option>
                   {% endfor %}
                 </select>
               </td>

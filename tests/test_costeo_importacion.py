@@ -372,6 +372,21 @@ def test_selector_de_activo_fijo_muestra_las_categorias_del_catalogo(client, usu
     assert '<option value="VEHICULOS"' in texto
 
 
+def test_selector_de_activo_fijo_muestra_el_nombre_y_no_el_codigo_de_cuenta(client, usuario_admin, empresa, db):
+    """Si la categoría se llama con el código contable, en la lista se ve la descripción."""
+    db.session.add(CategoriaActivo(empresa_id=empresa.id, nombre="1212108001", descripcion="MAQUINARIAS Y EQUIPOS"))
+    db.session.add(CategoriaActivo(empresa_id=empresa.id, nombre="1212103001", descripcion="EQUIPOS DE OFICINA"))
+    db.session.commit()
+    login(client, "admin@test.cl")
+    costeo = _crear_costeo(db, empresa, n_importacion="58")
+    client.post(f"/importaciones/costeo-detallado/{costeo.id}/productos/agregar", follow_redirects=True)
+
+    texto = client.get(f"/importaciones/costeo-detallado/{costeo.id}").get_data(as_text=True)
+    assert '<option value="1212108001" >MAQUINARIAS Y EQUIPOS</option>' in texto
+    # Y quedan ordenadas por ese nombre visible, no por el código.
+    assert texto.index(">EQUIPOS DE OFICINA<") < texto.index(">MAQUINARIAS Y EQUIPOS<")
+
+
 def test_se_puede_marcar_un_producto_con_una_categoria_de_activo_fijo(client, usuario_admin, empresa, db):
     db.session.add(CategoriaActivo(empresa_id=empresa.id, nombre="MUEBLES Y UTILES"))
     db.session.commit()
