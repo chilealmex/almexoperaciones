@@ -399,6 +399,35 @@ def test_crud_proveedor_de_importacion(client, usuario_admin, empresa, db):
     assert ProveedorImportacion.query.get(proveedor.id) is None
 
 
+def test_formulario_de_importacion_muestra_selector_de_proveedores_con_pais_y_tratado(client, usuario_admin, empresa, db):
+    db.session.add(ProveedorImportacion(empresa_id=empresa.id, nombre="ALMEX CANADA", pais="CANADA", tratado_tlc="SI"))
+    db.session.commit()
+    login(client, "admin@test.cl")
+
+    respuesta = client.get("/importaciones/resumen/nueva")
+    texto = respuesta.get_data(as_text=True)
+    assert '<option value="ALMEX CANADA"' in texto
+    assert "Crear nuevo proveedor" in texto
+    assert '"ALMEX CANADA": {"pais": "CANADA", "tratado_tlc": "SI"}' in texto
+
+
+def test_al_crear_importacion_con_proveedor_nuevo_se_agrega_al_catalogo(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    client.post(
+        "/importaciones/resumen/nueva",
+        data={
+            "proveedor_nombre": "NUEVO PROVEEDOR SPA",
+            "tipo_saldo": "a_favor",
+            "monto": "0",
+            "saldo_agencia": "0",
+            "estado": "pendiente",
+        },
+        follow_redirects=True,
+    )
+    proveedor = ProveedorImportacion.query.filter_by(empresa_id=empresa.id, nombre="NUEVO PROVEEDOR SPA").first()
+    assert proveedor is not None
+
+
 def test_crud_registro_din(client, usuario_admin, empresa, db):
     login(client, "admin@test.cl")
     client.post(

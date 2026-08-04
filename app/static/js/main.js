@@ -151,4 +151,66 @@ document.addEventListener("DOMContentLoaded", function () {
       campo.value = formatearCLP(campo.value);
     });
   });
+
+  // Sumas en vivo del Costeo (Documentos y Gastos internos): se recalculan
+  // mientras se escribe, sin esperar a "Guardar todo".
+  function parseNumeroLibre(valor) {
+    var texto = (valor || "").toString().trim().replace(/[^0-9.,-]/g, "");
+    if (!texto) return 0;
+    var numero = parseFloat(texto.replace(",", "."));
+    return isNaN(numero) ? 0 : numero;
+  }
+  function parseEnteroCLP(valor) {
+    var digitos = (valor || "").toString().replace(/[^0-9-]/g, "");
+    var numero = parseInt(digitos, 10);
+    return isNaN(numero) ? 0 : numero;
+  }
+
+  function pintar(id, valor) {
+    var celda = document.getElementById(id);
+    if (celda) celda.textContent = formatearCLP(valor);
+  }
+
+  function sumaCIF() {
+    var total = 0;
+    document.querySelectorAll('[id^="doc-clp-"]').forEach(function (celda) {
+      total += parseEnteroCLP(celda.textContent);
+    });
+    return total;
+  }
+
+  function sumaGastosInternos() {
+    var total = 0;
+    document.querySelectorAll(".gasto-valor-clp").forEach(function (campo) {
+      total += parseEnteroCLP(campo.value);
+    });
+    return total;
+  }
+
+  function actualizarTotales() {
+    var cif = sumaCIF();
+    var gastos = sumaGastosInternos();
+    pintar("total-cif", cif);
+    pintar("total-gastos-internos", gastos);
+    pintar("kpi-cif", cif);
+    pintar("kpi-gastos-internos", gastos);
+    pintar("kpi-costo-total", cif + gastos);
+  }
+
+  document.querySelectorAll(".doc-tc, .doc-total").forEach(function (campo) {
+    campo.addEventListener("input", function () {
+      var docId = campo.getAttribute("data-doc-id");
+      var tcInput = document.querySelector('.doc-tc[data-doc-id="' + docId + '"]');
+      var totalInput = document.querySelector('.doc-total[data-doc-id="' + docId + '"]');
+      var celda = document.getElementById("doc-clp-" + docId);
+      if (!tcInput || !totalInput || !celda) return;
+      var clp = Math.round(parseNumeroLibre(tcInput.value) * parseNumeroLibre(totalInput.value));
+      celda.textContent = formatearCLP(clp);
+      actualizarTotales();
+    });
+  });
+
+  document.querySelectorAll(".gasto-valor-clp").forEach(function (campo) {
+    campo.addEventListener("input", actualizarTotales);
+  });
 });

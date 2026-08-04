@@ -1,6 +1,7 @@
 """Costeo por producto: prorrateo de CIF y gastos internos según la planilla de referencia."""
 
 from app.extensions import db as _db
+from app.models.activo_fijo import CategoriaActivo
 from app.models.costeo_importacion import CosteoImportacion, CosteoImportacionProducto
 from app.models.importacion import Importacion, ProveedorImportacion
 from app.utils import costeo_importacion_calculo as calculo
@@ -355,6 +356,44 @@ def test_agregar_editar_y_eliminar_producto_por_ruta(client, usuario_admin, empr
     client.post(f"/importaciones/costeo-detallado/producto/{producto.id}/eliminar", follow_redirects=True)
     _db.session.refresh(costeo)
     assert len(costeo.productos) == 0
+
+
+def test_selector_de_activo_fijo_muestra_las_categorias_del_catalogo(client, usuario_admin, empresa, db):
+    db.session.add(CategoriaActivo(empresa_id=empresa.id, nombre="MAQUINARIAS Y EQUIPOS"))
+    db.session.add(CategoriaActivo(empresa_id=empresa.id, nombre="VEHICULOS"))
+    db.session.commit()
+    login(client, "admin@test.cl")
+    costeo = _crear_costeo(db, empresa, n_importacion="56")
+    client.post(f"/importaciones/costeo-detallado/{costeo.id}/productos/agregar", follow_redirects=True)
+
+    respuesta = client.get(f"/importaciones/costeo-detallado/{costeo.id}")
+    texto = respuesta.get_data(as_text=True)
+    assert '<option value="MAQUINARIAS Y EQUIPOS"' in texto
+    assert '<option value="VEHICULOS"' in texto
+
+
+def test_se_puede_marcar_un_producto_con_una_categoria_de_activo_fijo(client, usuario_admin, empresa, db):
+    db.session.add(CategoriaActivo(empresa_id=empresa.id, nombre="MUEBLES Y UTILES"))
+    db.session.commit()
+    login(client, "admin@test.cl")
+    costeo = _crear_costeo(db, empresa, n_importacion="57")
+    client.post(f"/importaciones/costeo-detallado/{costeo.id}/productos/agregar", follow_redirects=True)
+    _db.session.refresh(costeo)
+    producto = costeo.productos[0]
+
+    client.post(
+        f"/importaciones/costeo-detallado/{costeo.id}/productos/guardar",
+        data={
+            f"prod-{producto.id}-producto": "Escritorio",
+            f"prod-{producto.id}-valor_unitario_tc": "10",
+            f"prod-{producto.id}-cantidad": "2",
+            f"prod-{producto.id}-unidad_tc": "USD",
+            f"prod-{producto.id}-activo_fijo": "MUEBLES Y UTILES",
+        },
+        follow_redirects=True,
+    )
+    _db.session.refresh(producto)
+    assert producto.activo_fijo == "MUEBLES Y UTILES"
 
 
 def test_marcar_producto_sin_ad_valorem_por_ruta_lo_deja_en_cero(client, usuario_admin, empresa, db):
@@ -773,3 +812,35 @@ def test_lista_de_costeo_muestra_boton_reabrir_solo_a_superadmin(client, empresa
 
     respuesta = client.get("/importaciones/costeo-detallado")
     assert "Reabrir" in respuesta.get_data(as_text=True)
+
+
+def test_tabla_de_productos_sigue_el_orden_de_columnas_de_la_planilla(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    costeo = _crear_costeo(db, empresa, n_importacion="1415")
+    client.post(f"/importaciones/costeo-detallado/{costeo.id}/productos/agregar", follow_redirects=True)
+
+    texto = client.get(f"/importaciones/costeo-detallado/{costeo.id}").get_data(as_text=True)
+    inicio = texto.index('id="productos"')
+    cabecera = texto[inicio : texto.index("</thead>", inicio)]
+    encabezados = [
+        "Producto", "Cód. único", "Valor unit. T/C", "Cantidad", "Unidad T/C", "Activo fijo",
+        "EXW", "%", "EXW CLP", "Crating CLP", "Flete CLP", "Seguro CLP", "CIF CLP",
+        "¿Ad Valorem?", "Ad Valorem CLP", "TT. Gasto int. CLP", "Costo total",
+        "Costo unit. inicial (EXW)", "Costo unit. final", "Impacto %",
+    ]
+    posiciones = [cabecera.index(">" + e) for e in encabezados]
+    assert posiciones == sorted(posiciones)
+
+
+def test_documentos_y_gastos_traen_los_enganches_para_sumar_en_vivo(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    costeo = _crear_costeo(db, empresa, n_importacion="1416")
+
+    texto = client.get(f"/importaciones/costeo-detallado/{costeo.id}").get_data(as_text=True)
+    documento = costeo.documentos[0]
+    assert f'id="doc-clp-{documento.id}"' in texto
+    assert f'data-doc-id="{documento.id}"' in texto
+    assert 'id="total-cif"' in texto
+    assert 'id="total-gastos-internos"' in texto
+    assert "gasto-valor-clp" in texto
+    assert 'id="kpi-costo-total"' in texto

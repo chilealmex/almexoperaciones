@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "partials/_proveedor_selector.html" as prov %}
 {% block title %}{{ 'Editar importación' if importacion else 'Nueva importación' }}{% endblock %}
 {% block content %}
 <h1 class="h3 mb-3">{{ 'Editar importación' if importacion else 'Nueva importación' }}</h1>
@@ -25,10 +26,7 @@
   <div class="row">
     <div class="col-12 col-md-6 mb-3">
       {{ form.proveedor_nombre.label(class="form-label") }}
-      {{ form.proveedor_nombre(class="form-control", list="proveedores-datalist", placeholder="Nombre del proveedor") }}
-      <datalist id="proveedores-datalist">
-        {% for p in proveedores %}<option value="{{ p.nombre }}">{% endfor %}
-      </datalist>
+      {{ prov.selector(form.proveedor_nombre, proveedores, form.proveedor_nombre.data, campo_id="proveedor_nombre") }}
     </div>
     <div class="col-6 col-md-3 mb-3">
       {{ form.pais.label(class="form-label") }}
@@ -73,4 +71,19 @@
   <button type="submit" class="btn btn-primary">Guardar</button>
   <a href="{{ url_for('importaciones.resumen') }}" class="btn btn-outline-secondary">Cancelar</a>
 </form>
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  var datosProveedores = {{ proveedores_datos|tojson }};
+  var select = document.getElementById("proveedor_nombre-select");
+  var campoPais = document.getElementById("pais");
+  var campoTratado = document.getElementById("tratado_tlc");
+  if (!select || !campoPais || !campoTratado) return;
+  select.addEventListener("change", function () {
+    var datos = datosProveedores[this.value];
+    if (!datos) return;
+    if (datos.pais) campoPais.value = datos.pais;
+    if (datos.tratado_tlc) campoTratado.value = datos.tratado_tlc;
+  });
+});
+</script>
 {% endblock %}

@@ -12,6 +12,7 @@ from app.importaciones.forms import (
     ImportacionForm,
     ProveedorImportacionForm,
 )
+from app.models.activo_fijo import CategoriaActivo
 from app.models.importacion import DinRegistro, Importacion, ImportacionAsientoLinea, ProveedorImportacion
 from app.models.costeo_importacion import (
     CosteoImportacion,
@@ -238,11 +239,13 @@ def resumen():
 def nueva_importacion():
     form = ImportacionForm()
     if form.validate_on_submit():
+        nombre_proveedor = form.proveedor_nombre.data.strip() if form.proveedor_nombre.data else None
+        _asegurar_proveedor_en_catalogo(nombre_proveedor)
         importacion = _crear_importacion_completa(
             fecha_pei=form.fecha_pei.data,
             pei=form.pei.data.strip() if form.pei.data else None,
             imp=form.imp.data.strip() if form.imp.data else None,
-            proveedor_nombre=form.proveedor_nombre.data.strip() if form.proveedor_nombre.data else None,
+            proveedor_nombre=nombre_proveedor,
             oc=form.oc.data.strip() if form.oc.data else None,
             monto=form.monto.data or 0,
             agencia=form.agencia.data.strip() if form.agencia.data else None,
@@ -256,7 +259,14 @@ def nueva_importacion():
         db.session.commit()
         flash("Importación creada correctamente.", "success")
         return redirect(url_for("importaciones.detalle", importacion_id=importacion.id))
-    return render_template("importaciones/importacion_form.html", form=form, importacion=None, proveedores=_proveedores_catalogo())
+    proveedores = _proveedores_catalogo()
+    return render_template(
+        "importaciones/importacion_form.html",
+        form=form,
+        importacion=None,
+        proveedores=proveedores,
+        proveedores_datos=_proveedores_catalogo_datos(proveedores),
+    )
 
 
 @bp.route("/resumen/<int:importacion_id>/editar", methods=["GET", "POST"])
@@ -270,6 +280,7 @@ def editar_importacion(importacion_id):
         importacion.pei = form.pei.data.strip() if form.pei.data else None
         importacion.imp = form.imp.data.strip() if form.imp.data else None
         importacion.proveedor_nombre = form.proveedor_nombre.data.strip() if form.proveedor_nombre.data else None
+        _asegurar_proveedor_en_catalogo(importacion.proveedor_nombre)
         importacion.oc = form.oc.data.strip() if form.oc.data else None
         importacion.monto = form.monto.data or 0
         importacion.agencia = form.agencia.data.strip() if form.agencia.data else None
@@ -284,11 +295,13 @@ def editar_importacion(importacion_id):
         db.session.commit()
         flash("Importación actualizada correctamente.", "success")
         return redirect(url_for("importaciones.resumen"))
+    proveedores = _proveedores_catalogo()
     return render_template(
         "importaciones/importacion_form.html",
         form=form,
         importacion=importacion,
-        proveedores=_proveedores_catalogo(),
+        proveedores=proveedores,
+        proveedores_datos=_proveedores_catalogo_datos(proveedores),
         estado_bloqueado=estado_bloqueado,
     )
 
@@ -325,6 +338,19 @@ def eliminar_importacion(importacion_id):
 
 def _proveedores_catalogo():
     return ProveedorImportacion.query.filter_by(empresa_id=_empresa_id()).order_by(ProveedorImportacion.nombre).all()
+
+
+def _proveedores_catalogo_datos(proveedores):
+    """Mapa nombre -> {pais, tratado_tlc} para autocompletar esos campos al elegir el proveedor."""
+    return {p.nombre: {"pais": p.pais or "", "tratado_tlc": p.tratado_tlc or ""} for p in proveedores}
+
+
+def _categorias_activo_disponibles():
+    return (
+        CategoriaActivo.query.filter_by(empresa_id=_empresa_id(), activa=True)
+        .order_by(CategoriaActivo.nombre)
+        .all()
+    )
 
 
 def _asegurar_proveedor_en_catalogo(nombre):
@@ -1103,6 +1129,7 @@ def ver_costeo_detallado(costeo_id):
         accion_form=AccionForm(),
         datos_form=datos_form,
         proveedores=_proveedores_catalogo(),
+        categorias_activo=_categorias_activo_disponibles(),
     )
 
 

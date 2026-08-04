@@ -57,13 +57,13 @@
 
 <div class="row g-3 mb-4">
   <div class="col-6 col-lg-3">
-    <div class="kpi"><div class="kpi-label">Total CIF</div><div class="kpi-value">{{ totales.cif_clp|clp }}</div></div>
+    <div class="kpi"><div class="kpi-label">Total CIF</div><div class="kpi-value" id="kpi-cif">{{ totales.cif_clp|clp }}</div></div>
   </div>
   <div class="col-6 col-lg-3">
-    <div class="kpi"><div class="kpi-label">Gastos internos</div><div class="kpi-value">{{ totales.gastos_internos_clp|clp }}</div></div>
+    <div class="kpi"><div class="kpi-label">Gastos internos</div><div class="kpi-value" id="kpi-gastos-internos">{{ totales.gastos_internos_clp|clp }}</div></div>
   </div>
   <div class="col-6 col-lg-3">
-    <div class="kpi"><div class="kpi-label">Costo total</div><div class="kpi-value">{{ totales.costo_total_clp|clp }}</div></div>
+    <div class="kpi"><div class="kpi-label">Costo total</div><div class="kpi-value" id="kpi-costo-total">{{ totales.costo_total_clp|clp }}</div></div>
   </div>
   <div class="col-6 col-lg-3">
     <div class="kpi">
@@ -175,9 +175,9 @@
                 </select>
               </td>
               <td><input type="text" name="doc-{{ doc.id }}-nro_doc" class="form-control form-control-sm campo-excel" value="{{ doc.nro_doc or '' }}" {{ 'disabled' if not puede_editar }}></td>
-              <td class="num"><input type="text" inputmode="decimal" name="doc-{{ doc.id }}-valor_tc" class="form-control form-control-sm text-end campo-excel" value="{{ doc.valor_tc if doc.valor_tc is not none else '' }}" {{ 'disabled' if not puede_editar }}></td>
-              <td class="num"><input type="text" inputmode="decimal" name="doc-{{ doc.id }}-valor_total_inv" class="form-control form-control-sm text-end campo-excel" value="{{ doc.valor_total_inv if doc.valor_total_inv is not none else '' }}" {{ 'disabled' if not puede_editar }}></td>
-              <td class="num">{{ (doc.valor_clp or 0)|clp }}</td>
+              <td class="num"><input type="text" inputmode="decimal" name="doc-{{ doc.id }}-valor_tc" class="form-control form-control-sm text-end campo-excel doc-tc" data-doc-id="{{ doc.id }}" value="{{ doc.valor_tc if doc.valor_tc is not none else '' }}" {{ 'disabled' if not puede_editar }}></td>
+              <td class="num"><input type="text" inputmode="decimal" name="doc-{{ doc.id }}-valor_total_inv" class="form-control form-control-sm text-end campo-excel doc-total" data-doc-id="{{ doc.id }}" value="{{ doc.valor_total_inv if doc.valor_total_inv is not none else '' }}" {{ 'disabled' if not puede_editar }}></td>
+              <td class="num" id="doc-clp-{{ doc.id }}">{{ (doc.valor_clp or 0)|clp }}</td>
             </tr>
             {% endif %}
             {% endfor %}
@@ -185,7 +185,7 @@
           <tfoot>
             <tr class="fw-bold">
               <td colspan="5">Total CIF</td>
-              <td class="num">{{ totales.cif_clp|clp }}</td>
+              <td class="num" id="total-cif">{{ totales.cif_clp|clp }}</td>
             </tr>
           </tfoot>
         </table>
@@ -211,7 +211,7 @@
             <tr>
               <td class="fw-semibold">{{ plantilla.etiqueta }}</td>
               <td><input type="text" name="gasto-{{ gasto.id }}-nro_doc" class="form-control form-control-sm campo-excel" value="{{ gasto.nro_doc or '' }}" {{ 'disabled' if not puede_editar }}></td>
-              <td class="num"><input type="text" inputmode="decimal" name="gasto-{{ gasto.id }}-valor_clp" class="form-control form-control-sm text-end campo-excel campo-clp" value="{{ (gasto.valor_clp or 0)|clp }}" {{ 'disabled' if not puede_editar }}></td>
+              <td class="num"><input type="text" inputmode="decimal" name="gasto-{{ gasto.id }}-valor_clp" class="form-control form-control-sm text-end campo-excel campo-clp gasto-valor-clp" value="{{ (gasto.valor_clp or 0)|clp }}" {{ 'disabled' if not puede_editar }}></td>
             </tr>
             {% endif %}
             {% endfor %}
@@ -219,7 +219,7 @@
           <tfoot>
             <tr class="fw-bold">
               <td colspan="2">Total gastos internos</td>
-              <td class="num">{{ totales.gastos_internos_clp|clp }}</td>
+              <td class="num" id="total-gastos-internos">{{ totales.gastos_internos_clp|clp }}</td>
             </tr>
           </tfoot>
         </table>
@@ -239,15 +239,22 @@
         <table class="table table-sm align-middle mb-2">
           <thead>
             <tr>
-              <th>Producto</th><th>Código</th><th class="num">Valor unit. T/C</th><th class="num">Cantidad</th>
-              <th>Unidad</th><th>Activo fijo</th><th>¿Ad Valorem?</th>
-              <th class="num d-none d-xl-table-cell">EXW CLP</th>
-              <th class="num d-none d-xl-table-cell">CIF CLP</th>
-              <th class="num d-none d-xl-table-cell">Ad Valorem</th>
-              <th class="num d-none d-xl-table-cell">Gastos int.</th>
+              <th>Producto</th><th>Cód. único</th><th class="num">Valor unit. T/C</th><th class="num">Cantidad</th>
+              <th>Unidad T/C</th><th>Activo fijo</th>
+              <th class="num">EXW</th>
+              <th class="num">%</th>
+              <th class="num">EXW CLP</th>
+              <th class="num">Crating CLP</th>
+              <th class="num">Flete CLP</th>
+              <th class="num">Seguro CLP</th>
+              <th class="num">CIF CLP</th>
+              <th>¿Ad Valorem?</th>
+              <th class="num">Ad Valorem CLP ({{ '%g'|format((costeo.tasa_ad_valorem or 0) * 100) }}%)</th>
+              <th class="num">TT. Gasto int. CLP</th>
               <th class="num">Costo total</th>
+              <th class="num">Costo unit. inicial (EXW)</th>
               <th class="num">Costo unit. final</th>
-              <th class="num d-none d-lg-table-cell">Impacto %</th>
+              <th class="num">Impacto %</th>
               {% if puede_editar %}<th></th>{% endif %}
             </tr>
           </thead>
@@ -265,24 +272,32 @@
                 </select>
               </td>
               <td>
-                <select name="prod-{{ p.id }}-activo_fijo" class="form-select form-select-sm campo-excel" {{ 'disabled' if not puede_editar }}>
+                <select name="prod-{{ p.id }}-activo_fijo" class="form-select form-select-sm campo-excel" style="min-width:150px;" {{ 'disabled' if not puede_editar }}>
                   <option value="NO" {{ 'selected' if p.activo_fijo == 'NO' }}>No</option>
-                  <option value="SI" {{ 'selected' if p.activo_fijo == 'SI' }}>Sí</option>
+                  {% for categoria in categorias_activo %}
+                  <option value="{{ categoria.nombre }}" {{ 'selected' if p.activo_fijo == categoria.nombre }}>{{ categoria.nombre }}</option>
+                  {% endfor %}
                 </select>
               </td>
+              <td class="num">{{ p.exw_moneda|numero }}</td>
+              <td class="num">{{ '%.1f%%'|format(p.porcentaje * 100) }}</td>
+              <td class="num">{{ p.exw_clp|clp }}</td>
+              <td class="num">{{ p.crating_clp|clp }}</td>
+              <td class="num">{{ p.flete_clp|clp }}</td>
+              <td class="num">{{ p.seguro_clp|clp }}</td>
+              <td class="num">{{ p.cif_clp|clp }}</td>
               <td>
                 <select name="prod-{{ p.id }}-tiene_ad_valorem" class="form-select form-select-sm campo-excel" {{ 'disabled' if not puede_editar }}>
                   <option value="SI" {{ 'selected' if p.tiene_ad_valorem == 'SI' }}>Sí</option>
                   <option value="NO" {{ 'selected' if p.tiene_ad_valorem == 'NO' }}>No</option>
                 </select>
               </td>
-              <td class="num d-none d-xl-table-cell">{{ p.exw_clp|clp }}</td>
-              <td class="num d-none d-xl-table-cell">{{ p.cif_clp|clp }}</td>
-              <td class="num d-none d-xl-table-cell">{{ p.ad_valorem_clp|clp }}</td>
-              <td class="num d-none d-xl-table-cell">{{ p.gastos_internos_clp|clp }}</td>
+              <td class="num">{{ p.ad_valorem_clp|clp }}</td>
+              <td class="num">{{ p.gastos_internos_clp|clp }}</td>
               <td class="num fw-semibold">{{ p.costo_total_clp|clp }}</td>
+              <td class="num">{{ p.costo_unitario_inicial_clp|clp }}</td>
               <td class="num fw-semibold">{{ p.costo_unitario_final_clp|clp }}</td>
-              <td class="num d-none d-lg-table-cell">{{ '%+.1f%%'|format(p.impacto_pct * 100) }}</td>
+              <td class="num">{{ '%+.1f%%'|format(p.impacto_pct * 100) }}</td>
               {% if puede_editar %}
               <td class="text-end">
                 <button type="submit" formaction="{{ url_for('importaciones.eliminar_producto_costeo', producto_id=p.id) }}" formnovalidate class="btn btn-sm btn-outline-danger" onclick="return confirm('¿Eliminar este producto?')" title="Eliminar">🗑</button>
@@ -290,9 +305,31 @@
               {% endif %}
             </tr>
             {% else %}
-            <tr><td colspan="13" class="text-center text-muted">Sin productos todavía.</td></tr>
+            <tr><td colspan="20" class="text-center text-muted">Sin productos todavía.</td></tr>
             {% endfor %}
           </tbody>
+          {% if costeo.productos %}
+          <tfoot>
+            <tr class="fw-bold">
+              <td colspan="6">TOTAL IMP</td>
+              <td class="num">{{ costeo.productos|sum(attribute='exw_moneda')|numero }}</td>
+              <td class="num">{{ '%.1f%%'|format(costeo.productos|sum(attribute='porcentaje') * 100) }}</td>
+              <td class="num">{{ costeo.productos|sum(attribute='exw_clp')|clp }}</td>
+              <td class="num">{{ costeo.productos|sum(attribute='crating_clp')|clp }}</td>
+              <td class="num">{{ costeo.productos|sum(attribute='flete_clp')|clp }}</td>
+              <td class="num">{{ costeo.productos|sum(attribute='seguro_clp')|clp }}</td>
+              <td class="num">{{ costeo.productos|sum(attribute='cif_clp')|clp }}</td>
+              <td></td>
+              <td class="num">{{ costeo.productos|sum(attribute='ad_valorem_clp')|clp }}</td>
+              <td class="num">{{ costeo.productos|sum(attribute='gastos_internos_clp')|clp }}</td>
+              <td class="num">{{ costeo.productos|sum(attribute='costo_total_clp')|clp }}</td>
+              <td class="num">{{ costeo.productos|sum(attribute='costo_unitario_inicial_clp')|clp }}</td>
+              <td class="num">{{ costeo.productos|sum(attribute='costo_unitario_final_clp')|clp }}</td>
+              <td></td>
+              {% if puede_editar %}<td></td>{% endif %}
+            </tr>
+          </tfoot>
+          {% endif %}
         </table>
       </div>
       {% if puede_editar %}

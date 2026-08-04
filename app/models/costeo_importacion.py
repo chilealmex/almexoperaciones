@@ -1,7 +1,6 @@
 from app.extensions import db
 
 MONEDAS = (("USD", "USD"), ("EUR", "EUR"), ("CLP", "CLP"))
-ACTIVO_FIJO = (("NO", "No"), ("SI", "Sí"))
 ESTADOS_COSTEO = (
     ("en_proceso", "En proceso"),
     ("cerrado", "Cerrado"),
@@ -137,7 +136,7 @@ class CosteoImportacionProducto(db.Model):
     valor_unitario_tc = db.Column(db.Float, nullable=False, default=0)
     cantidad = db.Column(db.Float, nullable=False, default=0)
     unidad_tc = db.Column(db.String(6), nullable=False, default="USD")
-    activo_fijo = db.Column(db.String(3), nullable=False, default="NO")
+    activo_fijo = db.Column(db.String(80), nullable=False, default="NO")
     tiene_ad_valorem = db.Column(db.String(3), nullable=False, default="SI")
 
     # --- Prorrateo calculado por recalcular() (columnas I:U de la planilla) ---
