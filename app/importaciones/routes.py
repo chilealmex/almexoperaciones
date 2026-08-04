@@ -282,6 +282,9 @@ def cambiar_estado(importacion_id):
     form = AccionForm()
     if not form.validate_on_submit():
         abort(400)
+    if importacion.estado == "cerrado" and not current_user.es_superadmin:
+        flash("Esta importación está cerrada. Solo un superadmin puede reabrirla.", "warning")
+        return redirect(request.referrer or url_for("importaciones.resumen"))
     nuevo_estado = request.form.get("estado", "")
     if nuevo_estado in ("pendiente", "costeando", "cerrado"):
         importacion.estado = nuevo_estado

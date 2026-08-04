@@ -4,6 +4,7 @@ from app.extensions import db as _db
 from app.models.importacion import DinRegistro, Importacion, ProveedorImportacion
 from app.utils import importaciones_calculo as calculo
 from tests.conftest import login
+from tests.test_permissions import _crear_superadmin
 
 
 def _crear_importacion(db, empresa, **kwargs):
@@ -384,3 +385,39 @@ def test_descarga_excel_de_din(client, usuario_admin, empresa, db):
     respuesta = client.get("/importaciones/din.xlsx")
     assert respuesta.status_code == 200
     assert "spreadsheetml" in respuesta.headers["Content-Type"]
+
+
+def test_usuario_normal_no_puede_reabrir_una_importacion_cerrada(client, usuario_admin, empresa, db):
+    importacion = _crear_importacion(db, empresa, pei="20", estado="cerrado")
+    login(client, "admin@test.cl")
+
+    client.post(
+        f"/importaciones/resumen/{importacion.id}/estado",
+        data={"estado": "pendiente"},
+        follow_redirects=True,
+    )
+    _db.session.refresh(importacion)
+    assert importacion.estado == "cerrado"
+
+
+def test_superadmin_si_puede_reabrir_una_importacion_cerrada(client, empresa, db):
+    importacion = _crear_importacion(db, empresa, pei="21", estado="cerrado")
+    superadmin = _crear_superadmin(db, empresa)
+    login(client, superadmin.email)
+
+    client.post(
+        f"/importaciones/resumen/{importacion.id}/estado",
+        data={"estado": "pendiente"},
+        follow_redirects=True,
+    )
+    _db.session.refresh(importacion)
+    assert importacion.estado == "pendiente"
+
+
+def test_resumen_muestra_candado_en_importacion_cerrada_para_usuario_normal(client, usuario_admin, empresa, db):
+    _crear_importacion(db, empresa, pei="22", estado="cerrado")
+    login(client, "admin@test.cl")
+    respuesta = client.get("/importaciones/resumen")
+    texto = respuesta.get_data(as_text=True)
+    assert "🔒 Cerrado" in texto
+    assert 'class="select-estado' not in texto

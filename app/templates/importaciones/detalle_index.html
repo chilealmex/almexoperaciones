@@ -68,7 +68,7 @@
         <td>{{ i.oc or '—' }}</td>
         <td>
           <span class="badge {{ 'bg-success' if i.estado == 'cerrado' else ('bg-warning text-dark' if i.estado == 'costeando' else 'bg-danger') }}">
-            {{ {'pendiente': 'Pendiente', 'costeando': 'Costeando', 'cerrado': 'Cerrado'}[i.estado] }}
+            {{ '🔒 ' if i.estado == 'cerrado' }}{{ {'pendiente': 'Pendiente', 'costeando': 'Costeando', 'cerrado': 'Cerrado'}[i.estado] }}
           </span>
         </td>
         <td class="text-end"><a href="{{ url_for('importaciones.detalle', importacion_id=i.id) }}" class="btn btn-sm btn-outline-secondary">Ver detalle →</a></td>
