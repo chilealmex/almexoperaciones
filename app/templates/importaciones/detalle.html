@@ -55,11 +55,20 @@
        data-bs-toggle="collapse" data-bs-target="#colapsar-{{ grupo.tipo }}" role="button"
        aria-expanded="true" aria-controls="colapsar-{{ grupo.tipo }}">
     <span><span class="chevron">▾</span> {{ grupo.etiqueta }}</span>
-    {% if grupo.muestra_cuadratura %}
-    <span class="badge {{ 'bg-success' if grupo.cuadrado else 'bg-danger' }}">
-      {{ 'Cuadrado' if grupo.cuadrado else 'Descuadrado' }} · Debe {{ grupo.debe|clp }} / Haber {{ grupo.haber|clp }}
-    </span>
-    {% endif %}
+    <div class="d-flex align-items-center gap-2">
+      {% if grupo.tiene_cbte %}
+        {% if grupo.meta.cbte %}
+        <span class="badge bg-secondary">N° comprobante {{ grupo.meta.cbte }}</span>
+        {% else %}
+        <span class="badge bg-danger">Sin N° comprobante</span>
+        {% endif %}
+      {% endif %}
+      {% if grupo.muestra_cuadratura %}
+      <span class="badge {{ 'bg-success' if grupo.cuadrado else 'bg-danger' }}">
+        {{ 'Cuadrado' if grupo.cuadrado else 'Descuadrado' }} · Debe {{ grupo.debe|clp }} / Haber {{ grupo.haber|clp }}
+      </span>
+      {% endif %}
+    </div>
   </div>
   <div class="collapse show" id="colapsar-{{ grupo.tipo }}">
   <div class="card-body">

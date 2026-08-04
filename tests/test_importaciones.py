@@ -230,6 +230,31 @@ def test_cuadratura_contable_se_puede_filtrar_por_estado_y_texto(client, usuario
     assert "ALMEX CANADA" not in texto
 
 
+def test_cuadratura_contable_lista_muestra_monto_y_oc(client, usuario_admin, empresa, db):
+    _crear_importacion(db, empresa, pei="12", proveedor_nombre="ALMEX CANADA", monto=11574390, oc="14541")
+    login(client, "admin@test.cl")
+    respuesta = client.get("/importaciones/detalle")
+    texto = respuesta.get_data(as_text=True)
+    assert "11.574.390" in texto
+    assert "14541" in texto
+
+
+def test_secciones_de_asientos_muestran_alerta_de_comprobante_faltante(client, usuario_admin, empresa, db):
+    importacion = _crear_importacion(db, empresa, pei="13")
+    login(client, "admin@test.cl")
+
+    respuesta = client.get(f"/importaciones/detalle/{importacion.id}")
+    texto = respuesta.get_data(as_text=True)
+    assert "Sin N° comprobante" in texto
+
+    importacion.meta_de("din").cbte = "4582"
+    _db.session.commit()
+
+    respuesta = client.get(f"/importaciones/detalle/{importacion.id}")
+    texto = respuesta.get_data(as_text=True)
+    assert "N° comprobante 4582" in texto
+
+
 def test_select_de_estado_en_resumen_tiene_la_clase_de_color_correspondiente(client, usuario_admin, empresa, db):
     _crear_importacion(db, empresa, pei="20", estado="costeando")
     login(client, "admin@test.cl")
