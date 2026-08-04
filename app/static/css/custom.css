@@ -716,6 +716,27 @@ tr.filtros-fila .form-select {
   color: var(--ink-soft) !important;
 }
 
+/* Select de Estado (editable) con el mismo código de color que sus badges de solo lectura */
+.select-estado {
+  font-weight: 600;
+  border-width: 1px;
+}
+.select-estado.estado-pendiente {
+  background-color: var(--danger-bg);
+  color: var(--danger);
+  border-color: #f0d3d0;
+}
+.select-estado.estado-costeando {
+  background-color: var(--warn-bg);
+  color: var(--warn);
+  border-color: #ecdcbe;
+}
+.select-estado.estado-cerrado {
+  background-color: var(--ok-bg);
+  color: var(--ok);
+  border-color: #c9e6d8;
+}
+
 .text-success { color: var(--ok) !important; }
 .text-danger { color: var(--danger) !important; }
 .text-warning { color: var(--warn) !important; }

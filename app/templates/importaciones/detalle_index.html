@@ -18,6 +18,42 @@
   </div>
 </form>
 
+<form method="get" id="filtros-cuadratura" class="row g-2 align-items-center mb-3">
+  <div class="col-12 col-md-4">
+    <input type="search" name="texto" value="{{ filtros.get('texto', '') }}" class="form-control" placeholder="Buscar proveedor, PEI, N° OC..." data-autofiltro>
+  </div>
+  <div class="col-6 col-md-3">
+    <select name="agencia" class="form-select" data-autofiltro>
+      <option value="">Todas las agencias</option>
+      {% for a in agencias %}
+      <option value="{{ a }}" {{ 'selected' if filtros.get('agencia') == a }}>{{ a }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-6 col-md-2">
+    <select name="mes" class="form-select" data-autofiltro>
+      <option value="">Todos los meses</option>
+      {% for clave, etiqueta in meses %}
+      <option value="{{ clave }}" {{ 'selected' if filtros.get('mes') == clave }}>{{ etiqueta }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-6 col-md-2">
+    <select name="estado" class="form-select" data-autofiltro>
+      <option value="">Todos los estados</option>
+      <option value="pendiente" {{ 'selected' if filtros.get('estado') == 'pendiente' }}>Pendiente</option>
+      <option value="costeando" {{ 'selected' if filtros.get('estado') == 'costeando' }}>Costeando</option>
+      <option value="cerrado" {{ 'selected' if filtros.get('estado') == 'cerrado' }}>Cerrado</option>
+    </select>
+  </div>
+  <div class="col-auto">
+    <button type="submit" class="btn btn-outline-secondary">Filtrar</button>
+    {% if filtros.get('texto') or filtros.get('agencia') or filtros.get('mes') or filtros.get('estado') %}
+    <a href="{{ url_for('importaciones.detalle_index') }}" class="btn btn-link">Limpiar</a>
+    {% endif %}
+  </div>
+</form>
+
 <div class="table-responsive">
   <table class="table table-hover align-middle">
     <thead><tr><th>Fecha PEI</th><th>PEI</th><th>IMP</th><th>Proveedor</th><th>Estado</th><th></th></tr></thead>

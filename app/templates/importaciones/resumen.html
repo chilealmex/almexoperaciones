@@ -83,7 +83,7 @@
           {% if puede('importaciones', 'editar') %}
           <form method="post" action="{{ url_for('importaciones.cambiar_estado', importacion_id=i.id) }}">
             {{ estado_form.hidden_tag() }}
-            <select name="estado" class="form-select form-select-sm" onchange="this.form.submit()">
+            <select name="estado" class="form-select form-select-sm select-estado estado-{{ i.estado }}" onchange="this.form.submit()">
               <option value="pendiente" {{ 'selected' if i.estado == 'pendiente' }}>Pendiente</option>
               <option value="costeando" {{ 'selected' if i.estado == 'costeando' }}>Costeando</option>
               <option value="cerrado" {{ 'selected' if i.estado == 'cerrado' }}>Cerrado</option>

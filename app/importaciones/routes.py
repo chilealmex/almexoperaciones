@@ -303,8 +303,17 @@ def detalle_index():
         if importacion:
             return redirect(url_for("importaciones.detalle", importacion_id=importacion.id))
         flash(f'No existe una importación con PEI "{pei_buscado}". Créala primero en Resumen.', "warning")
-    importaciones = _query_base().order_by(Importacion.fecha_pei.desc().nullslast(), Importacion.id.desc()).all()
-    return render_template("importaciones/detalle_index.html", importaciones=importaciones)
+
+    query = _aplicar_filtros_lista(_query_base(), request.args)
+    importaciones = query.order_by(Importacion.fecha_pei.desc().nullslast(), Importacion.id.desc()).all()
+    todas = _query_base().all()
+    return render_template(
+        "importaciones/detalle_index.html",
+        importaciones=importaciones,
+        agencias=_agencias_disponibles(),
+        meses=_meses_disponibles(todas),
+        filtros=request.args,
+    )
 
 
 def _construir_grupos(importacion):

@@ -214,6 +214,29 @@ def test_detalle_por_pei_encuentra_la_importacion_por_numero(client, usuario_adm
     assert "/importaciones/detalle/" in respuesta.headers["Location"]
 
 
+def test_cuadratura_contable_se_puede_filtrar_por_estado_y_texto(client, usuario_admin, empresa, db):
+    _crear_importacion(db, empresa, pei="10", proveedor_nombre="ALMEX CANADA", estado="cerrado")
+    _crear_importacion(db, empresa, pei="11", proveedor_nombre="DONGGUAN FANGKUN", estado="pendiente")
+    login(client, "admin@test.cl")
+
+    respuesta = client.get("/importaciones/detalle?estado=cerrado")
+    texto = respuesta.get_data(as_text=True)
+    assert "ALMEX CANADA" in texto
+    assert "DONGGUAN FANGKUN" not in texto
+
+    respuesta = client.get("/importaciones/detalle?texto=DONGGUAN")
+    texto = respuesta.get_data(as_text=True)
+    assert "DONGGUAN FANGKUN" in texto
+    assert "ALMEX CANADA" not in texto
+
+
+def test_select_de_estado_en_resumen_tiene_la_clase_de_color_correspondiente(client, usuario_admin, empresa, db):
+    _crear_importacion(db, empresa, pei="20", estado="costeando")
+    login(client, "admin@test.cl")
+    respuesta = client.get("/importaciones/resumen")
+    assert 'select-estado estado-costeando' in respuesta.get_data(as_text=True)
+
+
 def test_guardar_grupo_recalcula_y_persiste(client, usuario_admin, empresa, db):
     importacion = _crear_importacion(db, empresa)
     fa_l1 = importacion.linea_por_rol("factura_agencia", "fa_l1")
