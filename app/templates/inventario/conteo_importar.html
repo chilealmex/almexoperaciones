@@ -11,6 +11,7 @@
       <div class="card-body">
         <h2 class="h5">Archivo QMS</h2>
         <p class="text-muted small">Reporte "Distribución Valor Stock CLP" exportado desde QMS (.xlsx o .csv separado por punto y coma).</p>
+        <p><a href="{{ url_for('inventario.conteo_plantilla_qms') }}" class="small">↓ Descargar plantilla</a></p>
         <form method="post" action="{{ url_for('inventario.conteo_importar_qms') }}" enctype="multipart/form-data">
           {{ form_qms.hidden_tag() }}
           <div class="mb-3">
@@ -28,6 +29,7 @@
       <div class="card-body">
         <h2 class="h5">Archivo Defontana</h2>
         <p class="text-muted small">Reporte de inventario por bodega exportado desde Defontana (.xlsx o .csv separado por punto y coma).</p>
+        <p><a href="{{ url_for('inventario.conteo_plantilla_defontana') }}" class="small">↓ Descargar plantilla</a></p>
         <form method="post" action="{{ url_for('inventario.conteo_importar_defontana') }}" enctype="multipart/form-data">
           {{ form_defontana.hidden_tag() }}
           <div class="mb-3">

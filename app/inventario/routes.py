@@ -15,7 +15,7 @@ from app.utils.importar_conteo import importar_qms, importar_defontana
 from app.utils.formatting import format_clp, format_fecha_hora
 from app.utils.graficos import COLOR, serie, widget_seguro
 from app.utils.paneles import panel_inventario
-from app.utils.exportar import responder_excel, col, CLP, ENTERO, FECHA, PORCENTAJE
+from app.utils.exportar import responder_excel, responder_plantilla_excel, col, CLP, ENTERO, FECHA, PORCENTAJE
 
 
 def _stats_inventario():
@@ -880,6 +880,31 @@ def conteo_importar():
     total_items = ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id).count()
     return render_template(
         "inventario/conteo_importar.html", form_qms=form_qms, form_defontana=form_defontana, total_items=total_items
+    )
+
+
+@bp.route("/conteo/importar/plantilla-qms")
+@require_permission("inventario", "editar")
+def conteo_plantilla_qms():
+    return responder_plantilla_excel(
+        "plantilla-qms",
+        "QMS",
+        [
+            "Código único", "Descripción", "Stock", "Linea Negocio", "Sucursal",
+            "Unidad", "Categoría", "Valor Unitario", "Valor Total",
+        ],
+        fila_ejemplo=["ROP-BCAN-M", "Roldana cable acero", 12, "Repuestos", "Bodega Central", "UN", "Componentes", 15000, 180000],
+    )
+
+
+@bp.route("/conteo/importar/plantilla-defontana")
+@require_permission("inventario", "editar")
+def conteo_plantilla_defontana():
+    return responder_plantilla_excel(
+        "plantilla-defontana",
+        "Defontana",
+        ["CodArticulo", "Descripción", "Saldo Stock", "Nombre Bodega", "Unidad", "Costo Unitario", "Valor Total"],
+        fila_ejemplo=["ROP-BCAN-M", "Roldana cable acero", 12, "Bodega Central", "UN", 15000, 180000],
     )
 
 

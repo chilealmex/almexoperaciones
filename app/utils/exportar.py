@@ -160,3 +160,36 @@ def responder_excel(nombre_archivo, titulo, columnas, filas, subtitulo=""):
         f"attachment; filename={nombre_archivo}-{date.today().isoformat()}.xlsx"
     )
     return respuesta
+
+
+def responder_plantilla_excel(nombre_archivo, hoja_titulo, encabezados, fila_ejemplo=None):
+    """Plantilla simple para rellenar y volver a subir: encabezados en la fila 1, sin nada
+    más encima. A diferencia de responder_excel(), no lleva el bloque de marca — los
+    importadores del sitio leen la primera fila como encabezados, así que ponerle algo
+    antes rompería la re-subida."""
+    libro = Workbook()
+    hoja = libro.active
+    hoja.title = hoja_titulo[:31] or "Plantilla"
+
+    for indice, titulo in enumerate(encabezados, start=1):
+        celda = hoja.cell(row=1, column=indice, value=titulo)
+        celda.font = Font(bold=True, color="FFFFFF", size=10)
+        celda.fill = PatternFill("solid", fgColor=_AZUL)
+        hoja.column_dimensions[get_column_letter(indice)].width = max(14, len(titulo) + 2)
+
+    if fila_ejemplo:
+        for indice, valor in enumerate(fila_ejemplo, start=1):
+            hoja.cell(row=2, column=indice, value=valor)
+
+    hoja.freeze_panes = "A2"
+
+    memoria = BytesIO()
+    libro.save(memoria)
+    memoria.seek(0)
+
+    respuesta = make_response(memoria.read())
+    respuesta.headers["Content-Type"] = (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    respuesta.headers["Content-Disposition"] = f"attachment; filename={nombre_archivo}.xlsx"
+    return respuesta

@@ -188,6 +188,39 @@ def test_importar_defontana_desde_xlsx(db, empresa):
     assert item.unidad_defontana == "UN"
 
 
+def test_plantilla_qms_se_puede_descargar_y_reimportar(client, usuario_admin, empresa, db):
+    from tests.conftest import login
+
+    login(client, "admin@test.cl")
+    respuesta = client.get("/inventario/conteo/importar/plantilla-qms")
+    assert respuesta.status_code == 200
+    assert respuesta.headers["Content-Type"].startswith(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+    archivo = _fs(respuesta.data, "plantilla-qms.xlsx")
+    resultado = importar_qms(archivo, empresa.id)
+    assert resultado["total_codigos"] == 1
+    item = ItemConteoInventario.query.filter_by(codigo="ROP-BCAN-M").first()
+    assert item is not None
+    assert item.cantidad_qms == 12
+
+
+def test_plantilla_defontana_se_puede_descargar_y_reimportar(client, usuario_admin, empresa, db):
+    from tests.conftest import login
+
+    login(client, "admin@test.cl")
+    respuesta = client.get("/inventario/conteo/importar/plantilla-defontana")
+    assert respuesta.status_code == 200
+
+    archivo = _fs(respuesta.data, "plantilla-defontana.xlsx")
+    resultado = importar_defontana(archivo, empresa.id)
+    assert resultado["total_codigos"] == 1
+    item = ItemConteoInventario.query.filter_by(codigo="ROP-BCAN-M").first()
+    assert item is not None
+    assert item.cantidad_defontana == 12
+
+
 def test_xlsx_sin_extension_reconocible_se_detecta_por_contenido(db, empresa):
     """Si el archivo llega sin extensión .xlsx en el nombre, se detecta por la firma del archivo."""
     archivo = _xlsx(
