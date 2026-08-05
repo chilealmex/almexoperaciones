@@ -84,68 +84,83 @@
   </div>
   {% endif %}
 
+  {# La planilla tiene los datos de la importación a la izquierda y, a su derecha,
+     Documentos con Gastos internos debajo. Se replica esa misma disposición para
+     que quien viene del Excel encuentre cada dato donde lo espera. #}
+  <div class="row g-4">
+  <div class="col-12 col-xl-4">
+
   {# ===================== DATOS GENERALES ===================== #}
   <div class="card mb-4" id="datos-generales">
     <div class="card-header costeo-card-header card-header-plegable" data-bs-toggle="collapse" data-bs-target="#colapsar-datos-generales" role="button" aria-expanded="true" aria-controls="colapsar-datos-generales">
       <span class="chevron">▾</span> Datos generales
     </div>
     <div class="collapse show" id="colapsar-datos-generales">
-    <div class="card-body">
-      <div class="row g-3">
-        <div class="col-6 col-md-3">
-          {{ datos_form.n_importacion.label(class="form-label small mb-1") }}
-          {{ datos_form.n_importacion(class="form-control form-control-sm campo-excel", placeholder="1299", disabled=not puede_editar) }}
-        </div>
-        <div class="col-6 col-md-3">
-          {{ datos_form.fecha_llegada.label(class="form-label small mb-1") }}
-          {{ datos_form.fecha_llegada(class="form-control form-control-sm campo-excel", disabled=not puede_editar) }}
-        </div>
-        <div class="col-6 col-md-3">
-          {{ datos_form.guia_despacho.label(class="form-label small mb-1") }}
-          {{ datos_form.guia_despacho(class="form-control form-control-sm campo-excel", placeholder="64838", disabled=not puede_editar) }}
-        </div>
-        <div class="col-6 col-md-3">
-          {{ datos_form.purchase_order.label(class="form-label small mb-1") }}
-          {{ datos_form.purchase_order(class="form-control form-control-sm campo-excel", placeholder="14387", disabled=not puede_editar) }}
-        </div>
-        <div class="col-6 col-md-4">
-          {{ datos_form.proveedor.label(class="form-label small mb-1") }}
-          {{ prov.selector(datos_form.proveedor, proveedores, datos_form.proveedor.data, disabled=not puede_editar, select_clases="form-select form-select-sm campo-excel", input_clases="form-control form-control-sm campo-excel") }}
-        </div>
-        <div class="col-6 col-md-4">
-          {{ datos_form.modo_venta.label(class="form-label small mb-1") }}
-          {{ datos_form.modo_venta(class="form-control form-control-sm campo-excel", placeholder="CRÉDITO", disabled=not puede_editar) }}
-        </div>
-        <div class="col-6 col-md-4">
-          {{ datos_form.orden_trabajo.label(class="form-label small mb-1") }}
-          {{ datos_form.orden_trabajo(class="form-control form-control-sm campo-excel", placeholder="6235-6249-STOCK", disabled=not puede_editar) }}
-        </div>
-        <div class="col-6 col-md-4">
-          {{ datos_form.responsable_costeo.label(class="form-label small mb-1") }}
-          {{ datos_form.responsable_costeo(class="form-control form-control-sm campo-excel", disabled=not puede_editar) }}
-        </div>
-        <div class="col-6 col-md-4">
-          {{ datos_form.tipo_flete_proyectado.label(class="form-label small mb-1") }}
-          {{ datos_form.tipo_flete_proyectado(class="form-control form-control-sm campo-excel", placeholder="A", disabled=not puede_editar) }}
-        </div>
-        <div class="col-6 col-md-4">
-          {{ datos_form.solicitud_compra.label(class="form-label small mb-1") }}
-          {{ datos_form.solicitud_compra(class="form-control form-control-sm campo-excel", placeholder="COM-0271", disabled=not puede_editar) }}
-        </div>
-        <div class="col-6 col-md-4">
-          {{ datos_form.tasa_ad_valorem.label(class="form-label small mb-1") }}
-          {{ datos_form.tasa_ad_valorem(class="form-control form-control-sm campo-excel", disabled=not puede_editar) }}
-          <div class="form-text">Usa 0 si está exenta por tratado de libre comercio.</div>
-        </div>
-        <div class="col-12 col-md-4">
-          {{ datos_form.importacion_id.label(class="form-label small mb-1") }}
-          {{ datos_form.importacion_id(class="form-select form-select-sm campo-excel", disabled=not puede_editar) }}
-          <div class="form-text">Para que aparezca el acceso directo desde Cuadratura contable.</div>
-        </div>
-      </div>
+    <div class="card-body p-0">
+      <table class="table table-sm align-middle mb-0 tabla-datos-generales">
+        <tbody>
+          <tr>
+            <th>{{ datos_form.n_importacion.label.text }}</th>
+            <td>{{ datos_form.n_importacion(class="form-control form-control-sm campo-excel", placeholder="1299", disabled=not puede_editar) }}</td>
+          </tr>
+          <tr>
+            <th>{{ datos_form.fecha_llegada.label.text }}</th>
+            <td>{{ datos_form.fecha_llegada(class="form-control form-control-sm campo-excel", disabled=not puede_editar) }}</td>
+          </tr>
+          <tr>
+            <th>{{ datos_form.guia_despacho.label.text }}</th>
+            <td>{{ datos_form.guia_despacho(class="form-control form-control-sm campo-excel", placeholder="64838", disabled=not puede_editar) }}</td>
+          </tr>
+          <tr>
+            <th>{{ datos_form.proveedor.label.text }}</th>
+            <td>{{ prov.selector(datos_form.proveedor, proveedores, datos_form.proveedor.data, disabled=not puede_editar, select_clases="form-select form-select-sm campo-excel", input_clases="form-control form-control-sm campo-excel") }}</td>
+          </tr>
+          <tr>
+            <th>{{ datos_form.modo_venta.label.text }}</th>
+            <td>{{ datos_form.modo_venta(class="form-control form-control-sm campo-excel", placeholder="CRÉDITO", disabled=not puede_editar) }}</td>
+          </tr>
+          <tr>
+            <th>{{ datos_form.purchase_order.label.text }}</th>
+            <td>{{ datos_form.purchase_order(class="form-control form-control-sm campo-excel", placeholder="14387", disabled=not puede_editar) }}</td>
+          </tr>
+          <tr>
+            <th>{{ datos_form.orden_trabajo.label.text }}</th>
+            <td>{{ datos_form.orden_trabajo(class="form-control form-control-sm campo-excel", placeholder="6235-6249-STOCK", disabled=not puede_editar) }}</td>
+          </tr>
+          <tr>
+            <th>{{ datos_form.responsable_costeo.label.text }}</th>
+            <td>{{ datos_form.responsable_costeo(class="form-control form-control-sm campo-excel", disabled=not puede_editar) }}</td>
+          </tr>
+          <tr>
+            <th>{{ datos_form.tipo_flete_proyectado.label.text }}</th>
+            <td>{{ datos_form.tipo_flete_proyectado(class="form-control form-control-sm campo-excel", placeholder="A", disabled=not puede_editar) }}</td>
+          </tr>
+          <tr>
+            <th>{{ datos_form.solicitud_compra.label.text }}</th>
+            <td>{{ datos_form.solicitud_compra(class="form-control form-control-sm campo-excel", placeholder="COM-0271", disabled=not puede_editar) }}</td>
+          </tr>
+          <tr>
+            <th>{{ datos_form.tasa_ad_valorem.label.text }}</th>
+            <td>
+              {{ datos_form.tasa_ad_valorem(class="form-control form-control-sm campo-excel", disabled=not puede_editar) }}
+              <div class="form-text">Usa 0 si está exenta por tratado de libre comercio.</div>
+            </td>
+          </tr>
+          <tr>
+            <th>{{ datos_form.importacion_id.label.text }}</th>
+            <td>
+              {{ datos_form.importacion_id(class="form-select form-select-sm campo-excel", disabled=not puede_editar) }}
+              <div class="form-text">Para que aparezca el acceso directo desde Cuadratura contable.</div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
     </div>
   </div>
+
+  </div>{# fin columna izquierda #}
+  <div class="col-12 col-xl-8">
 
   {# ===================== DOCUMENTOS ===================== #}
   <div class="card mb-4" id="documentos">
@@ -185,7 +200,7 @@
           </tbody>
           <tfoot>
             <tr class="fw-bold">
-              <td colspan="5">Total CIF</td>
+              <td colspan="5">TOTAL CIF</td>
               <td class="num" id="total-cif">{{ totales.cif_clp|clp }}</td>
             </tr>
           </tfoot>
@@ -219,8 +234,12 @@
           </tbody>
           <tfoot>
             <tr class="fw-bold">
-              <td colspan="2">Total gastos internos</td>
+              <td colspan="2">TT. GASTOS INTERNOS</td>
               <td class="num" id="total-gastos-internos">{{ totales.gastos_internos_clp|clp }}</td>
+            </tr>
+            <tr class="fw-bold fila-costo-total">
+              <td colspan="2">COSTO TOTAL</td>
+              <td class="num" id="total-costo">{{ totales.costo_total_clp|clp }}</td>
             </tr>
           </tfoot>
         </table>
@@ -228,6 +247,9 @@
     </div>
     </div>
   </div>
+
+  </div>{# fin columna derecha #}
+  </div>{# fin fila datos + documentos #}
 
   {# ===================== PRODUCTOS ===================== #}
   <div class="card mb-4" id="productos">

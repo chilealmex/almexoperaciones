@@ -1066,3 +1066,23 @@ tr.filtros-fila .form-select {
 .tabla-compacta td + td {
   border-left: 1px solid rgba(15, 35, 60, 0.07);
 }
+
+/* Datos generales del Costeo: etiqueta a la izquierda y campo a la derecha, en
+   la misma línea, igual que las dos primeras columnas de la planilla. */
+.tabla-datos-generales th {
+  width: 42%;
+  font-weight: 600;
+  font-size: 0.82rem;
+  vertical-align: middle;
+}
+.tabla-datos-generales td {
+  vertical-align: middle;
+}
+.tabla-datos-generales .form-text {
+  font-size: 0.72rem;
+  margin-top: 0.1rem;
+}
+/* La fila del costo total cierra el bloque, como en el Excel. */
+.fila-costo-total td {
+  border-top: 2px solid rgba(15, 35, 60, 0.25);
+}

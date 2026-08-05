@@ -195,6 +195,7 @@ document.addEventListener("DOMContentLoaded", function () {
     pintar("kpi-cif", cif);
     pintar("kpi-gastos-internos", gastos);
     pintar("kpi-costo-total", cif + gastos);
+    pintar("total-costo", cif + gastos);
   }
 
   document.querySelectorAll(".doc-tc, .doc-total").forEach(function (campo) {
