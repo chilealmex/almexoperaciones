@@ -178,7 +178,7 @@
             </tr>
           </thead>
           <tbody>
-            {% for plantilla in documento_roles %}
+            {% for plantilla in documento_roles if plantilla.rol != 'ad_valorem' %}
             {% set doc = costeo.documento_por_rol(plantilla.rol) %}
             {% if doc %}
             <tr>
@@ -203,6 +203,24 @@
               <td colspan="5">TOTAL CIF</td>
               <td class="num" id="total-cif">{{ totales.cif_clp|clp }}</td>
             </tr>
+            {# Igual que en la planilla, el Ad Valorem va bajo el TOTAL CIF y no forma parte de él. #}
+            {% set doc_av = costeo.documento_por_rol('ad_valorem') %}
+            {% if doc_av %}
+            <tr class="fila-ad-valorem">
+              <td class="fw-semibold">Ad Valorem</td>
+              <td>
+                <select name="doc-{{ doc_av.id }}-moneda" class="form-select form-select-sm campo-excel" {{ 'disabled' if not puede_editar }}>
+                  <option value="USD" {{ 'selected' if doc_av.moneda == 'USD' }}>USD</option>
+                  <option value="EUR" {{ 'selected' if doc_av.moneda == 'EUR' }}>EUR</option>
+                  <option value="CLP" {{ 'selected' if doc_av.moneda == 'CLP' }}>CLP</option>
+                </select>
+              </td>
+              <td><input type="text" name="doc-{{ doc_av.id }}-nro_doc" class="form-control form-control-sm campo-excel" value="{{ doc_av.nro_doc or '' }}" {{ 'disabled' if not puede_editar }}></td>
+              <td class="num"><input type="text" inputmode="decimal" name="doc-{{ doc_av.id }}-valor_tc" class="form-control form-control-sm text-end campo-excel doc-tc" data-doc-id="{{ doc_av.id }}" value="{{ doc_av.valor_tc if doc_av.valor_tc is not none else '' }}" {{ 'disabled' if not puede_editar }}></td>
+              <td class="num"><input type="text" inputmode="decimal" name="doc-{{ doc_av.id }}-valor_total_inv" class="form-control form-control-sm text-end campo-excel doc-total" data-doc-id="{{ doc_av.id }}" value="{{ doc_av.valor_total_inv if doc_av.valor_total_inv is not none else '' }}" {{ 'disabled' if not puede_editar }}></td>
+              <td class="num" id="doc-clp-{{ doc_av.id }}" data-fuera-cif="1">{{ (doc_av.valor_clp or 0)|clp }}</td>
+            </tr>
+            {% endif %}
           </tfoot>
         </table>
       </div>
@@ -272,7 +290,8 @@
               <th class="num">Seguro</th>
               <th class="num">CIF</th>
               <th>¿Ad Valorem?</th>
-              <th class="num">Ad Valorem ({{ '%g'|format((costeo.tasa_ad_valorem or 0) * 100) }}%)</th>
+              <th class="num">Ad Valorem</th>
+              <th class="num">% s/ CIF</th>
               <th class="num">TT. Gasto inter.</th>
               <th class="num">Costo total</th>
               <th class="num">Costo unit. inicial</th>
@@ -327,6 +346,11 @@
                 {{ p.ad_valorem_clp|clp }}
                 {% endif %}
               </td>
+              {# Tasa efectiva: cuánto fue realmente el Ad Valorem sobre el CIF de la línea.
+                 No siempre da la tasa nominal, porque el monto puede venir de la DIN. #}
+              <td class="num text-muted">
+                {{ '%.1f%%'|format(p.ad_valorem_clp / p.cif_clp * 100) if p.cif_clp else '—' }}
+              </td>
               <td class="num">{{ p.gastos_internos_clp|clp }}</td>
               <td class="num fw-semibold">{{ p.costo_total_clp|clp }}</td>
               <td class="num">{{ p.costo_unitario_inicial_clp|clp }}</td>
@@ -339,7 +363,7 @@
               {% endif %}
             </tr>
             {% else %}
-            <tr><td colspan="20" class="text-center text-muted">Sin productos todavía.</td></tr>
+            <tr><td colspan="21" class="text-center text-muted">Sin productos todavía.</td></tr>
             {% endfor %}
           </tbody>
           {% if costeo.productos %}
@@ -355,6 +379,10 @@
               <td class="num">{{ costeo.productos|sum(attribute='cif_clp')|clp }}</td>
               <td></td>
               <td class="num">{{ costeo.productos|sum(attribute='ad_valorem_clp')|clp }}</td>
+              {% set cif_total = costeo.productos|sum(attribute='cif_clp') %}
+              <td class="num text-muted">
+                {{ '%.1f%%'|format(costeo.productos|sum(attribute='ad_valorem_clp') / cif_total * 100) if cif_total else '—' }}
+              </td>
               <td class="num">{{ costeo.productos|sum(attribute='gastos_internos_clp')|clp }}</td>
               <td class="num">{{ costeo.productos|sum(attribute='costo_total_clp')|clp }}</td>
               <td class="num">{{ costeo.productos|sum(attribute='costo_unitario_inicial_clp')|clp }}</td>

@@ -173,7 +173,17 @@ document.addEventListener("DOMContentLoaded", function () {
 
   function sumaCIF() {
     var total = 0;
-    document.querySelectorAll('[id^="doc-clp-"]').forEach(function (celda) {
+    // El Ad Valorem también es una línea de documentos, pero queda fuera del
+    // CIF (en la planilla va bajo la fila TOTAL CIF), así que no se suma acá.
+    document.querySelectorAll('[id^="doc-clp-"]:not([data-fuera-cif])').forEach(function (celda) {
+      total += parseEnteroCLP(celda.textContent);
+    });
+    return total;
+  }
+
+  function sumaAdValorem() {
+    var total = 0;
+    document.querySelectorAll('[id^="doc-clp-"][data-fuera-cif]').forEach(function (celda) {
       total += parseEnteroCLP(celda.textContent);
     });
     return total;
@@ -190,12 +200,13 @@ document.addEventListener("DOMContentLoaded", function () {
   function actualizarTotales() {
     var cif = sumaCIF();
     var gastos = sumaGastosInternos();
+    var costoTotal = cif + sumaAdValorem() + gastos;
     pintar("total-cif", cif);
     pintar("total-gastos-internos", gastos);
     pintar("kpi-cif", cif);
     pintar("kpi-gastos-internos", gastos);
-    pintar("kpi-costo-total", cif + gastos);
-    pintar("total-costo", cif + gastos);
+    pintar("kpi-costo-total", costoTotal);
+    pintar("total-costo", costoTotal);
   }
 
   document.querySelectorAll(".doc-tc, .doc-total").forEach(function (campo) {

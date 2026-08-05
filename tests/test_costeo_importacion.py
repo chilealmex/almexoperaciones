@@ -81,9 +81,10 @@ def _cargar_ejemplo_real(costeo, db):
 # --- Lógica de cálculo ---------------------------------------------------
 
 
-def test_sembrar_lineas_fijas_crea_8_documentos_y_6_gastos(db, empresa):
+def test_sembrar_lineas_fijas_crea_9_documentos_y_6_gastos(db, empresa):
+    """8 documentos de la planilla más la línea de Ad Valorem."""
     costeo = _crear_costeo(db, empresa)
-    assert len(costeo.documentos) == len(calculo.DOCUMENTO_ROLES) == 8
+    assert len(costeo.documentos) == len(calculo.DOCUMENTO_ROLES) == 9
     assert len(costeo.gastos_internos) == len(calculo.GASTO_INTERNO_ROLES) == 6
 
 
@@ -204,7 +205,7 @@ def test_admin_crea_y_ve_costeo_detallado(client, usuario_admin, empresa, db):
     costeo = CosteoImportacion.query.filter_by(empresa_id=empresa.id, n_importacion="1299").first()
     assert costeo is not None
     assert costeo.tasa_ad_valorem == 0.06
-    assert len(costeo.documentos) == 8
+    assert len(costeo.documentos) == 9
     assert len(costeo.gastos_internos) == 6
 
     respuesta = client.get(f"/importaciones/costeo-detallado/{costeo.id}")
@@ -840,7 +841,7 @@ def test_tabla_de_productos_sigue_el_orden_de_columnas_de_la_planilla(client, us
     encabezados = [
         "Producto", "Cód. único", "Valor unit. T/C", "Cantidad", "Unidad T/C", "Activo fijo",
         "EXW", "%", "EXW CLP", "Crating", "Flete", "Seguro", "CIF",
-        "¿Ad Valorem?", "Ad Valorem (", "TT. Gasto inter.", "Costo total",
+        "¿Ad Valorem?", "Ad Valorem", "% s/ CIF", "TT. Gasto inter.", "Costo total",
         "Costo unit. inicial", "Costo unit. final", "Impacto %",
     ]
     posiciones = [cabecera.index(">" + e) for e in encabezados]
@@ -951,3 +952,144 @@ def test_un_monto_absurdamente_largo_no_rompe_el_guardado(client, usuario_admin,
     assert respuesta.status_code == 200
     _db.session.refresh(gasto)
     assert gasto.valor_clp == 10 ** 15
+
+
+def test_ad_valorem_es_una_linea_mas_de_documentos_y_queda_fuera_del_cif(db, empresa):
+    costeo = _crear_costeo(db, empresa)
+    _cargar_ejemplo_real(costeo, db)
+    cif_antes = calculo.totales_documentos(costeo)["cif_clp"]
+
+    doc = costeo.documento_por_rol("ad_valorem")
+    assert doc is not None, "la línea de Ad Valorem se siembra junto con las demás"
+    doc.valor_tc = 894.79
+    doc.valor_total_inv = 195.6
+    calculo.recalcular(costeo)
+
+    totales = calculo.totales_documentos(costeo)
+    assert totales["ad_valorem_clp"] == round(894.79 * 195.6)
+    assert totales["cif_clp"] == cif_antes  # el Ad Valorem no infla el CIF
+    assert totales["costo_total_clp"] == totales["cif_clp"] + totales["ad_valorem_clp"] + totales["gastos_internos_clp"]
+
+
+def test_el_ad_valorem_cargado_como_documento_se_reparte_entre_los_productos(db, empresa):
+    costeo = _crear_costeo(db, empresa)
+    _cargar_ejemplo_real(costeo, db)
+
+    doc = costeo.documento_por_rol("ad_valorem")
+    doc.valor_tc = 1
+    doc.valor_total_inv = 200000
+    calculo.recalcular(costeo)
+    _db.session.commit()
+
+    repartido = sum(p.ad_valorem_clp for p in costeo.productos)
+    assert abs(repartido - 200000) <= len(costeo.productos)
+    # Se reparte proporcional al peso de cada producto, igual que el flete.
+    primero = costeo.productos[0]
+    assert abs(primero.ad_valorem_clp - 200000 * primero.porcentaje) <= 2
+
+
+def test_los_productos_exentos_no_reciben_ad_valorem_y_el_resto_absorbe_el_total(db, empresa):
+    costeo = _crear_costeo(db, empresa)
+    _cargar_ejemplo_real(costeo, db)
+
+    costeo.productos[0].tiene_ad_valorem = "NO"
+    doc = costeo.documento_por_rol("ad_valorem")
+    doc.valor_tc = 1
+    doc.valor_total_inv = 200000
+    calculo.recalcular(costeo)
+    _db.session.commit()
+
+    assert costeo.productos[0].ad_valorem_clp == 0
+    repartido = sum(p.ad_valorem_clp for p in costeo.productos)
+    assert abs(repartido - 200000) <= len(costeo.productos)
+
+
+def test_sin_documento_de_ad_valorem_se_sigue_calculando_con_la_tasa(db, empresa):
+    costeo = _crear_costeo(db, empresa)
+    _cargar_ejemplo_real(costeo, db)  # deja la línea de Ad Valorem en cero
+    producto = costeo.productos[2]
+    assert abs(producto.ad_valorem_clp - round(producto.cif_clp * 0.06)) <= 1
+
+
+def test_agregar_un_producto_conserva_lo_escrito_y_recalcula(client, usuario_admin, empresa, db):
+    """El botón '+ Agregar producto' vive dentro del formulario grande: no debe perder lo tipeado."""
+    login(client, "admin@test.cl")
+    costeo = _crear_costeo(db, empresa, n_importacion="62")
+    client.post(f"/importaciones/costeo-detallado/{costeo.id}/productos/agregar", follow_redirects=True)
+    _db.session.refresh(costeo)
+    producto = costeo.productos[0]
+    inv1 = costeo.documento_por_rol("inv1")
+    gasto = costeo.gastos_internos[0]
+
+    # Se escribe en pantalla y, sin guardar, se agrega otra línea.
+    client.post(
+        f"/importaciones/costeo-detallado/{costeo.id}/productos/agregar",
+        data={
+            f"doc-{inv1.id}-valor_tc": "900",
+            f"doc-{inv1.id}-valor_total_inv": "1000",
+            f"gasto-{gasto.id}-valor_clp": "$50.000",
+            f"prod-{producto.id}-producto": "ENCHUFE",
+            f"prod-{producto.id}-valor_unitario_tc": "100",
+            f"prod-{producto.id}-cantidad": "2",
+            f"prod-{producto.id}-unidad_tc": "USD",
+            f"prod-{producto.id}-activo_fijo": "NO",
+            f"prod-{producto.id}-tiene_ad_valorem": "SI",
+        },
+        follow_redirects=True,
+    )
+    _db.session.refresh(costeo)
+    _db.session.refresh(producto)
+    _db.session.refresh(inv1)
+    _db.session.refresh(gasto)
+
+    assert len(costeo.productos) == 2
+    assert producto.producto == "ENCHUFE"       # no se perdió lo escrito
+    assert inv1.valor_clp == 900_000
+    assert gasto.valor_clp == 50_000
+    assert producto.exw_clp == 900_000          # y quedó recalculado
+
+
+def test_eliminar_un_producto_conserva_lo_escrito_en_los_demas(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    costeo = _crear_costeo(db, empresa, n_importacion="63")
+    for _ in range(2):
+        client.post(f"/importaciones/costeo-detallado/{costeo.id}/productos/agregar", follow_redirects=True)
+    _db.session.refresh(costeo)
+    queda, se_borra = costeo.productos[0], costeo.productos[1]
+    inv1 = costeo.documento_por_rol("inv1")
+
+    client.post(
+        f"/importaciones/costeo-detallado/producto/{se_borra.id}/eliminar",
+        data={
+            f"doc-{inv1.id}-valor_tc": "900",
+            f"doc-{inv1.id}-valor_total_inv": "1000",
+            f"prod-{queda.id}-producto": "SE QUEDA",
+            f"prod-{queda.id}-valor_unitario_tc": "50",
+            f"prod-{queda.id}-cantidad": "4",
+            f"prod-{queda.id}-unidad_tc": "USD",
+            f"prod-{queda.id}-activo_fijo": "NO",
+            f"prod-{queda.id}-tiene_ad_valorem": "SI",
+        },
+        follow_redirects=True,
+    )
+    _db.session.refresh(costeo)
+    _db.session.refresh(queda)
+
+    assert len(costeo.productos) == 1
+    assert queda.producto == "SE QUEDA"
+    assert queda.exw_clp == 900_000  # el que queda absorbe todo el EXW
+
+
+def test_la_pantalla_muestra_el_porcentaje_real_de_ad_valorem_sobre_el_cif(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    costeo = _crear_costeo(db, empresa, n_importacion="64")
+    _cargar_ejemplo_real(costeo, db)
+    producto = costeo.productos[0]
+    producto.ad_valorem_manual_clp = round(producto.cif_clp * 0.059)
+    _db.session.commit()
+    calculo.recalcular(costeo)
+    _db.session.commit()
+
+    texto = client.get(f"/importaciones/costeo-detallado/{costeo.id}").get_data(as_text=True)
+    assert "% s/ CIF" in texto
+    assert "5.9%" in texto

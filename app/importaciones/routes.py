@@ -1145,6 +1145,19 @@ def ver_costeo_detallado(costeo_id):
     )
 
 
+def _guardar_lo_escrito_en_la_pantalla(costeo):
+    """Guarda lo tipeado en el formulario grande antes de agregar o borrar una línea.
+
+    Los botones de "+ Agregar producto" y de eliminar viven dentro del mismo
+    formulario que el resto del Costeo, así que envían todo lo escrito. Sin
+    esto, cada vez que se agrega una línea se perdía lo editado desde el
+    último "Guardar todo" y los totales quedaban desactualizados.
+    """
+    _guardar_campos_documentos(costeo)
+    _guardar_campos_gastos(costeo)
+    _guardar_campos_productos(costeo)
+
+
 def _guardar_campos_documentos(costeo):
     for plantilla in costeo_calculo.DOCUMENTO_ROLES:
         doc = costeo.documento_por_rol(plantilla["rol"])
@@ -1264,12 +1277,15 @@ def agregar_producto_costeo(costeo_id):
     if _costeo_bloqueado(costeo):
         flash("Este costeo está cerrado. Solo un superadmin puede modificarlo.", "warning")
         return redirect(url_for("importaciones.ver_costeo_detallado", costeo_id=costeo.id))
+    _guardar_lo_escrito_en_la_pantalla(costeo)
     orden = len(costeo.productos)
     db.session.add(
         CosteoImportacionProducto(
             costeo=costeo, orden=orden, unidad_tc="USD", activo_fijo="NO", tiene_ad_valorem="SI"
         )
     )
+    db.session.flush()
+    costeo_calculo.recalcular(costeo)
     db.session.commit()
     return redirect(url_for("importaciones.ver_costeo_detallado", costeo_id=costeo.id) + "#productos")
 
@@ -1285,6 +1301,7 @@ def eliminar_producto_costeo(producto_id):
     if _costeo_bloqueado(costeo):
         flash("Este costeo está cerrado. Solo un superadmin puede modificarlo.", "warning")
         return redirect(url_for("importaciones.ver_costeo_detallado", costeo_id=costeo.id))
+    _guardar_lo_escrito_en_la_pantalla(costeo)
     db.session.delete(producto)
     db.session.flush()
     costeo_calculo.recalcular(costeo)

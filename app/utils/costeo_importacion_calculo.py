@@ -17,7 +17,11 @@ DOCUMENTO_ROLES = (
     {"rol": "flete_intl", "etiqueta": "Flete Internacional"},
     {"rol": "crating_usd", "etiqueta": "Crating USD"},
     {"rol": "crating_eur", "etiqueta": "Crating EUR"},
+    {"rol": "ad_valorem", "etiqueta": "Ad Valorem"},
 )
+# El Ad Valorem va en la tabla de documentos, como en la planilla, pero queda
+# fuera del CIF: en el Excel la fila TOTAL CIF viene antes que la de Ad Valorem.
+ROL_AD_VALOREM = "ad_valorem"
 ROLES_INVOICE = ("inv1", "inv2", "inv3", "inv4")
 
 GASTO_INTERNO_ROLES = (
@@ -82,6 +86,9 @@ def totales_documentos(costeo):
     cif_clp = exw_clp + crating_clp + flete_clp + seguro_clp
     gastos_internos_clp = sum(_num(g.valor_clp) for g in costeo.gastos_internos)
 
+    doc_ad_valorem = costeo.documento_por_rol(ROL_AD_VALOREM)
+    ad_valorem_clp = _num(doc_ad_valorem.valor_clp if doc_ad_valorem else 0)
+
     return {
         "exw_moneda": exw_moneda,
         "exw_clp": exw_clp,
@@ -90,7 +97,8 @@ def totales_documentos(costeo):
         "seguro_clp": seguro_clp,
         "cif_clp": cif_clp,
         "gastos_internos_clp": gastos_internos_clp,
-        "costo_total_clp": cif_clp + gastos_internos_clp,
+        "ad_valorem_clp": ad_valorem_clp,
+        "costo_total_clp": cif_clp + ad_valorem_clp + gastos_internos_clp,
     }
 
 
@@ -109,6 +117,15 @@ def recalcular(costeo):
     totales = totales_documentos(costeo)
     exw_total_moneda = sum(_num(p.valor_unitario_tc) * _num(p.cantidad) for p in costeo.productos)
 
+    # Si se cargó el Ad Valorem como documento (el monto real de la DIN), ese
+    # total se reparte solo entre los productos que sí lo pagan, en proporción
+    # a lo que pesa cada uno; así se distribuye completo y no queda un resto.
+    peso_afecto = sum(
+        _num(p.valor_unitario_tc) * _num(p.cantidad)
+        for p in costeo.productos
+        if p.tiene_ad_valorem == "SI"
+    )
+
     for producto in costeo.productos:
         exw_moneda = _num(producto.valor_unitario_tc) * _num(producto.cantidad)
         porcentaje = (exw_moneda / exw_total_moneda) if exw_total_moneda else 0.0
@@ -121,8 +138,11 @@ def recalcular(costeo):
         if producto.tiene_ad_valorem != "SI":
             ad_valorem_clp = 0.0
         elif producto.ad_valorem_manual_clp is not None:
-            # Monto escrito a mano: manda por sobre el cálculo de CIF x tasa.
+            # Monto escrito a mano en la línea: manda sobre todo lo demás.
             ad_valorem_clp = _num(producto.ad_valorem_manual_clp)
+        elif totales["ad_valorem_clp"]:
+            proporcion = (exw_moneda / peso_afecto) if peso_afecto else 0.0
+            ad_valorem_clp = totales["ad_valorem_clp"] * proporcion
         else:
             ad_valorem_clp = cif_clp * _num(costeo.tasa_ad_valorem)
         gastos_internos_clp = totales["gastos_internos_clp"] * porcentaje
