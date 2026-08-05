@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+{% block title %}Dif TC {{ nombre_mes_numero(periodo.mes) }} {{ periodo.anio }}{% endblock %}
+{% block main_class %}container-fluid px-3 px-lg-4{% endblock %}
+{% block content %}
+{% set puede_editar = puede('contabilidad', 'editar') and (periodo.estado != 'cerrado' or current_user.es_superadmin) %}
+
+<div class="page-head">
+  <div>
+    <h1>Dif TC PR/CL — {{ nombre_mes_numero(periodo.mes) }} {{ periodo.anio }}</h1>
+    <p class="page-sub">{{ periodo.notas or 'Contabilización mensual de la diferencia de tipo de cambio' }}</p>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <a href="{{ url_for('contabilidad.exportar_periodo_dif_tc', periodo_id=periodo.id) }}"
+       class="btn btn-outline-secondary btn-sm">Descargar Excel</a>
+    <a href="{{ url_for('contabilidad.dif_tc') }}" class="btn btn-outline-secondary btn-sm">← Todos los períodos</a>
+  </div>
+</div>
+
+<div class="row g-2 align-items-center mb-4">
+  <div class="col-auto">
+    {% if periodo.estado == 'cerrado' %}
+    <span class="badge bg-success">🔒 Cerrado</span>
+    {% if current_user.es_superadmin %}
+    <form method="post" action="{{ url_for('contabilidad.cambiar_estado_dif_tc', periodo_id=periodo.id) }}" class="d-inline">
+      {{ accion_form.hidden_tag() }}
+      <input type="hidden" name="estado" value="en_proceso">
+      <button type="submit" class="btn btn-link btn-sm p-0 ms-1"
+              onclick="return confirm('¿Reabrir este período ya contabilizado?')">🔓 Reabrir</button>
+    </form>
+    {% endif %}
+    {% elif puede('contabilidad', 'editar') %}
+    <form method="post" action="{{ url_for('contabilidad.cambiar_estado_dif_tc', periodo_id=periodo.id) }}" class="d-inline">
+      {{ accion_form.hidden_tag() }}
+      <input type="hidden" name="estado" value="cerrado">
+      <button type="submit" class="btn btn-outline-success btn-sm"
+              onclick="return confirm('Al cerrar, el período queda archivado y solo un superadmin podrá reabrirlo. ¿Continuar?')">
+        🔒 Cerrar período
+      </button>
+    </form>
+    {% else %}
+    <span class="badge bg-secondary">En proceso</span>
+    {% endif %}
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-6 col-lg-3">
+    <div class="kpi"><div class="kpi-label">Saldo ($)</div><div class="kpi-value">{{ totales.saldo|clp }}</div></div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="kpi"><div class="kpi-label">Valor en $</div><div class="kpi-value">{{ totales.valor_clp|clp }}</div></div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="kpi">
+      <div class="kpi-label">Dif de cambio</div>
+      <div class="kpi-value">{{ totales.dif_cambio|clp }}</div>
+      <div class="kpi-foot">Lo que se contabiliza este mes</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="kpi">
+      <div class="kpi-label">Líneas</div>
+      <div class="kpi-value">{{ totales.lineas }}</div>
+      {% if totales.sin_mon_orig %}
+      <div class="kpi-foot text-danger">{{ totales.sin_mon_orig }} sin Mon Orig</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{% if puede_editar %}
+<div class="card mb-4">
+  <div class="card-body">
+    <form method="post" action="{{ url_for('contabilidad.importar_mayor_dif_tc', periodo_id=periodo.id) }}"
+          enctype="multipart/form-data" class="row g-2 align-items-end"
+          onsubmit="return {{ 'confirm(\'Ya hay líneas cargadas en este período: el archivo las reemplaza. ¿Continuar?\')' if periodo.lineas else 'true' }};">
+      {{ importar_form.hidden_tag() }}
+      <div class="col-12 col-md-6">
+        {{ importar_form.archivo.label(class="form-label small mb-1") }}
+        {{ importar_form.archivo(class="form-control form-control-sm") }}
+        <div class="form-text">
+          El mayor es la foto de la base contable de este mes, así que reemplaza lo que haya en el período.
+          Los meses anteriores no se tocan.
+        </div>
+      </div>
+      <div class="col-auto">
+        <button type="submit" class="btn btn-primary btn-sm">Importar mayor</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+<form method="post" action="{{ url_for('contabilidad.guardar_periodo_dif_tc', periodo_id=periodo.id) }}">
+  {{ accion_form.hidden_tag() }}
+
+  <div class="card mb-4">
+    <div class="card-header costeo-card-header">Tipo de cambio del mes</div>
+    <div class="card-body">
+      <div class="row g-3 align-items-end">
+        <div class="col-6 col-md-3">
+          <label class="form-label small mb-1">Tipo de cambio</label>
+          {# Campo amarillo, como en la planilla: multiplica el Mon Orig de todas las líneas. #}
+          <input type="text" inputmode="decimal" name="tipo_cambio" class="form-control form-control-sm campo-excel"
+                 value="{{ periodo.tipo_cambio|numero }}" {{ 'disabled' if not puede_editar }}>
+          <div class="form-text">Al cambiarlo se recalculan todas las líneas del mes.</div>
+        </div>
+        <div class="col-12 col-md-6">
+          <label class="form-label small mb-1">Notas</label>
+          <input type="text" name="notas" class="form-control form-control-sm campo-excel"
+                 value="{{ periodo.notas or '' }}" {{ 'disabled' if not puede_editar }}>
+        </div>
+        {% if puede_editar %}
+        <div class="col-auto">
+          <button type="submit" class="btn btn-primary">Guardar todo</button>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="card mb-4">
+    <div class="card-header costeo-card-header">Mayor del mes</div>
+    <div class="card-body">
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-2 tabla-compacta">
+          <thead>
+            <tr>
+              <th>Cuenta</th><th>Descripción</th><th>Fecha</th><th>Tipo</th><th>Número</th>
+              <th>ID Ficha</th><th>Ficha</th>
+              <th class="num">Cargo ($)</th><th class="num">Abono ($)</th><th class="num">Saldo ($)</th>
+              <th>Código Doc.</th><th>Documento</th><th>Vencimiento</th><th>Número Doc.</th>
+              <th>Tipo Mov.</th><th>Serie</th><th>Número Mov.</th><th>Moneda Ref.</th>
+              <th>Comentario</th><th>Doc. Pago</th><th>Número Doc. Pago</th><th>Serie Doc. Pago.</th>
+              <th class="num">Mon Orig</th>
+              <th class="num">Valor en $</th><th class="num">Dif de cambio</th><th class="num">% Dif Variación</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for l in periodo.lineas %}
+            <tr>
+              <td>{{ l.cuenta or '' }}</td>
+              <td>{{ l.descripcion or '' }}</td>
+              <td>{{ l.fecha|fecha if l.fecha else '' }}</td>
+              <td>{{ l.tipo or '' }}</td>
+              <td>{{ l.numero or '' }}</td>
+              <td>{{ l.id_ficha or '' }}</td>
+              <td>{{ l.ficha or '' }}</td>
+              <td class="num">{{ l.cargo|clp }}</td>
+              <td class="num">{{ l.abono|clp }}</td>
+              <td class="num">{{ l.saldo|clp }}</td>
+              <td>{{ l.codigo_doc or '' }}</td>
+              <td>{{ l.documento or '' }}</td>
+              <td>{{ l.vencimiento or '' }}</td>
+              <td>{{ l.numero_doc or '' }}</td>
+              <td>{{ l.tipo_mov or '' }}</td>
+              <td>{{ l.serie or '' }}</td>
+              <td>{{ l.numero_mov or '' }}</td>
+              <td>{{ l.moneda_ref or '' }}</td>
+              <td>{{ l.comentario or '' }}</td>
+              <td>{{ l.doc_pago or '' }}</td>
+              <td>{{ l.numero_doc_pago or '' }}</td>
+              <td>{{ l.serie_doc_pago or '' }}</td>
+              {# La otra columna amarilla de la planilla: se escribe a mano. #}
+              <td class="num">
+                <input type="text" inputmode="decimal" name="linea-{{ l.id }}-mon_orig"
+                       class="form-control form-control-sm text-end campo-excel" style="min-width:110px;"
+                       value="{{ l.mon_orig|numero if l.mon_orig is not none else '' }}"
+                       {{ 'disabled' if not puede_editar }}>
+              </td>
+              <td class="num">{{ l.valor_clp|clp }}</td>
+              <td class="num fw-semibold">{{ l.dif_cambio|clp }}</td>
+              <td class="num">{{ '%.2f%%'|format(l.pct_variacion * 100) }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="26" class="text-center text-muted">
+              Sin líneas todavía. Importa el mayor del mes para empezar.
+            </td></tr>
+            {% endfor %}
+          </tbody>
+          {% if periodo.lineas %}
+          <tfoot>
+            <tr class="fw-bold">
+              <td colspan="7">TOTAL</td>
+              <td class="num">{{ periodo.lineas|sum(attribute='cargo')|clp }}</td>
+              <td class="num">{{ periodo.lineas|sum(attribute='abono')|clp }}</td>
+              <td class="num">{{ totales.saldo|clp }}</td>
+              <td colspan="12"></td>
+              <td class="num">{{ totales.mon_orig|numero }}</td>
+              <td class="num">{{ totales.valor_clp|clp }}</td>
+              <td class="num">{{ totales.dif_cambio|clp }}</td>
+              <td></td>
+            </tr>
+          </tfoot>
+          {% endif %}
+        </table>
+      </div>
+
+      {% if puede_editar and periodo.lineas %}
+      <button type="submit" class="btn btn-primary">Guardar todo</button>
+      {% endif %}
+    </div>
+  </div>
+</form>
+
+{% if puede_editar %}
+<form method="post" action="{{ url_for('contabilidad.eliminar_periodo_dif_tc', periodo_id=periodo.id) }}"
+      onsubmit="return confirm('¿Eliminar este período completo con todas sus líneas?')">
+  {{ accion_form.hidden_tag() }}
+  <button type="submit" class="btn btn-outline-danger btn-sm">Eliminar este período</button>
+</form>
+{% endif %}
+
+{% endblock %}

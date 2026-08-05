@@ -308,6 +308,21 @@ MODULOS = (
                     "contabilidad.exportar_provision_ingresos",
                 ),
             },
+            {
+                "clave": "dif_tc",
+                "etiqueta": "Dif TC PR/CL",
+                "endpoint": "contabilidad.dif_tc",
+                "endpoints": (
+                    "contabilidad.dif_tc",
+                    "contabilidad.nuevo_periodo_dif_tc",
+                    "contabilidad.ver_periodo_dif_tc",
+                    "contabilidad.importar_mayor_dif_tc",
+                    "contabilidad.guardar_periodo_dif_tc",
+                    "contabilidad.cambiar_estado_dif_tc",
+                    "contabilidad.eliminar_periodo_dif_tc",
+                    "contabilidad.exportar_periodo_dif_tc",
+                ),
+            },
         ),
     },
     {

@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Dif TC PR/CL{% endblock %}
+{% block content %}
+{% set puede_editar = puede('contabilidad', 'editar') %}
+
+<div class="page-head">
+  <div>
+    <h1>Dif TC PR/CL</h1>
+    <p class="page-sub">Un período por mes: cada uno guarda su tipo de cambio y la base contable de ese cierre.</p>
+  </div>
+</div>
+
+{% if puede_editar %}
+<div class="card mb-4">
+  <div class="card-header">Nuevo período</div>
+  <div class="card-body">
+    <form method="post" action="{{ url_for('contabilidad.nuevo_periodo_dif_tc') }}" class="row g-2 align-items-end">
+      {{ form.hidden_tag() }}
+      <div class="col-6 col-md-2">
+        {{ form.mes.label(class="form-label small mb-1") }}
+        {{ form.mes(class="form-select form-select-sm") }}
+      </div>
+      <div class="col-6 col-md-2">
+        {{ form.anio.label(class="form-label small mb-1") }}
+        {{ form.anio(class="form-control form-control-sm") }}
+      </div>
+      <div class="col-6 col-md-2">
+        {{ form.tipo_cambio.label(class="form-label small mb-1") }}
+        {{ form.tipo_cambio(class="form-control form-control-sm", placeholder="925,48") }}
+      </div>
+      <div class="col-12 col-md-4">
+        {{ form.notas.label(class="form-label small mb-1") }}
+        {{ form.notas(class="form-control form-control-sm") }}
+      </div>
+      <div class="col-auto">
+        <button type="submit" class="btn btn-primary btn-sm">Crear período</button>
+      </div>
+    </form>
+    <div class="form-text mt-2">
+      El tipo de cambio se puede dejar en blanco: al importar el mayor se toma el de la planilla, y después se
+      puede cambiar cuantas veces haga falta.
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Período</th><th class="num">Tipo de cambio</th><th class="num">Líneas</th>
+            <th class="num">Saldo ($)</th><th class="num">Valor en $</th><th class="num">Dif de cambio</th>
+            <th>Estado</th><th>Notas</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in periodos %}
+          {% set r = resumenes[p.id] %}
+          <tr>
+            <td class="fw-semibold">
+              <a href="{{ url_for('contabilidad.ver_periodo_dif_tc', periodo_id=p.id) }}">
+                {{ nombre_mes_numero(p.mes) }} {{ p.anio }}
+              </a>
+            </td>
+            <td class="num">{{ p.tipo_cambio|numero }}</td>
+            <td class="num">{{ r.lineas }}</td>
+            <td class="num">{{ r.saldo|clp }}</td>
+            <td class="num">{{ r.valor_clp|clp }}</td>
+            <td class="num fw-semibold">{{ r.dif_cambio|clp }}</td>
+            <td>
+              {% if p.estado == 'cerrado' %}
+              <span class="badge bg-success">🔒 Cerrado</span>
+              {% else %}
+              <span class="badge bg-secondary">En proceso</span>
+              {% endif %}
+            </td>
+            <td class="text-muted small">{{ p.notas or '' }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="8" class="text-center text-muted">
+            Todavía no hay períodos. Crea el del mes para empezar.
+          </td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
