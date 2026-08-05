@@ -187,6 +187,11 @@ class ItemConteoInventario(db.Model, _CalculosConteoMixin):
     unidad_defontana = db.Column(db.String(20), nullable=True)
     contado_por_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"), nullable=True)
     contado_en = db.Column(db.DateTime, nullable=True)
+    # Si el artículo venía en la última importación de cada sistema. Sirve para
+    # saber cuáles dejaron de existir: los que no están en ninguna de las dos
+    # planillas ya no son stock vigente.
+    en_qms = db.Column(db.Boolean, nullable=False, default=True)
+    en_defontana = db.Column(db.Boolean, nullable=False, default=True)
     actualizado_en = db.Column(
         db.DateTime,
         default=lambda: datetime.now(timezone.utc),

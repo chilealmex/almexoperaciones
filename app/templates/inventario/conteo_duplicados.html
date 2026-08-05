@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %}Depurar artículos del conteo{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <h1>Depurar artículos</h1>
+    <p class="page-sub">Códigos repetidos y artículos que ya no existen en QMS ni en Defontana.</p>
+  </div>
+  <div>
+    <a href="{{ url_for('inventario.conteo_importar') }}" class="btn btn-outline-secondary btn-sm">← Volver a importar</a>
+  </div>
+</div>
+
+{# ============ Códigos repetidos ============ #}
+<div class="card mb-4">
+  <div class="card-header">
+    Códigos repetidos
+    <span class="text-muted small">— el mismo código escrito con o sin espacios, o con acentos distintos</span>
+  </div>
+  <div class="card-body">
+    {% if grupos %}
+    <p class="text-muted small">
+      Al unificar se conserva una sola línea: se suman las cantidades de QMS y de Defontana, y el conteo
+      físico ya registrado se mantiene.
+    </p>
+
+    <form method="post" action="{{ url_for('inventario.conteo_unificar_duplicados') }}">
+      {{ form.hidden_tag() }}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-3">
+          <thead>
+            <tr>
+              <th>Código</th><th>Nombre</th>
+              <th class="num">QMS</th><th class="num">Defontana</th><th class="num">Físico</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for grupo in grupos %}
+            {% for item in grupo %}
+            <tr class="{{ 'border-top border-2' if loop.first else '' }}">
+              <td class="{{ 'fw-semibold' if loop.first else 'ps-4 text-muted' }}">{{ item.codigo }}</td>
+              <td>{{ item.nombre or '—' }}</td>
+              <td class="num">{{ item.cantidad_qms }}</td>
+              <td class="num">{{ item.cantidad_defontana }}</td>
+              <td class="num">
+                {% if item.cantidad_fisica is not none %}
+                <span class="badge bg-success">{{ item.cantidad_fisica }}</span>
+                {% else %}<span class="text-muted">—</span>{% endif %}
+              </td>
+              {% if loop.first %}
+              <td class="text-end" rowspan="{{ grupo|length }}">
+                <button type="submit" name="clave" value="{{ codigo_normalizado(item.codigo) }}"
+                        class="btn btn-sm btn-outline-primary">Unificar</button>
+              </td>
+              {% endif %}
+            </tr>
+            {% endfor %}
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <button type="submit" class="btn btn-primary btn-sm"
+              onclick="return confirm('¿Unificar todos los códigos repetidos?')">
+        Unificar todos ({{ grupos|length }})
+      </button>
+    </form>
+    {% else %}
+    <p class="text-muted mb-0">No hay códigos repetidos.</p>
+    {% endif %}
+  </div>
+</div>
+
+{# ============ Artículos que ya no están en ninguna planilla ============ #}
+<div class="card mb-4">
+  <div class="card-header">
+    Ya no están en QMS ni en Defontana
+    <span class="text-muted small">— según la última importación de cada sistema</span>
+  </div>
+  <div class="card-body">
+    {% if fuera %}
+    {% if fuera_contados %}
+    <div class="alert alert-warning">
+      Atención: {{ fuera_contados|length }} de estos artículos tiene conteo físico registrado.
+      Si los eliminas, ese conteo se pierde.
+    </div>
+    {% endif %}
+
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-3">
+        <thead>
+          <tr><th>Código</th><th>Nombre</th><th class="num">QMS</th><th class="num">Defontana</th><th class="num">Físico</th></tr>
+        </thead>
+        <tbody>
+          {% for item in fuera %}
+          <tr>
+            <td class="fw-semibold">{{ item.codigo }}</td>
+            <td>{{ item.nombre or '—' }}</td>
+            <td class="num">{{ item.cantidad_qms }}</td>
+            <td class="num">{{ item.cantidad_defontana }}</td>
+            <td class="num">
+              {% if item.cantidad_fisica is not none %}
+              <span class="badge bg-warning text-dark">{{ item.cantidad_fisica }}</span>
+              {% else %}<span class="text-muted">—</span>{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <form method="post" action="{{ url_for('inventario.conteo_eliminar_ausentes') }}"
+          onsubmit="return confirm('Se eliminarán {{ fuera|length }} artículo(s) del stock y del conteo. ¿Continuar?')">
+      {{ form.hidden_tag() }}
+      <button type="submit" class="btn btn-danger btn-sm">Eliminar los {{ fuera|length }} artículos</button>
+    </form>
+    {% else %}
+    <p class="text-muted mb-0">
+      Todos los artículos aparecen en al menos una de las dos planillas.
+    </p>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}

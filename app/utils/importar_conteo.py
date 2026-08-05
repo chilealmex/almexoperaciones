@@ -1,6 +1,7 @@
 import csv
 import io
 import re
+import unicodedata
 
 from app.extensions import db
 from app.models.conteo_inventario import ItemConteoInventario
@@ -150,16 +151,34 @@ def _leer_filas(file_storage, codificaciones_csv=("utf-8-sig",)):
 # sobrevivir a cualquier reimportación de QMS o Defontana.
 
 
+def codigo_normalizado(codigo) -> str:
+    """Clave para comparar códigos que son el mismo escrito distinto.
+
+    QMS y Defontana no siempre escriben igual el código del mismo artículo:
+    "EM-R-Pantalla BG3" y "EM-R-PantallaBG3" son el mismo producto. Para
+    compararlos se sacan los espacios y los acentos, y se pasa a mayúsculas.
+    """
+    texto = str(codigo or "").strip()
+    sin_acentos = "".join(c for c in unicodedata.normalize("NFD", texto) if unicodedata.category(c) != "Mn")
+    return "".join(sin_acentos.split()).upper()
+
+
 def _items_existentes(empresa_id: int) -> dict:
-    """Trae todos los items de la empresa en una sola consulta.
+    """Trae todos los items de la empresa en una sola consulta, por código normalizado.
 
     Consultar código por código genera miles de round-trips contra la base de datos
     remota y agota el tiempo de la petición.
+
+    La clave es el código normalizado para que reimportar el mismo artículo escrito
+    distinto actualice la fila que ya existe en vez de crear una duplicada. Si ya
+    hubiera duplicados de antes, gana el que tenga conteo físico registrado (y entre
+    iguales, el más antiguo), para no dejar huérfano el trabajo de bodega.
     """
-    return {
-        item.codigo: item
-        for item in ItemConteoInventario.query.filter_by(empresa_id=empresa_id).all()
-    }
+    items = ItemConteoInventario.query.filter_by(empresa_id=empresa_id).all()
+    por_codigo = {}
+    for item in sorted(items, key=lambda i: (i.cantidad_fisica is None, i.id)):
+        por_codigo.setdefault(codigo_normalizado(item.codigo), item)
+    return por_codigo
 
 
 def importar_qms(file_storage, empresa_id: int) -> dict:
@@ -212,9 +231,10 @@ def importar_qms(file_storage, empresa_id: int) -> dict:
     filas_actualizadas = 0
     nuevos = []
     for codigo, datos in acumulado.items():
-        item = existentes.get(codigo)
+        item = existentes.get(codigo_normalizado(codigo))
         if item is None:
-            item = ItemConteoInventario(empresa_id=empresa_id, codigo=codigo, cantidad_defontana=0)
+            item = ItemConteoInventario(empresa_id=empresa_id, codigo=codigo, cantidad_defontana=0,
+                                        en_qms=True, en_defontana=False)
             nuevos.append(item)
             filas_creadas += 1
         else:
@@ -232,9 +252,11 @@ def importar_qms(file_storage, empresa_id: int) -> dict:
             item.unidad_qms = datos["unidad"]
         if datos["costo"] is not None:
             item.costo_unitario_qms = datos["costo"]
+        item.en_qms = True
 
     if nuevos:
         db.session.add_all(nuevos)
+    _marcar_ausentes(empresa_id, acumulado.keys(), "en_qms", nuevos)
     db.session.commit()
     return {"total_codigos": len(acumulado), "creados": filas_creadas, "actualizados": filas_actualizadas}
 
@@ -295,9 +317,10 @@ def importar_defontana(file_storage, empresa_id: int) -> dict:
     filas_actualizadas = 0
     nuevos = []
     for codigo, datos in acumulado.items():
-        item = existentes.get(codigo)
+        item = existentes.get(codigo_normalizado(codigo))
         if item is None:
-            item = ItemConteoInventario(empresa_id=empresa_id, codigo=codigo, cantidad_qms=0)
+            item = ItemConteoInventario(empresa_id=empresa_id, codigo=codigo, cantidad_qms=0,
+                                        en_defontana=True, en_qms=False)
             nuevos.append(item)
             filas_creadas += 1
         else:
@@ -311,8 +334,88 @@ def importar_defontana(file_storage, empresa_id: int) -> dict:
             item.unidad_defontana = datos["unidad"]
         if datos["costo"] is not None:
             item.costo_unitario_defontana = datos["costo"]
+        item.en_defontana = True
 
     if nuevos:
         db.session.add_all(nuevos)
+    _marcar_ausentes(empresa_id, acumulado.keys(), "en_defontana", nuevos)
     db.session.commit()
     return {"total_codigos": len(acumulado), "creados": filas_creadas, "actualizados": filas_actualizadas}
+
+
+def _marcar_ausentes(empresa_id: int, codigos_del_archivo, campo: str, recien_creados) -> None:
+    """Apaga la marca del sistema recién importado en los artículos que no venían.
+
+    Un artículo nuevo creado por ESTA importación no puede estar ausente de ella,
+    así que se excluye; y el otro sistema no se toca, porque de esa planilla no
+    sabemos nada en esta pasada.
+    """
+    presentes = {codigo_normalizado(c) for c in codigos_del_archivo}
+    nuevos_ids = {id(i) for i in recien_creados}
+    for item in ItemConteoInventario.query.filter_by(empresa_id=empresa_id).all():
+        if id(item) in nuevos_ids:
+            continue
+        if codigo_normalizado(item.codigo) not in presentes:
+            setattr(item, campo, False)
+
+
+def articulos_fuera_de_ambas_planillas(empresa_id: int) -> list:
+    """Artículos que dejaron de aparecer tanto en QMS como en Defontana."""
+    return (
+        ItemConteoInventario.query.filter_by(empresa_id=empresa_id, en_qms=False, en_defontana=False)
+        .order_by(ItemConteoInventario.codigo)
+        .all()
+    )
+
+
+def grupos_duplicados(empresa_id: int) -> list:
+    """Artículos cuyo código es el mismo si se le quitan espacios y acentos.
+
+    Devuelve una lista de grupos (2 o más artículos cada uno), ordenados por
+    código, para poder revisarlos y unificarlos desde la pantalla.
+    """
+    from collections import defaultdict as _dd
+
+    por_clave = _dd(list)
+    for item in ItemConteoInventario.query.filter_by(empresa_id=empresa_id).all():
+        por_clave[codigo_normalizado(item.codigo)].append(item)
+    grupos = [sorted(items, key=lambda i: i.id) for items in por_clave.values() if len(items) > 1]
+    return sorted(grupos, key=lambda g: g[0].codigo)
+
+
+def _primero(valores):
+    return next((v for v in valores if v not in (None, "")), None)
+
+
+def unificar_grupo(items: list) -> ItemConteoInventario:
+    """Deja un solo artículo con la suma de los duplicados y borra el resto.
+
+    Se conserva la fila que ya tenía conteo físico (y entre iguales, la más
+    antigua), para no perder el trabajo de bodega. Las cantidades se suman,
+    porque cada fila era stock declarado por separado, y los datos de texto que
+    falten en la fila que queda se completan con los de las otras.
+    """
+    if len(items) < 2:
+        return items[0] if items else None
+
+    ordenados = sorted(items, key=lambda i: (i.cantidad_fisica is None, i.id))
+    principal, resto = ordenados[0], ordenados[1:]
+
+    principal.cantidad_qms = sum(i.cantidad_qms or 0 for i in ordenados)
+    principal.cantidad_defontana = sum(i.cantidad_defontana or 0 for i in ordenados)
+
+    contadas = [i.cantidad_fisica for i in ordenados if i.cantidad_fisica is not None]
+    principal.cantidad_fisica = sum(contadas) if contadas else None
+    contador = next((i for i in ordenados if i.cantidad_fisica is not None), None)
+    if contador is not None:
+        principal.contado_por_id = contador.contado_por_id
+        principal.contado_en = contador.contado_en
+
+    for campo in ("nombre", "linea_negocio", "ubicacion", "categoria", "unidad_qms",
+                  "unidad_defontana", "costo_unitario_qms", "costo_unitario_defontana"):
+        if getattr(principal, campo) in (None, ""):
+            setattr(principal, campo, _primero(getattr(i, campo) for i in ordenados))
+
+    for item in resto:
+        db.session.delete(item)
+    return principal

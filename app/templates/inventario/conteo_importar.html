@@ -3,7 +3,9 @@
 {% block content %}
 <h1 class="h3 mb-3">Inventario</h1>
 
-<p class="text-muted">Sube los archivos exportados de cada sistema. El cruce se hace por código de artículo: puedes subirlos en cualquier orden y volver a subirlos cuando quieras actualizar las cantidades (el conteo físico ya registrado no se pierde).</p>
+<p class="text-muted">Sube los archivos exportados de cada sistema. El cruce se hace por código de artículo: puedes subirlos en cualquier orden y volver a subirlos cuando quieras actualizar las cantidades (el conteo físico ya registrado no se pierde). Los códigos que solo se diferencian por espacios o acentos se reconocen como el mismo artículo.</p>
+
+<p><a href="{{ url_for('inventario.conteo_duplicados') }}" class="btn btn-outline-secondary btn-sm">Depurar artículos (repetidos y dados de baja)</a></p>
 
 <div class="row g-3">
   <div class="col-12 col-lg-6">

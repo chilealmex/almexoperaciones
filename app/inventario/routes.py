@@ -7,11 +7,18 @@ from flask_login import current_user
 from sqlalchemy import or_, and_
 
 from app.inventario import bp
-from app.inventario.forms import ImportarCsvForm
+from app.inventario.forms import AccionForm, ImportarCsvForm
 from app.extensions import db
 from app.models.conteo_inventario import ItemConteoInventario, TomaInventario, TomaInventarioDetalle
 from app.utils.decorators import require_permission
-from app.utils.importar_conteo import importar_qms, importar_defontana
+from app.utils.importar_conteo import (
+    articulos_fuera_de_ambas_planillas,
+    codigo_normalizado,
+    grupos_duplicados,
+    importar_defontana,
+    importar_qms,
+    unificar_grupo,
+)
 from app.utils.formatting import format_clp, format_fecha_hora
 from app.utils.graficos import COLOR, serie, widget_seguro
 from app.utils.paneles import panel_inventario
@@ -881,6 +888,72 @@ def conteo_importar():
     return render_template(
         "inventario/conteo_importar.html", form_qms=form_qms, form_defontana=form_defontana, total_items=total_items
     )
+
+
+@bp.route("/conteo/duplicados")
+@require_permission("inventario", "editar")
+def conteo_duplicados():
+    """Artículos repetidos: el mismo código escrito con o sin espacios/acentos."""
+    fuera = articulos_fuera_de_ambas_planillas(current_user.empresa_id)
+    return render_template(
+        "inventario/conteo_duplicados.html",
+        grupos=grupos_duplicados(current_user.empresa_id),
+        fuera=fuera,
+        fuera_contados=[i for i in fuera if i.cantidad_fisica is not None],
+        form=AccionForm(),
+        codigo_normalizado=codigo_normalizado,
+    )
+
+
+@bp.route("/conteo/duplicados/unificar", methods=["POST"])
+@require_permission("inventario", "editar")
+def conteo_unificar_duplicados():
+    form = AccionForm()
+    if not form.validate_on_submit():
+        abort(400)
+
+    clave = (request.form.get("clave") or "").strip()
+    grupos = grupos_duplicados(current_user.empresa_id)
+    if clave:  # unificar solo el grupo pedido
+        grupos = [g for g in grupos if codigo_normalizado(g[0].codigo) == clave]
+
+    unificados = 0
+    eliminados = 0
+    for grupo in grupos:
+        eliminados += len(grupo) - 1
+        unificar_grupo(grupo)
+        unificados += 1
+    db.session.commit()
+
+    if unificados:
+        flash(f"Se unificaron {unificados} código(s); se juntaron {eliminados} línea(s) repetida(s).", "success")
+    else:
+        flash("No quedaban códigos repetidos por unificar.", "info")
+    return redirect(url_for("inventario.conteo_duplicados"))
+
+
+@bp.route("/conteo/duplicados/eliminar-ausentes", methods=["POST"])
+@require_permission("inventario", "editar")
+def conteo_eliminar_ausentes():
+    """Borra los artículos que ya no vienen ni en QMS ni en Defontana."""
+    form = AccionForm()
+    if not form.validate_on_submit():
+        abort(400)
+
+    ausentes = articulos_fuera_de_ambas_planillas(current_user.empresa_id)
+    contados = sum(1 for i in ausentes if i.cantidad_fisica is not None)
+    for item in ausentes:
+        db.session.delete(item)
+    db.session.commit()
+
+    if ausentes:
+        mensaje = f"Se eliminaron {len(ausentes)} artículo(s) que ya no aparecen en ninguna de las dos planillas."
+        if contados:
+            mensaje += f" De esos, {contados} tenía(n) conteo físico registrado."
+        flash(mensaje, "success")
+    else:
+        flash("Todos los artículos aparecen en al menos una de las dos planillas.", "info")
+    return redirect(url_for("inventario.conteo_duplicados"))
 
 
 @bp.route("/conteo/importar/plantilla-qms")

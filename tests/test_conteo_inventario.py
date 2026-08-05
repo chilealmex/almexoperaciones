@@ -278,3 +278,123 @@ def test_filas_vacias_del_xlsx_se_ignoran(db, empresa):
     )
     resultado = importar_qms(archivo, empresa.id)
     assert resultado["total_codigos"] == 1
+
+
+# --- Códigos que son el mismo escrito distinto ---------------------------
+
+CSV_QMS_CON_ESPACIO = """﻿Sucursal;Linea Negocio;Categoria; Columna1 ; Valor Total Stock CLP ;Stock;Stock Critico;Descripción;Unidad;Código Único;ubicacion_bodega
+Casa Matriz;GOMAS;CAT-A;0;0;1;0;Pantalla Beltgard;UN;EM-R-Pantalla BG3;BODEGA CENTRAL
+"""
+
+CSV_DEFONTANA_SIN_ESPACIO = (
+    "CodArticulo;Descripci\xf3n Art\xedculo;CodBodega;Nombre Bodega;Saldo Stock;Unidad\r\n"
+    '"EM-R-PantallaBG3";"Pantalla Beltgard";"BODEGACENTRAL";"BODEGA CENTRAL";"1";"UN"\r\n'
+)
+
+
+def test_codigo_normalizado_ignora_espacios_acentos_y_mayusculas():
+    from app.utils.importar_conteo import codigo_normalizado
+
+    assert codigo_normalizado("EM-R-Pantalla BG3") == codigo_normalizado("EM-R-PantallaBG3")
+    assert codigo_normalizado("CÓD-Ñ 1") == codigo_normalizado("cod-n1")
+    assert codigo_normalizado(None) == ""
+
+
+def test_el_mismo_codigo_con_y_sin_espacio_no_crea_dos_articulos(db, empresa):
+    importar_qms(_fs(CSV_QMS_CON_ESPACIO.encode("utf-8"), "qms.csv"), empresa.id)
+    importar_defontana(_fs(CSV_DEFONTANA_SIN_ESPACIO.encode("utf-8"), "def.csv"), empresa.id)
+
+    items = ItemConteoInventario.query.filter_by(empresa_id=empresa.id).all()
+    assert len(items) == 1
+    assert items[0].cantidad_qms == 1
+    assert items[0].cantidad_defontana == 1
+
+
+def test_unificar_junta_las_cantidades_y_conserva_el_conteo(db, empresa):
+    from app.utils.importar_conteo import grupos_duplicados, unificar_grupo
+
+    sin_contar = ItemConteoInventario(empresa_id=empresa.id, codigo="EM-R-Pantalla BG3",
+                                      cantidad_qms=1, cantidad_defontana=1)
+    contado = ItemConteoInventario(empresa_id=empresa.id, codigo="EM-R-PantallaBG3",
+                                   cantidad_qms=1, cantidad_defontana=1, cantidad_fisica=2,
+                                   nombre="Pantalla Beltgard 3.0")
+    db.session.add_all([sin_contar, contado])
+    db.session.commit()
+
+    grupos = grupos_duplicados(empresa.id)
+    assert len(grupos) == 1 and len(grupos[0]) == 2
+
+    unificar_grupo(grupos[0])
+    db.session.commit()
+
+    items = ItemConteoInventario.query.filter_by(empresa_id=empresa.id).all()
+    assert len(items) == 1
+    assert items[0].cantidad_qms == 2
+    assert items[0].cantidad_defontana == 2
+    assert items[0].cantidad_fisica == 2          # se conservó el conteo de bodega
+    assert items[0].nombre == "Pantalla Beltgard 3.0"
+
+
+# --- Artículos dados de baja en ambos sistemas ---------------------------
+
+
+def test_un_articulo_que_deja_de_venir_en_una_planilla_no_se_marca_como_ausente(db, empresa):
+    from app.utils.importar_conteo import articulos_fuera_de_ambas_planillas
+
+    importar_qms(_fs(CSV_QMS.encode("utf-8"), "qms.csv"), empresa.id)
+    importar_defontana(_fs(CSV_DEFONTANA.encode("utf-8"), "def.csv"), empresa.id)
+
+    # COD-002 solo estaba en QMS; ahora QMS deja de traerlo.
+    csv_qms_sin_cod2 = """﻿Sucursal;Linea Negocio;Categoria; Columna1 ; Valor Total Stock CLP ;Stock;Stock Critico;Descripción;Unidad;Código Único;ubicacion_bodega
+Casa Matriz;GOMAS;CAT-A;0;0;10;0;PRODUCTO UNO;UN;COD-001;RACK A1
+"""
+    importar_qms(_fs(csv_qms_sin_cod2.encode("utf-8"), "qms.csv"), empresa.id)
+
+    fuera = articulos_fuera_de_ambas_planillas(empresa.id)
+    assert [i.codigo for i in fuera] == ["COD-002"]
+    # COD-003 sigue en Defontana, así que no está fuera de ambas.
+    assert "COD-003" not in [i.codigo for i in fuera]
+
+
+def test_importar_solo_qms_no_da_de_baja_lo_que_vive_en_defontana(db, empresa):
+    """Las planillas se suben por separado: subir una no puede borrar la otra."""
+    from app.utils.importar_conteo import articulos_fuera_de_ambas_planillas
+
+    importar_defontana(_fs(CSV_DEFONTANA.encode("utf-8"), "def.csv"), empresa.id)
+    importar_qms(_fs(CSV_QMS.encode("utf-8"), "qms.csv"), empresa.id)
+
+    fuera = articulos_fuera_de_ambas_planillas(empresa.id)
+    assert fuera == []  # COD-003 solo está en Defontana, pero sigue vigente
+
+
+def test_eliminar_los_que_no_estan_en_ninguna_planilla(client, usuario_admin, empresa, db):
+    from tests.conftest import login
+    from app.utils.importar_conteo import articulos_fuera_de_ambas_planillas
+
+    baja = ItemConteoInventario(empresa_id=empresa.id, codigo="VIEJO-001", cantidad_qms=0,
+                                cantidad_defontana=0, en_qms=False, en_defontana=False)
+    vigente = ItemConteoInventario(empresa_id=empresa.id, codigo="VIVE-001", cantidad_qms=5,
+                                   cantidad_defontana=0, en_qms=True, en_defontana=False)
+    db.session.add_all([baja, vigente])
+    db.session.commit()
+    assert len(articulos_fuera_de_ambas_planillas(empresa.id)) == 1
+
+    login(client, "admin@test.cl")
+    client.post("/inventario/conteo/duplicados/eliminar-ausentes", follow_redirects=True)
+
+    codigos = [i.codigo for i in ItemConteoInventario.query.filter_by(empresa_id=empresa.id).all()]
+    assert codigos == ["VIVE-001"]
+
+
+def test_la_pantalla_de_depuracion_avisa_si_hay_conteo_en_los_dados_de_baja(client, usuario_admin, empresa, db):
+    from tests.conftest import login
+
+    db.session.add(ItemConteoInventario(empresa_id=empresa.id, codigo="VIEJO-002", cantidad_qms=0,
+                                        cantidad_defontana=0, cantidad_fisica=7,
+                                        en_qms=False, en_defontana=False))
+    db.session.commit()
+
+    login(client, "admin@test.cl")
+    texto = client.get("/inventario/conteo/duplicados").get_data(as_text=True)
+    assert "VIEJO-002" in texto
+    assert "conteo físico registrado" in texto
