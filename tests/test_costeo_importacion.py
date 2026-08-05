@@ -1093,3 +1093,30 @@ def test_la_pantalla_muestra_el_porcentaje_real_de_ad_valorem_sobre_el_cif(clien
     texto = client.get(f"/importaciones/costeo-detallado/{costeo.id}").get_data(as_text=True)
     assert "% s/ CIF" in texto
     assert "5.9%" in texto
+
+
+def test_responsable_costeo_se_elige_de_una_lista_con_los_ya_usados(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    _crear_costeo(db, empresa, n_importacion="65", responsable_costeo="WILRAYLI JIMENEZ")
+    costeo = _crear_costeo(db, empresa, n_importacion="66")
+
+    texto = client.get(f"/importaciones/costeo-detallado/{costeo.id}").get_data(as_text=True)
+    assert '<option value="WILRAYLI JIMENEZ"' in texto
+    assert "Crear nueva persona" in texto
+
+
+def test_se_puede_escribir_un_responsable_nuevo_y_queda_en_la_lista(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    costeo = _crear_costeo(db, empresa, n_importacion="67")
+
+    client.post(
+        f"/importaciones/costeo-detallado/{costeo.id}/guardar",
+        data={"n_importacion": "67", "responsable_costeo": "PERSONA NUEVA", "tasa_ad_valorem": "6", "importacion_id": "0"},
+        follow_redirects=True,
+    )
+    _db.session.refresh(costeo)
+    assert costeo.responsable_costeo == "PERSONA NUEVA"
+
+    otro = _crear_costeo(db, empresa, n_importacion="68")
+    texto = client.get(f"/importaciones/costeo-detallado/{otro.id}").get_data(as_text=True)
+    assert '<option value="PERSONA NUEVA"' in texto

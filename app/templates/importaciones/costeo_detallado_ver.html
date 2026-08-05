@@ -129,7 +129,12 @@
           </tr>
           <tr>
             <th>{{ datos_form.responsable_costeo.label.text }}</th>
-            <td>{{ datos_form.responsable_costeo(class="form-control form-control-sm campo-excel", disabled=not puede_editar) }}</td>
+            <td>{{ prov.selector(datos_form.responsable_costeo, responsables, datos_form.responsable_costeo.data, disabled=not puede_editar,
+                                 select_clases="form-select form-select-sm campo-excel", input_clases="form-control form-control-sm campo-excel",
+                                 campo_id="responsable_costeo",
+                                 etiqueta_vacia="— Selecciona un responsable —",
+                                 etiqueta_nuevo="+ Crear nueva persona…",
+                                 placeholder_nuevo="Nombre de la persona") }}</td>
           </tr>
           <tr>
             <th>{{ datos_form.tipo_flete_proyectado.label.text }}</th>

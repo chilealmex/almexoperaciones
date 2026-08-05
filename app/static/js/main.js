@@ -137,7 +137,9 @@ document.addEventListener("DOMContentLoaded", function () {
   // formateados con separador de miles ($1.234). Al enfocarlos se muestran
   // como número simple para editar cómodo, y se reformatean al salir.
   function formatearCLP(valor) {
-    var digitos = (valor || "").toString().replace(/[^0-9-]/g, "");
+    // Ojo: el 0 es un valor válido, así que no se puede usar "valor || ''".
+    var texto = valor === null || valor === undefined ? "" : valor.toString();
+    var digitos = texto.replace(/[^0-9-]/g, "");
     if (!digitos) return "";
     var numero = parseInt(digitos, 10);
     if (isNaN(numero)) return "";
@@ -225,4 +227,36 @@ document.addEventListener("DOMContentLoaded", function () {
   document.querySelectorAll(".gasto-valor-clp").forEach(function (campo) {
     campo.addEventListener("input", actualizarTotales);
   });
+  // Campos del Costeo sin llenar: se pintan de rojo mientras no tengan dato,
+  // y vuelven al amarillo apenas se escribe algo. Un 0 cuenta como "sin
+  // llenar", porque en estas planillas significa que todavía no se cargó.
+  function estaVacio(campo) {
+    var valor = (campo.value || "").trim();
+    if (campo.tagName === "SELECT") return valor === "";
+    if (valor === "") return true;
+    var esNumerico =
+      campo.inputMode === "decimal" ||
+      campo.inputMode === "numeric" ||
+      campo.classList.contains("campo-clp");
+    if (!esNumerico) return false;
+    var numero = parseFloat(valor.replace(/[^0-9.,-]/g, "").replace(/\.(?=.*[.,])/g, "").replace(",", "."));
+    return !isNaN(numero) && numero === 0;
+  }
+
+  function marcarVacios(campos) {
+    campos.forEach(function (campo) {
+      if (campo.disabled) return;
+      campo.classList.toggle("esta-vacio", estaVacio(campo));
+    });
+  }
+
+  var camposExcel = Array.prototype.slice.call(document.querySelectorAll(".campo-excel"));
+  if (camposExcel.length) {
+    marcarVacios(camposExcel);
+    camposExcel.forEach(function (campo) {
+      campo.addEventListener("input", function () { marcarVacios([campo]); });
+      campo.addEventListener("change", function () { marcarVacios([campo]); });
+      campo.addEventListener("blur", function () { marcarVacios([campo]); });
+    });
+  }
 });

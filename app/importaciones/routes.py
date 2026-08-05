@@ -365,6 +365,22 @@ def _categorias_activo_disponibles():
     return sorted(categorias, key=lambda c: (c.descripcion or c.nombre).upper())
 
 
+def _responsables_costeo_disponibles():
+    """Nombres de responsables ya usados en algún costeo de la empresa."""
+    filas = (
+        db.session.query(CosteoImportacion.responsable_costeo)
+        .filter(
+            CosteoImportacion.empresa_id == _empresa_id(),
+            CosteoImportacion.responsable_costeo.isnot(None),
+            CosteoImportacion.responsable_costeo != "",
+        )
+        .distinct()
+        .order_by(CosteoImportacion.responsable_costeo)
+        .all()
+    )
+    return [f[0] for f in filas]
+
+
 def _asegurar_proveedor_en_catalogo(nombre):
     """Si el proveedor escrito no existe en el catálogo, lo agrega para que quede
     disponible la próxima vez en la lista desplegable."""
@@ -1141,6 +1157,7 @@ def ver_costeo_detallado(costeo_id):
         accion_form=AccionForm(),
         datos_form=datos_form,
         proveedores=_proveedores_catalogo(),
+        responsables=_responsables_costeo_disponibles(),
         categorias_activo=_categorias_activo_disponibles(),
     )
 

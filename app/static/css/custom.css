@@ -1086,3 +1086,14 @@ tr.filtros-fila .form-select {
 .fila-costo-total td {
   border-top: 2px solid rgba(15, 35, 60, 0.25);
 }
+
+/* Campos del Costeo todavía sin llenar: se marcan en rojo suave para que se
+   vea de un vistazo qué falta cargar. Al escribir algo vuelven al amarillo. */
+input.campo-excel.esta-vacio,
+select.campo-excel.esta-vacio {
+  background-color: #fdeded;
+  border-color: #e8a9a3;
+}
+input.campo-excel.esta-vacio::placeholder {
+  color: #c98d86;
+}
