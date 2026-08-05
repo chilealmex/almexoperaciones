@@ -289,6 +289,28 @@ MODULOS = (
         ),
     },
     {
+        "clave": "contabilidad",
+        "etiqueta": "Contabilidad",
+        "icono": "📒",
+        "permiso": "contabilidad",
+        "endpoint": "contabilidad.provision_ingresos",
+        "endpoints": ("contabilidad.index",),
+        "submodulos": (
+            {
+                "clave": "provision_ingresos",
+                "etiqueta": "Provisión de Ingresos",
+                "endpoint": "contabilidad.provision_ingresos",
+                "endpoints": (
+                    "contabilidad.provision_ingresos",
+                    "contabilidad.importar_provision_ingresos",
+                    "contabilidad.guardar_provision_ingresos",
+                    "contabilidad.eliminar_provision_ingreso",
+                    "contabilidad.exportar_provision_ingresos",
+                ),
+            },
+        ),
+    },
+    {
         "clave": "admin",
         "etiqueta": "Usuarios",
         "icono": "👥",

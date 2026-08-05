@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+{% block title %}Provisión de Ingresos{% endblock %}
+{% block main_class %}container-fluid px-3 px-lg-4{% endblock %}
+{% block content %}
+{% set puede_editar = puede('contabilidad', 'editar') %}
+
+<div class="page-head">
+  <div>
+    <h1>Provisión de Ingresos</h1>
+    <p class="page-sub">Cada importación del Excel agrega las líneas nuevas y deja las anteriores como están.</p>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <a href="{{ url_for('contabilidad.exportar_provision_ingresos', **filtros) }}" class="btn btn-outline-secondary btn-sm">Descargar Excel</a>
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-6 col-lg-4">
+    <div class="kpi"><div class="kpi-label">Monto provisión</div><div class="kpi-value">{{ totales.provision|clp }}</div></div>
+  </div>
+  <div class="col-6 col-lg-4">
+    <div class="kpi"><div class="kpi-label">Reversa</div><div class="kpi-value">{{ totales.reversa|clp }}</div></div>
+  </div>
+  <div class="col-6 col-lg-4">
+    <div class="kpi">
+      <div class="kpi-label">Saldo</div>
+      <div class="kpi-value {{ 'is-ok' if totales.saldo == 0 else '' }}">{{ totales.saldo|clp }}</div>
+      <div class="kpi-foot">{{ totales.pendientes }} pendiente(s) · {{ totales.cerradas }} cerrada(s)</div>
+    </div>
+  </div>
+</div>
+
+{% if puede_editar %}
+<div class="card mb-4">
+  <div class="card-body">
+    <form method="post" action="{{ url_for('contabilidad.importar_provision_ingresos') }}" enctype="multipart/form-data"
+          class="row g-2 align-items-end">
+      {{ importar_form.hidden_tag() }}
+      <div class="col-12 col-md-6">
+        {{ importar_form.archivo.label(class="form-label small mb-1") }}
+        {{ importar_form.archivo(class="form-control form-control-sm") }}
+        <div class="form-text">Se lee la hoja <strong>Control</strong>. Las líneas ya cargadas no se tocan ni se duplican.</div>
+      </div>
+      <div class="col-auto">
+        <button type="submit" class="btn btn-primary btn-sm">Importar planilla</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+<form method="get" class="row g-2 align-items-end mb-3" id="filtros-provision">
+  <div class="col-12 col-md-4">
+    <label class="form-label small mb-1">Buscar</label>
+    <input type="text" name="texto" value="{{ filtros.get('texto', '') }}" class="form-control form-control-sm"
+           placeholder="Cliente, OT, comprobante o RUT" data-autofiltro>
+  </div>
+  <div class="col-6 col-md-2">
+    <label class="form-label small mb-1">Mes</label>
+    <select name="mes" class="form-select form-select-sm" data-autofiltro>
+      <option value="">Todos</option>
+      {% for clave, etiqueta in meses %}
+      <option value="{{ clave }}" {{ 'selected' if filtros.get('mes') == clave }}>{{ etiqueta }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-6 col-md-2">
+    <label class="form-label small mb-1">Año</label>
+    <select name="anio" class="form-select form-select-sm" data-autofiltro>
+      <option value="">Todos</option>
+      {% for a in anios %}
+      <option value="{{ a }}" {{ 'selected' if filtros.get('anio') == a|string }}>{{ a }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-6 col-md-3">
+    <label class="form-label small mb-1">Estado</label>
+    <select name="estado" class="form-select form-select-sm" data-autofiltro>
+      <option value="">Todas</option>
+      <option value="pendiente" {{ 'selected' if filtros.get('estado') == 'pendiente' }}>Con saldo pendiente</option>
+      <option value="cerrado" {{ 'selected' if filtros.get('estado') == 'cerrado' }}>Cerradas</option>
+    </select>
+  </div>
+</form>
+
+<form method="post" action="{{ url_for('contabilidad.guardar_provision_ingresos', **filtros) }}">
+  {{ accion_form.hidden_tag() }}
+
+  <div class="card mb-4">
+    <div class="card-body">
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-2 tabla-compacta">
+          <thead>
+            <tr>
+              <th>Mes</th><th>Año</th><th>Cbte Prov</th><th>OT</th>
+              <th class="num">Monto Provisión</th>
+              <th class="num">Reversa</th><th>Mes Reversa</th><th>Cbte Reversa</th>
+              <th>Cliente</th><th>Centro de Costos</th><th>Rut</th><th>Obs</th>
+              <th class="num">Saldo</th>
+              <th>Estado</th>
+              {% if puede_editar %}<th></th>{% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for l in lineas %}
+            <tr>
+              <td class="fw-semibold">{{ nombre_mes(l.mes_ano) }}</td>
+              <td>{{ l.mes_ano.year if l.mes_ano else '' }}</td>
+              <td>{{ l.cbte_prov }}</td>
+              <td>{{ l.ot }}</td>
+              <td class="num">{{ l.monto_provision|clp }}</td>
+              {# Las cuatro columnas editables. El resto viene del Excel y es solo lectura. #}
+              <td class="num">
+                <input type="text" inputmode="numeric" name="linea-{{ l.id }}-reversa"
+                       class="form-control form-control-sm text-end campo-excel campo-clp" style="min-width:110px;"
+                       value="{{ l.reversa|clp if l.reversa is not none else '' }}" {{ 'disabled' if not puede_editar }}>
+              </td>
+              <td>
+                <input type="text" name="linea-{{ l.id }}-mes_reversa" class="form-control form-control-sm campo-excel"
+                       style="min-width:120px;" value="{{ l.mes_reversa or '' }}"
+                       {{ 'disabled' if not puede_editar }}>
+              </td>
+              <td>
+                <input type="text" name="linea-{{ l.id }}-cbte_reversa" class="form-control form-control-sm campo-excel"
+                       style="min-width:100px;" value="{{ l.cbte_reversa or '' }}" {{ 'disabled' if not puede_editar }}>
+              </td>
+              <td>{{ l.cliente or '' }}</td>
+              <td>{{ l.centro_costos or '' }}</td>
+              <td>{{ l.rut or '' }}</td>
+              <td>{{ l.obs or '' }}</td>
+              <td class="num">
+                <input type="text" inputmode="numeric" name="linea-{{ l.id }}-saldo"
+                       class="form-control form-control-sm text-end campo-excel campo-clp" style="min-width:110px;"
+                       value="{{ (l.saldo or 0)|clp }}" {{ 'disabled' if not puede_editar }}>
+              </td>
+              {# Saldo en $0 = la provisión se reversó completa, la línea está cerrada. #}
+              <td>
+                {% if (l.saldo or 0) <= 0 %}
+                <span class="badge bg-success">Cerrado</span>
+                {% else %}
+                <span class="badge bg-warning text-dark">Pendiente</span>
+                {% endif %}
+              </td>
+              {% if puede_editar %}
+              <td class="text-end">
+                <button type="submit" formaction="{{ url_for('contabilidad.eliminar_provision_ingreso', linea_id=l.id) }}"
+                        formnovalidate class="btn btn-sm btn-outline-danger"
+                        onclick="return confirm('¿Eliminar esta línea?')" title="Eliminar">🗑</button>
+              </td>
+              {% endif %}
+            </tr>
+            {% else %}
+            <tr><td colspan="15" class="text-center text-muted">
+              Todavía no hay líneas cargadas. Importa la planilla para partir.
+            </td></tr>
+            {% endfor %}
+          </tbody>
+          {% if lineas %}
+          <tfoot>
+            <tr class="fw-bold">
+              <td colspan="4">TOTAL</td>
+              <td class="num">{{ totales.provision|clp }}</td>
+              <td class="num">{{ totales.reversa|clp }}</td>
+              <td colspan="6"></td>
+              <td class="num">{{ totales.saldo|clp }}</td>
+              <td></td>
+              {% if puede_editar %}<td></td>{% endif %}
+            </tr>
+          </tfoot>
+          {% endif %}
+        </table>
+      </div>
+
+      {% if puede_editar and lineas %}
+      <button type="submit" class="btn btn-primary">Guardar cambios</button>
+      {% endif %}
+    </div>
+  </div>
+</form>
+
+{% endblock %}

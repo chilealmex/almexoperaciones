@@ -1,0 +1,40 @@
+# El plan gratis de Render apaga el servicio cuando nadie lo usa. Al despertar
+# tarda casi un minuto, y como el chequeo de salud espera solo 5 segundos, la
+# instancia se marca como caída y quien entra ve un error 502.
+#
+# Esto lo evita: le pega a /healthz cada 10 minutos para que nunca se duerma.
+# /healthz responde "ok" sin tocar la base de datos, así que es una consulta
+# de costo casi nulo.
+name: Mantener la aplicación despierta
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+# Si una corrida se atrasa, no se acumulan varias en cola.
+concurrency:
+  group: mantener-despierto
+  cancel-in-progress: true
+
+jobs:
+  despertar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Llamar a /healthz
+        run: |
+          URL="${{ vars.URL_APLICACION }}"
+          if [ -z "$URL" ]; then
+            echo "Falta la variable URL_APLICACION en Settings > Secrets and variables > Actions > Variables."
+            exit 1
+          fi
+          # --max-time 90 porque despertar la instancia puede tardar cerca de un minuto.
+          codigo=$(curl -s -o /dev/null -w "%{http_code}" --max-time 90 --retry 2 --retry-delay 15 "$URL/healthz")
+          echo "Respuesta de $URL/healthz: HTTP $codigo"
+          # Solo se falla si la aplicación contesta un error; que tarde en
+          # despertar es normal y no debe ensuciar el historial.
+          case "$codigo" in
+            200) echo "La aplicación está despierta." ;;
+            000) echo "No respondió a tiempo; la próxima corrida vuelve a intentar." ;;
+            *) echo "La aplicación respondió con error."; exit 1 ;;
+          esac

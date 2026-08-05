@@ -107,6 +107,7 @@ def create_app(config_name=None):
     from app.arriendos import bp as arriendos_bp
     from app.datos_maestros import bp as datos_maestros_bp
     from app.importaciones import bp as importaciones_bp
+    from app.contabilidad import bp as contabilidad_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(core_bp)
@@ -117,6 +118,7 @@ def create_app(config_name=None):
     app.register_blueprint(arriendos_bp, url_prefix="/arriendos")
     app.register_blueprint(datos_maestros_bp, url_prefix="/datos-maestros")
     app.register_blueprint(importaciones_bp, url_prefix="/importaciones")
+    app.register_blueprint(contabilidad_bp, url_prefix="/contabilidad")
 
     _configurar_logging(app)
     _registrar_manejo_de_errores(app)
