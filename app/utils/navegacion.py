@@ -391,6 +391,20 @@ def construir_navegacion(endpoint, puede):
                 "icono": modulo["icono"],
                 "endpoint": modulo["endpoint"],
                 "activo": activo,
+                # Cada módulo lleva sus propios submódulos, para poder mostrarlos
+                # todos en el menú del celular: ahí no hay un módulo "abierto" al
+                # costado, así que si solo se listaran los del módulo activo no
+                # habría forma de llegar a los demás.
+                "submodulos": [
+                    {
+                        "clave": sub["clave"],
+                        "etiqueta": sub["etiqueta"],
+                        "endpoint": sub["endpoint"],
+                        "activo": endpoint in sub["endpoints"],
+                    }
+                    for sub in modulo["submodulos"]
+                    if _es_visible(modulo, sub, puede)
+                ],
             }
         )
 
@@ -398,18 +412,7 @@ def construir_navegacion(endpoint, puede):
             continue
 
         modulo_activo = modulos[-1]
-        for submodulo in modulo["submodulos"]:
-            if not _es_visible(modulo, submodulo, puede):
-                continue
-            sub_activo = endpoint in submodulo["endpoints"]
-            submodulos.append(
-                {
-                    "clave": submodulo["clave"],
-                    "etiqueta": submodulo["etiqueta"],
-                    "endpoint": submodulo["endpoint"],
-                    "activo": sub_activo,
-                }
-            )
+        submodulos.extend(modulos[-1]["submodulos"])
 
     return {
         "modulos": modulos,

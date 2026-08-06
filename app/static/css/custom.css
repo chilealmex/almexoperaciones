@@ -1108,3 +1108,14 @@ input.campo-excel.esta-vacio::placeholder {
   color: #1a7f37;
   font-weight: 600;
 }
+
+/* Menú del celular: se ven los submódulos de todos los módulos, no solo los del
+   abierto, porque ahí no hay un panel lateral donde desplegarlos aparte. */
+.sidebar-submodules.solo-celular {
+  display: none;
+}
+@media (max-width: 991.98px) {
+  .sidebar-submodules.solo-celular {
+    display: block;
+  }
+}

@@ -11,9 +11,11 @@
        {% if modulo.activo %}aria-current="page"{% endif %}>
       <span class="module-icon" aria-hidden="true">{{ modulo.icono }}</span>{{ modulo.etiqueta }}
     </a>
-    {% if modulo.activo and nav.submodulos %}
-    <ul class="sidebar-submodules list-unstyled">
-      {% for submodulo in nav.submodulos %}
+    {# En el escritorio se despliegan los del módulo abierto; en el celular, los
+       de todos, porque ahí el menú es la única vía para llegar a un submódulo. #}
+    {% if modulo.submodulos %}
+    <ul class="sidebar-submodules list-unstyled{{ '' if modulo.activo else ' solo-celular' }}">
+      {% for submodulo in modulo.submodulos %}
       <li>
         <a class="sidebar-submodule-link{{ ' active' if submodulo.activo else '' }}"
            href="{{ url_for(submodulo.endpoint) }}"
