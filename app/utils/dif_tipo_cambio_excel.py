@@ -40,13 +40,16 @@ COLUMNAS = {
     "numero doc. pago": "numero_doc_pago",
     "serie doc. pago.": "serie_doc_pago",
     "serie doc. pago": "serie_doc_pago",
+    "tipo moneda": "tipo_moneda",
     "mon orig": "mon_orig",
+    "moneda": "moneda_tabla",
     "tipo de cambio": "tipo_cambio",
 }
 TEXTOS = (
     "cuenta", "descripcion", "tipo", "numero", "id_ficha", "ficha", "codigo_doc",
     "documento", "vencimiento", "numero_doc", "tipo_mov", "serie", "numero_mov",
     "moneda_ref", "comentario", "doc_pago", "numero_doc_pago", "serie_doc_pago",
+    "tipo_moneda",
 )
 ENTEROS = ("cargo", "abono", "saldo")
 OBLIGATORIAS = ("cuenta", "saldo")
@@ -112,7 +115,11 @@ def _mapa_de_columnas(hoja):
 
 
 def leer_mayor(archivo, nombre_hoja=None):
-    """Devuelve (líneas, tipo_de_cambio) leídos de la planilla."""
+    """Devuelve (líneas, tipos_de_cambio) leídos de la planilla.
+
+    Los tipos de cambio salen del bloque "Moneda / Tipo de Cambio" que está al
+    costado de la tabla, y vienen como un diccionario {"USD": 930.048, ...}.
+    """
     from openpyxl import load_workbook
 
     try:
@@ -133,14 +140,17 @@ def leer_mayor(archivo, nombre_hoja=None):
         return fila[indice]
 
     lineas = []
-    tipo_cambio = None
+    tipos_cambio = {}
     for numero_fila, fila in enumerate(
         hoja.iter_rows(min_row=FILA_TITULOS + 1, values_only=True), start=FILA_TITULOS + 1
     ):
         if not any(v not in (None, "") for v in fila):
             continue
-        if tipo_cambio is None:
-            tipo_cambio = _numero(valor(fila, "tipo_cambio"))
+        # La tabla de tipos de cambio va al costado, con sus propias filas.
+        moneda_tabla = _texto(valor(fila, "moneda_tabla"))
+        cambio = _numero(valor(fila, "tipo_cambio"))
+        if moneda_tabla and cambio is not None:
+            tipos_cambio.setdefault(moneda_tabla.upper(), cambio)
         if not _texto(valor(fila, "cuenta")):
             continue  # fila de totales o sin datos de mayor
 
@@ -151,7 +161,9 @@ def leer_mayor(archivo, nombre_hoja=None):
             datos[campo] = _entero(valor(fila, campo)) or 0
         datos["fecha"] = _fecha(valor(fila, "fecha"))
         datos["mon_orig"] = _numero(valor(fila, "mon_orig"))
+        if datos.get("tipo_moneda"):
+            datos["tipo_moneda"] = datos["tipo_moneda"].upper()
         lineas.append(datos)
 
     libro.close()
-    return lineas, tipo_cambio
+    return lineas, tipos_cambio

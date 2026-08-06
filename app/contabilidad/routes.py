@@ -11,7 +11,7 @@ from app.contabilidad.forms import (
     PeriodoDifTcForm,
 )
 from app.extensions import db
-from app.models.contabilidad import LineaDifTc, PeriodoDifTc, ProvisionIngreso
+from app.models.contabilidad import LineaDifTc, PeriodoDifTc, ProvisionIngreso, TipoCambioDifTc
 from app.utils.decorators import require_permission
 from app.utils.dif_tipo_cambio import recalcular_periodo, totales_periodo
 from app.utils.dif_tipo_cambio_excel import PlanillaInvalida as PlanillaInvalidaMayor
@@ -293,6 +293,19 @@ def exportar_provision_ingresos():
 # ===================== Dif TC PR/CL =====================
 
 
+MONEDAS_DIF_TC = ("USD", "EUR")
+
+
+def _sembrar_tipos_cambio(periodo, valores=None):
+    """Deja una fila por moneda en la tabla de cambio del período."""
+    valores = {k.upper(): v for k, v in (valores or {}).items()}
+    existentes = {tc.moneda for tc in periodo.tipos_cambio}
+    for moneda in list(MONEDAS_DIF_TC) + [m for m in valores if m not in MONEDAS_DIF_TC]:
+        if moneda in existentes:
+            continue
+        periodo.tipos_cambio.append(TipoCambioDifTc(moneda=moneda, valor=valores.get(moneda, 0) or 0))
+
+
 def _get_periodo_or_404(periodo_id):
     periodo = PeriodoDifTc.query.get_or_404(periodo_id)
     if periodo.empresa_id != _empresa_id():
@@ -348,11 +361,16 @@ def nuevo_periodo_dif_tc():
         flash(f"Ya existe el período {MESES_NOMBRES[form.mes.data - 1]} {form.anio.data}.", "warning")
         return redirect(url_for("contabilidad.ver_periodo_dif_tc", periodo_id=existe.id))
 
+    valores = {
+        "USD": _parse_decimal(form.tipo_cambio_usd.data) or 0,
+        "EUR": _parse_decimal(form.tipo_cambio_eur.data) or 0,
+    }
     periodo = PeriodoDifTc(
         empresa_id=_empresa_id(), anio=form.anio.data, mes=form.mes.data,
-        tipo_cambio=_parse_decimal(form.tipo_cambio.data) or 0, notas=form.notas.data or None,
+        tipo_cambio=valores["USD"], notas=form.notas.data or None,
     )
     db.session.add(periodo)
+    _sembrar_tipos_cambio(periodo, valores)
     db.session.commit()
     flash("Período creado. Ahora importa el mayor del mes.", "success")
     return redirect(url_for("contabilidad.ver_periodo_dif_tc", periodo_id=periodo.id))
@@ -386,7 +404,7 @@ def importar_mayor_dif_tc(periodo_id):
         return redirect(url_for("contabilidad.ver_periodo_dif_tc", periodo_id=periodo.id))
 
     try:
-        lineas, tipo_cambio = leer_mayor(form.archivo.data)
+        lineas, tipos_cambio = leer_mayor(form.archivo.data)
     except PlanillaInvalidaMayor as error:
         flash(str(error), "danger")
         return redirect(url_for("contabilidad.ver_periodo_dif_tc", periodo_id=periodo.id))
@@ -398,15 +416,20 @@ def importar_mayor_dif_tc(periodo_id):
     db.session.flush()
     for datos in lineas:
         periodo.lineas.append(LineaDifTc(**datos))
-    if tipo_cambio and not periodo.tipo_cambio:
-        periodo.tipo_cambio = tipo_cambio
+    # La planilla trae los tipos de cambio del mes, así que mandan sobre lo que
+    # hubiera. Las monedas que no vienen en el archivo se dejan como estaban.
+    _sembrar_tipos_cambio(periodo, tipos_cambio)
+    for tc in periodo.tipos_cambio:
+        if tipos_cambio.get(tc.moneda) is not None:
+            tc.valor = tipos_cambio[tc.moneda]
     db.session.flush()
     recalcular_periodo(periodo)
     db.session.commit()
 
     mensaje = f"Se cargaron {len(lineas)} línea(s) del mayor."
-    if tipo_cambio:
-        mensaje += f" Tipo de cambio de la planilla: {tipo_cambio}."
+    if tipos_cambio:
+        detalle = ", ".join(f"{m} {v}" for m, v in sorted(tipos_cambio.items()))
+        mensaje += f" Tipos de cambio de la planilla: {detalle}."
     flash(mensaje, "success")
     return redirect(url_for("contabilidad.ver_periodo_dif_tc", periodo_id=periodo.id))
 
@@ -422,16 +445,23 @@ def guardar_periodo_dif_tc(periodo_id):
         flash("Este período está cerrado. Solo un superadmin puede modificarlo.", "warning")
         return redirect(url_for("contabilidad.ver_periodo_dif_tc", periodo_id=periodo.id))
 
-    tipo_cambio = _parse_decimal(request.form.get("tipo_cambio"))
-    if tipo_cambio is not None:
-        periodo.tipo_cambio = tipo_cambio
     periodo.notas = (request.form.get("notas") or "").strip() or None
+
+    for tc in periodo.tipos_cambio:
+        valor = _parse_decimal(request.form.get(f"tc-{tc.id}-valor"))
+        if valor is not None:
+            tc.valor = valor
+    nueva_moneda = (request.form.get("nueva_moneda") or "").strip().upper()
+    nuevo_valor = _parse_decimal(request.form.get("nuevo_tipo_cambio"))
+    if nueva_moneda and nueva_moneda not in {tc.moneda for tc in periodo.tipos_cambio}:
+        periodo.tipos_cambio.append(TipoCambioDifTc(moneda=nueva_moneda, valor=nuevo_valor or 0))
 
     for linea in periodo.lineas:
         campo = f"linea-{linea.id}-mon_orig"
         if campo not in request.form:
             continue
         linea.mon_orig = _parse_decimal(request.form.get(campo))
+        linea.tipo_moneda = (request.form.get(f"linea-{linea.id}-tipo_moneda") or "").strip().upper() or None
     recalcular_periodo(periodo)
     db.session.commit()
     flash("Cambios guardados.", "success")
@@ -489,7 +519,7 @@ def exportar_periodo_dif_tc(periodo_id):
         col("Número Doc.", ancho=13), col("Tipo Mov.", ancho=12), col("Serie", ancho=12),
         col("Número Mov.", ancho=13), col("Moneda Ref.", ancho=12), col("Comentario", ancho=36),
         col("Doc. Pago", ancho=12), col("Número Doc. Pago", ancho=16), col("Serie Doc. Pago.", ancho=16),
-        col("Mon Orig", ancho=16),
+        col("TIPO MONEDA", ancho=13), col("Mon Orig", ancho=16),
         col("Valor en $", ancho=18, formato=CLP, total="suma"),
         col("Dif de cambio", ancho=18, formato=CLP, total="suma"),
         col("% Dif Variación", ancho=15, formato=PORCENTAJE),
@@ -499,7 +529,8 @@ def exportar_periodo_dif_tc(periodo_id):
             l.cuenta, l.descripcion, l.fecha, l.tipo, l.numero, l.id_ficha, l.ficha,
             l.cargo, l.abono, l.saldo, l.codigo_doc, l.documento, l.vencimiento, l.numero_doc,
             l.tipo_mov, l.serie, l.numero_mov, l.moneda_ref, l.comentario, l.doc_pago,
-            l.numero_doc_pago, l.serie_doc_pago, l.mon_orig, l.valor_clp, l.dif_cambio, l.pct_variacion,
+            l.numero_doc_pago, l.serie_doc_pago, l.tipo_moneda, l.mon_orig,
+            l.valor_clp, l.dif_cambio, l.pct_variacion,
         ]
         for l in periodo.lineas
     ]
@@ -507,5 +538,6 @@ def exportar_periodo_dif_tc(periodo_id):
         f"dif-tc-{periodo.anio}-{periodo.mes:02d}",
         f"Dif TC {MESES_NOMBRES[periodo.mes - 1]} {periodo.anio}",
         columnas, filas,
-        f"Tipo de cambio aplicado: {periodo.tipo_cambio}",
+        "Tipos de cambio aplicados: "
+        + (", ".join(f"{tc.moneda} {tc.valor}" for tc in periodo.tipos_cambio) or "sin definir"),
     )

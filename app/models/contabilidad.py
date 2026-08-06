@@ -66,8 +66,8 @@ class PeriodoDifTc(db.Model):
     empresa_id = db.Column(db.Integer, db.ForeignKey("empresas.id"), nullable=False)
     anio = db.Column(db.Integer, nullable=False)
     mes = db.Column(db.Integer, nullable=False)
-    # El tipo de cambio de cierre del mes: multiplica el monto en moneda origen
-    # de todas las líneas (la celda AB2 de la planilla).
+    # Tipo de cambio de respaldo, para las líneas cuya moneda no esté en la
+    # tabla del período. La tabla (tipos_cambio) es la que manda.
     tipo_cambio = db.Column(db.Float, nullable=False, default=0)
     estado = db.Column(db.String(15), nullable=False, default="en_proceso")
     notas = db.Column(db.String(255), nullable=True)
@@ -79,9 +79,44 @@ class PeriodoDifTc(db.Model):
         "LineaDifTc", back_populates="periodo", cascade="all, delete-orphan",
         order_by="LineaDifTc.orden",
     )
+    tipos_cambio = db.relationship(
+        "TipoCambioDifTc", back_populates="periodo", cascade="all, delete-orphan",
+        order_by="TipoCambioDifTc.moneda",
+    )
+
+    def tipo_cambio_de(self, moneda):
+        """El tipo de cambio de esa moneda en este mes, o el de respaldo si no está."""
+        clave = (moneda or "").strip().upper()
+        for tc in self.tipos_cambio:
+            if tc.moneda == clave:
+                return tc.valor
+        return self.tipo_cambio or 0
 
     def __repr__(self):
         return f"<PeriodoDifTc {self.mes:02d}.{self.anio}>"
+
+
+class TipoCambioDifTc(db.Model):
+    """Una fila de la tabla de tipos de cambio del mes (Moneda y Tipo de Cambio).
+
+    En la planilla es el bloque amarillo AC:AD, y la columna "Valor en $" lo
+    consulta con un VLOOKUP según la moneda de cada línea.
+    """
+
+    __tablename__ = "tipos_cambio_dif_tc"
+    __table_args__ = (
+        db.UniqueConstraint("periodo_id", "moneda", name="uq_tipo_cambio_dif_tc_moneda"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    periodo_id = db.Column(db.Integer, db.ForeignKey("periodos_dif_tc.id"), nullable=False, index=True)
+    moneda = db.Column(db.String(10), nullable=False)
+    valor = db.Column(db.Float, nullable=False, default=0)
+
+    periodo = db.relationship("PeriodoDifTc", back_populates="tipos_cambio")
+
+    def __repr__(self):
+        return f"<TipoCambioDifTc {self.moneda}={self.valor}>"
 
 
 class LineaDifTc(db.Model):
@@ -122,7 +157,9 @@ class LineaDifTc(db.Model):
     numero_doc_pago = db.Column(db.String(40), nullable=True)
     serie_doc_pago = db.Column(db.String(40), nullable=True)
 
-    # --- Columna amarilla: se escribe a mano ---
+    # --- Columnas amarillas: se escriben a mano ---
+    # La moneda de la línea decide qué tipo de cambio se le aplica.
+    tipo_moneda = db.Column(db.String(10), nullable=True)
     mon_orig = db.Column(db.Float, nullable=True)
 
     # --- Calculadas con el tipo de cambio del período ---

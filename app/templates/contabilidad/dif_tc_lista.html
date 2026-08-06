@@ -25,10 +25,14 @@
         {{ form.anio(class="form-control form-control-sm") }}
       </div>
       <div class="col-6 col-md-2">
-        {{ form.tipo_cambio.label(class="form-label small mb-1") }}
-        {{ form.tipo_cambio(class="form-control form-control-sm", placeholder="925,48") }}
+        {{ form.tipo_cambio_usd.label(class="form-label small mb-1") }}
+        {{ form.tipo_cambio_usd(class="form-control form-control-sm campo-excel", placeholder="930,048") }}
       </div>
-      <div class="col-12 col-md-4">
+      <div class="col-6 col-md-2">
+        {{ form.tipo_cambio_eur.label(class="form-label small mb-1") }}
+        {{ form.tipo_cambio_eur(class="form-control form-control-sm campo-excel", placeholder="930,048") }}
+      </div>
+      <div class="col-12 col-md-3">
         {{ form.notas.label(class="form-label small mb-1") }}
         {{ form.notas(class="form-control form-control-sm") }}
       </div>
@@ -37,8 +41,8 @@
       </div>
     </form>
     <div class="form-text mt-2">
-      El tipo de cambio se puede dejar en blanco: al importar el mayor se toma el de la planilla, y después se
-      puede cambiar cuantas veces haga falta.
+      Los tipos de cambio se pueden dejar en blanco: al importar el mayor se toman los de la planilla. Después
+      se cambian cuantas veces haga falta, y se pueden agregar más monedas dentro del período.
     </div>
   </div>
 </div>
@@ -50,7 +54,7 @@
       <table class="table table-sm align-middle mb-0">
         <thead>
           <tr>
-            <th>Período</th><th class="num">Tipo de cambio</th><th class="num">Líneas</th>
+            <th>Período</th><th class="num">Tipos de cambio</th><th class="num">Líneas</th>
             <th class="num">Saldo ($)</th><th class="num">Valor en $</th><th class="num">Dif de cambio</th>
             <th>Estado</th><th>Notas</th>
           </tr>
@@ -64,7 +68,9 @@
                 {{ nombre_mes_numero(p.mes) }} {{ p.anio }}
               </a>
             </td>
-            <td class="num">{{ p.tipo_cambio|numero }}</td>
+            <td class="num small">
+              {% for tc in p.tipos_cambio %}{{ tc.moneda }} {{ tc.valor|numero(3) }}{% if not loop.last %}<br>{% endif %}{% endfor %}
+            </td>
             <td class="num">{{ r.lineas }}</td>
             <td class="num">{{ r.saldo|clp }}</td>
             <td class="num">{{ r.valor_clp|clp }}</td>

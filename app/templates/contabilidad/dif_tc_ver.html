@@ -64,6 +64,9 @@
       {% if totales.sin_mon_orig %}
       <div class="kpi-foot text-danger">{{ totales.sin_mon_orig }} sin Mon Orig</div>
       {% endif %}
+      {% if totales.sin_tipo_cambio %}
+      <div class="kpi-foot text-danger">{{ totales.sin_tipo_cambio }} sin tipo de cambio</div>
+      {% endif %}
     </div>
   </div>
 </div>
@@ -95,26 +98,50 @@
   {{ accion_form.hidden_tag() }}
 
   <div class="card mb-4">
-    <div class="card-header costeo-card-header">Tipo de cambio del mes</div>
+    <div class="card-header costeo-card-header">Tipos de cambio del mes</div>
     <div class="card-body">
-      <div class="row g-3 align-items-end">
-        <div class="col-6 col-md-3">
-          <label class="form-label small mb-1">Tipo de cambio</label>
-          {# Campo amarillo, como en la planilla: multiplica el Mon Orig de todas las líneas. #}
-          <input type="text" inputmode="decimal" name="tipo_cambio" class="form-control form-control-sm campo-excel"
-                 value="{{ periodo.tipo_cambio|numero }}" {{ 'disabled' if not puede_editar }}>
-          <div class="form-text">Al cambiarlo se recalculan todas las líneas del mes.</div>
+      {# El bloque amarillo de la planilla: una fila por moneda. Cada línea del
+         mayor usa el de su propia moneda. #}
+      <div class="row g-3">
+        <div class="col-12 col-lg-6">
+          <div class="table-responsive">
+            <table class="table table-sm align-middle mb-2" style="max-width:420px;">
+              <thead><tr><th>Moneda</th><th class="num">Tipo de Cambio</th><th class="num">Líneas</th></tr></thead>
+              <tbody>
+                {% for tc in periodo.tipos_cambio %}
+                <tr>
+                  <td class="fw-semibold">{{ tc.moneda }}</td>
+                  <td class="num">
+                    <input type="text" inputmode="decimal" name="tc-{{ tc.id }}-valor"
+                           class="form-control form-control-sm text-end campo-excel" style="min-width:120px;"
+                           data-confirmar-cambio="el tipo de cambio de {{ tc.moneda }}"
+                           value="{{ tc.valor|numero(3) }}" {{ 'disabled' if not puede_editar }}>
+                  </td>
+                  <td class="num text-muted">{{ periodo.lineas|selectattr('tipo_moneda', 'equalto', tc.moneda)|list|length }}</td>
+                </tr>
+                {% endfor %}
+                {% if puede_editar %}
+                <tr>
+                  <td><input type="text" name="nueva_moneda" class="form-control form-control-sm"
+                             placeholder="Otra moneda" style="max-width:120px;"></td>
+                  <td class="num"><input type="text" inputmode="decimal" name="nuevo_tipo_cambio"
+                             class="form-control form-control-sm text-end" placeholder="0,000" style="min-width:120px;"></td>
+                  <td></td>
+                </tr>
+                {% endif %}
+              </tbody>
+            </table>
+          </div>
+          <div class="form-text">Al cambiar un tipo de cambio se recalculan las líneas de esa moneda.</div>
         </div>
-        <div class="col-12 col-md-6">
+        <div class="col-12 col-lg-6">
           <label class="form-label small mb-1">Notas</label>
           <input type="text" name="notas" class="form-control form-control-sm campo-excel"
                  value="{{ periodo.notas or '' }}" {{ 'disabled' if not puede_editar }}>
+          {% if puede_editar %}
+          <button type="submit" class="btn btn-primary mt-3">Guardar todo</button>
+          {% endif %}
         </div>
-        {% if puede_editar %}
-        <div class="col-auto">
-          <button type="submit" class="btn btn-primary">Guardar todo</button>
-        </div>
-        {% endif %}
       </div>
     </div>
   </div>
@@ -132,7 +159,7 @@
               <th>Código Doc.</th><th>Documento</th><th>Vencimiento</th><th>Número Doc.</th>
               <th>Tipo Mov.</th><th>Serie</th><th>Número Mov.</th><th>Moneda Ref.</th>
               <th>Comentario</th><th>Doc. Pago</th><th>Número Doc. Pago</th><th>Serie Doc. Pago.</th>
-              <th class="num">Mon Orig</th>
+              <th>Tipo moneda</th><th class="num">Mon Orig</th>
               <th class="num">Valor en $</th><th class="num">Dif de cambio</th><th class="num">% Dif Variación</th>
             </tr>
           </thead>
@@ -161,7 +188,19 @@
               <td>{{ l.doc_pago or '' }}</td>
               <td>{{ l.numero_doc_pago or '' }}</td>
               <td>{{ l.serie_doc_pago or '' }}</td>
-              {# La otra columna amarilla de la planilla: se escribe a mano. #}
+              {# Las columnas amarillas de la planilla: se escriben a mano. #}
+              <td>
+                <select name="linea-{{ l.id }}-tipo_moneda" class="form-select form-select-sm campo-excel"
+                        style="min-width:90px;" {{ 'disabled' if not puede_editar }}>
+                  <option value=""></option>
+                  {% for tc in periodo.tipos_cambio %}
+                  <option value="{{ tc.moneda }}" {{ 'selected' if l.tipo_moneda == tc.moneda }}>{{ tc.moneda }}</option>
+                  {% endfor %}
+                  {% if l.tipo_moneda and l.tipo_moneda not in periodo.tipos_cambio|map(attribute='moneda')|list %}
+                  <option value="{{ l.tipo_moneda }}" selected>{{ l.tipo_moneda }} (sin tipo de cambio)</option>
+                  {% endif %}
+                </select>
+              </td>
               <td class="num">
                 <input type="text" inputmode="decimal" name="linea-{{ l.id }}-mon_orig"
                        class="form-control form-control-sm text-end campo-excel" style="min-width:110px;"
@@ -173,7 +212,7 @@
               <td class="num">{{ '%.2f%%'|format(l.pct_variacion * 100) }}</td>
             </tr>
             {% else %}
-            <tr><td colspan="26" class="text-center text-muted">
+            <tr><td colspan="27" class="text-center text-muted">
               Sin líneas todavía. Importa el mayor del mes para empezar.
             </td></tr>
             {% endfor %}
@@ -185,7 +224,7 @@
               <td class="num">{{ periodo.lineas|sum(attribute='cargo')|clp }}</td>
               <td class="num">{{ periodo.lineas|sum(attribute='abono')|clp }}</td>
               <td class="num">{{ totales.saldo|clp }}</td>
-              <td colspan="12"></td>
+              <td colspan="13"></td>
               <td class="num">{{ totales.mon_orig|numero }}</td>
               <td class="num">{{ totales.valor_clp|clp }}</td>
               <td class="num">{{ totales.dif_cambio|clp }}</td>

@@ -20,7 +20,9 @@ class PeriodoDifTcForm(FlaskForm):
     mes = SelectField("Mes", coerce=int, validators=[DataRequired()])
     # Texto y no número: acá el decimal se escribe con coma ("925,48") y
     # FloatField rechaza esa forma. La ruta lo convierte.
-    tipo_cambio = StringField("Tipo de cambio", validators=[Optional(), Length(max=30)])
+    # Uno por moneda, como la tabla de la planilla.
+    tipo_cambio_usd = StringField("Tipo de cambio USD", validators=[Optional(), Length(max=30)])
+    tipo_cambio_eur = StringField("Tipo de cambio EUR", validators=[Optional(), Length(max=30)])
     notas = StringField("Notas", validators=[Optional(), Length(max=255)])
 
 
