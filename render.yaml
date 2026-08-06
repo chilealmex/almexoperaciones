@@ -4,7 +4,12 @@ services:
     runtime: python
     plan: free
     buildCommand: "pip install -r requirements.txt && flask db upgrade && python seeds/seed_dev.py && python scripts/importar_respaldo_html.py seeds/respaldo_importaciones_20260731.json"
-    startCommand: "gunicorn wsgi:app --workers 2 --preload --timeout 120 --bind 0.0.0.0:$PORT"
+    # Los procesos "sync" atienden UNA petición cada uno: con tres personas
+    # usando el sistema quedaban todos ocupados, el chequeo de salud de Render
+    # esperaba en la cola y a los 5 segundos daba la instancia por caída.
+    # Con hilos se atienden 16 a la vez, y --preload carga la aplicación una
+    # sola vez antes de dividirse, que en 512 MB se agradece.
+    startCommand: "gunicorn wsgi:app --workers 2 --threads 8 --preload --timeout 120 --bind 0.0.0.0:$PORT"
     healthCheckPath: /healthz
     autoDeploy: true
     envVars:
