@@ -7,7 +7,7 @@
 <div class="page-head">
   <div>
     <h1>Provisión de Ingresos</h1>
-    <p class="page-sub">Cada importación del Excel agrega las líneas nuevas y deja las anteriores como están.</p>
+    <p class="page-sub">Cada importación agrega las líneas nuevas y actualiza las que ya estaban con lo que trae la planilla.</p>
   </div>
   <div class="d-flex gap-2 flex-wrap">
     <a href="{{ url_for('contabilidad.plantilla_provision_ingresos') }}" class="btn btn-outline-secondary btn-sm">Descargar plantilla</a>
@@ -41,7 +41,8 @@
         {{ importar_form.archivo.label(class="form-label small mb-1") }}
         {{ importar_form.archivo(class="form-control form-control-sm") }}
         <div class="form-text">
-          Se lee la hoja <strong>Control</strong>. Las líneas ya cargadas no se tocan ni se duplican.
+          Se lee la hoja <strong>Control</strong>. Las líneas que ya estaban se actualizan con lo que traiga
+          el archivo, así que lo editado a mano se reemplaza. Ninguna línea se elimina.
           Si no tienes la planilla, descarga la de arriba, bórrale la fila de ejemplo y llénala.
         </div>
       </div>

@@ -123,7 +123,8 @@ def test_reimportar_no_duplica_ni_borra_lo_anterior(client, usuario_admin, empre
     assert {l.ot for l in lineas} == {"6095", "6119", "6136"}
 
 
-def test_reimportar_respeta_lo_editado_a_mano(client, usuario_admin, empresa, db):
+def test_reimportar_actualiza_las_lineas_con_lo_que_trae_la_planilla(client, usuario_admin, empresa, db):
+    """La planilla es la fuente: al reimportar, lo editado a mano se reemplaza."""
     login(client, "admin@test.cl")
     client.post(
         "/contabilidad/provision-ingresos/importar",
@@ -136,15 +137,16 @@ def test_reimportar_respeta_lo_editado_a_mano(client, usuario_admin, empresa, db
     linea.saldo = 0
     _db.session.commit()
 
-    client.post(  # se vuelve a subir el mismo Excel, que trae la línea sin reversar
+    client.post(  # el mismo Excel, que trae la línea sin reversar
         "/contabilidad/provision-ingresos/importar",
         data={"archivo": (_planilla([FILA_2]), "provision.xlsx")},
         content_type="multipart/form-data", follow_redirects=True,
     )
     _db.session.refresh(linea)
-    assert linea.reversa == 91_035_000  # no se pisó con lo del archivo
-    assert linea.mes_reversa == "07.2026"
-    assert linea.saldo == 0
+    assert linea.reversa is None            # quedó como en la planilla
+    assert linea.mes_reversa is None
+    assert linea.saldo == 91_035_000        # y el saldo se recalculó
+    assert ProvisionIngreso.query.count() == 1   # sin duplicar
 
 
 def test_importar_un_archivo_que_no_es_la_planilla_avisa(client, usuario_admin, empresa, db):
@@ -484,7 +486,7 @@ def test_la_plantilla_se_descarga_con_las_columnas_de_la_planilla(client, usuari
     hoja = load_workbook(io.BytesIO(respuesta.data))["Control"]
     titulos = [c.value for c in hoja[1] if c.value]
     assert titulos == [
-        "Mes.año", "Cbte Prov", "OT", "Monto Provisión", "Reversa", "Mes Reversa",
+        "Mes", "Año", "Cbte Prov", "OT", "Monto Provisión", "Reversa", "Mes Reversa",
         "Cbte Reversa", "Cliente", "Centro de Costos", "Rut", "Obs", "Saldo",
     ]
 
@@ -498,7 +500,7 @@ def test_la_plantilla_descargada_se_puede_llenar_y_volver_a_subir(client, usuari
     libro = load_workbook(io.BytesIO(descargada))
     hoja = libro["Control"]
     hoja.delete_rows(2)  # se borra la fila de ejemplo, como haría cualquiera
-    hoja.append([date(2026, 7, 1), 900, 7001, 5_000_000, None, None, None,
+    hoja.append([7, 2026, 900, 7001, 5_000_000, None, None, None,
                  "CLIENTE DE PRUEBA", "CENTRO-1", "76000000-1", None, 5_000_000])
     memoria = io.BytesIO()
     libro.save(memoria)
@@ -531,3 +533,117 @@ def test_la_pantalla_ofrece_descargar_la_plantilla(client, usuario_admin, empres
     login(client, "admin@test.cl")
     texto = client.get("/contabilidad/provision-ingresos").get_data(as_text=True)
     assert "Descargar plantilla" in texto
+
+
+# --- Mes y Año en columnas separadas ------------------------------------
+
+TITULOS_MES_ANIO = [
+    "Mes", "Año", "Cbte Prov", "OT", "Monto Provisión", "Reversa", "Mes Reversa",
+    "Cbte Reversa", "Cliente", "Centro de Costos", "Rut", "Obs", "Saldo",
+]
+
+
+def _planilla_mes_anio(filas):
+    from openpyxl import Workbook
+    libro = Workbook()
+    ws = libro.active
+    ws.title = "Control"
+    ws.append(TITULOS_MES_ANIO)
+    for fila in filas:
+        ws.append(fila)
+    memoria = io.BytesIO()
+    libro.save(memoria)
+    memoria.seek(0)
+    return memoria
+
+
+def test_se_puede_indicar_el_periodo_con_mes_y_ano_por_separado(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla_mes_anio([
+            [7, 2026, 511, 6250, 339150, None, None, None, "TTM CHILE S.A.",
+             "EMPNEGVTAVTAOEM", "89026600-2", None, 339150],
+        ]), "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    linea = ProvisionIngreso.query.filter_by(empresa_id=empresa.id).one()
+    assert linea.mes_ano == date(2026, 7, 1)
+    assert linea.cbte_prov == "511"
+    assert linea.ot == "6250"
+    assert linea.monto_provision == 339150
+
+
+def test_la_plantilla_trae_mes_y_ano_separados(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    from openpyxl import load_workbook
+
+    hoja = load_workbook(io.BytesIO(client.get("/contabilidad/provision-ingresos/plantilla.xlsx").data))["Control"]
+    assert [c.value for c in hoja[1] if c.value][:4] == ["Mes", "Año", "Cbte Prov", "OT"]
+
+
+def test_un_mes_fuera_de_rango_no_se_carga(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla_mes_anio([
+            [13, 2026, 511, 6250, 339150, None, None, None, "TTM", "C", "1-9", None, 339150],
+        ]), "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    assert ProvisionIngreso.query.count() == 0
+
+
+def test_si_los_datos_no_calzan_con_los_titulos_se_avisa(client, usuario_admin, empresa, db):
+    """Pasa al insertar una columna en los títulos sin correr también los datos."""
+    login(client, "admin@test.cl")
+    corrida = [7, 2026, None, 511, 6250, 339150, None, None, None, "TTM CHILE S.A.", "C", "1-9", None]
+    respuesta = client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla_mes_anio([corrida]), "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    texto = respuesta.get_data(as_text=True)
+    assert "corridos" in texto or "debajo de su" in texto
+    assert ProvisionIngreso.query.count() == 0
+
+
+def test_reimportar_no_borra_las_lineas_que_ya_no_vienen_en_la_planilla(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([FILA_1, FILA_2]), "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    assert ProvisionIngreso.query.filter_by(empresa_id=empresa.id).count() == 2
+
+    client.post(  # una planilla con solo una de las dos
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([FILA_1]), "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    assert ProvisionIngreso.query.filter_by(empresa_id=empresa.id).count() == 2
+
+
+def test_al_actualizar_desde_la_planilla_el_saldo_se_recalcula(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    sin_reversar = list(FILA_2)          # provisión 91.035.000, sin reversa
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([sin_reversar]), "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    linea = ProvisionIngreso.query.filter_by(empresa_id=empresa.id).one()
+    assert linea.saldo == 91_035_000
+
+    reversada = list(FILA_2)
+    reversada[4] = 91_035_000            # ahora la planilla la trae reversada
+    reversada[11] = 0
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([reversada]), "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    _db.session.refresh(linea)
+    assert linea.reversa == 91_035_000
+    assert linea.saldo == 0

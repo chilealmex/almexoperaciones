@@ -169,11 +169,11 @@ def plantilla_provision_ingresos():
         "plantilla-provision-de-ingresos",
         HOJA_PROVISIONES,
         [
-            "Mes.año", "Cbte Prov", "OT", "Monto Provisión", "Reversa", "Mes Reversa",
+            "Mes", "Año", "Cbte Prov", "OT", "Monto Provisión", "Reversa", "Mes Reversa",
             "Cbte Reversa", "Cliente", "Centro de Costos", "Rut", "Obs", "Saldo",
         ],
         fila_ejemplo=[
-            date(2026, 3, 1), 67, 6095, 3700000, 3700000, "05.2026", 109,
+            3, 2026, 67, 6095, 3700000, 3700000, "05.2026", 109,
             "CIA MINERA COLLAHUASI", "EMPNEGVTAVTAPRE", "89468900-5", "", 0,
         ],
     )
@@ -193,29 +193,34 @@ def importar_provision_ingresos():
         flash(str(error), "danger")
         return redirect(url_for("contabilidad.provision_ingresos"))
 
-    # Se agregan solo las líneas que no estaban. Las que ya existen se dejan
-    # tal cual, para no pisar lo que se editó a mano en la aplicación.
-    existentes = {(l.mes_ano, l.cbte_prov, l.ot) for l in _query_base().all()}
-    nuevas = 0
+    # La planilla manda: las líneas nuevas se agregan y las que ya estaban se
+    # actualizan con lo que trae el archivo. Nada se elimina: una línea que ya
+    # no venga en la planilla se queda como está.
+    existentes = {(l.mes_ano, l.cbte_prov, l.ot): l for l in _query_base().all()}
+    nuevas = actualizadas = 0
     for linea in lineas:
+        datos = {k: v for k, v in linea.items() if k != "fila"}
         clave = (linea["mes_ano"], linea["cbte_prov"], linea["ot"])
-        if clave in existentes:
-            continue
-        existentes.add(clave)
-        registro = ProvisionIngreso(
-            empresa_id=_empresa_id(),
-            **{k: v for k, v in linea.items() if k != "fila"},
-        )
+        registro = existentes.get(clave)
+        if registro is None:
+            registro = ProvisionIngreso(empresa_id=_empresa_id(), **datos)
+            existentes[clave] = registro
+            db.session.add(registro)
+            nuevas += 1
+        else:
+            for campo, valor in datos.items():
+                setattr(registro, campo, valor)
+            actualizadas += 1
         registro.saldo = _saldo_de(registro)
-        db.session.add(registro)
-        nuevas += 1
     db.session.commit()
 
-    repetidas = len(lineas) - nuevas
-    mensaje = f"Se agregaron {nuevas} línea(s) nueva(s)."
-    if repetidas:
-        mensaje += f" Se dejaron sin tocar {repetidas} que ya estaban cargadas."
-    flash(mensaje, "success" if nuevas else "info")
+    partes = []
+    if nuevas:
+        partes.append(f"{nuevas} línea(s) nueva(s)")
+    if actualizadas:
+        partes.append(f"{actualizadas} actualizada(s) con los datos de la planilla")
+    mensaje = "Se cargaron " + " y ".join(partes) + "." if partes else "La planilla no traía líneas."
+    flash(mensaje, "success" if partes else "info")
     return redirect(url_for("contabilidad.provision_ingresos"))
 
 
