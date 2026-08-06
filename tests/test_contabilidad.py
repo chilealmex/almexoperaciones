@@ -469,3 +469,65 @@ def test_la_columna_se_llama_monto_reversa_y_el_saldo_ya_no_se_escribe(client, u
     assert f'name="linea-{linea.id}-saldo"' not in texto   # el saldo dejó de ser un campo
     assert f'id="saldo-{linea.id}"' in texto               # ahora es una celda calculada
     assert "data-confirmar-cambio" in texto                # y avisa antes de pisar un dato
+
+
+# --- Plantilla descargable ----------------------------------------------
+
+
+def test_la_plantilla_se_descarga_con_las_columnas_de_la_planilla(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    respuesta = client.get("/contabilidad/provision-ingresos/plantilla.xlsx")
+    assert respuesta.status_code == 200
+    assert "spreadsheetml" in respuesta.headers["Content-Type"]
+
+    from openpyxl import load_workbook
+    hoja = load_workbook(io.BytesIO(respuesta.data))["Control"]
+    titulos = [c.value for c in hoja[1] if c.value]
+    assert titulos == [
+        "Mes.año", "Cbte Prov", "OT", "Monto Provisión", "Reversa", "Mes Reversa",
+        "Cbte Reversa", "Cliente", "Centro de Costos", "Rut", "Obs", "Saldo",
+    ]
+
+
+def test_la_plantilla_descargada_se_puede_llenar_y_volver_a_subir(client, usuario_admin, empresa, db):
+    """El circuito completo: bajar la plantilla, escribir en ella y cargarla."""
+    login(client, "admin@test.cl")
+    from openpyxl import load_workbook
+
+    descargada = client.get("/contabilidad/provision-ingresos/plantilla.xlsx").data
+    libro = load_workbook(io.BytesIO(descargada))
+    hoja = libro["Control"]
+    hoja.delete_rows(2)  # se borra la fila de ejemplo, como haría cualquiera
+    hoja.append([date(2026, 7, 1), 900, 7001, 5_000_000, None, None, None,
+                 "CLIENTE DE PRUEBA", "CENTRO-1", "76000000-1", None, 5_000_000])
+    memoria = io.BytesIO()
+    libro.save(memoria)
+    memoria.seek(0)
+
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (memoria, "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    linea = ProvisionIngreso.query.filter_by(empresa_id=empresa.id).one()
+    assert linea.cliente == "CLIENTE DE PRUEBA"
+    assert linea.monto_provision == 5_000_000
+    assert linea.saldo == 5_000_000
+    assert linea.ot == "7001"
+
+
+def test_se_siguen_leyendo_las_planillas_con_los_titulos_en_la_segunda_fila(client, usuario_admin, empresa, db):
+    """La planilla original trae una fila de totales encima de los títulos."""
+    login(client, "admin@test.cl")
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([FILA_1, FILA_2]), "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    assert ProvisionIngreso.query.filter_by(empresa_id=empresa.id).count() == 2
+
+
+def test_la_pantalla_ofrece_descargar_la_plantilla(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    texto = client.get("/contabilidad/provision-ingresos").get_data(as_text=True)
+    assert "Descargar plantilla" in texto

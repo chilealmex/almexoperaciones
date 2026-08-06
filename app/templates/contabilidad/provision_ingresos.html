@@ -10,6 +10,7 @@
     <p class="page-sub">Cada importación del Excel agrega las líneas nuevas y deja las anteriores como están.</p>
   </div>
   <div class="d-flex gap-2 flex-wrap">
+    <a href="{{ url_for('contabilidad.plantilla_provision_ingresos') }}" class="btn btn-outline-secondary btn-sm">Descargar plantilla</a>
     <a href="{{ url_for('contabilidad.exportar_provision_ingresos', **filtros) }}" class="btn btn-outline-secondary btn-sm">Descargar Excel</a>
   </div>
 </div>
@@ -39,7 +40,10 @@
       <div class="col-12 col-md-6">
         {{ importar_form.archivo.label(class="form-label small mb-1") }}
         {{ importar_form.archivo(class="form-control form-control-sm") }}
-        <div class="form-text">Se lee la hoja <strong>Control</strong>. Las líneas ya cargadas no se tocan ni se duplican.</div>
+        <div class="form-text">
+          Se lee la hoja <strong>Control</strong>. Las líneas ya cargadas no se tocan ni se duplican.
+          Si no tienes la planilla, descarga la de arriba, bórrale la fila de ejemplo y llénala.
+        </div>
       </div>
       <div class="col-auto">
         <button type="submit" class="btn btn-primary btn-sm">Importar planilla</button>

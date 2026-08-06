@@ -16,7 +16,8 @@ from app.utils.decorators import require_permission
 from app.utils.dif_tipo_cambio import recalcular_periodo, totales_periodo
 from app.utils.dif_tipo_cambio_excel import PlanillaInvalida as PlanillaInvalidaMayor
 from app.utils.dif_tipo_cambio_excel import leer_mayor
-from app.utils.exportar import CLP, FECHA, PORCENTAJE, col, responder_excel
+from app.utils.exportar import CLP, FECHA, PORCENTAJE, col, responder_excel, responder_plantilla_excel
+from app.utils.provision_ingresos_excel import HOJA as HOJA_PROVISIONES
 from app.utils.provision_ingresos_excel import (
     MESES_NOMBRES,
     PlanillaInvalida,
@@ -157,6 +158,24 @@ def provision_ingresos():
         accion_form=AccionForm(),
         mes_legible=mes_legible,
         nombre_mes=nombre_mes,
+    )
+
+
+@bp.route("/provision-ingresos/plantilla.xlsx")
+@require_permission("contabilidad", "ver")
+def plantilla_provision_ingresos():
+    """Planilla vacía con las columnas que espera la importación, para llenar y subir."""
+    return responder_plantilla_excel(
+        "plantilla-provision-de-ingresos",
+        HOJA_PROVISIONES,
+        [
+            "Mes.año", "Cbte Prov", "OT", "Monto Provisión", "Reversa", "Mes Reversa",
+            "Cbte Reversa", "Cliente", "Centro de Costos", "Rut", "Obs", "Saldo",
+        ],
+        fila_ejemplo=[
+            date(2026, 3, 1), 67, 6095, 3700000, 3700000, "05.2026", 109,
+            "CIA MINERA COLLAHUASI", "EMPNEGVTAVTAPRE", "89468900-5", "", 0,
+        ],
     )
 
 

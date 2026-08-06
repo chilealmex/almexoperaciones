@@ -8,7 +8,10 @@ guarda y cómo decide lo duplicado es cosa de las rutas.
 from datetime import date, datetime
 
 HOJA = "Control"
-FILA_TITULOS = 2
+# En la planilla de origen los títulos van en la fila 2, debajo de una fila de
+# totales; en la plantilla que entrega el sistema van en la 1. Se busca la fila
+# de títulos entre las primeras, así sirven las dos formas.
+FILAS_TITULOS_POSIBLES = (1, 2, 3)
 
 # Título en la planilla -> nombre del campo. Se busca por título y no por
 # posición, así un cambio de orden de columnas no rompe la importación.
@@ -78,22 +81,35 @@ def _mes_como_texto(valor):
     return _texto(valor)
 
 
-def _mapa_de_columnas(hoja):
+def _columnas_de_la_fila(hoja, numero_fila):
     mapa = {}
-    for celda in hoja[FILA_TITULOS]:
+    for celda in hoja[numero_fila]:
         titulo = _texto(celda.value)
         if not titulo:
             continue
         campo = COLUMNAS.get(titulo.lower())
         if campo and campo not in mapa:
             mapa[campo] = celda.column - 1
-    faltantes = [c for c in OBLIGATORIAS if c not in mapa]
-    if faltantes:
-        raise PlanillaInvalida(
-            "A la hoja 'Control' le faltan columnas obligatorias: "
-            + ", ".join(faltantes).replace("mes_ano", "Mes.año").replace("cbte_prov", "Cbte Prov").replace("ot", "OT")
-        )
     return mapa
+
+
+def _mapa_de_columnas(hoja):
+    """Encuentra la fila de títulos y devuelve (mapa de columnas, número de fila)."""
+    mejor, mejor_fila = {}, FILAS_TITULOS_POSIBLES[0]
+    for numero_fila in FILAS_TITULOS_POSIBLES:
+        if numero_fila > hoja.max_row:
+            break
+        mapa = _columnas_de_la_fila(hoja, numero_fila)
+        if all(c in mapa for c in OBLIGATORIAS):
+            return mapa, numero_fila
+        if len(mapa) > len(mejor):
+            mejor, mejor_fila = mapa, numero_fila
+
+    faltantes = [c for c in OBLIGATORIAS if c not in mejor]
+    raise PlanillaInvalida(
+        "A la hoja 'Control' le faltan columnas obligatorias: "
+        + ", ".join(faltantes).replace("mes_ano", "Mes.año").replace("cbte_prov", "Cbte Prov").replace("ot", "OT")
+    )
 
 
 def leer_provisiones(archivo):
@@ -110,7 +126,7 @@ def leer_provisiones(archivo):
             f"El archivo no tiene la hoja '{HOJA}'. Hojas encontradas: {', '.join(libro.sheetnames)}."
         )
     hoja = libro[HOJA]
-    mapa = _mapa_de_columnas(hoja)
+    mapa, fila_titulos = _mapa_de_columnas(hoja)
 
     def valor(fila, campo):
         indice = mapa.get(campo)
@@ -119,7 +135,7 @@ def leer_provisiones(archivo):
         return fila[indice]
 
     lineas = []
-    for numero, fila in enumerate(hoja.iter_rows(min_row=FILA_TITULOS + 1, values_only=True), start=FILA_TITULOS + 1):
+    for numero, fila in enumerate(hoja.iter_rows(min_row=fila_titulos + 1, values_only=True), start=fila_titulos + 1):
         if not any(v not in (None, "") for v in fila):
             continue
         mes_ano = _fecha(valor(fila, "mes_ano"))
