@@ -94,7 +94,7 @@
             <tr>
               <th>Mes</th><th>Año</th><th>Cbte Prov</th><th>OT</th>
               <th class="num">Monto Provisión</th>
-              <th class="num">Reversa</th><th>Mes Reversa</th><th>Cbte Reversa</th>
+              <th class="num">Monto Reversa</th><th>Mes Reversa</th><th>Cbte Reversa</th>
               <th>Cliente</th><th>Centro de Costos</th><th>Rut</th><th>Obs</th>
               <th class="num">Saldo</th>
               <th>Estado</th>
@@ -103,6 +103,9 @@
           </thead>
           <tbody>
             {% for l in lineas %}
+            {# Saldo en $0 = provisión reversada por completo: la fila se bloquea. #}
+            {% set cerrada = (l.saldo or 0) == 0 %}
+            {% set editable = puede_editar and (not cerrada or current_user.es_superadmin) %}
             <tr>
               <td class="fw-semibold">{{ nombre_mes(l.mes_ano) }}</td>
               <td>{{ l.mes_ano.year if l.mes_ano else '' }}</td>
@@ -112,40 +115,56 @@
               {# Las cuatro columnas editables. El resto viene del Excel y es solo lectura. #}
               <td class="num">
                 <input type="text" inputmode="numeric" name="linea-{{ l.id }}-reversa"
-                       class="form-control form-control-sm text-end campo-excel campo-clp" style="min-width:110px;"
-                       value="{{ l.reversa|clp if l.reversa is not none else '' }}" {{ 'disabled' if not puede_editar }}>
+                       class="form-control form-control-sm text-end campo-excel campo-clp campo-monto-reversa"
+                       style="min-width:110px;" data-linea="{{ l.id }}"
+                       data-provision="{{ l.monto_provision or 0 }}"
+                       data-confirmar-cambio="el monto de reversa de {{ (l.cliente or 'esta línea')|replace('"', '') }} (OT {{ l.ot }})"
+                       value="{{ l.reversa|clp if l.reversa is not none else '' }}" {{ 'disabled' if not editable }}>
               </td>
               <td>
                 <input type="text" name="linea-{{ l.id }}-mes_reversa" class="form-control form-control-sm campo-excel"
+                       data-confirmar-cambio="el mes de reversa (OT {{ l.ot }})"
                        style="min-width:120px;" value="{{ l.mes_reversa or '' }}"
-                       {{ 'disabled' if not puede_editar }}>
+                       {{ 'disabled' if not editable }}>
               </td>
               <td>
                 <input type="text" name="linea-{{ l.id }}-cbte_reversa" class="form-control form-control-sm campo-excel"
-                       style="min-width:100px;" value="{{ l.cbte_reversa or '' }}" {{ 'disabled' if not puede_editar }}>
+                       data-confirmar-cambio="el comprobante de reversa (OT {{ l.ot }})"
+                       style="min-width:100px;" value="{{ l.cbte_reversa or '' }}" {{ 'disabled' if not editable }}>
               </td>
               <td>{{ l.cliente or '' }}</td>
               <td>{{ l.centro_costos or '' }}</td>
               <td>{{ l.rut or '' }}</td>
               <td>{{ l.obs or '' }}</td>
-              <td class="num">
-                <input type="text" inputmode="numeric" name="linea-{{ l.id }}-saldo"
-                       class="form-control form-control-sm text-end campo-excel campo-clp" style="min-width:110px;"
-                       value="{{ (l.saldo or 0)|clp }}" {{ 'disabled' if not puede_editar }}>
+              {# El saldo ya no se escribe: sale de restar la reversa a la provisión. #}
+              <td class="num saldo-linea {{ 'saldo-cerrado' if cerrada }}" id="saldo-{{ l.id }}">
+                {{ (l.saldo or 0)|clp }}
               </td>
               {# Saldo en $0 = la provisión se reversó completa, la línea está cerrada. #}
-              <td>
-                {% if (l.saldo or 0) <= 0 %}
-                <span class="badge bg-success">Cerrado</span>
+              <td id="estado-{{ l.id }}">
+                {% if cerrada %}
+                <span class="badge bg-success">🔒 Cerrado</span>
                 {% else %}
                 <span class="badge bg-warning text-dark">Pendiente</span>
                 {% endif %}
               </td>
               {% if puede_editar %}
               <td class="text-end">
+                {# El aviso dice qué línea es y advierte lo que no se ve: la importación
+                   vuelve a traerla, porque solo agrega lo que falta. #}
+                {% set aviso %}⚠️ Se eliminará esta línea de la provisión:
+
+{{ nombre_mes(l.mes_ano) }} {{ l.mes_ano.year if l.mes_ano else '' }} · Cbte {{ l.cbte_prov }} · OT {{ l.ot }}
+{{ l.cliente or 'Sin cliente' }}
+Monto provisión: {{ l.monto_provision|clp }} · Saldo: {{ (l.saldo or 0)|clp }}{% if l.reversa is not none %}
+Tiene reversa registrada por {{ l.reversa|clp }}, y se perderá.{% endif %}
+
+Esto no se puede deshacer. Si vuelves a importar la planilla, la línea se cargará de nuevo (sin lo que hayas editado a mano).
+
+¿Eliminarla igual?{% endset %}
                 <button type="submit" formaction="{{ url_for('contabilidad.eliminar_provision_ingreso', linea_id=l.id) }}"
                         formnovalidate class="btn btn-sm btn-outline-danger"
-                        onclick="return confirm('¿Eliminar esta línea?')" title="Eliminar">🗑</button>
+                        onclick='return confirm({{ aviso|trim|tojson }})' title="Eliminar">🗑</button>
               </td>
               {% endif %}
             </tr>

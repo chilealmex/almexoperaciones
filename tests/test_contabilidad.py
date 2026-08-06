@@ -176,7 +176,6 @@ def test_solo_se_editan_reversa_mes_reversa_cbte_reversa_y_saldo(client, usuario
             f"linea-{linea.id}-reversa": "$91.035.000",
             f"linea-{linea.id}-mes_reversa": "may-26 y jun-26",
             f"linea-{linea.id}-cbte_reversa": "456-204",
-            f"linea-{linea.id}-saldo": "$0",
             # Estos no son editables: aunque se envíen, deben ignorarse.
             f"linea-{linea.id}-monto_provision": "1",
             f"linea-{linea.id}-cliente": "OTRO CLIENTE",
@@ -193,25 +192,33 @@ def test_solo_se_editan_reversa_mes_reversa_cbte_reversa_y_saldo(client, usuario
 
 
 def test_dejar_la_reversa_vacia_la_borra(client, usuario_admin, empresa, db):
+    """En una línea abierta se puede borrar la reversa; el saldo vuelve a la provisión."""
     login(client, "admin@test.cl")
     client.post(
         "/contabilidad/provision-ingresos/importar",
-        data={"archivo": (_planilla([FILA_1]), "provision.xlsx")},
+        data={"archivo": (_planilla([FILA_2]), "provision.xlsx")},
         content_type="multipart/form-data", follow_redirects=True,
     )
     linea = ProvisionIngreso.query.filter_by(empresa_id=empresa.id).one()
-    assert linea.reversa == 3_700_000
+    client.post(
+        "/contabilidad/provision-ingresos/guardar",
+        data={f"linea-{linea.id}-reversa": "40000000", f"linea-{linea.id}-mes_reversa": "06.2026",
+              f"linea-{linea.id}-cbte_reversa": "456"},
+        follow_redirects=True,
+    )
+    _db.session.refresh(linea)
+    assert linea.reversa == 40_000_000
 
     client.post(
         "/contabilidad/provision-ingresos/guardar",
         data={f"linea-{linea.id}-reversa": "", f"linea-{linea.id}-mes_reversa": "",
-              f"linea-{linea.id}-cbte_reversa": "", f"linea-{linea.id}-saldo": "3700000"},
+              f"linea-{linea.id}-cbte_reversa": ""},
         follow_redirects=True,
     )
     _db.session.refresh(linea)
     assert linea.reversa is None
     assert linea.mes_reversa is None
-    assert linea.saldo == 3_700_000
+    assert linea.saldo == 91_035_000   # vuelve a quedar toda la provisión pendiente
 
 
 # --- Pantalla ------------------------------------------------------------
@@ -319,3 +326,146 @@ def test_exportar_devuelve_un_excel(client, usuario_admin, empresa, db):
     respuesta = client.get("/contabilidad/provision-ingresos/exportar.xlsx")
     assert respuesta.status_code == 200
     assert "spreadsheetml" in respuesta.headers["Content-Type"]
+
+
+def test_eliminar_una_linea_avisa_antes_y_dice_que_se_va_a_perder(client, usuario_admin, empresa, db):
+    """El botón de eliminar tiene que pedir confirmación explicando qué línea es."""
+    login(client, "admin@test.cl")
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([FILA_1]), "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    texto = client.get("/contabilidad/provision-ingresos").get_data(as_text=True)
+
+    assert "Se eliminar\\u00e1 esta l\\u00ednea de la provisi\\u00f3n" in texto
+    assert "no se puede deshacer" in texto
+    assert "COLLAHUASI" in texto           # dice de qué línea se trata
+    assert "Tiene reversa registrada" in texto  # y que se pierde la reversa
+
+
+def test_el_aviso_de_borrado_no_rompe_el_atributo_aunque_el_cliente_traiga_comillas(client, usuario_admin, empresa, db):
+    """El mensaje viaja dentro de un atributo HTML: si se corta, el borrado ocurriría sin preguntar."""
+    login(client, "admin@test.cl")
+    con_comillas = list(FILA_1)
+    con_comillas[7] = 'CLIENTE "RARO" S.A.'
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([con_comillas]), "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    texto = client.get("/contabilidad/provision-ingresos").get_data(as_text=True)
+
+    # El atributo va con comillas simples y el contenido no puede traer una comilla
+    # simple sin escapar, ni una comilla doble cruda que lo corte antes de tiempo.
+    inicio = texto.index("onclick='return confirm(")
+    fin = texto.index("' title=\"Eliminar\"", inicio)
+    atributo = texto[inicio + len("onclick='"):fin]
+    assert atributo.startswith("return confirm(")
+    assert atributo.endswith(")")
+    assert "'" not in atributo, "una comilla simple sin escapar cortaría el atributo"
+
+
+# --- Saldo calculado y línea cerrada -------------------------------------
+
+
+def test_el_saldo_sale_de_restar_la_reversa_a_la_provision(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([FILA_2]), "provision.xlsx")},   # provisión 91.035.000, sin reversa
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    linea = ProvisionIngreso.query.filter_by(empresa_id=empresa.id).one()
+    assert linea.saldo == 91_035_000
+
+    client.post(
+        "/contabilidad/provision-ingresos/guardar",
+        data={f"linea-{linea.id}-reversa": "$40.000.000"},
+        follow_redirects=True,
+    )
+    _db.session.refresh(linea)
+    assert linea.saldo == 91_035_000 - 40_000_000  # no se escribe: se calcula
+
+
+def test_al_reversar_todo_el_saldo_queda_en_cero_y_la_linea_se_cierra(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([FILA_2]), "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    linea = ProvisionIngreso.query.filter_by(empresa_id=empresa.id).one()
+    client.post(
+        "/contabilidad/provision-ingresos/guardar",
+        data={f"linea-{linea.id}-reversa": "91035000"},
+        follow_redirects=True,
+    )
+    _db.session.refresh(linea)
+    assert linea.saldo == 0
+
+    texto = client.get("/contabilidad/provision-ingresos").get_data(as_text=True)
+    assert "saldo-cerrado" in texto          # la celda va en verde
+    assert "Cerrado" in texto
+
+
+def test_una_linea_cerrada_no_se_puede_modificar(client, usuario_admin, empresa, db):
+    """Saldo en $0: queda con candado y el servidor ignora cualquier cambio."""
+    login(client, "admin@test.cl")
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([FILA_1]), "provision.xlsx")},   # ya viene reversada, saldo 0
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    linea = ProvisionIngreso.query.filter_by(empresa_id=empresa.id).one()
+    assert linea.saldo == 0
+
+    client.post(
+        "/contabilidad/provision-ingresos/guardar",
+        data={f"linea-{linea.id}-reversa": "1", f"linea-{linea.id}-cbte_reversa": "PISADO"},
+        follow_redirects=True,
+    )
+    _db.session.refresh(linea)
+    assert linea.reversa == 3_700_000    # intacta
+    assert linea.cbte_reversa == "109"
+    assert linea.saldo == 0
+
+
+def test_un_superadmin_si_puede_corregir_una_linea_cerrada(client, empresa, db):
+    """Hace falta para arreglar un monto mal escrito que dejó la línea en $0."""
+    from tests.test_permissions import _crear_superadmin
+
+    _crear_superadmin(db, empresa)
+    login(client, "super@test.cl")
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([FILA_1]), "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    linea = ProvisionIngreso.query.filter_by(empresa_id=empresa.id).one()
+    assert linea.saldo == 0
+
+    client.post(
+        "/contabilidad/provision-ingresos/guardar",
+        data={f"linea-{linea.id}-reversa": "1000000"},
+        follow_redirects=True,
+    )
+    _db.session.refresh(linea)
+    assert linea.reversa == 1_000_000
+    assert linea.saldo == 3_700_000 - 1_000_000
+
+
+def test_la_columna_se_llama_monto_reversa_y_el_saldo_ya_no_se_escribe(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([FILA_2]), "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    linea = ProvisionIngreso.query.filter_by(empresa_id=empresa.id).one()
+    texto = client.get("/contabilidad/provision-ingresos").get_data(as_text=True)
+
+    assert "<th class=\"num\">Monto Reversa</th>" in texto
+    assert f'name="linea-{linea.id}-saldo"' not in texto   # el saldo dejó de ser un campo
+    assert f'id="saldo-{linea.id}"' in texto               # ahora es una celda calculada
+    assert "data-confirmar-cambio" in texto                # y avisa antes de pisar un dato

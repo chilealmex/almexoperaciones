@@ -61,6 +61,19 @@ def _parse_decimal(valor):
         return None
 
 
+def _saldo_de(linea):
+    """El saldo es lo que queda por reversar: la provisión menos la reversa."""
+    return (linea.monto_provision or 0) - (linea.reversa or 0)
+
+
+def _linea_cerrada(linea):
+    """Saldo en $0 = provisión reversada por completo. Queda bloqueada.
+
+    Un superadmin sí puede modificarla, para poder corregir un monto mal escrito.
+    """
+    return (linea.saldo or 0) == 0 and not current_user.es_superadmin
+
+
 def _query_base():
     return ProvisionIngreso.query.filter_by(empresa_id=_empresa_id())
 
@@ -170,12 +183,12 @@ def importar_provision_ingresos():
         if clave in existentes:
             continue
         existentes.add(clave)
-        db.session.add(
-            ProvisionIngreso(
-                empresa_id=_empresa_id(),
-                **{k: v for k, v in linea.items() if k != "fila"},
-            )
+        registro = ProvisionIngreso(
+            empresa_id=_empresa_id(),
+            **{k: v for k, v in linea.items() if k != "fila"},
         )
+        registro.saldo = _saldo_de(registro)
+        db.session.add(registro)
         nuevas += 1
     db.session.commit()
 
@@ -196,12 +209,14 @@ def guardar_provision_ingresos():
 
     for linea in _query_base().all():
         prefijo = f"linea-{linea.id}-"
-        if prefijo + "saldo" not in request.form:
+        if prefijo + "reversa" not in request.form:
             continue  # línea que no está en la página que se envió
+        if _linea_cerrada(linea):
+            continue  # ya quedó en $0: no se toca salvo que la reabra un superadmin
         linea.reversa = _parse_entero(request.form.get(prefijo + "reversa"))
         linea.mes_reversa = (request.form.get(prefijo + "mes_reversa") or "").strip() or None
         linea.cbte_reversa = (request.form.get(prefijo + "cbte_reversa") or "").strip() or None
-        linea.saldo = _parse_entero(request.form.get(prefijo + "saldo")) or 0
+        linea.saldo = _saldo_de(linea)
     db.session.commit()
     flash("Cambios guardados.", "success")
     return redirect(url_for("contabilidad.provision_ingresos", **request.args))

@@ -1097,3 +1097,14 @@ select.campo-excel.esta-vacio {
 input.campo-excel.esta-vacio::placeholder {
   color: #c98d86;
 }
+
+/* Provisión de Ingresos: el saldo se calcula, así que se muestra como texto.
+   En $0 la línea está cerrada y se marca en verde. */
+.saldo-linea {
+  font-variant-numeric: tabular-nums;
+}
+.saldo-cerrado {
+  background-color: #e6f4ea;
+  color: #1a7f37;
+  font-weight: 600;
+}

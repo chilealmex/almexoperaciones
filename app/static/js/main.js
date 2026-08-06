@@ -259,4 +259,52 @@ document.addEventListener("DOMContentLoaded", function () {
       campo.addEventListener("blur", function () { marcarVacios([campo]); });
     });
   }
+  // Provisión de Ingresos: al escribir el monto de reversa, el saldo de esa
+  // misma fila se recalcula al vuelo (provisión - reversa) y se marca en verde
+  // cuando llega a $0, que es cuando la provisión queda reversada por completo.
+  document.querySelectorAll(".campo-monto-reversa").forEach(function (campo) {
+    function refrescarSaldo() {
+      var id = campo.getAttribute("data-linea");
+      var celda = document.getElementById("saldo-" + id);
+      if (!celda) return;
+      var provision = parseInt(campo.getAttribute("data-provision"), 10) || 0;
+      var saldo = provision - parseEnteroCLP(campo.value);
+      celda.textContent = formatearCLP(saldo);
+      celda.classList.toggle("saldo-cerrado", saldo === 0);
+
+      var estado = document.getElementById("estado-" + id);
+      if (estado) {
+        estado.innerHTML = saldo === 0
+          ? '<span class="badge bg-success">\u{1F512} Cerrado</span>'
+          : '<span class="badge bg-warning text-dark">Pendiente</span>';
+      }
+    }
+    campo.addEventListener("input", refrescarSaldo);
+    campo.addEventListener("blur", refrescarSaldo);
+  });
+
+  // Cambiar un dato que ya estaba cargado pide confirmación: llenar un campo
+  // vacío no molesta, pero pisar algo escrito antes sí conviene pensarlo.
+  document.querySelectorAll("[data-confirmar-cambio]").forEach(function (campo) {
+    var original = campo.value;
+    campo.addEventListener("change", function () {
+      if (campo.value === original) return;
+      if (!original.trim()) {          // estaba vacío: es carga, no cambio
+        original = campo.value;
+        return;
+      }
+      var etiqueta = campo.getAttribute("data-confirmar-cambio") || "este dato";
+      var mensaje =
+        "\u26A0\uFE0F Vas a cambiar " + etiqueta + ".\n\n" +
+        "Antes decía: " + original + "\n" +
+        "Va a quedar: " + (campo.value.trim() || "(vacío)") + "\n\n" +
+        "\u00BFSeguro?";
+      if (window.confirm(mensaje)) {
+        original = campo.value;
+      } else {
+        campo.value = original;
+      }
+      campo.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  });
 });
