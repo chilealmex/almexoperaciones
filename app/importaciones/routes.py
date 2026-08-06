@@ -3,6 +3,8 @@ from datetime import date, datetime
 from flask import abort, flash, redirect, render_template, request, url_for
 from flask_login import current_user
 
+from sqlalchemy.orm import joinedload, selectinload
+
 from app.extensions import db
 from app.importaciones import bp
 from app.importaciones.forms import (
@@ -989,7 +991,16 @@ def _ordenar(query, args, columnas, por_defecto, direccion_por_defecto="asc"):
 @bp.route("/costeo-detallado")
 @require_permission("importaciones", "ver")
 def costeo_detallado_lista():
-    query = CosteoImportacion.query.filter_by(empresa_id=_empresa_id())
+    # selectinload trae documentos, gastos y productos de todos los costeos en
+    # tres consultas, en vez de una por costeo: el listado pasaba de cientos de
+    # idas a la base a un puñado, que en una base remota es la diferencia entre
+    # segundos y milisegundos.
+    query = CosteoImportacion.query.options(
+        selectinload(CosteoImportacion.documentos),
+        selectinload(CosteoImportacion.gastos_internos),
+        selectinload(CosteoImportacion.productos),
+        joinedload(CosteoImportacion.importacion),
+    ).filter_by(empresa_id=_empresa_id())
     query, filtros_columna = _filtros_de_columna(query, request.args, COLUMNAS_FILTRO_COSTEO)
 
     filtro_estado = request.args.get("filtro", "todos")
@@ -1003,22 +1014,29 @@ def costeo_detallado_lista():
     )
     lista = query.order_by(CosteoImportacion.id.desc()).all()
 
-    todos = CosteoImportacion.query.filter_by(empresa_id=_empresa_id()).all()
+    # Contar en la base en vez de traerse todos los costeos solo para contarlos.
+    por_estado = dict(
+        db.session.query(CosteoImportacion.estado, db.func.count(CosteoImportacion.id))
+        .filter(CosteoImportacion.empresa_id == _empresa_id())
+        .group_by(CosteoImportacion.estado)
+        .all()
+    )
     conteo_estados = {
-        "todos": len(todos),
-        "en_proceso": sum(1 for c in todos if c.estado == "en_proceso"),
-        "cerrado": sum(1 for c in todos if c.estado == "cerrado"),
+        "todos": sum(por_estado.values()),
+        "en_proceso": por_estado.get("en_proceso", 0),
+        "cerrado": por_estado.get("cerrado", 0),
     }
 
     resumen = []
     for costeo in lista:
+        # Los totales se calculan una sola vez y se reutilizan para la cuadratura.
         totales = costeo_calculo.totales_documentos(costeo)
         resumen.append(
             {
                 "costeo": costeo,
                 "costo_total_clp": totales["costo_total_clp"],
                 "cantidad_productos": len(costeo.productos),
-                "cuadrado": abs(costeo_calculo.diferencia_cuadratura(costeo)) < 0.01,
+                "cuadrado": abs(costeo_calculo.diferencia_cuadratura(costeo, totales)) < 0.01,
             }
         )
     return render_template(

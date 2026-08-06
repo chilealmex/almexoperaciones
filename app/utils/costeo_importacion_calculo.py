@@ -168,12 +168,15 @@ def recalcular(costeo):
         producto.impacto_pct = impacto_pct
 
 
-def diferencia_cuadratura(costeo):
+def diferencia_cuadratura(costeo, totales=None):
     """Diferencia entre el EXW total de los documentos y la suma de EXW de los productos.
 
     Si no da $0, algo quedó sin prorratear: falta cargar un producto, o el monto
     de algún invoice no coincide con lo que realmente se repartió.
+
+    'totales' se puede pasar ya calculado para no repetir el recorrido cuando
+    quien llama ya los tiene (por ejemplo, el listado de costeos).
     """
-    totales = totales_documentos(costeo)
+    totales = totales if totales is not None else totales_documentos(costeo)
     suma_productos = sum(_num(p.exw_moneda) for p in costeo.productos)
     return round(totales["exw_moneda"] - suma_productos, 2)

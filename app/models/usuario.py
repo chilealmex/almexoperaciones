@@ -53,32 +53,64 @@ class Usuario(UserMixin, db.Model):
     def is_active(self):
         return self.activo
 
+    def _mapa_permisos(self):
+        """Todos los permisos del usuario, leídos de la base una sola vez por petición.
+
+        Antes cada consulta de permiso iba a la base, y como se pregunta por cada
+        módulo del menú y por cada fila de una tabla, una sola pantalla llegaba a
+        hacer cientos de idas.
+
+        Se guardan en el contexto de la petición y no en el objeto del usuario:
+        ese contexto se limpia solo al terminar cada petición, así que un cambio
+        de permisos nunca queda pegado de una petición a la siguiente.
+        """
+        from flask import g, has_request_context
+
+        from app.models.permiso import PermisoUsuario, RolModuloPermiso
+
+        def leer():
+            propios = {
+                (p.modulo, p.submodulo or ""): p
+                for p in PermisoUsuario.query.filter_by(usuario_id=self.id).all()
+            }
+            del_rol = {
+                p.modulo: p for p in RolModuloPermiso.query.filter_by(rol_id=self.rol_id).all()
+            }
+            return propios, del_rol
+
+        if not has_request_context():
+            return leer()
+
+        cache = getattr(g, "_permisos_por_usuario", None)
+        if cache is None:
+            cache = g._permisos_por_usuario = {}
+        if self.id not in cache:
+            cache[self.id] = leer()
+        return cache[self.id]
+
     def tiene_permiso(self, modulo: str, accion: str = "ver", submodulo: str | None = None) -> bool:
         if self.es_superadmin:
             return True
 
-        from app.models.permiso import PermisoUsuario, RolModuloPermiso
+        propios, del_rol = self._mapa_permisos()
+
+        def resolver(permiso):
+            return permiso.puede_editar if accion == "editar" else permiso.puede_ver
 
         if submodulo:
-            override_sub = PermisoUsuario.query.filter_by(
-                usuario_id=self.id, modulo=modulo, submodulo=submodulo
-            ).first()
+            override_sub = propios.get((modulo, submodulo))
             if override_sub is not None:
-                return override_sub.puede_editar if accion == "editar" else override_sub.puede_ver
+                return resolver(override_sub)
             # Sin override propio del submódulo: hereda el permiso del módulo completo.
 
-        override = PermisoUsuario.query.filter_by(
-            usuario_id=self.id, modulo=modulo, submodulo=""
-        ).first()
+        override = propios.get((modulo, ""))
         if override is not None:
-            return override.puede_editar if accion == "editar" else override.puede_ver
+            return resolver(override)
 
-        default = RolModuloPermiso.query.filter_by(
-            rol_id=self.rol_id, modulo=modulo
-        ).first()
+        default = del_rol.get(modulo)
         if default is None:
             return False
-        return default.puede_editar if accion == "editar" else default.puede_ver
+        return resolver(default)
 
     @property
     def es_superadmin(self) -> bool:

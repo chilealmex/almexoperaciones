@@ -2,7 +2,7 @@ import logging
 import os
 import sys
 
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, g
 from flask_wtf.csrf import CSRFError
 from werkzeug.exceptions import HTTPException
 
@@ -123,6 +123,17 @@ def create_app(config_name=None):
     _configurar_logging(app)
     _registrar_manejo_de_errores(app)
     _registrar_cabeceras_de_seguridad(app)
+
+
+    @app.before_request
+    def _limpiar_permisos_en_cache():
+        """Los permisos se leen una vez por petición y se guardan en 'g'.
+
+        'g' vive con el contexto de la aplicación, que en algunos escenarios dura
+        más de una petición, así que se vacía al empezar cada una: nunca se
+        responde con permisos de la petición anterior.
+        """
+        g._permisos_por_usuario = {}
 
     return app
 
