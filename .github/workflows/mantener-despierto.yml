@@ -23,11 +23,10 @@ jobs:
     steps:
       - name: Llamar a /healthz
         run: |
+          # Sin configurar nada funciona con la dirección de producción; si
+          # algún día cambia, basta con definir la variable URL_APLICACION.
           URL="${{ vars.URL_APLICACION }}"
-          if [ -z "$URL" ]; then
-            echo "Falta la variable URL_APLICACION en Settings > Secrets and variables > Actions > Variables."
-            exit 1
-          fi
+          URL="${URL:-https://gestor-pyme-ntqf.onrender.com}"
           # --max-time 90 porque despertar la instancia puede tardar cerca de un minuto.
           codigo=$(curl -s -o /dev/null -w "%{http_code}" --max-time 90 --retry 2 --retry-delay 15 "$URL/healthz")
           echo "Respuesta de $URL/healthz: HTTP $codigo"
