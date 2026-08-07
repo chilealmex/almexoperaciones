@@ -462,3 +462,61 @@ def test_la_pantalla_muestra_la_tabla_de_monedas_y_la_columna_tipo_moneda(client
     assert "Tipos de cambio del mes" in texto
     assert "Tipo moneda" in texto
     assert TipoCambioDifTc.query.filter_by(periodo_id=periodo.id).count() >= 2
+
+
+def test_la_tabla_del_mayor_tiene_las_mismas_celdas_que_titulos(client, usuario_admin, empresa, db):
+    """Al sacar columnas es fácil descuadrar títulos, celdas y el pie de totales.
+
+    Un descuadre no rompe la página, sólo corre los datos bajo el título
+    equivocado, así que no se nota mirando: hay que contarlo.
+    """
+    import re
+    from tests.conftest import login
+
+    login(client, "admin@test.cl")
+    _crear_periodo(client)
+    periodo = PeriodoDifTc.query.filter_by(empresa_id=empresa.id).one()
+    client.post(
+        f"/contabilidad/dif-tc/{periodo.id}/importar",
+        data={"archivo": (_mayor([FILA_A]), "control.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    html = client.get(f"/contabilidad/dif-tc/{periodo.id}").get_data(as_text=True)
+
+    tabla = re.search(r'<table[^>]*tabla-compacta.*?</table>', html, re.S).group(0)
+    cabecera = re.search(r"<thead>.*?</thead>", tabla, re.S).group(0)
+    titulos = len(re.findall(r"<th[\s>]", cabecera))  # \s> para no contar <thead
+
+    primera_fila = re.search(r"<tbody>\s*<tr>(.*?)</tr>", tabla, re.S).group(1)
+    celdas = len(re.findall(r"<td[\s>]", primera_fila))
+    assert celdas == titulos, f"{titulos} títulos pero {celdas} celdas por fila"
+
+    pie = re.search(r"<tfoot>.*?</tfoot>", tabla, re.S)
+    if pie:
+        ancho = 0
+        for celda in re.findall(r"<td[\s>][^>]*>", pie.group(0)):
+            span = re.search(r'colspan="(\d+)"', celda)
+            ancho += int(span.group(1)) if span else 1
+        assert ancho == titulos, f"el pie suma {ancho} columnas y la tabla tiene {titulos}"
+
+
+def test_las_columnas_que_se_ocultaron_se_siguen_guardando(client, usuario_admin, empresa, db):
+    """Ocultarlas de la pantalla no puede significar perder el dato."""
+    login(client, "admin@test.cl")
+    _crear_periodo(client)
+    periodo = PeriodoDifTc.query.filter_by(empresa_id=empresa.id).one()
+    client.post(
+        f"/contabilidad/dif-tc/{periodo.id}/importar",
+        data={"archivo": (_mayor([FILA_A]), "control.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    linea = periodo.lineas[0]
+    linea.tipo_mov = "VTA"
+    linea.serie = "A"
+    linea.doc_pago = "PAGO-1"
+    db.session.commit()
+
+    guardada = LineaDifTc.query.get(linea.id)
+    assert guardada.tipo_mov == "VTA"
+    assert guardada.serie == "A"
+    assert guardada.doc_pago == "PAGO-1"

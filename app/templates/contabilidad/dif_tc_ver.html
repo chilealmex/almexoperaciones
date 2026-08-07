@@ -153,12 +153,15 @@
         <table class="table table-sm align-middle mb-2 tabla-compacta">
           <thead>
             <tr>
+              {# Documento, Tipo Mov., Serie, Número Mov., Moneda Ref., Doc. Pago, Número Doc.
+                 Pago y Serie Doc. Pago se siguen importando y guardando, pero no se muestran:
+                 no se usan para revisar la diferencia de cambio y sólo ensanchaban la tabla.
+                 Van completas en el Excel, que es el respaldo del mayor. #}
               <th>Cuenta</th><th>Descripción</th><th>Fecha</th><th>Tipo</th><th>Número</th>
               <th>ID Ficha</th><th>Ficha</th>
               <th class="num">Cargo ($)</th><th class="num">Abono ($)</th><th class="num">Saldo ($)</th>
-              <th>Código Doc.</th><th>Documento</th><th>Vencimiento</th><th>Número Doc.</th>
-              <th>Tipo Mov.</th><th>Serie</th><th>Número Mov.</th><th>Moneda Ref.</th>
-              <th>Comentario</th><th>Doc. Pago</th><th>Número Doc. Pago</th><th>Serie Doc. Pago.</th>
+              <th>Código Doc.</th><th>Vencimiento</th><th>Número Doc.</th>
+              <th>Comentario</th>
               <th>Tipo moneda</th><th class="num">Mon Orig</th>
               <th class="num">Valor en $</th><th class="num">Dif de cambio</th><th class="num">% Dif Variación</th>
             </tr>
@@ -177,17 +180,9 @@
               <td class="num">{{ l.abono|clp }}</td>
               <td class="num">{{ l.saldo|clp }}</td>
               <td>{{ l.codigo_doc or '' }}</td>
-              <td>{{ l.documento or '' }}</td>
               <td>{{ l.vencimiento or '' }}</td>
               <td>{{ l.numero_doc or '' }}</td>
-              <td>{{ l.tipo_mov or '' }}</td>
-              <td>{{ l.serie or '' }}</td>
-              <td>{{ l.numero_mov or '' }}</td>
-              <td>{{ l.moneda_ref or '' }}</td>
               <td>{{ l.comentario or '' }}</td>
-              <td>{{ l.doc_pago or '' }}</td>
-              <td>{{ l.numero_doc_pago or '' }}</td>
-              <td>{{ l.serie_doc_pago or '' }}</td>
               {# Las columnas amarillas de la planilla: se escriben a mano. #}
               <td>
                 <select name="linea-{{ l.id }}-tipo_moneda" class="form-select form-select-sm campo-excel"
@@ -212,7 +207,7 @@
               <td class="num">{{ '%.2f%%'|format(l.pct_variacion * 100) }}</td>
             </tr>
             {% else %}
-            <tr><td colspan="27" class="text-center text-muted">
+            <tr><td colspan="19" class="text-center text-muted">
               Sin líneas todavía. Importa el mayor del mes para empezar.
             </td></tr>
             {% endfor %}
@@ -223,8 +218,9 @@
               <td colspan="7">TOTAL</td>
               <td class="num">{{ periodo.lineas|sum(attribute='cargo')|clp }}</td>
               <td class="num">{{ periodo.lineas|sum(attribute='abono')|clp }}</td>
+              {# Código Doc., Vencimiento, Número Doc., Comentario y Tipo moneda #}
               <td class="num">{{ totales.saldo|clp }}</td>
-              <td colspan="13"></td>
+              <td colspan="5"></td>
               <td class="num">{{ totales.mon_orig|numero }}</td>
               <td class="num">{{ totales.valor_clp|clp }}</td>
               <td class="num">{{ totales.dif_cambio|clp }}</td>
