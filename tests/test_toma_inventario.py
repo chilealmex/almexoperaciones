@@ -321,3 +321,42 @@ def test_el_excel_de_stock_muestra_quien_conto_tras_continuar(client, empresa, u
     fila = next(f for f in filas if f and f[0] == "COD-001")
     assert fila[i_por] == "Admin de Prueba"
     assert fila[i_cuando]  # fecha y hora presentes
+
+
+def test_cerrar_una_toma_de_inventario_valioso_no_desborda(client, empresa, usuario_admin):
+    """La valorización total supera el entero normal de PostgreSQL (2.147 millones).
+
+    Con columnas Integer, cerrar la toma moría con "integer out of range" y no
+    se podía archivar. Por eso los totales son BigInteger.
+    """
+    _importar(empresa)
+    login(client, "admin@test.cl")
+
+    item = ItemConteoInventario.query.filter_by(codigo="COD-001").first()
+    item.cantidad_qms = 500_000
+    item.costo_unitario_qms = 900_000  # 450.000.000.000 en total
+    item.cantidad_fisica = 500_000
+    from app.extensions import db as _db
+    _db.session.commit()
+
+    respuesta = client.post("/inventario/toma/cerrar", follow_redirects=True)
+    assert respuesta.status_code == 200
+
+    toma = TomaInventario.query.first()
+    assert toma is not None
+    # 500.000 x 900.000 de COD-001, mas 7 x 10.000 de COD-002
+    assert toma.valor_qms_total == 450_000_070_000
+    assert toma.valor_qms_total > 2_147_483_647  # no cabria en un Integer
+
+
+def test_los_totales_de_la_toma_son_bigint():
+    """Las pruebas corren en SQLite, que no respeta el limite del Integer.
+
+    Sin esta comprobacion, volver las columnas a Integer pasaria inadvertido
+    aqui y reventaria recien en produccion, sobre PostgreSQL.
+    """
+    from sqlalchemy import BigInteger
+
+    for columna in ("valor_qms_total", "valor_defontana_total", "valor_fisico_total"):
+        tipo = TomaInventario.__table__.columns[columna].type
+        assert isinstance(tipo, BigInteger), f"{columna} deberia ser BigInteger, es {tipo}"

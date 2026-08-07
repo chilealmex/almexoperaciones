@@ -561,3 +561,107 @@ def test_importar_por_la_ruta_sin_la_casilla_actualiza_todo(client, usuario_admi
 
     contado = ItemConteoInventario.query.filter_by(codigo="COD-001").first()
     assert contado.cantidad_qms == 2
+
+
+# --- Que la importación no vuelva a hacer una consulta por artículo ---
+
+def _contar_consultas(fn):
+    """Ejecuta fn contando las sentencias que se mandan a la base."""
+    from sqlalchemy import event
+    from sqlalchemy.engine import Engine
+
+    sentencias = []
+
+    def antes(conn, cur, stmt, params, ctx, many):
+        sentencias.append(stmt.split()[0].upper())
+
+    event.listen(Engine, "before_cursor_execute", antes)
+    try:
+        fn()
+    finally:
+        event.remove(Engine, "before_cursor_execute", antes)
+    return sentencias
+
+
+def _planilla_qms(n):
+    filas = ["Sucursal;Linea Negocio;Categoria;Stock;Descripción;Unidad;Código Único;ubicacion_bodega"]
+    for i in range(n):
+        filas.append(f"Casa Matriz;GOMAS;CAT;{i};ARTICULO {i};UN;COD-{i:05d};RACK {i%50}")
+    return "\n".join(filas).encode("utf-8")
+
+
+def test_importar_no_hace_una_consulta_por_articulo(db, empresa):
+    """Con la base remota de Render cada sentencia es una ida y vuelta por la red.
+
+    Antes se mandaba un UPDATE por artículo y importar 3162 filas tardaba
+    minutos. Esta prueba fija el techo para que no vuelva a colarse.
+    """
+    importar_qms(_fs(_planilla_qms(300), "qms.csv"), empresa.id)  # crea los 300
+
+    sentencias = _contar_consultas(
+        lambda: importar_qms(_fs(_planilla_qms(300), "qms.csv"), empresa.id)
+    )
+    assert len(sentencias) < 30, f"demasiadas consultas: {len(sentencias)}"
+    assert ItemConteoInventario.query.filter_by(empresa_id=empresa.id).count() == 300
+
+
+def test_importar_en_lote_deja_los_mismos_datos_que_antes(db, empresa):
+    """Las reglas de 'solo sobrescribe si la planilla trae dato' deben mantenerse."""
+    importar_qms(_fs(CSV_QMS.encode("utf-8"), "qms.csv"), empresa.id)
+    item = ItemConteoInventario.query.filter_by(codigo="COD-001").first()
+    item.ubicacion = "RACK PROPIO"  # puesto a mano
+    db.session.commit()
+
+    # Planilla sin nombre, sin categoría y sin ubicación: no debe borrar nada.
+    sin_datos = """﻿Sucursal;Linea Negocio;Categoria;Stock;Descripción;Unidad;Código Único;ubicacion_bodega
+Casa Matriz;;;99;;;COD-001;
+"""
+    importar_qms(_fs(sin_datos.encode("utf-8"), "qms.csv"), empresa.id)
+
+    item = ItemConteoInventario.query.filter_by(codigo="COD-001").first()
+    assert item.cantidad_qms == 99          # el stock sí se actualiza
+    assert item.nombre == "PRODUCTO UNO"    # el nombre no se pisa con vacío
+    assert item.linea_negocio == "GOMAS"
+    assert item.categoria == "CAT-A"
+    assert item.ubicacion == "RACK PROPIO"  # la ubicación puesta a mano se respeta
+
+
+def test_defontana_en_lote_no_pisa_el_nombre_que_ya_existe(db, empresa):
+    """En Defontana el nombre sólo se usa si el artículo aún no tiene."""
+    importar_qms(_fs(CSV_QMS.encode("utf-8"), "qms.csv"), empresa.id)
+    importar_defontana(_fs(CSV_DEFONTANA.encode("cp1252"), "def.csv"), empresa.id)
+
+    item = ItemConteoInventario.query.filter_by(codigo="COD-001").first()
+    assert item.nombre == "PRODUCTO UNO"  # el de QMS manda, no lo reemplaza Defontana
+
+    solo_def = ItemConteoInventario.query.filter_by(codigo="COD-003").first()
+    assert solo_def.nombre == "PRODUCTO TRES"  # este sí lo puso Defontana
+
+
+def test_marcar_ausentes_sigue_funcionando_en_lote(db, empresa):
+    """Un artículo que deja de venir en la planilla queda marcado como ausente."""
+    importar_qms(_fs(CSV_QMS.encode("utf-8"), "qms.csv"), empresa.id)
+    assert ItemConteoInventario.query.filter_by(codigo="COD-002").first().en_qms is True
+
+    solo_uno = """﻿Sucursal;Linea Negocio;Categoria;Stock;Descripción;Unidad;Código Único;ubicacion_bodega
+Casa Matriz;GOMAS;CAT-A;5;PRODUCTO UNO;UN;COD-001;RACK A1
+"""
+    importar_qms(_fs(solo_uno.encode("utf-8"), "qms.csv"), empresa.id)
+
+    assert ItemConteoInventario.query.filter_by(codigo="COD-001").first().en_qms is True
+    assert ItemConteoInventario.query.filter_by(codigo="COD-002").first().en_qms is False
+
+
+def test_congelar_el_stock_sigue_funcionando_con_la_carga_en_lote(db, empresa):
+    """La protección de lo ya contado no se puede perder al agrupar las escrituras."""
+    importar_qms(_fs(CSV_QMS.encode("utf-8"), "qms.csv"), empresa.id)
+    item = ItemConteoInventario.query.filter_by(codigo="COD-001").first()
+    item.cantidad_fisica = 15
+    db.session.commit()
+
+    resultado = importar_qms(_fs(CSV_QMS_DIA_2.encode("utf-8"), "qms.csv"), empresa.id,
+                             solo_no_contados=True)
+
+    assert ItemConteoInventario.query.filter_by(codigo="COD-001").first().cantidad_qms == 15
+    assert ItemConteoInventario.query.filter_by(codigo="COD-002").first().cantidad_qms == 99
+    assert resultado["congelados"] == 1

@@ -3,6 +3,8 @@ import io
 import re
 import unicodedata
 
+from sqlalchemy import update
+
 from app.extensions import db
 from app.models.conteo_inventario import ItemConteoInventario
 
@@ -185,18 +187,63 @@ def _congela_el_stock(item, solo_no_contados: bool) -> bool:
     return solo_no_contados and item.cantidad_fisica is not None
 
 
-def _items_existentes(empresa_id: int) -> dict:
-    """Trae todos los items de la empresa en una sola consulta, por código normalizado.
+def _aplicar_en_lote(cambios: list) -> None:
+    """Aplica muchas actualizaciones en una sola ida y vuelta a la base.
 
-    Consultar código por código genera miles de round-trips contra la base de datos
-    remota y agota el tiempo de la petición.
+    Modificar los objetos del ORM uno por uno parece equivalente, pero al
+    guardar SQLAlchemy agrupa los UPDATE por el conjunto de columnas que cambió
+    en cada fila. Como aquí cada artículo cambia columnas distintas (el nombre
+    sólo si viene, el costo sólo si viene...), se fragmentaba en más de mil
+    sentencias, y contra la base remota de Render cada una es una ida y vuelta
+    por la red: de ahí que importar tardara minutos.
 
-    La clave es el código normalizado para que reimportar el mismo artículo escrito
-    distinto actualice la fila que ya existe en vez de crear una duplicada. Si ya
-    hubiera duplicados de antes, gana el que tenga conteo físico registrado (y entre
-    iguales, el más antiguo), para no dejar huérfano el trabajo de bodega.
+    Mandando siempre las mismas claves en todos los diccionarios, SQLAlchemy
+    puede usar executemany y resolverlo con una sentencia.
     """
-    items = ItemConteoInventario.query.filter_by(empresa_id=empresa_id).all()
+    if not cambios:
+        return
+    # En tandas para no armar una sentencia gigante con miles de parámetros.
+    for inicio in range(0, len(cambios), 500):
+        db.session.execute(update(ItemConteoInventario), cambios[inicio : inicio + 500])
+
+
+def _marcar_ausentes_en_lote(items, codigos_del_archivo, campo: str) -> None:
+    """Apaga la marca del sistema recién importado en los artículos que no venían.
+
+    'items' son los que ya existían antes de esta importación, así que los
+    recién creados quedan fuera por construcción: un artículo creado por ESTA
+    planilla no puede estar ausente de ella. El otro sistema no se toca, porque
+    de esa planilla no sabemos nada en esta pasada.
+    """
+    presentes = {codigo_normalizado(c) for c in codigos_del_archivo}
+    ids = [
+        item.id
+        for item in items
+        if getattr(item, campo) and codigo_normalizado(item.codigo) not in presentes
+    ]
+    for inicio in range(0, len(ids), 500):
+        db.session.execute(
+            update(ItemConteoInventario)
+            .where(ItemConteoInventario.id.in_(ids[inicio : inicio + 500]))
+            .values(**{campo: False})
+        )
+
+
+def _items_de_la_empresa(empresa_id: int) -> list:
+    """Todos los artículos de la empresa, incluidos los códigos repetidos.
+
+    Una sola consulta: pedirlos de a uno genera miles de idas y vueltas contra
+    la base remota y agota el tiempo de la petición.
+    """
+    return ItemConteoInventario.query.filter_by(empresa_id=empresa_id).all()
+
+
+def _por_codigo_normalizado(items) -> dict:
+    """Indexa por código normalizado para cruzar QMS y Defontana como el mismo artículo.
+
+    Si hay duplicados de antes, gana el que tenga conteo físico registrado (y
+    entre iguales, el más antiguo), para no dejar huérfano el trabajo de bodega.
+    """
     por_codigo = {}
     for item in sorted(items, key=lambda i: (i.cantidad_fisica is None, i.id)):
         por_codigo.setdefault(codigo_normalizado(item.codigo), item)
@@ -252,41 +299,52 @@ def importar_qms(file_storage, empresa_id: int, solo_no_contados: bool = False) 
         if costo and acumulado[codigo]["costo"] is None:
             acumulado[codigo]["costo"] = costo
 
-    existentes = _items_existentes(empresa_id)
+    items = _items_de_la_empresa(empresa_id)
+    existentes = _por_codigo_normalizado(items)
     filas_creadas = 0
     filas_actualizadas = 0
     filas_congeladas = 0
     nuevos = []
+    cambios = []
     for codigo, datos in acumulado.items():
         item = existentes.get(codigo_normalizado(codigo))
         if item is None:
             item = ItemConteoInventario(empresa_id=empresa_id, codigo=codigo, cantidad_defontana=0,
                                         en_qms=True, en_defontana=False)
+            item.cantidad_qms = datos["cantidad"]
+            item.nombre = datos["nombre"] or None
+            item.linea_negocio = datos["linea_negocio"] or None
+            item.ubicacion = datos["ubicacion"] or None
+            item.categoria = datos["categoria"] or None
+            item.unidad_qms = datos["unidad"] or None
+            item.costo_unitario_qms = datos["costo"]
             nuevos.append(item)
             filas_creadas += 1
-        elif _congela_el_stock(item, solo_no_contados):
+            continue
+
+        congelado = _congela_el_stock(item, solo_no_contados)
+        if congelado:
             filas_congeladas += 1
         else:
             filas_actualizadas += 1
-        if not _congela_el_stock(item, solo_no_contados):
-            item.cantidad_qms = datos["cantidad"]
-        if datos["nombre"]:
-            item.nombre = datos["nombre"]
-        if datos["linea_negocio"]:
-            item.linea_negocio = datos["linea_negocio"]
-        if datos["ubicacion"] and not item.ubicacion:
-            item.ubicacion = datos["ubicacion"]
-        if datos["categoria"]:
-            item.categoria = datos["categoria"]
-        if datos["unidad"]:
-            item.unidad_qms = datos["unidad"]
-        if datos["costo"] is not None:
-            item.costo_unitario_qms = datos["costo"]
-        item.en_qms = True
+        # Se manda siempre el mismo juego de columnas (con el valor que ya tenía
+        # cuando la planilla no trae dato) para que salga en una sola sentencia.
+        cambios.append({
+            "id": item.id,
+            "cantidad_qms": item.cantidad_qms if congelado else datos["cantidad"],
+            "nombre": datos["nombre"] or item.nombre,
+            "linea_negocio": datos["linea_negocio"] or item.linea_negocio,
+            "ubicacion": item.ubicacion or datos["ubicacion"] or item.ubicacion,
+            "categoria": datos["categoria"] or item.categoria,
+            "unidad_qms": datos["unidad"] or item.unidad_qms,
+            "costo_unitario_qms": datos["costo"] if datos["costo"] is not None else item.costo_unitario_qms,
+            "en_qms": True,
+        })
 
     if nuevos:
         db.session.add_all(nuevos)
-    _marcar_ausentes(empresa_id, acumulado.keys(), "en_qms", nuevos)
+    _aplicar_en_lote(cambios)
+    _marcar_ausentes_en_lote(items, acumulado.keys(), "en_qms")
     db.session.commit()
     return {
         "total_codigos": len(acumulado),
@@ -347,37 +405,49 @@ def importar_defontana(file_storage, empresa_id: int, solo_no_contados: bool = F
         if costo and acumulado[codigo]["costo"] is None:
             acumulado[codigo]["costo"] = costo
 
-    existentes = _items_existentes(empresa_id)
+    items = _items_de_la_empresa(empresa_id)
+    existentes = _por_codigo_normalizado(items)
     filas_creadas = 0
     filas_actualizadas = 0
     filas_congeladas = 0
     nuevos = []
+    cambios = []
     for codigo, datos in acumulado.items():
+        bodegas = ", ".join(sorted(datos["bodegas"]))[:255] if datos["bodegas"] else ""
         item = existentes.get(codigo_normalizado(codigo))
         if item is None:
             item = ItemConteoInventario(empresa_id=empresa_id, codigo=codigo, cantidad_qms=0,
                                         en_defontana=True, en_qms=False)
+            item.cantidad_defontana = datos["cantidad"]
+            item.nombre = datos["nombre"] or None
+            item.ubicacion = bodegas or None
+            item.unidad_defontana = datos["unidad"] or None
+            item.costo_unitario_defontana = datos["costo"]
             nuevos.append(item)
             filas_creadas += 1
-        elif _congela_el_stock(item, solo_no_contados):
+            continue
+
+        congelado = _congela_el_stock(item, solo_no_contados)
+        if congelado:
             filas_congeladas += 1
         else:
             filas_actualizadas += 1
-        if not _congela_el_stock(item, solo_no_contados):
-            item.cantidad_defontana = datos["cantidad"]
-        if datos["nombre"] and not item.nombre:
-            item.nombre = datos["nombre"]
-        if datos["bodegas"] and not item.ubicacion:
-            item.ubicacion = ", ".join(sorted(datos["bodegas"]))[:255]
-        if datos["unidad"]:
-            item.unidad_defontana = datos["unidad"]
-        if datos["costo"] is not None:
-            item.costo_unitario_defontana = datos["costo"]
-        item.en_defontana = True
+        cambios.append({
+            "id": item.id,
+            "cantidad_defontana": item.cantidad_defontana if congelado else datos["cantidad"],
+            "nombre": item.nombre or datos["nombre"] or item.nombre,
+            "ubicacion": item.ubicacion or bodegas or item.ubicacion,
+            "unidad_defontana": datos["unidad"] or item.unidad_defontana,
+            "costo_unitario_defontana": (
+                datos["costo"] if datos["costo"] is not None else item.costo_unitario_defontana
+            ),
+            "en_defontana": True,
+        })
 
     if nuevos:
         db.session.add_all(nuevos)
-    _marcar_ausentes(empresa_id, acumulado.keys(), "en_defontana", nuevos)
+    _aplicar_en_lote(cambios)
+    _marcar_ausentes_en_lote(items, acumulado.keys(), "en_defontana")
     db.session.commit()
     return {
         "total_codigos": len(acumulado),
@@ -385,22 +455,6 @@ def importar_defontana(file_storage, empresa_id: int, solo_no_contados: bool = F
         "actualizados": filas_actualizadas,
         "congelados": filas_congeladas,
     }
-
-
-def _marcar_ausentes(empresa_id: int, codigos_del_archivo, campo: str, recien_creados) -> None:
-    """Apaga la marca del sistema recién importado en los artículos que no venían.
-
-    Un artículo nuevo creado por ESTA importación no puede estar ausente de ella,
-    así que se excluye; y el otro sistema no se toca, porque de esa planilla no
-    sabemos nada en esta pasada.
-    """
-    presentes = {codigo_normalizado(c) for c in codigos_del_archivo}
-    nuevos_ids = {id(i) for i in recien_creados}
-    for item in ItemConteoInventario.query.filter_by(empresa_id=empresa_id).all():
-        if id(item) in nuevos_ids:
-            continue
-        if codigo_normalizado(item.codigo) not in presentes:
-            setattr(item, campo, False)
 
 
 def articulos_fuera_de_ambas_planillas(empresa_id: int) -> list:

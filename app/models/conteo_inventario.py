@@ -227,9 +227,12 @@ class TomaInventario(db.Model):
     dif_stock = db.Column(db.Integer, default=0, nullable=False)
     dif_costo = db.Column(db.Integer, default=0, nullable=False)
     dif_unidad = db.Column(db.Integer, default=0, nullable=False)
-    valor_qms_total = db.Column(db.Integer, default=0, nullable=False)
-    valor_defontana_total = db.Column(db.Integer, default=0, nullable=False)
-    valor_fisico_total = db.Column(db.Integer, default=0, nullable=False)
+    # BigInteger y no Integer: son la valorización de TODO el inventario en pesos.
+    # El entero normal de PostgreSQL llega hasta 2.147.483.647, o sea unos 2.147
+    # millones; pasado eso, cerrar la toma reventaba con "integer out of range".
+    valor_qms_total = db.Column(db.BigInteger, default=0, nullable=False)
+    valor_defontana_total = db.Column(db.BigInteger, default=0, nullable=False)
+    valor_fisico_total = db.Column(db.BigInteger, default=0, nullable=False)
 
     cerrado_por = db.relationship("Usuario")
     detalles = db.relationship(
