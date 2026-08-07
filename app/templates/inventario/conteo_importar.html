@@ -5,6 +5,15 @@
 
 <p class="text-muted">Sube los archivos exportados de cada sistema. El cruce se hace por código de artículo: puedes subirlos en cualquier orden y volver a subirlos cuando quieras actualizar las cantidades (el conteo físico ya registrado no se pierde). Los códigos que solo se diferencian por espacios o acentos se reconocen como el mismo artículo.</p>
 
+<div class="alert alert-info">
+  <strong>Si la toma dura varios días</strong>, deja marcada la casilla «Actualizar solo los artículos que aún no se han contado».
+  Así puedes subir el stock del día para lo que falta por contar, sin alterar lo que bodega ya contó:
+  cada artículo contado se sigue comparando contra el stock que el sistema declaraba el día en que se contó.
+  <br>
+  Si la desmarcas se actualiza el stock de <em>todos</em> los artículos, incluidos los ya contados, y ahí pueden
+  aparecer diferencias que en realidad son movimientos posteriores al conteo.
+</div>
+
 <p><a href="{{ url_for('inventario.conteo_duplicados') }}" class="btn btn-outline-secondary btn-sm">Depurar artículos (repetidos y dados de baja)</a></p>
 
 <div class="row g-3">
@@ -19,6 +28,10 @@
           <div class="mb-3">
             {{ form_qms.archivo(class="form-control") }}
             {% for error in form_qms.archivo.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+          </div>
+          <div class="form-check mb-3">
+            {{ form_qms.solo_no_contados(class="form-check-input") }}
+            {{ form_qms.solo_no_contados.label(class="form-check-label") }}
           </div>
           <button type="submit" class="btn btn-primary">Importar QMS</button>
         </form>
@@ -37,6 +50,10 @@
           <div class="mb-3">
             {{ form_defontana.archivo(class="form-control") }}
             {% for error in form_defontana.archivo.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+          </div>
+          <div class="form-check mb-3">
+            {{ form_defontana.solo_no_contados(class="form-check-input") }}
+            {{ form_defontana.solo_no_contados.label(class="form-check-label") }}
           </div>
           <button type="submit" class="btn btn-primary">Importar Defontana</button>
         </form>

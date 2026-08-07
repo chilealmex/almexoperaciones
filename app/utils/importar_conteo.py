@@ -163,6 +163,28 @@ def codigo_normalizado(codigo) -> str:
     return "".join(sin_acentos.split()).upper()
 
 
+def _congela_el_stock(item, solo_no_contados: bool) -> bool:
+    """True si a este artículo no hay que actualizarle el stock declarado por el sistema.
+
+    Cuando la toma de inventario dura varios días, bodega cuenta un artículo el
+    lunes contra el stock que el sistema declaraba el lunes. Si el martes se
+    reimporta el stock, ese artículo pasaría a compararse contra una cifra que ya
+    incorpora los movimientos del martes, y aparecería una diferencia que no
+    existe: la toma dejaría de cuadrar por culpa de la reimportación, no por un
+    error de bodega.
+
+    Por eso, con solo_no_contados=True, a los artículos ya contados se les
+    congela la cantidad: siguen comparándose contra la foto del sistema que
+    tenían al momento de contarlos. Los que aún no se cuentan sí se actualizan,
+    que es justamente lo que se quiere refrescar antes de seguir contando.
+
+    Ojo: sólo se congela la CANTIDAD. Nombre, ubicación, unidad y costo se
+    siguen actualizando, porque son datos de referencia que no cambian el
+    resultado del conteo (no son movimientos de stock).
+    """
+    return solo_no_contados and item.cantidad_fisica is not None
+
+
 def _items_existentes(empresa_id: int) -> dict:
     """Trae todos los items de la empresa en una sola consulta, por código normalizado.
 
@@ -181,9 +203,13 @@ def _items_existentes(empresa_id: int) -> dict:
     return por_codigo
 
 
-def importar_qms(file_storage, empresa_id: int) -> dict:
+def importar_qms(file_storage, empresa_id: int, solo_no_contados: bool = False) -> dict:
     """Archivo 'Distribución Valor Stock CLP' de QMS (.csv o .xlsx): código único, descripción,
-    stock, línea de negocio, categoría, unidad y costo unitario."""
+    stock, línea de negocio, categoría, unidad y costo unitario.
+
+    Con solo_no_contados=True no se toca el stock de los artículos que ya tienen
+    conteo físico registrado (ver _congela_el_stock).
+    """
     encabezados, reader = _leer_filas(file_storage)
 
     columna_codigo = next((c for c in encabezados if "digo" in c.lower() and "nico" in c.lower()), None)
@@ -229,6 +255,7 @@ def importar_qms(file_storage, empresa_id: int) -> dict:
     existentes = _items_existentes(empresa_id)
     filas_creadas = 0
     filas_actualizadas = 0
+    filas_congeladas = 0
     nuevos = []
     for codigo, datos in acumulado.items():
         item = existentes.get(codigo_normalizado(codigo))
@@ -237,9 +264,12 @@ def importar_qms(file_storage, empresa_id: int) -> dict:
                                         en_qms=True, en_defontana=False)
             nuevos.append(item)
             filas_creadas += 1
+        elif _congela_el_stock(item, solo_no_contados):
+            filas_congeladas += 1
         else:
             filas_actualizadas += 1
-        item.cantidad_qms = datos["cantidad"]
+        if not _congela_el_stock(item, solo_no_contados):
+            item.cantidad_qms = datos["cantidad"]
         if datos["nombre"]:
             item.nombre = datos["nombre"]
         if datos["linea_negocio"]:
@@ -258,10 +288,15 @@ def importar_qms(file_storage, empresa_id: int) -> dict:
         db.session.add_all(nuevos)
     _marcar_ausentes(empresa_id, acumulado.keys(), "en_qms", nuevos)
     db.session.commit()
-    return {"total_codigos": len(acumulado), "creados": filas_creadas, "actualizados": filas_actualizadas}
+    return {
+        "total_codigos": len(acumulado),
+        "creados": filas_creadas,
+        "actualizados": filas_actualizadas,
+        "congelados": filas_congeladas,
+    }
 
 
-def importar_defontana(file_storage, empresa_id: int) -> dict:
+def importar_defontana(file_storage, empresa_id: int, solo_no_contados: bool = False) -> dict:
     """Archivo de inventario por bodega de Defontana (.csv o .xlsx): CodArticulo, Descripción,
     CodBodega, Nombre Bodega, Saldo Stock."""
     encabezados, reader = _leer_filas(file_storage, codificaciones_csv=("cp1252", "latin-1", "utf-8-sig"))
@@ -315,6 +350,7 @@ def importar_defontana(file_storage, empresa_id: int) -> dict:
     existentes = _items_existentes(empresa_id)
     filas_creadas = 0
     filas_actualizadas = 0
+    filas_congeladas = 0
     nuevos = []
     for codigo, datos in acumulado.items():
         item = existentes.get(codigo_normalizado(codigo))
@@ -323,9 +359,12 @@ def importar_defontana(file_storage, empresa_id: int) -> dict:
                                         en_defontana=True, en_qms=False)
             nuevos.append(item)
             filas_creadas += 1
+        elif _congela_el_stock(item, solo_no_contados):
+            filas_congeladas += 1
         else:
             filas_actualizadas += 1
-        item.cantidad_defontana = datos["cantidad"]
+        if not _congela_el_stock(item, solo_no_contados):
+            item.cantidad_defontana = datos["cantidad"]
         if datos["nombre"] and not item.nombre:
             item.nombre = datos["nombre"]
         if datos["bodegas"] and not item.ubicacion:
@@ -340,7 +379,12 @@ def importar_defontana(file_storage, empresa_id: int) -> dict:
         db.session.add_all(nuevos)
     _marcar_ausentes(empresa_id, acumulado.keys(), "en_defontana", nuevos)
     db.session.commit()
-    return {"total_codigos": len(acumulado), "creados": filas_creadas, "actualizados": filas_actualizadas}
+    return {
+        "total_codigos": len(acumulado),
+        "creados": filas_creadas,
+        "actualizados": filas_actualizadas,
+        "congelados": filas_congeladas,
+    }
 
 
 def _marcar_ausentes(empresa_id: int, codigos_del_archivo, campo: str, recien_creados) -> None:

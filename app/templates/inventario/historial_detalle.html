@@ -13,6 +13,16 @@
   </div>
   <div class="d-flex gap-2">
     <a href="{{ url_for('inventario.historial_excel', toma_id=toma.id) }}" class="btn btn-primary btn-sm">⬇ Excel</a>
+    {% if current_user.es_admin_o_superior %}
+      {# El atributo va con comillas simples: tojson genera comillas dobles y con
+         un atributo entre comillas dobles el onsubmit se corta y no pregunta nada. #}
+      {% set aviso_reabrir = "¿Continuar esta toma de inventario?\n\nVuelve a quedar en curso: los conteos ya hechos regresan a Stock y conteo con quién contó y cuándo, junto con el stock que los sistemas declaraban ese día, así nadie los cuenta de nuevo.\n\nDeja de aparecer en el historial hasta que la vuelvas a finalizar. Lo que ya se contó otra vez no se toca." %}
+      <form method="post" action="{{ url_for('inventario.toma_reabrir', toma_id=toma.id) }}"
+            onsubmit='return confirm({{ aviso_reabrir|tojson }})'>
+        {{ form.hidden_tag() }}
+        <button type="submit" class="btn btn-warning btn-sm">▶ Continuar esta toma</button>
+      </form>
+    {% endif %}
     <a href="{{ url_for('inventario.historial') }}" class="btn btn-outline-secondary btn-sm">← Historial</a>
   </div>
 </div>

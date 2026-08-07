@@ -398,3 +398,166 @@ def test_la_pantalla_de_depuracion_avisa_si_hay_conteo_en_los_dados_de_baja(clie
     texto = client.get("/inventario/conteo/duplicados").get_data(as_text=True)
     assert "VIEJO-002" in texto
     assert "conteo físico registrado" in texto
+
+
+# --- Toma de varios días: refrescar el stock sin alterar lo ya contado ---
+
+# Mismos códigos que CSV_QMS pero con el stock movido: COD-001 pasa de 15 a 2
+# y COD-002 de 7 a 99. Simula la exportación del día siguiente.
+CSV_QMS_DIA_2 = """﻿Sucursal;Linea Negocio;Categoria; Columna1 ; Valor Total Stock CLP ;Stock;Stock Critico;Descripción;Unidad;Código Único;ubicacion_bodega
+Casa Matriz;GOMAS;CAT-A;0;0;2;0;PRODUCTO UNO;UN;COD-001;RACK A1
+Casa Matriz;ACEROS;CAT-B;0;0;99;0;PRODUCTO DOS;UN;COD-002;RACK B2
+"""
+
+CSV_DEFONTANA_DIA_2 = (
+    "CodArticulo;Descripci\xf3n Art\xedculo;CodBodega;Nombre Bodega;Saldo Stock;Unidad\r\n"
+    '"COD-001";"PRODUCTO UNO";"BODEGACENTRAL";"BODEGA CENTRAL";"1";"UN"\r\n'
+    '"COD-003";"PRODUCTO TRES";"BODEGACENTRAL";"BODEGA CENTRAL";"44";"UN"\r\n'
+)
+
+
+def _contar(codigo, cantidad):
+    item = ItemConteoInventario.query.filter_by(codigo=codigo).first()
+    item.cantidad_fisica = cantidad
+    return item
+
+
+def test_reimportar_qms_no_toca_el_stock_de_lo_ya_contado(db, empresa):
+    importar_qms(_fs(CSV_QMS.encode("utf-8"), "qms.csv"), empresa.id)
+    _contar("COD-001", 15)  # bodega ya contó este y cuadraba
+    db.session.commit()
+
+    resultado = importar_qms(_fs(CSV_QMS_DIA_2.encode("utf-8"), "qms.csv"), empresa.id,
+                             solo_no_contados=True)
+
+    contado = ItemConteoInventario.query.filter_by(codigo="COD-001").first()
+    assert contado.cantidad_qms == 15  # sigue comparándose contra la foto del día del conteo
+    assert contado.diferencia_fisica_qms == 0  # no aparece una diferencia inventada
+
+    sin_contar = ItemConteoInventario.query.filter_by(codigo="COD-002").first()
+    assert sin_contar.cantidad_qms == 99  # este sí se refresca, que es lo que se busca
+
+    assert resultado["congelados"] == 1
+    assert resultado["actualizados"] == 1
+
+
+def test_reimportar_defontana_no_toca_el_stock_de_lo_ya_contado(db, empresa):
+    importar_qms(_fs(CSV_QMS.encode("utf-8"), "qms.csv"), empresa.id)
+    importar_defontana(_fs(CSV_DEFONTANA.encode("cp1252"), "def.csv"), empresa.id)
+    _contar("COD-001", 15)
+    db.session.commit()
+
+    resultado = importar_defontana(_fs(CSV_DEFONTANA_DIA_2.encode("cp1252"), "def.csv"), empresa.id,
+                                   solo_no_contados=True)
+
+    contado = ItemConteoInventario.query.filter_by(codigo="COD-001").first()
+    assert contado.cantidad_defontana == 15
+    assert contado.diferencia_fisica_defontana == 0
+
+    otro = ItemConteoInventario.query.filter_by(codigo="COD-003").first()
+    assert otro.cantidad_defontana == 44
+
+    assert resultado["congelados"] == 1
+
+
+def test_sin_la_opcion_se_actualiza_el_stock_de_todos(db, empresa):
+    importar_qms(_fs(CSV_QMS.encode("utf-8"), "qms.csv"), empresa.id)
+    _contar("COD-001", 15)
+    db.session.commit()
+
+    resultado = importar_qms(_fs(CSV_QMS_DIA_2.encode("utf-8"), "qms.csv"), empresa.id,
+                             solo_no_contados=False)
+
+    contado = ItemConteoInventario.query.filter_by(codigo="COD-001").first()
+    assert contado.cantidad_qms == 2  # se pisa con la cifra nueva
+    assert resultado["congelados"] == 0
+
+
+def test_congelar_el_stock_igual_deja_actualizar_costo_y_datos(db, empresa):
+    """Congelar es sólo para la cantidad: el costo y la unidad son datos de
+    referencia y deben poder corregirse aunque el artículo ya esté contado."""
+    importar_qms(_fs(CSV_QMS.encode("utf-8"), "qms.csv"), empresa.id)
+    _contar("COD-001", 15)
+    db.session.commit()
+
+    csv_con_costo = """﻿Sucursal;Linea Negocio;Categoria; Valor Unitario ;Stock;Descripción;Unidad;Código Único;ubicacion_bodega
+Casa Matriz;GOMAS;CAT-A;8000;2;PRODUCTO UNO CORREGIDO;KG;COD-001;RACK A1
+"""
+    importar_qms(_fs(csv_con_costo.encode("utf-8"), "qms.csv"), empresa.id, solo_no_contados=True)
+
+    item = ItemConteoInventario.query.filter_by(codigo="COD-001").first()
+    assert item.cantidad_qms == 15  # la cantidad sigue congelada
+    assert item.costo_unitario_qms == 8000  # el costo sí se corrigió
+    assert item.unidad_qms == "KG"
+    assert item.nombre == "PRODUCTO UNO CORREGIDO"
+
+
+def test_un_articulo_nuevo_entra_aunque_se_congelen_los_contados(db, empresa):
+    """Los códigos que aparecen por primera vez no tienen conteo, así que entran normal."""
+    importar_qms(_fs(CSV_QMS.encode("utf-8"), "qms.csv"), empresa.id)
+    _contar("COD-001", 15)
+    db.session.commit()
+
+    csv_nuevo = """﻿Sucursal;Linea Negocio;Categoria;Stock;Descripción;Unidad;Código Único;ubicacion_bodega
+Casa Matriz;GOMAS;CAT-A;30;PRODUCTO NUEVO;UN;COD-999;RACK Z9
+"""
+    resultado = importar_qms(_fs(csv_nuevo.encode("utf-8"), "qms.csv"), empresa.id,
+                             solo_no_contados=True)
+
+    assert resultado["creados"] == 1
+    nuevo = ItemConteoInventario.query.filter_by(codigo="COD-999").first()
+    assert nuevo.cantidad_qms == 30
+
+
+def test_la_pantalla_de_importar_ofrece_la_opcion_marcada_por_defecto(client, usuario_admin, db):
+    from tests.conftest import login
+
+    login(client, "admin@test.cl")
+    texto = client.get("/inventario/conteo/importar").get_data(as_text=True)
+    assert "solo los artículos que aún no se han contado" in texto
+    # Debe venir marcada: es lo que se quiere durante una toma de varios días.
+    assert texto.count("checked") >= 2  # una casilla por cada sistema
+
+
+def test_importar_por_la_ruta_respeta_la_casilla(client, usuario_admin, empresa, db):
+    """Prueba de punta a punta: la casilla del formulario llega hasta el importador."""
+    from tests.conftest import login
+
+    importar_qms(_fs(CSV_QMS.encode("utf-8"), "qms.csv"), empresa.id)
+    _contar("COD-001", 15)
+    db.session.commit()
+
+    login(client, "admin@test.cl")
+    respuesta = client.post(
+        "/inventario/conteo/importar/qms",
+        data={
+            "qms-archivo": (io.BytesIO(CSV_QMS_DIA_2.encode("utf-8")), "qms.csv"),
+            "qms-solo_no_contados": "y",
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+    assert respuesta.status_code == 200
+    assert "ya contados" in respuesta.get_data(as_text=True)
+
+    contado = ItemConteoInventario.query.filter_by(codigo="COD-001").first()
+    assert contado.cantidad_qms == 15
+
+
+def test_importar_por_la_ruta_sin_la_casilla_actualiza_todo(client, usuario_admin, empresa, db):
+    from tests.conftest import login
+
+    importar_qms(_fs(CSV_QMS.encode("utf-8"), "qms.csv"), empresa.id)
+    _contar("COD-001", 15)
+    db.session.commit()
+
+    login(client, "admin@test.cl")
+    client.post(
+        "/inventario/conteo/importar/qms",
+        data={"qms-archivo": (io.BytesIO(CSV_QMS_DIA_2.encode("utf-8")), "qms.csv")},
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+
+    contado = ItemConteoInventario.query.filter_by(codigo="COD-001").first()
+    assert contado.cantidad_qms == 2

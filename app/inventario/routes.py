@@ -211,6 +211,65 @@ def toma_cerrar():
     return redirect(url_for("inventario.historial_detalle", toma_id=toma.id))
 
 
+@bp.route("/historial/<int:toma_id>/reabrir", methods=["POST"])
+@require_permission("inventario", "editar")
+def toma_reabrir(toma_id):
+    """Devuelve una toma cerrada al cruce vivo para seguir contándola.
+
+    Sirve para cuando una toma se cerró antes de tiempo (por error, o para poder
+    refrescar el stock). Restituye el conteo físico y, en los artículos contados,
+    también el stock que cada sistema declaraba ese día: sin eso el conteo
+    quedaría comparado contra cifras posteriores y aparecerían diferencias falsas.
+
+    En los artículos que estaban sin contar no se toca el stock actual, que es
+    justamente el que se quiere tener al día para seguir contando.
+
+    Si un artículo ya se contó de nuevo en el cruce vivo, gana ese conteo por ser
+    el más reciente: reabrir nunca pisa trabajo de bodega hecho después.
+    """
+    if not current_user.es_admin_o_superior:
+        abort(403)
+
+    toma = TomaInventario.query.filter_by(id=toma_id, empresa_id=current_user.empresa_id).first_or_404()
+
+    items = {
+        codigo_normalizado(i.codigo): i
+        for i in ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id).all()
+    }
+
+    restaurados = conservados = sin_articulo = 0
+    for detalle in toma.detalles:
+        if detalle.cantidad_fisica is None:
+            continue  # no se contó en esa toma: nada que devolver
+        item = items.get(codigo_normalizado(detalle.codigo))
+        if item is None:
+            sin_articulo += 1  # el artículo se depuró después de cerrar la toma
+            continue
+        if item.cantidad_fisica is not None:
+            conservados += 1  # ya se volvió a contar: el conteo nuevo manda
+            continue
+        item.cantidad_fisica = detalle.cantidad_fisica
+        item.contado_por_id = detalle.contado_por_id
+        item.contado_en = detalle.contado_en
+        item.cantidad_qms = detalle.cantidad_qms
+        item.cantidad_defontana = detalle.cantidad_defontana
+        restaurados += 1
+
+    db.session.delete(toma)  # deja de ser historial: vuelve a estar en curso
+    db.session.commit()
+
+    aviso = (
+        f"Toma retomada: {restaurados} artículos vuelven a aparecer como contados, "
+        "con quién los contó y cuándo, así no se cuentan de nuevo."
+    )
+    if conservados:
+        aviso += f" {conservados} se dejaron como estaban porque ya se contaron de nuevo."
+    if sin_articulo:
+        aviso += f" {sin_articulo} no se pudieron devolver porque el artículo ya no existe."
+    flash(aviso, "success")
+    return redirect(url_for("inventario.stock"))
+
+
 @bp.route("/historial")
 @require_permission("inventario", "ver")
 def historial():
@@ -219,7 +278,7 @@ def historial():
         .order_by(TomaInventario.fecha_fin.desc())
         .all()
     )
-    return render_template("inventario/historial.html", tomas=tomas)
+    return render_template("inventario/historial.html", tomas=tomas, form=AccionForm())
 
 
 COLUMNAS_HISTORIAL_DETALLE = {
@@ -277,6 +336,7 @@ def historial_detalle(toma_id):
     return render_template(
         "inventario/historial_detalle.html",
         toma=toma,
+        form=AccionForm(),
         detalles=visibles,
         total_detalles=len(detalles),
         conteos=conteos,
@@ -981,18 +1041,24 @@ def conteo_plantilla_defontana():
     )
 
 
+def _resumen_importacion(resultado: dict) -> str:
+    """Texto del aviso tras importar, mencionando los congelados sólo si los hubo."""
+    detalle = [f"{resultado['creados']} nuevos", f"{resultado['actualizados']} actualizados"]
+    if resultado.get("congelados"):
+        detalle.append(f"{resultado['congelados']} sin tocar por estar ya contados")
+    return f"{resultado['total_codigos']} códigos ({', '.join(detalle)})."
+
+
 @bp.route("/conteo/importar/qms", methods=["POST"])
 @require_permission("inventario", "editar")
 def conteo_importar_qms():
     form = ImportarCsvForm(prefix="qms")
     if form.validate_on_submit():
         try:
-            resultado = importar_qms(form.archivo.data, current_user.empresa_id)
-            flash(
-                f"QMS importado: {resultado['total_codigos']} códigos "
-                f"({resultado['creados']} nuevos, {resultado['actualizados']} actualizados).",
-                "success",
+            resultado = importar_qms(
+                form.archivo.data, current_user.empresa_id, form.solo_no_contados.data
             )
+            flash(f"QMS importado: {_resumen_importacion(resultado)}", "success")
         except ValueError as e:
             flash(str(e), "danger")
     else:
@@ -1006,12 +1072,10 @@ def conteo_importar_defontana():
     form = ImportarCsvForm(prefix="def")
     if form.validate_on_submit():
         try:
-            resultado = importar_defontana(form.archivo.data, current_user.empresa_id)
-            flash(
-                f"Defontana importado: {resultado['total_codigos']} códigos "
-                f"({resultado['creados']} nuevos, {resultado['actualizados']} actualizados).",
-                "success",
+            resultado = importar_defontana(
+                form.archivo.data, current_user.empresa_id, form.solo_no_contados.data
             )
+            flash(f"Defontana importado: {_resumen_importacion(resultado)}", "success")
         except ValueError as e:
             flash(str(e), "danger")
     else:

@@ -46,7 +46,19 @@
           <td class="num">{{ toma.dif_unidad }}</td>
           <td class="num">{{ toma.valor_qms_total|clp }}</td>
           <td class="text-end">
-            <a href="{{ url_for('inventario.historial_detalle', toma_id=toma.id) }}" class="btn btn-sm btn-outline-secondary">Ver detalle</a>
+            <div class="d-flex flex-wrap gap-1 justify-content-end">
+              <a href="{{ url_for('inventario.historial_detalle', toma_id=toma.id) }}" class="btn btn-sm btn-outline-secondary">Ver detalle</a>
+              {% if current_user.es_admin_o_superior %}
+                {# Comillas simples en el atributo: tojson emite comillas dobles y
+                   con un atributo entre dobles el onsubmit se corta y no pregunta. #}
+                {% set aviso = "¿Continuar esta toma de inventario?\n\nVuelve a quedar en curso: los conteos ya hechos regresan a Stock y conteo con quién contó y cuándo, así nadie los cuenta de nuevo.\n\nDeja de aparecer en el historial hasta que la vuelvas a finalizar." %}
+                <form method="post" action="{{ url_for('inventario.toma_reabrir', toma_id=toma.id) }}"
+                      onsubmit='return confirm({{ aviso|tojson }})'>
+                  {{ form.hidden_tag() }}
+                  <button type="submit" class="btn btn-sm btn-warning">▶ Continuar</button>
+                </form>
+              {% endif %}
+            </div>
           </td>
         </tr>
         {% endfor %}
