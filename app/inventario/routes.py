@@ -1,5 +1,6 @@
 import csv
 import io
+from collections import Counter
 from datetime import date, datetime, timezone
 
 from flask import render_template, redirect, url_for, flash, request, abort, jsonify, make_response
@@ -885,7 +886,24 @@ def cruce_datos():
         total_paginas=total_paginas,
         grafico_estado=grafico_estado,
         grafico_impacto=grafico_impacto,
+        pares_de_unidades=_pares_de_unidades_distintas(items),
     )
+
+
+def _pares_de_unidades_distintas(items):
+    """Los pares de unidades que siguen contando como diferencia, con cuántos artículos.
+
+    Sirve para descubrir equivalencias que falten: en vez de revisar cientos de
+    artículos uno por uno, se ven los pocos pares distintos que hay y se agregan
+    a la tabla de app/utils/unidades.py los que sean la misma unidad.
+    """
+    conteo = Counter(
+        (i.unidad_qms, i.unidad_defontana) for i in items if not i.unidades_coinciden
+    )
+    return [
+        {"qms": qms, "defontana": defontana, "articulos": cuantos}
+        for (qms, defontana), cuantos in conteo.most_common()
+    ]
 
 
 @bp.route("/cruce-datos.xlsx")

@@ -80,6 +80,27 @@
   {{ t.pill('Sin costo cargado', 'sin_costo', filtro, totales.sin_costo if filtro == 'todos' else None) }}
 </div>
 
+{% if pares_de_unidades %}
+<div class="card mb-3">
+  <div class="card-body">
+    <h2 class="h6 mb-1">Unidades que aún se cuentan como distintas</h2>
+    <p class="text-muted small mb-2">
+      Las equivalencias conocidas (M = MT, PK = PACK, L = LT, FT = PIE, RL = ROLLO, entre otras)
+      ya no aparecen como diferencia. Si en esta lista ves un par que en realidad es la misma
+      unidad, avísame y lo agrego a la tabla de equivalencias.
+    </p>
+    <div class="d-flex flex-wrap gap-2">
+      {% for par in pares_de_unidades %}
+      <span class="badge bg-light text-dark border">
+        {{ par.qms or '—' }} <span class="text-muted">≠</span> {{ par.defontana or '—' }}
+        <span class="text-muted">({{ par.articulos }})</span>
+      </span>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
 {# ---------- Tabla ---------- #}
 <div class="table-card">
   <div class="table-responsive">

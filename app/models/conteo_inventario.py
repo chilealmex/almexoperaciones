@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from app.extensions import db
+from app.utils.unidades import son_equivalentes
 
 
 class _CalculosConteoMixin:
@@ -146,10 +147,13 @@ class _CalculosConteoMixin:
 
     @property
     def unidades_coinciden(self) -> bool:
-        """False sólo si ambos sistemas declaran unidad y no es la misma."""
-        if not self.unidad_qms or not self.unidad_defontana:
-            return True
-        return self.unidad_qms.strip().upper() == self.unidad_defontana.strip().upper()
+        """False sólo si ambos sistemas declaran unidad y significan cosas distintas.
+
+        No se comparan como texto: QMS escribe "M" donde Defontana escribe "MT",
+        "RL" donde el otro pone "ROLLO". Son la misma unidad, y contarlas como
+        diferencia tapaba las diferencias reales (ver app/utils/unidades.py).
+        """
+        return son_equivalentes(self.unidad_qms, self.unidad_defontana)
 
     @property
     def tiene_costo(self) -> bool:
