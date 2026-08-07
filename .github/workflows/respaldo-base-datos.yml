@@ -1,0 +1,109 @@
+# Copia de seguridad diaria de la base de datos de producción.
+#
+# Render en plan gratis NO hace respaldos: si la base se corrompe o alguien
+# borra datos por error, no hay de dónde recuperarlos. Esto los guarda como
+# artefactos de GitHub Actions, que en repositorios privados es gratis dentro
+# de la cuota de almacenamiento.
+#
+# QUÉ HAY QUE CONFIGURAR (una sola vez):
+#   Ajustes del repositorio → Secrets and variables → Actions → New repository secret
+#     Nombre:  DATABASE_URL
+#     Valor:   la "External Database URL" de Render (la interna sólo funciona
+#              dentro de Render; desde GitHub hay que usar la externa).
+#
+# CÓMO RECUPERAR UN RESPALDO: ver docs/respaldos.md
+name: Respaldo de la base de datos
+
+on:
+  schedule:
+    # 09:10 UTC = 05:10 en Chile continental (06:10 en horario de invierno).
+    # De madrugada, cuando nadie está usando el sistema.
+    - cron: "10 9 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: respaldo-base-datos
+  cancel-in-progress: false
+
+jobs:
+  respaldar:
+    runs-on: ubuntu-latest
+    # La versión del cliente debe ser igual o mayor que la del servidor: si el
+    # servidor es más nuevo, pg_dump se niega a trabajar. Correr dentro de la
+    # imagen oficial evita depender de la que traiga el runner.
+    container: postgres:16-alpine
+
+    steps:
+      - name: Comprobar que el secreto está configurado
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "Falta el secreto DATABASE_URL."
+            echo "Configúralo en Ajustes → Secrets and variables → Actions con la"
+            echo "'External Database URL' que entrega Render."
+            exit 1
+          fi
+          echo "Secreto presente."
+
+      - name: Generar el respaldo
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          nombre="respaldo-$(date -u +%Y%m%d-%H%M).dump"
+          echo "ARCHIVO=$nombre" >> "$GITHUB_ENV"
+
+          # -Fc: formato propio de PostgreSQL, ya comprimido y restaurable por
+          # partes con pg_restore. --no-owner/--no-acl para poder restaurar en
+          # una base con otro usuario dueño (por ejemplo, una local de prueba).
+          #
+          # La URL nunca se imprime: va por variable de entorno y pg_dump no la
+          # muestra en los mensajes de error.
+          pg_dump "$DATABASE_URL" \
+            --format=custom \
+            --no-owner \
+            --no-acl \
+            --file="$nombre"
+
+      - name: Verificar que el respaldo sirve
+        run: |
+          set -euo pipefail
+          # Un respaldo vacío o truncado es peor que no tener respaldo, porque
+          # da una sensación falsa de seguridad. Estas comprobaciones fallan la
+          # corrida en vez de subir un archivo inservible.
+          bytes=$(wc -c < "$ARCHIVO")
+          echo "Tamaño: $bytes bytes"
+          if [ "$bytes" -lt 1000 ]; then
+            echo "El respaldo es demasiado pequeño: algo salió mal."
+            exit 1
+          fi
+
+          # pg_restore --list lee el índice del archivo: si está corrupto, falla.
+          pg_restore --list "$ARCHIVO" > contenido.txt
+          tablas=$(grep -c "TABLE DATA" contenido.txt || true)
+          echo "Tablas con datos en el respaldo: $tablas"
+          if [ "$tablas" -lt 5 ]; then
+            echo "El respaldo trae muy pocas tablas: probablemente apunta a una base equivocada."
+            exit 1
+          fi
+
+          # Que estén las tablas que de verdad importan (nombres reales de la
+          # base; si alguna se renombra, hay que actualizar esta lista).
+          for tabla in items_conteo_inventario provisiones_ingreso costeo_importaciones usuarios; do
+            if ! grep -q "$tabla" contenido.txt; then
+              echo "No aparece la tabla '$tabla' en el respaldo."
+              exit 1
+            fi
+          done
+          echo "Respaldo verificado."
+
+      - name: Guardar el respaldo
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARCHIVO }}
+          path: ${{ env.ARCHIVO }}
+          # 90 días es el máximo que permite GitHub. Pasado ese plazo el
+          # artefacto se borra solo, así que no se acumula almacenamiento.
+          retention-days: 90
+          if-no-files-found: error
