@@ -571,3 +571,35 @@ def test_agencias_usa_una_sola_tabla_para_que_las_columnas_queden_alineadas(
 
     # Los títulos se escriben una sola vez, no uno por grupo.
     assert len(re.findall(r"<th[^>]*>\s*Monto guía", texto)) == 1
+
+def test_el_resumen_no_deja_que_las_filas_crezcan_a_dos_lineas(client, usuario_admin, empresa, db):
+    """Fecha, proveedor y agencia van en una sola línea.
+
+    Con nombres largos, esas tres celdas envolvían y cada fila terminaba
+    midiendo distinto (medido en el navegador: 60, 63, 82 y 125 px en la misma
+    pantalla). Lo que no cabe ahora se corta y se lee completo con el mouse
+    encima, así que todas las filas miden lo mismo.
+    """
+    from datetime import date
+    from tests.conftest import login
+
+    db.session.add(Importacion(
+        empresa_id=empresa.id, fecha_pei=date(2026, 6, 15), pei=50, imp="1288",
+        proveedor_nombre="DONGGUAN FANGKUN MACHINERY EQUIPMENT COMPANY",
+        oc="14152", monto=4349898, agencia="UNITED PARCEL SERVICE DE CHILE LIMITADA",
+        estado="pendiente"))
+    db.session.commit()
+
+    login(client, "admin@test.cl")
+    texto = client.get("/importaciones/resumen").get_data(as_text=True)
+
+    assert "tabla-resumen-imp" in texto
+    assert "col-fecha" in texto
+    assert texto.count("col-texto-largo") == 2  # proveedor y agencia
+
+    # El nombre completo se conserva en el title, aunque en pantalla se corte.
+    assert 'title="DONGGUAN FANGKUN MACHINERY EQUIPMENT COMPANY"' in texto
+    assert 'title="UNITED PARCEL SERVICE DE CHILE LIMITADA"' in texto
+
+    # Notas es la columna opcional más ancha: sólo aparece cuando de verdad cabe.
+    assert "d-none d-xxl-table-cell" in texto

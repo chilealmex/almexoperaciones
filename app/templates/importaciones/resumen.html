@@ -49,25 +49,25 @@
 </form>
 
 <div class="table-responsive">
-  <table class="table table-striped align-middle">
+  <table class="table table-striped align-middle tabla-resumen-imp">
     <thead>
       <tr>
         <th>Fecha PEI</th><th>PEI</th><th class="d-none d-lg-table-cell">IMP</th><th>Proveedor</th>
         <th class="d-none d-lg-table-cell">N° OC</th><th class="num">Monto guía</th><th>Agencia</th>
         <th class="num">Saldo</th><th class="d-none d-xl-table-cell">Tratado</th><th>Estado</th>
-        <th class="d-none d-xl-table-cell">Notas</th><th></th>
+        <th class="d-none d-xxl-table-cell">Notas</th><th></th>
       </tr>
     </thead>
     <tbody>
       {% for i in importaciones %}
       <tr>
-        <td>{{ i.fecha_pei|fecha if i.fecha_pei else '—' }}</td>
+        <td class="col-fecha">{{ i.fecha_pei|fecha if i.fecha_pei else '—' }}</td>
         <td class="fw-semibold"><a href="{{ url_for('importaciones.detalle', importacion_id=i.id) }}">{{ i.pei or '—' }}</a></td>
         <td class="d-none d-lg-table-cell">{{ i.imp or '—' }}</td>
-        <td>{{ i.proveedor_nombre or '—' }}</td>
+        <td class="col-texto-largo" title="{{ i.proveedor_nombre or '' }}">{{ i.proveedor_nombre or '—' }}</td>
         <td class="d-none d-lg-table-cell">{{ i.oc or '—' }}</td>
         <td class="num">{{ i.monto|clp }}</td>
-        <td>{{ i.agencia or '—' }}</td>
+        <td class="col-texto-largo" title="{{ i.agencia or '' }}">{{ i.agencia or '—' }}</td>
         <td class="num">
           <span class="{{ 'text-success' if i.saldo_signado >= 0 else 'text-danger' }}">
             {{ '+' if i.saldo_signado >= 0 else '' }}{{ i.saldo_signado|clp }}
@@ -80,7 +80,7 @@
           </span>
           {% else %}—{% endif %}
         </td>
-        <td>
+        <td class="col-estado">
           <span class="badge {{ 'bg-success' if i.estado == 'cerrado' else ('bg-warning text-dark' if i.estado == 'costeando' else 'bg-danger') }}">
             {{ '🔒 ' if i.estado == 'cerrado' }}{{ {'pendiente': 'Pendiente', 'costeando': 'Costeando', 'cerrado': 'Cerrado'}[i.estado] }}
           </span>
@@ -88,14 +88,14 @@
           <form method="post" action="{{ url_for('importaciones.cambiar_estado', importacion_id=i.id) }}" class="d-inline">
             {{ estado_form.hidden_tag() }}
             <input type="hidden" name="estado" value="pendiente">
-            <button type="submit" class="btn btn-link btn-sm p-0 ms-1" title="Reabrir (solo superadmin)" onclick="return confirm('¿Reabrir esta importación y dejarla en Pendiente?')">🔓 Reabrir</button>
+            <button type="submit" class="btn btn-link btn-sm p-0 ms-1" title="Reabrir (solo superadmin)" onclick="return confirm('¿Reabrir esta importación y dejarla en Pendiente?')">🔓</button>
           </form>
           {% endif %}
         </td>
-        <td class="d-none d-xl-table-cell text-truncate" style="max-width: 220px;" title="{{ i.notas or '' }}">
+        <td class="d-none d-xxl-table-cell text-truncate col-notas" title="{{ i.notas or '' }}">
           {{ i.notas or '—' }}
         </td>
-        <td class="text-end text-nowrap">
+        <td class="text-end text-nowrap col-acciones">
           <a href="{{ url_for('importaciones.detalle', importacion_id=i.id) }}" class="btn btn-sm btn-outline-secondary">Detalle</a>
           {% if puede('importaciones', 'editar') %}
           <a href="{{ url_for('importaciones.editar_importacion', importacion_id=i.id) }}" class="btn btn-sm btn-outline-secondary">Editar</a>

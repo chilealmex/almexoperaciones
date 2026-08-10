@@ -1209,3 +1209,37 @@ input.campo-excel.esta-vacio::placeholder {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ===== Resumen de importaciones =====
+   La fecha se partía en dos líneas y los nombres largos de proveedor y agencia
+   envolvían en dos o tres, así que cada fila medía distinto y el listado se
+   leía a saltos. Se fija una sola línea por celda: lo que no cabe se corta con
+   puntos suspensivos y se puede leer completo pasando el mouse por encima. */
+.tabla-resumen-imp td,
+.tabla-resumen-imp th { vertical-align: middle; }
+
+.tabla-resumen-imp .col-fecha { white-space: nowrap; }
+
+.tabla-resumen-imp .col-texto-largo {
+  max-width: 10rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* El botón de reabrir caía debajo del estado y estiraba esas filas. */
+.tabla-resumen-imp .col-estado { white-space: nowrap; }
+
+/* Con pantalla ancha se les devuelve el espacio. */
+/* En pantalla ancha aparece además la columna Notas, así que a los textos
+   largos se les devuelve sólo un poco de espacio: si no, la tabla vuelve a
+   salirse y hay que desplazarse en horizontal. */
+@media (min-width: 1500px) {
+  .tabla-resumen-imp .col-texto-largo { max-width: 12rem; }
+  .tabla-resumen-imp .col-notas { max-width: 10rem; }
+}
+
+/* Los botones de acción, compactos: son dos por fila y con el texto completo
+   empujaban la tabla fuera de la pantalla. */
+.tabla-resumen-imp .col-acciones .btn { padding: 0.15rem 0.45rem; font-size: 0.8rem; }
+.tabla-resumen-imp .col-notas { max-width: 12rem; }
