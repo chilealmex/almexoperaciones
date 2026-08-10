@@ -15,6 +15,27 @@ class ImportarProvisionesForm(FlaskForm):
     )
 
 
+class NuevaProvisionForm(FlaskForm):
+    """Una línea de Provisión de Ingresos cargada a mano, sin pasar por el Excel.
+
+    Solo pide lo que identifica y describe la provisión. La reversa y el saldo
+    no van aquí: se llenan después en la tabla, igual que en las líneas que
+    llegan importando, y el saldo lo calcula la aplicación.
+    """
+
+    mes = SelectField("Mes", coerce=int, validators=[DataRequired()])
+    anio = IntegerField("Año", validators=[DataRequired(), NumberRange(min=2000, max=2100)])
+    cbte_prov = StringField("Cbte Prov", validators=[DataRequired(), Length(max=30)])
+    ot = StringField("OT", validators=[DataRequired(), Length(max=30)])
+    # Texto y no número: en pantalla el monto se escribe "$1.310.000" y un
+    # IntegerField lo rechaza. La ruta lo convierte con _parse_entero.
+    monto_provision = StringField("Monto Provisión", validators=[DataRequired()])
+    cliente = StringField("Cliente", validators=[Optional(), Length(max=200)])
+    centro_costos = StringField("Centro de Costos", validators=[Optional(), Length(max=60)])
+    rut = StringField("RUT", validators=[Optional(), Length(max=20)])
+    obs = StringField("Obs", validators=[Optional(), Length(max=255)])
+
+
 class PeriodoDifTcForm(FlaskForm):
     anio = IntegerField("Año", validators=[DataRequired(), NumberRange(min=2000, max=2100)])
     mes = SelectField("Mes", coerce=int, validators=[DataRequired()])

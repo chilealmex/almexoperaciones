@@ -80,13 +80,84 @@
   </div>
   <div class="col-6 col-md-3">
     <label class="form-label small mb-1">Estado</label>
+    {# "Todas" viaja con valor propio: un valor vacío no se puede distinguir de
+       llegar a la pantalla sin filtrar, y ahí se muestran las pendientes. #}
     <select name="estado" class="form-select form-select-sm" data-autofiltro>
-      <option value="">Todas</option>
-      <option value="pendiente" {{ 'selected' if filtros.get('estado') == 'pendiente' }}>Con saldo pendiente</option>
-      <option value="cerrado" {{ 'selected' if filtros.get('estado') == 'cerrado' }}>Cerradas</option>
+      <option value="pendiente" {{ 'selected' if estado_actual == 'pendiente' }}>Con saldo pendiente</option>
+      <option value="cerrado" {{ 'selected' if estado_actual == 'cerrado' }}>Cerradas</option>
+      <option value="todas" {{ 'selected' if estado_actual == 'todas' }}>Todas</option>
     </select>
   </div>
 </form>
+
+{# Con el filtro por defecto se ve sólo una parte: hay que decirlo, si no
+   parece que las demás líneas se perdieron. #}
+{% if lineas|length < total_lineas %}
+<p class="text-muted small">
+  Mostrando <strong>{{ lineas|length }}</strong> de {{ total_lineas }} líneas.
+  {% if estado_actual == 'pendiente' and not filtros.get('estado') %}
+  Al entrar se muestran sólo las que tienen saldo pendiente.
+  {% endif %}
+  <a href="{{ url_for('contabilidad.provision_ingresos', estado='todas') }}">Ver todas →</a>
+</p>
+{% endif %}
+
+{% if puede('contabilidad', 'editar') %}
+<div class="card mb-3">
+  <div class="card-body">
+    <details {{ 'open' if nueva_form.errors }}>
+      <summary class="fw-semibold" style="cursor:pointer;">+ Agregar una línea a mano</summary>
+      <p class="text-muted small mt-2 mb-2">
+        Para cargar una provisión suelta sin armar la planilla. El monto de reversa se
+        completa después en la tabla, igual que en las líneas importadas.
+      </p>
+      <form method="post" action="{{ url_for('contabilidad.nueva_provision_ingreso') }}" class="row g-2">
+        {{ nueva_form.hidden_tag() }}
+        <div class="col-6 col-md-2">
+          {{ nueva_form.mes.label(class="form-label small mb-1") }}
+          {{ nueva_form.mes(class="form-select form-select-sm") }}
+        </div>
+        <div class="col-6 col-md-1">
+          {{ nueva_form.anio.label(class="form-label small mb-1") }}
+          {{ nueva_form.anio(class="form-control form-control-sm") }}
+        </div>
+        <div class="col-6 col-md-2">
+          {{ nueva_form.cbte_prov.label(class="form-label small mb-1") }}
+          {{ nueva_form.cbte_prov(class="form-control form-control-sm") }}
+        </div>
+        <div class="col-6 col-md-2">
+          {{ nueva_form.ot.label(class="form-label small mb-1") }}
+          {{ nueva_form.ot(class="form-control form-control-sm") }}
+        </div>
+        <div class="col-6 col-md-2">
+          {{ nueva_form.monto_provision.label(class="form-label small mb-1") }}
+          {{ nueva_form.monto_provision(class="form-control form-control-sm text-end campo-clp",
+                                        placeholder="$0") }}
+        </div>
+        <div class="col-6 col-md-3">
+          {{ nueva_form.cliente.label(class="form-label small mb-1") }}
+          {{ nueva_form.cliente(class="form-control form-control-sm") }}
+        </div>
+        <div class="col-6 col-md-3">
+          {{ nueva_form.centro_costos.label(class="form-label small mb-1") }}
+          {{ nueva_form.centro_costos(class="form-control form-control-sm") }}
+        </div>
+        <div class="col-6 col-md-2">
+          {{ nueva_form.rut.label(class="form-label small mb-1") }}
+          {{ nueva_form.rut(class="form-control form-control-sm") }}
+        </div>
+        <div class="col-12 col-md-4">
+          {{ nueva_form.obs.label(class="form-label small mb-1") }}
+          {{ nueva_form.obs(class="form-control form-control-sm") }}
+        </div>
+        <div class="col-12 col-md-3 d-flex align-items-end">
+          <button type="submit" class="btn btn-primary btn-sm">Agregar línea</button>
+        </div>
+      </form>
+    </details>
+  </div>
+</div>
+{% endif %}
 
 <form method="post" action="{{ url_for('contabilidad.guardar_provision_ingresos', **filtros) }}">
   {{ accion_form.hidden_tag() }}

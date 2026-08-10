@@ -233,7 +233,7 @@ def test_la_pantalla_muestra_las_lineas_y_los_totales(client, usuario_admin, emp
         data={"archivo": (_planilla([FILA_1, FILA_2]), "provision.xlsx")},
         content_type="multipart/form-data", follow_redirects=True,
     )
-    texto = client.get("/contabilidad/provision-ingresos").get_data(as_text=True)
+    texto = client.get("/contabilidad/provision-ingresos?estado=todas").get_data(as_text=True)
     assert "MINERA LOS PELAMBRES" in texto
     assert "$94.735.000" in texto  # monto provisión total
     assert "$91.035.000" in texto  # saldo total
@@ -247,7 +247,7 @@ def test_el_mes_y_el_ano_se_muestran_en_columnas_separadas(client, usuario_admin
         data={"archivo": (_planilla([FILA_1]), "provision.xlsx")},
         content_type="multipart/form-data", follow_redirects=True,
     )
-    texto = client.get("/contabilidad/provision-ingresos").get_data(as_text=True)
+    texto = client.get("/contabilidad/provision-ingresos?estado=todas").get_data(as_text=True)
     assert "<th>Mes</th><th>Año</th>" in texto
     assert "Marzo" in texto
     assert "2026" in texto
@@ -263,16 +263,16 @@ def test_se_puede_filtrar_por_mes_y_por_ano_por_separado(client, usuario_admin, 
         data={"archivo": (_planilla([FILA_1, FILA_2, FILA_3, otro_ano]), "provision.xlsx")},
         content_type="multipart/form-data", follow_redirects=True,
     )
-    solo_abril = client.get("/contabilidad/provision-ingresos?mes=4").get_data(as_text=True)
+    solo_abril = client.get("/contabilidad/provision-ingresos?estado=todas&mes=4").get_data(as_text=True)
     assert "CONTITECH" in solo_abril      # abril 2026
     assert "COLLAHUASI" in solo_abril     # abril 2025, mismo mes distinto año
     assert "PELAMBRES" not in solo_abril  # marzo
 
-    solo_2025 = client.get("/contabilidad/provision-ingresos?anio=2025").get_data(as_text=True)
+    solo_2025 = client.get("/contabilidad/provision-ingresos?estado=todas&anio=2025").get_data(as_text=True)
     assert "9999" in solo_2025
     assert "CONTITECH" not in solo_2025
 
-    abril_2026 = client.get("/contabilidad/provision-ingresos?mes=4&anio=2026").get_data(as_text=True)
+    abril_2026 = client.get("/contabilidad/provision-ingresos?estado=todas&mes=4&anio=2026").get_data(as_text=True)
     assert "CONTITECH" in abril_2026
     assert "9999" not in abril_2026
 
@@ -284,7 +284,7 @@ def test_la_linea_con_saldo_cero_aparece_como_cerrada(client, usuario_admin, emp
         data={"archivo": (_planilla([FILA_1, FILA_2]), "provision.xlsx")},
         content_type="multipart/form-data", follow_redirects=True,
     )
-    texto = client.get("/contabilidad/provision-ingresos").get_data(as_text=True)
+    texto = client.get("/contabilidad/provision-ingresos?estado=todas").get_data(as_text=True)
     assert "Cerrado" in texto    # FILA_1 tiene saldo 0
     assert "Pendiente" in texto  # FILA_2 tiene saldo 91.035.000
 
@@ -338,7 +338,7 @@ def test_eliminar_una_linea_avisa_antes_y_dice_que_se_va_a_perder(client, usuari
         data={"archivo": (_planilla([FILA_1]), "provision.xlsx")},
         content_type="multipart/form-data", follow_redirects=True,
     )
-    texto = client.get("/contabilidad/provision-ingresos").get_data(as_text=True)
+    texto = client.get("/contabilidad/provision-ingresos?estado=todas").get_data(as_text=True)
 
     assert "Se eliminar\\u00e1 esta l\\u00ednea de la provisi\\u00f3n" in texto
     assert "no se puede deshacer" in texto
@@ -356,7 +356,7 @@ def test_el_aviso_de_borrado_no_rompe_el_atributo_aunque_el_cliente_traiga_comil
         data={"archivo": (_planilla([con_comillas]), "provision.xlsx")},
         content_type="multipart/form-data", follow_redirects=True,
     )
-    texto = client.get("/contabilidad/provision-ingresos").get_data(as_text=True)
+    texto = client.get("/contabilidad/provision-ingresos?estado=todas").get_data(as_text=True)
 
     # El atributo va con comillas simples y el contenido no puede traer una comilla
     # simple sin escapar, ni una comilla doble cruda que lo corte antes de tiempo.
@@ -406,7 +406,7 @@ def test_al_reversar_todo_el_saldo_queda_en_cero_y_la_linea_se_cierra(client, us
     _db.session.refresh(linea)
     assert linea.saldo == 0
 
-    texto = client.get("/contabilidad/provision-ingresos").get_data(as_text=True)
+    texto = client.get("/contabilidad/provision-ingresos?estado=todas").get_data(as_text=True)
     assert "saldo-cerrado" in texto          # la celda va en verde
     assert "Cerrado" in texto
 
@@ -465,7 +465,7 @@ def test_la_columna_se_llama_monto_reversa_y_el_saldo_ya_no_se_escribe(client, u
         content_type="multipart/form-data", follow_redirects=True,
     )
     linea = ProvisionIngreso.query.filter_by(empresa_id=empresa.id).one()
-    texto = client.get("/contabilidad/provision-ingresos").get_data(as_text=True)
+    texto = client.get("/contabilidad/provision-ingresos?estado=todas").get_data(as_text=True)
 
     assert "<th class=\"num\">Monto Reversa</th>" in texto
     assert f'name="linea-{linea.id}-saldo"' not in texto   # el saldo dejó de ser un campo
@@ -531,7 +531,7 @@ def test_se_siguen_leyendo_las_planillas_con_los_titulos_en_la_segunda_fila(clie
 
 def test_la_pantalla_ofrece_descargar_la_plantilla(client, usuario_admin, empresa, db):
     login(client, "admin@test.cl")
-    texto = client.get("/contabilidad/provision-ingresos").get_data(as_text=True)
+    texto = client.get("/contabilidad/provision-ingresos?estado=todas").get_data(as_text=True)
     assert "Descargar plantilla" in texto
 
 
@@ -647,3 +647,135 @@ def test_al_actualizar_desde_la_planilla_el_saldo_se_recalcula(client, usuario_a
     _db.session.refresh(linea)
     assert linea.reversa == 91_035_000
     assert linea.saldo == 0
+
+
+# --- Cargar una línea a mano, sin pasar por el Excel ---
+
+def _datos_linea(**cambios):
+    datos = {
+        "mes": 6, "anio": 2026, "cbte_prov": "453", "ot": "6241",
+        "monto_provision": "450000", "cliente": "TTM CHILE S.A.",
+        "centro_costos": "EMPNEGVTAVTAOEM", "rut": "89026600-2", "obs": "",
+    }
+    datos.update(cambios)
+    return datos
+
+
+def test_agregar_una_linea_a_mano(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    respuesta = client.post("/contabilidad/provision-ingresos/nueva",
+                            data=_datos_linea(), follow_redirects=True)
+    assert respuesta.status_code == 200
+
+    linea = ProvisionIngreso.query.filter_by(empresa_id=empresa.id).one()
+    assert linea.mes_ano == date(2026, 6, 1)
+    assert linea.cbte_prov == "453"
+    assert linea.ot == "6241"
+    assert linea.monto_provision == 450000
+    assert linea.cliente == "TTM CHILE S.A."
+    assert linea.saldo == 450000  # sin reversa todavía, queda pendiente entero
+
+
+def test_el_monto_se_acepta_con_formato_de_pantalla(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    client.post("/contabilidad/provision-ingresos/nueva",
+                data=_datos_linea(monto_provision="$1.310.000"), follow_redirects=True)
+
+    linea = ProvisionIngreso.query.one()
+    assert linea.monto_provision == 1310000
+
+
+def test_no_se_puede_repetir_periodo_comprobante_y_ot(client, usuario_admin, empresa, db):
+    """La restricción de la base existe; hay que avisar antes, no reventar."""
+    login(client, "admin@test.cl")
+    client.post("/contabilidad/provision-ingresos/nueva", data=_datos_linea(), follow_redirects=True)
+    respuesta = client.post("/contabilidad/provision-ingresos/nueva",
+                            data=_datos_linea(monto_provision="999"), follow_redirects=True)
+
+    assert respuesta.status_code == 200
+    assert "Ya existe una línea" in respuesta.get_data(as_text=True)
+    assert ProvisionIngreso.query.count() == 1
+    assert ProvisionIngreso.query.one().monto_provision == 450000  # no se pisó
+
+
+def test_la_linea_a_mano_se_puede_reversar_como_cualquier_otra(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    client.post("/contabilidad/provision-ingresos/nueva", data=_datos_linea(), follow_redirects=True)
+    linea = ProvisionIngreso.query.one()
+
+    client.post("/contabilidad/provision-ingresos/guardar",
+                data={f"linea-{linea.id}-reversa": "450000"}, follow_redirects=True)
+
+    linea = ProvisionIngreso.query.one()
+    assert linea.reversa == 450000
+    assert linea.saldo == 0
+
+
+def test_un_monto_ilegible_no_crea_la_linea(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    respuesta = client.post("/contabilidad/provision-ingresos/nueva",
+                            data=_datos_linea(monto_provision="abc"), follow_redirects=True)
+    assert "no se entiende" in respuesta.get_data(as_text=True)
+    assert ProvisionIngreso.query.count() == 0
+
+
+def test_sin_permiso_de_edicion_no_se_puede_agregar(client, usuario_bodega, empresa, db):
+    login(client, "bodega@test.cl")
+    respuesta = client.post("/contabilidad/provision-ingresos/nueva", data=_datos_linea())
+    assert respuesta.status_code == 403
+    assert ProvisionIngreso.query.count() == 0
+
+
+# --- Al entrar se muestran solo las pendientes ---
+
+def _dos_lineas(empresa, db):
+    pendiente = ProvisionIngreso(empresa_id=empresa.id, mes_ano=date(2026, 6, 1),
+                                 cbte_prov="1", ot="PEND", monto_provision=500, saldo=500)
+    cerrada = ProvisionIngreso(empresa_id=empresa.id, mes_ano=date(2026, 6, 1),
+                               cbte_prov="2", ot="CERR", monto_provision=500,
+                               reversa=500, saldo=0)
+    db.session.add_all([pendiente, cerrada])
+    db.session.commit()
+
+
+def test_al_entrar_solo_se_ven_las_pendientes(client, usuario_admin, empresa, db):
+    _dos_lineas(empresa, db)
+    login(client, "admin@test.cl")
+
+    texto = client.get("/contabilidad/provision-ingresos").get_data(as_text=True)
+    assert "PEND" in texto
+    assert "CERR" not in texto
+    assert "Mostrando" in texto  # avisa que no las está mostrando todas
+
+
+def test_se_pueden_ver_todas_a_proposito(client, usuario_admin, empresa, db):
+    """'Todas' tiene que seguir funcionando: por eso viaja con valor propio."""
+    _dos_lineas(empresa, db)
+    login(client, "admin@test.cl")
+
+    texto = client.get("/contabilidad/provision-ingresos?estado=todas").get_data(as_text=True)
+    assert "PEND" in texto
+    assert "CERR" in texto
+
+
+def test_el_filtro_de_cerradas_sigue_funcionando(client, usuario_admin, empresa, db):
+    _dos_lineas(empresa, db)
+    login(client, "admin@test.cl")
+
+    texto = client.get("/contabilidad/provision-ingresos?estado=cerrado").get_data(as_text=True)
+    assert "CERR" in texto
+    assert "PEND" not in texto
+
+
+def test_los_desplegables_de_mes_y_anio_no_cargan_todas_las_lineas(client, usuario_admin, empresa, db):
+    """Se arman con consultas DISTINCT, no trayendo el histórico a memoria."""
+    for n in range(30):
+        db.session.add(ProvisionIngreso(
+            empresa_id=empresa.id, mes_ano=date(2025 if n % 2 else 2026, (n % 12) + 1, 1),
+            cbte_prov=str(n), ot=f"OT{n}", monto_provision=100, saldo=0, reversa=100))
+    db.session.commit()
+
+    login(client, "admin@test.cl")
+    texto = client.get("/contabilidad/provision-ingresos").get_data(as_text=True)
+    # Aunque ninguna línea se muestre (todas cerradas), los filtros siguen completos
+    assert "2025" in texto and "2026" in texto

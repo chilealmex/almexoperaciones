@@ -8,6 +8,7 @@ from app.contabilidad.forms import (
     AccionForm,
     ImportarMayorForm,
     ImportarProvisionesForm,
+    NuevaProvisionForm,
     PeriodoDifTcForm,
 )
 from app.extensions import db
@@ -79,11 +80,24 @@ def _query_base():
     return ProvisionIngreso.query.filter_by(empresa_id=_empresa_id())
 
 
+def estado_filtrado(args) -> str:
+    """Qué estado se está mostrando; al entrar sin elegir nada, las pendientes.
+
+    Lo cerrado ya no requiere trabajo, así que abrir la pantalla con todo el
+    histórico cargado es lento y además entierra lo que falta por reversar.
+    Para ver el resto está la opción "Todas", que viaja como estado=todas: si
+    fuera un valor vacío no habría forma de distinguir "quiero verlas todas"
+    de "recién llego a la pantalla".
+    """
+    estado = (args.get("estado") or "").strip()
+    return estado or "pendiente"
+
+
 def _aplicar_filtros(query, args):
     texto = (args.get("texto") or "").strip()
     mes = (args.get("mes") or "").strip()
     anio = (args.get("anio") or "").strip()
-    estado = (args.get("estado") or "").strip()
+    estado = estado_filtrado(args)
     if texto:
         comodin = f"%{texto}%"
         query = query.filter(
@@ -115,13 +129,24 @@ def _aplicar_filtros(query, args):
     return query
 
 
-def _anios_disponibles(lineas):
-    return sorted({l.mes_ano.year for l in lineas if l.mes_ano}, reverse=True)
+def _anios_disponibles():
+    """Los años que existen, preguntándoselo a la base.
+
+    Antes se traían todas las líneas a memoria sólo para sacar esta lista; con
+    muchos movimientos eso es cargar miles de filas para llenar un desplegable.
+    """
+    filas = db.session.query(db.extract("year", ProvisionIngreso.mes_ano)).filter_by(
+        empresa_id=_empresa_id()
+    ).distinct()
+    return sorted({int(f[0]) for f in filas if f[0] is not None}, reverse=True)
 
 
-def _meses_disponibles(lineas):
+def _meses_disponibles():
     """Los meses que realmente aparecen, con su nombre, ordenados de enero a diciembre."""
-    numeros = sorted({l.mes_ano.month for l in lineas if l.mes_ano})
+    filas = db.session.query(db.extract("month", ProvisionIngreso.mes_ano)).filter_by(
+        empresa_id=_empresa_id()
+    ).distinct()
+    numeros = sorted({int(f[0]) for f in filas if f[0] is not None})
     return [(str(n), MESES_NOMBRES[n - 1]) for n in numeros]
 
 
@@ -134,7 +159,6 @@ def index():
 @bp.route("/provision-ingresos")
 @require_permission("contabilidad", "ver")
 def provision_ingresos():
-    todas = _query_base().all()
     lineas = (
         _aplicar_filtros(_query_base(), request.args)
         .order_by(ProvisionIngreso.mes_ano.desc(), ProvisionIngreso.cbte_prov, ProvisionIngreso.ot)
@@ -147,15 +171,28 @@ def provision_ingresos():
         "cerradas": sum(1 for l in lineas if (l.saldo or 0) <= 0),
         "pendientes": sum(1 for l in lineas if (l.saldo or 0) > 0),
     }
+    # Cuántas quedan fuera de lo que se está viendo, para poder decirlo en
+    # pantalla: si no, con el filtro por defecto parecería que se perdieron.
+    total_lineas = _query_base().count()
+
+    # Formulario vacío para cargar una línea a mano, con el mes y el año de hoy
+    # ya puestos, que es lo que se va a usar casi siempre.
+    hoy = date.today()
+    nueva_form = NuevaProvisionForm(formdata=None, mes=hoy.month, anio=hoy.year)
+    nueva_form.mes.choices = [(n, MESES_NOMBRES[n - 1]) for n in range(1, 13)]
+
     return render_template(
         "contabilidad/provision_ingresos.html",
         lineas=lineas,
         totales=totales,
-        meses=_meses_disponibles(todas),
-        anios=_anios_disponibles(todas),
+        total_lineas=total_lineas,
+        estado_actual=estado_filtrado(request.args),
+        meses=_meses_disponibles(),
+        anios=_anios_disponibles(),
         filtros=request.args,
         importar_form=ImportarProvisionesForm(),
         accion_form=AccionForm(),
+        nueva_form=nueva_form,
         mes_legible=mes_legible,
         nombre_mes=nombre_mes,
     )
@@ -244,6 +281,57 @@ def guardar_provision_ingresos():
     db.session.commit()
     flash("Cambios guardados.", "success")
     return redirect(url_for("contabilidad.provision_ingresos", **request.args))
+
+
+@bp.route("/provision-ingresos/nueva", methods=["POST"])
+@require_permission("contabilidad", "editar")
+def nueva_provision_ingreso():
+    """Agrega una línea a mano, sin tener que armar y subir el Excel."""
+    form = NuevaProvisionForm()
+    form.mes.choices = [(n, MESES_NOMBRES[n - 1]) for n in range(1, 13)]
+
+    if not form.validate_on_submit():
+        for campo, errores in form.errors.items():
+            etiqueta = getattr(form, campo).label.text
+            flash(f"{etiqueta}: {errores[0]}", "danger")
+        return redirect(url_for("contabilidad.provision_ingresos"))
+
+    monto = _parse_entero(form.monto_provision.data)
+    if monto is None:
+        flash("El monto de la provisión no se entiende. Escríbelo como 1310000 o $1.310.000.", "danger")
+        return redirect(url_for("contabilidad.provision_ingresos"))
+
+    periodo = date(form.anio.data, form.mes.data, 1)
+    cbte = form.cbte_prov.data.strip()
+    ot = form.ot.data.strip()
+
+    # La línea se identifica por período + comprobante + OT, igual que en la
+    # planilla. Si ya existe se avisa en vez de reventar con el error de la
+    # restricción de la base.
+    if _query_base().filter_by(mes_ano=periodo, cbte_prov=cbte, ot=ot).first():
+        flash(
+            f"Ya existe una línea de {nombre_mes(periodo)} {periodo.year} "
+            f"con el comprobante {cbte} y la OT {ot}.",
+            "warning",
+        )
+        return redirect(url_for("contabilidad.provision_ingresos"))
+
+    linea = ProvisionIngreso(
+        empresa_id=_empresa_id(),
+        mes_ano=periodo,
+        cbte_prov=cbte,
+        ot=ot,
+        monto_provision=monto,
+        cliente=(form.cliente.data or "").strip() or None,
+        centro_costos=(form.centro_costos.data or "").strip() or None,
+        rut=(form.rut.data or "").strip() or None,
+        obs=(form.obs.data or "").strip() or None,
+    )
+    linea.saldo = _saldo_de(linea)  # sin reversa todavía, el saldo es la provisión entera
+    db.session.add(linea)
+    db.session.commit()
+    flash(f"Línea agregada: OT {ot}, comprobante {cbte}.", "success")
+    return redirect(url_for("contabilidad.provision_ingresos"))
 
 
 @bp.route("/provision-ingresos/<int:linea_id>/eliminar", methods=["POST"])
