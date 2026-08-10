@@ -65,7 +65,10 @@ class CosteoImportacion(db.Model):
         "CosteoImportacionProducto",
         back_populates="costeo",
         cascade="all, delete-orphan",
-        order_by="CosteoImportacionProducto.orden",
+        # El id desempata: si dos líneas quedaran con el mismo "orden", sin este
+        # criterio la base las devuelve en cualquier secuencia y las filas se
+        # mueven solas entre una carga y otra.
+        order_by="CosteoImportacionProducto.orden, CosteoImportacionProducto.id",
     )
 
     def __repr__(self):

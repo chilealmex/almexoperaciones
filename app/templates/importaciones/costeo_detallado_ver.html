@@ -68,8 +68,14 @@
   </div>
   <div class="col-6 col-lg-3">
     <div class="kpi">
+      {# Cuadra según el mismo criterio de la fila DIF: unos centavos son el
+         redondeo del cálculo con decimales, no plata sin repartir. Exigir un
+         cero exacto marcaba rojo casi siempre. #}
+      {% set exw_cuadra = comparacion.exw_moneda.cuadra %}
       <div class="kpi-label">Cuadratura EXW</div>
-      <div class="kpi-value {{ 'is-ok' if diferencia == 0 else 'is-danger' }}">{{ '$0' if diferencia == 0 else diferencia }}</div>
+      <div class="kpi-value {{ 'is-ok' if exw_cuadra else 'is-danger' }}">
+        {{ '$0' if exw_cuadra else diferencia|numero }}
+      </div>
       <div class="kpi-foot">Documentos vs. suma de productos</div>
     </div>
   </div>
@@ -299,8 +305,8 @@
               <th class="num">% s/ CIF</th>
               <th class="num">TT. Gasto inter.</th>
               <th class="num">Costo total</th>
-              <th class="num">Costo unit. inicial</th>
-              <th class="num">Costo unit. final</th>
+              <th class="num costeo-titulo-verde">Costo unit. inicial</th>
+              <th class="num costeo-titulo-verde">Costo unit. final</th>
               <th class="num">Impacto %</th>
               {% if puede_editar %}<th></th>{% endif %}
             </tr>

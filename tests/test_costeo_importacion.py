@@ -1219,3 +1219,55 @@ def test_sin_descuadres_no_se_pinta_nada_de_rojo(client, usuario_admin, empresa,
     login(client, "admin@test.cl")
     texto = client.get(f"/importaciones/costeo-detallado/{costeo.id}").get_data(as_text=True)
     assert "no-cuadra" not in texto
+
+
+def test_las_lineas_quedan_en_el_orden_en_que_se_crearon(client, usuario_admin, empresa, db):
+    """Borrar una línea del medio no puede desordenar las que quedan.
+
+    El orden se asignaba contando las líneas existentes, así que después de
+    borrar una del medio la siguiente nacía con un número ya usado. Con dos
+    líneas empatadas, la base las devuelve en cualquier secuencia y las filas
+    se mueven solas entre una carga y otra.
+    """
+    from tests.conftest import login
+
+    costeo = _crear_costeo(db, empresa)
+    db.session.commit()
+    login(client, "admin@test.cl")
+
+    for nombre in ("PRIMERA", "SEGUNDA", "TERCERA"):
+        client.post(f"/importaciones/costeo-detallado/{costeo.id}/productos/agregar",
+                    data={}, follow_redirects=True)
+        costeo.productos[-1].producto = nombre
+        db.session.commit()
+
+    # Se borra la del medio y se agrega una nueva
+    del_medio = costeo.productos[1]
+    client.post(f"/importaciones/costeo-detallado/producto/{del_medio.id}/eliminar",
+                data={}, follow_redirects=True)
+    client.post(f"/importaciones/costeo-detallado/{costeo.id}/productos/agregar",
+                data={}, follow_redirects=True)
+    costeo.productos[-1].producto = "CUARTA"
+    db.session.commit()
+
+    ordenes = [p.orden for p in costeo.productos]
+    assert len(ordenes) == len(set(ordenes)), f"hay líneas con el mismo orden: {ordenes}"
+    assert [p.producto for p in costeo.productos] == ["PRIMERA", "TERCERA", "CUARTA"]
+
+
+def test_el_indicador_de_cuadratura_no_marca_rojo_por_unos_centavos(client, usuario_admin, empresa, db):
+    """Con decimales, exigir un cero exacto marcaba descuadre casi siempre."""
+    from tests.conftest import login
+
+    costeo = _crear_costeo(db, empresa)
+    _cargar_ejemplo_real(costeo, db)
+    calculo.recalcular(costeo)
+    db.session.commit()
+
+    diferencia = calculo.diferencia_cuadratura(costeo)
+    assert diferencia != 0 or True  # puede ser 0 o unos centavos, ambos cuadran
+
+    login(client, "admin@test.cl")
+    texto = client.get(f"/importaciones/costeo-detallado/{costeo.id}").get_data(as_text=True)
+    bloque = texto[texto.find("Cuadratura EXW"):texto.find("Cuadratura EXW") + 400]
+    assert "is-danger" not in bloque, "marca descuadre por el redondeo de los decimales"

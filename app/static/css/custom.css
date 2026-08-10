@@ -1177,6 +1177,12 @@ input.campo-excel.esta-vacio::placeholder {
 }
 
 .costeo-celda-verde { background: #00b050; color: #06230f; font-weight: 600; }
+
+/* En la planilla los títulos de costo unitario también van en verde. */
+.tabla-compacta thead th.costeo-titulo-verde {
+  background: #00b050;
+  color: #06230f;
+}
 .costeo-celda-gris { background: #d9d9d9; }
 
 /* En pantallas chicas la tabla ya va apretada: el color se mantiene, pero sin

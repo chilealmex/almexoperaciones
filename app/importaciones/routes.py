@@ -1315,7 +1315,9 @@ def agregar_producto_costeo(costeo_id):
         flash("Este costeo está cerrado. Solo un superadmin puede modificarlo.", "warning")
         return redirect(url_for("importaciones.ver_costeo_detallado", costeo_id=costeo.id))
     _guardar_lo_escrito_en_la_pantalla(costeo)
-    orden = len(costeo.productos)
+    # Uno más que el mayor, no la cantidad de líneas: si se borró una del medio,
+    # contar da un número que ya está en uso y las dos filas quedan empatadas.
+    orden = max((p.orden or 0) for p in costeo.productos) + 1 if costeo.productos else 0
     db.session.add(
         CosteoImportacionProducto(
             costeo=costeo, orden=orden, unidad_tc="USD", activo_fijo="NO", tiene_ad_valorem="SI"
