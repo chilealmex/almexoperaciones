@@ -304,21 +304,40 @@
               <th class="num">Impacto %</th>
               {% if puede_editar %}<th></th>{% endif %}
             </tr>
+            {# Fila 30 de la planilla: lo que declaran los documentos, arriba de
+               los productos, para tener a la vista contra qué se está repartiendo. #}
+            <tr class="costeo-fila-total">
+              <td colspan="6">SEGÚN DOCUMENTOS</td>
+              <td class="num">{{ comparacion.exw_moneda.documentos|numero }}</td>
+              <td></td>
+              <td class="num">{{ comparacion.exw_clp.documentos|clp }}</td>
+              <td class="num">{{ comparacion.crating_clp.documentos|clp }}</td>
+              <td class="num">{{ comparacion.flete_clp.documentos|clp }}</td>
+              <td class="num">{{ comparacion.seguro_clp.documentos|clp }}</td>
+              <td class="num">{{ comparacion.cif_clp.documentos|clp }}</td>
+              <td></td>
+              <td class="num">{{ comparacion.ad_valorem_clp.documentos|clp }}</td>
+              <td></td>
+              <td class="num">{{ comparacion.gastos_internos_clp.documentos|clp }}</td>
+              <td class="num">{{ comparacion.costo_total_clp.documentos|clp }}</td>
+              <td></td><td></td><td></td>
+              {% if puede_editar %}<td></td>{% endif %}
+            </tr>
           </thead>
           <tbody>
             {% for p in costeo.productos %}
             <tr>
-              <td><input type="text" name="prod-{{ p.id }}-producto" class="form-control form-control-sm campo-excel" value="{{ p.producto or '' }}" style="min-width:170px;" {{ 'disabled' if not puede_editar }}></td>
-              <td><input type="text" name="prod-{{ p.id }}-codigo" class="form-control form-control-sm campo-excel" value="{{ p.codigo or '' }}" style="min-width:95px;" {{ 'disabled' if not puede_editar }}></td>
-              <td class="num"><input type="text" inputmode="decimal" name="prod-{{ p.id }}-valor_unitario_tc" class="form-control form-control-sm text-end campo-excel" value="{{ p.valor_unitario_tc }}" style="min-width:78px;" {{ 'disabled' if not puede_editar }}></td>
-              <td class="num"><input type="text" inputmode="decimal" name="prod-{{ p.id }}-cantidad" class="form-control form-control-sm text-end campo-excel" value="{{ p.cantidad }}" style="min-width:68px;" {{ 'disabled' if not puede_editar }}></td>
-              <td>
+              <td class="costeo-celda-manual"><input type="text" name="prod-{{ p.id }}-producto" class="form-control form-control-sm campo-excel" value="{{ p.producto or '' }}" style="min-width:170px;" {{ 'disabled' if not puede_editar }}></td>
+              <td class="costeo-celda-manual"><input type="text" name="prod-{{ p.id }}-codigo" class="form-control form-control-sm campo-excel" value="{{ p.codigo or '' }}" style="min-width:95px;" {{ 'disabled' if not puede_editar }}></td>
+              <td class="num costeo-celda-manual"><input type="text" inputmode="decimal" name="prod-{{ p.id }}-valor_unitario_tc" class="form-control form-control-sm text-end campo-excel" value="{{ p.valor_unitario_tc }}" style="min-width:78px;" {{ 'disabled' if not puede_editar }}></td>
+              <td class="num costeo-celda-manual"><input type="text" inputmode="decimal" name="prod-{{ p.id }}-cantidad" class="form-control form-control-sm text-end campo-excel" value="{{ p.cantidad }}" style="min-width:68px;" {{ 'disabled' if not puede_editar }}></td>
+              <td class="costeo-celda-manual">
                 <select name="prod-{{ p.id }}-unidad_tc" class="form-select form-select-sm campo-excel" style="min-width:70px;" {{ 'disabled' if not puede_editar }}>
                   <option value="USD" {{ 'selected' if p.unidad_tc == 'USD' }}>USD</option>
                   <option value="EUR" {{ 'selected' if p.unidad_tc == 'EUR' }}>EUR</option>
                 </select>
               </td>
-              <td>
+              <td class="costeo-celda-activo-fijo">
                 <select name="prod-{{ p.id }}-activo_fijo" class="form-select form-select-sm campo-excel" style="min-width:125px;" {{ 'disabled' if not puede_editar }}>
                   <option value="NO" {{ 'selected' if p.activo_fijo == 'NO' }}>No</option>
                   {% for categoria in categorias_activo %}
@@ -332,7 +351,7 @@
               <td class="num">{{ p.crating_clp|clp }}</td>
               <td class="num">{{ p.flete_clp|clp }}</td>
               <td class="num">{{ p.seguro_clp|clp }}</td>
-              <td class="num">{{ p.cif_clp|clp }}</td>
+              <td class="num costeo-celda-gris fw-semibold">{{ p.cif_clp|clp }}</td>
               <td>
                 <select name="prod-{{ p.id }}-tiene_ad_valorem" class="form-select form-select-sm campo-excel" {{ 'disabled' if not puede_editar }}>
                   <option value="SI" {{ 'selected' if p.tiene_ad_valorem == 'SI' }}>Sí</option>
@@ -358,9 +377,9 @@
               </td>
               <td class="num">{{ p.gastos_internos_clp|clp }}</td>
               <td class="num fw-semibold">{{ p.costo_total_clp|clp }}</td>
-              <td class="num">{{ p.costo_unitario_inicial_clp|clp }}</td>
-              <td class="num fw-semibold">{{ p.costo_unitario_final_clp|clp }}</td>
-              <td class="num">{{ '%+.1f%%'|format(p.impacto_pct * 100) }}</td>
+              <td class="num costeo-celda-gris">{{ p.costo_unitario_inicial_clp|clp }}</td>
+              <td class="num costeo-celda-verde">{{ p.costo_unitario_final_clp|clp }}</td>
+              <td class="num costeo-celda-gris">{{ '%+.1f%%'|format(p.impacto_pct * 100) }}</td>
               {% if puede_editar %}
               <td class="text-end">
                 <button type="submit" formaction="{{ url_for('importaciones.eliminar_producto_costeo', producto_id=p.id) }}" formnovalidate class="btn btn-sm btn-outline-danger" onclick="return confirm('¿Eliminar este producto?')" title="Eliminar">🗑</button>
@@ -373,7 +392,7 @@
           </tbody>
           {% if costeo.productos %}
           <tfoot>
-            <tr class="fw-bold">
+            <tr class="costeo-fila-total">
               <td colspan="6">TOTAL IMP</td>
               <td class="num">{{ costeo.productos|sum(attribute='exw_moneda')|numero }}</td>
               <td class="num">{{ '%.1f%%'|format(costeo.productos|sum(attribute='porcentaje') * 100) }}</td>
@@ -393,6 +412,26 @@
               <td class="num">{{ costeo.productos|sum(attribute='costo_unitario_inicial_clp')|clp }}</td>
               <td class="num">{{ costeo.productos|sum(attribute='costo_unitario_final_clp')|clp }}</td>
               <td></td>
+              {% if puede_editar %}<td></td>{% endif %}
+            </tr>
+            {# Fila 33 de la planilla: documentos menos productos. Cualquier
+               columna distinta de cero es plata que quedó sin prorratear, y va
+               en rojo igual que el formato condicional del Excel. #}
+            <tr class="costeo-fila-dif">
+              <td colspan="6">DIF</td>
+              <td class="num {{ '' if comparacion.exw_moneda.cuadra else 'no-cuadra' }}">{{ comparacion.exw_moneda.diferencia|numero }}</td>
+              <td></td>
+              <td class="num {{ '' if comparacion.exw_clp.cuadra else 'no-cuadra' }}">{{ comparacion.exw_clp.diferencia|clp }}</td>
+              <td class="num {{ '' if comparacion.crating_clp.cuadra else 'no-cuadra' }}">{{ comparacion.crating_clp.diferencia|clp }}</td>
+              <td class="num {{ '' if comparacion.flete_clp.cuadra else 'no-cuadra' }}">{{ comparacion.flete_clp.diferencia|clp }}</td>
+              <td class="num {{ '' if comparacion.seguro_clp.cuadra else 'no-cuadra' }}">{{ comparacion.seguro_clp.diferencia|clp }}</td>
+              <td class="num {{ '' if comparacion.cif_clp.cuadra else 'no-cuadra' }}">{{ comparacion.cif_clp.diferencia|clp }}</td>
+              <td></td>
+              <td class="num {{ '' if comparacion.ad_valorem_clp.cuadra else 'no-cuadra' }}">{{ comparacion.ad_valorem_clp.diferencia|clp }}</td>
+              <td></td>
+              <td class="num {{ '' if comparacion.gastos_internos_clp.cuadra else 'no-cuadra' }}">{{ comparacion.gastos_internos_clp.diferencia|clp }}</td>
+              <td class="num {{ '' if comparacion.costo_total_clp.cuadra else 'no-cuadra' }}">{{ comparacion.costo_total_clp.diferencia|clp }}</td>
+              <td></td><td></td><td></td>
               {% if puede_editar %}<td></td>{% endif %}
             </tr>
           </tfoot>

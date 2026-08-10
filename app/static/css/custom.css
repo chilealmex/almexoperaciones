@@ -1119,3 +1119,68 @@ input.campo-excel.esta-vacio::placeholder {
     display: block;
   }
 }
+
+/* ===== Tabla de productos del Costeo, con los colores de la planilla =====
+   Los tonos salen del archivo original (PLANILLA_IMP...xlsx), leídos celda a
+   celda, para que quien viene del Excel reconozca la tabla de inmediato:
+     #002060  azul marino  -> filas de totales (documentos y TOTAL IMP)
+     #CC00CC  magenta      -> lo que se escribe a mano del producto
+     #FFFF00  amarillo     -> Activo Fijo
+     #00B050  verde        -> costo unitario final
+     gris                  -> CIF, impacto y la fila de diferencias           */
+
+.costeo-fila-total > td {
+  background: #002060;
+  color: #fff;
+  font-weight: 600;
+}
+.costeo-fila-total > td.num { color: #fff; }
+
+.costeo-fila-dif > td {
+  background: #d9d9d9;
+  color: #1a1a1a;
+  font-weight: 600;
+}
+/* Una columna que no cuadra tiene que saltar a la vista: es plata sin repartir.
+   La planilla usa formato condicional en I33:R33 que pinta de rojo cualquier
+   diferencia distinta de cero; esto es lo mismo. */
+.costeo-fila-dif > td.no-cuadra {
+  background: #ff0000;
+  color: #fff;
+}
+
+/* Las celdas que se escriben a mano. El color va en el campo y no sólo en la
+   celda: el input ocupa casi todo el ancho y, pintando sólo la celda, el color
+   quedaba tapado y no se veía nada. */
+.costeo-celda-manual, .costeo-celda-activo-fijo { padding: 2px !important; }
+
+.costeo-celda-manual .form-control,
+.costeo-celda-manual .form-select {
+  background: #cc00cc;
+  color: #fff;
+  font-weight: 600;
+  border-color: #9c009c;
+}
+.costeo-celda-manual .form-control::placeholder { color: rgba(255, 255, 255, 0.75); }
+.costeo-celda-manual .form-control:focus,
+.costeo-celda-manual .form-select:focus {
+  background: #fff;              /* al escribir se aclara, para ver bien lo que se teclea */
+  color: #1a1a1a;
+}
+
+.costeo-celda-activo-fijo .form-control,
+.costeo-celda-activo-fijo .form-select {
+  background: #ffff00;
+  color: #1a1a1a;
+  font-weight: 600;
+  border-color: #c9c900;
+}
+
+.costeo-celda-verde { background: #00b050; color: #06230f; font-weight: 600; }
+.costeo-celda-gris { background: #d9d9d9; }
+
+/* En pantallas chicas la tabla ya va apretada: el color se mantiene, pero sin
+   engordar las celdas. */
+@media (max-width: 992px) {
+  .costeo-celda-manual, .costeo-celda-activo-fijo { background-clip: padding-box; }
+}

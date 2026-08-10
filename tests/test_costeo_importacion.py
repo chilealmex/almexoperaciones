@@ -1120,3 +1120,102 @@ def test_se_puede_escribir_un_responsable_nuevo_y_queda_en_la_lista(client, usua
     otro = _crear_costeo(db, empresa, n_importacion="68")
     texto = client.get(f"/importaciones/costeo-detallado/{otro.id}").get_data(as_text=True)
     assert '<option value="PERSONA NUEVA"' in texto
+
+
+# --- Fila de totales arriba y fila de diferencias abajo (filas 30, 32 y 33) ---
+
+def test_la_comparacion_por_columna_da_cero_cuando_todo_esta_prorrateado(db, empresa):
+    """Con los productos cubriendo el invoice completo, ninguna columna descuadra."""
+    costeo = _crear_costeo(db, empresa)
+    _cargar_ejemplo_real(costeo, db)
+    calculo.recalcular(costeo)
+    db.session.commit()
+
+    comparacion = calculo.comparacion_por_columna(costeo)
+    for columna, datos in comparacion.items():
+        assert datos["cuadra"], f"{columna} descuadra en {datos['diferencia']}"
+
+
+def test_la_comparacion_detecta_lo_que_quedo_sin_prorratear(db, empresa):
+    """Si la factura declara más de lo que suman los productos, la columna EXW no cuadra."""
+    costeo = _crear_costeo(db, empresa)
+    _cargar_ejemplo_real(costeo, db)
+    # El invoice declara 300 dólares más de los que se repartieron entre productos.
+    costeo.documento_por_rol("inv1").valor_total_inv = 9134.4 + 300
+    calculo.recalcular(costeo)
+    db.session.commit()
+
+    comparacion = calculo.comparacion_por_columna(costeo)
+    assert not comparacion["exw_moneda"]["cuadra"]
+    assert comparacion["exw_moneda"]["diferencia"] == 300
+
+
+def test_la_comparacion_trae_documentos_y_productos_por_separado(db, empresa):
+    """Son las dos filas de la planilla: arriba los documentos, abajo los productos."""
+    costeo = _crear_costeo(db, empresa)
+    _cargar_ejemplo_real(costeo, db)
+    calculo.recalcular(costeo)
+    db.session.commit()
+
+    totales = calculo.totales_documentos(costeo)
+    comparacion = calculo.comparacion_por_columna(costeo)
+
+    assert comparacion["cif_clp"]["documentos"] == totales["cif_clp"]
+    assert comparacion["cif_clp"]["productos"] == sum(p.cif_clp for p in costeo.productos)
+
+
+def test_el_redondeo_del_prorrateo_no_se_marca_como_descuadre(db, empresa):
+    """Cada producto se guarda redondeado a pesos: la suma puede correrse unos
+    pocos pesos respecto del documento y eso no es plata sin repartir."""
+    costeo = _crear_costeo(db, empresa)
+    _cargar_ejemplo_real(costeo, db)
+    calculo.recalcular(costeo)
+    db.session.commit()
+
+    comparacion = calculo.comparacion_por_columna(costeo)
+    assert comparacion["costo_total_clp"]["cuadra"]
+
+
+def test_la_pantalla_muestra_las_filas_de_totales_y_diferencias(client, usuario_admin, empresa, db):
+    from tests.conftest import login
+
+    costeo = _crear_costeo(db, empresa)
+    _cargar_ejemplo_real(costeo, db)
+    calculo.recalcular(costeo)
+    db.session.commit()
+
+    login(client, "admin@test.cl")
+    texto = client.get(f"/importaciones/costeo-detallado/{costeo.id}").get_data(as_text=True)
+
+    assert "SEGÚN DOCUMENTOS" in texto     # la fila de arriba
+    assert "TOTAL IMP" in texto
+    assert "costeo-fila-dif" in texto      # la fila de diferencias
+    assert "costeo-celda-manual" in texto  # las celdas pintadas como el Excel
+    assert "costeo-celda-activo-fijo" in texto
+
+
+def test_la_pantalla_pinta_de_rojo_la_columna_que_no_cuadra(client, usuario_admin, empresa, db):
+    from tests.conftest import login
+
+    costeo = _crear_costeo(db, empresa)
+    _cargar_ejemplo_real(costeo, db)
+    costeo.documento_por_rol("inv1").valor_total_inv = 9134.4 + 300
+    calculo.recalcular(costeo)
+    db.session.commit()
+
+    login(client, "admin@test.cl")
+    texto = client.get(f"/importaciones/costeo-detallado/{costeo.id}").get_data(as_text=True)
+    assert "no-cuadra" in texto
+
+
+def test_sin_descuadres_no_se_pinta_nada_de_rojo(client, usuario_admin, empresa, db):
+    from tests.conftest import login
+
+    costeo = _crear_costeo(db, empresa)
+    _cargar_ejemplo_real(costeo, db)
+    calculo.recalcular(costeo)
+    db.session.commit()
+
+    login(client, "admin@test.cl")
+    texto = client.get(f"/importaciones/costeo-detallado/{costeo.id}").get_data(as_text=True)
+    assert "no-cuadra" not in texto

@@ -180,3 +180,67 @@ def diferencia_cuadratura(costeo, totales=None):
     totales = totales if totales is not None else totales_documentos(costeo)
     suma_productos = sum(_num(p.exw_moneda) for p in costeo.productos)
     return round(totales["exw_moneda"] - suma_productos, 2)
+
+
+# Columnas que la planilla compara entre lo que declaran los documentos y lo
+# que quedó repartido en los productos: (clave en totales, atributo del producto).
+COLUMNAS_COMPARABLES = (
+    ("exw_moneda", "exw_moneda"),
+    ("exw_clp", "exw_clp"),
+    ("crating_clp", "crating_clp"),
+    ("flete_clp", "flete_clp"),
+    ("seguro_clp", "seguro_clp"),
+    ("cif_clp", "cif_clp"),
+    ("ad_valorem_clp", "ad_valorem_clp"),
+    ("gastos_internos_clp", "gastos_internos_clp"),
+    ("costo_total_clp", "costo_total_clp"),
+)
+
+
+def comparacion_por_columna(costeo, totales=None):
+    """Documentos contra productos, columna por columna (filas 30, 32 y 33 de la planilla).
+
+    Arriba de la tabla la planilla pone lo que declaran los documentos, abajo la
+    suma de lo repartido entre los productos, y debajo la resta. Si una columna
+    no da cero, ese monto quedó sin prorratear y el costeo no cuadra.
+
+    Devuelve, por columna: {'documentos', 'productos', 'diferencia', 'cuadra'}.
+    """
+    totales = totales if totales is not None else totales_documentos(costeo)
+
+    # El monto en pesos de cada producto se guarda redondeado, así que al sumar
+    # N productos el total puede correrse hasta N pesos respecto del documento.
+    # Eso es el redondeo del prorrateo, no plata sin repartir: marcarlo en rojo
+    # sería una falsa alarma en cada costeo con varias líneas.
+    tolerancia_clp = max(1, len(costeo.productos))
+
+    # Mientras no llegue la DIN no hay documento de Ad Valorem, y cada producto
+    # aplica la tasa teórica (CIF x tasa). En ese caso la referencia es lo que
+    # se está aplicando, no un cero: si no, cada costeo sin DIN aparecería
+    # descuadrado en Ad Valorem y, de arrastre, en el Costo total.
+    referencia = dict(totales)
+    if not referencia.get("ad_valorem_clp"):
+        ad_valorem_aplicado = sum(_num(p.ad_valorem_clp) for p in costeo.productos)
+        referencia["ad_valorem_clp"] = ad_valorem_aplicado
+        referencia["costo_total_clp"] = (
+            _num(referencia.get("cif_clp"))
+            + ad_valorem_aplicado
+            + _num(referencia.get("gastos_internos_clp"))
+        )
+
+    resultado = {}
+    for clave, atributo in COLUMNAS_COMPARABLES:
+        documentos = _num(referencia.get(clave))
+        productos = sum(_num(getattr(p, atributo)) for p in costeo.productos)
+        diferencia = round(documentos - productos, 2)
+        # exw_moneda va en la moneda del invoice, con decimales y sin redondear:
+        # ahí cualquier diferencia real importa y sólo se perdona el ruido del
+        # cálculo con decimales.
+        tolerancia = 0.01 if clave == "exw_moneda" else tolerancia_clp
+        resultado[clave] = {
+            "documentos": documentos,
+            "productos": productos,
+            "diferencia": diferencia,
+            "cuadra": abs(diferencia) <= tolerancia,
+        }
+    return resultado
