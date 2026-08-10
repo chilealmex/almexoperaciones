@@ -17,6 +17,7 @@ from app.utils.importar_conteo import (
     codigo_normalizado,
     grupos_duplicados,
     importar_defontana,
+    rarezas_del_codigo,
     importar_qms,
     unificar_grupo,
 )
@@ -980,6 +981,7 @@ def conteo_duplicados():
         fuera_contados=[i for i in fuera if i.cantidad_fisica is not None],
         form=AccionForm(),
         codigo_normalizado=codigo_normalizado,
+        rarezas_del_codigo=rarezas_del_codigo,
     )
 
 

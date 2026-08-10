@@ -77,14 +77,22 @@ def _buscar_columna(campos, *palabras_clave):
 
 
 def _normalizar_codigo(codigo) -> str:
-    """Normaliza el código para que QMS y Defontana crucen como el mismo artículo.
+    """Limpia el código tal como se va a GUARDAR.
 
-    Quita apóstrofes iniciales (artefacto de Excel) y TODOS los espacios internos:
-    QMS suele exportar 'ROP- BCAN-M' donde Defontana trae 'ROP-BCAN-M' para el mismo
-    código, y sin esta limpieza aparecen como dos artículos distintos en el cruce.
+    Quita apóstrofes iniciales (artefacto de Excel), todos los espacios internos
+    y los caracteres invisibles de categoría Cf (espacio de ancho cero, guion
+    suave, BOM). QMS suele exportar 'ROP- BCAN-M' donde Defontana trae
+    'ROP-BCAN-M' para el mismo código, y sin esta limpieza aparecen como dos
+    artículos distintos en el cruce; con los invisibles es peor todavía, porque
+    en pantalla se ven exactamente iguales.
+
+    El guion NO se toca aquí: se deja el que venga en la planilla para que el
+    código guardado siga siendo el del sistema de origen. Unificar los guiones
+    es cosa de codigo_normalizado(), que es sólo la clave de comparación.
     """
     texto = str(codigo).strip().lstrip("'").strip()
-    return _ESPACIOS_RE.sub("", texto)[:80]
+    sin_invisibles = "".join(c for c in texto if unicodedata.category(c) != "Cf")
+    return _ESPACIOS_RE.sub("", sin_invisibles)[:80]
 
 
 def _texto(valor, limite: int) -> str:
@@ -153,15 +161,41 @@ def _leer_filas(file_storage, codificaciones_csv=("utf-8-sig",)):
 # sobrevivir a cualquier reimportación de QMS o Defontana.
 
 
+# Guiones que Excel y Word escriben en vez del normal. Se unifican al '-' de
+# toda la vida: "KIT–ST" y "KIT-ST" son el mismo artículo escrito distinto.
+_GUIONES = {
+    "‐": "-",  # HYPHEN
+    "‑": "-",  # NON-BREAKING HYPHEN
+    "‒": "-",  # FIGURE DASH
+    "–": "-",  # EN DASH
+    "—": "-",  # EM DASH
+    "―": "-",  # HORIZONTAL BAR
+    "−": "-",  # MINUS SIGN
+}
+
+
 def codigo_normalizado(codigo) -> str:
     """Clave para comparar códigos que son el mismo escrito distinto.
 
     QMS y Defontana no siempre escriben igual el código del mismo artículo:
     "EM-R-Pantalla BG3" y "EM-R-PantallaBG3" son el mismo producto. Para
-    compararlos se sacan los espacios y los acentos, y se pasa a mayúsculas.
+    compararlos se saca todo lo que no cambia de qué artículo se trata:
+
+    - espacios de cualquier tipo, incluido el espacio duro que pega Excel;
+    - caracteres invisibles (categoría Cf): espacio de ancho cero, guion suave,
+      la marca BOM... No se ven en pantalla, así que dos códigos que sólo se
+      diferencian en eso parecen idénticos y aun así no cruzaban;
+    - los distintos guiones tipográficos, que se unifican al '-';
+    - el apóstrofe con que Excel marca "esto es texto";
+    - acentos y mayúsculas.
     """
-    texto = str(codigo or "").strip()
-    sin_acentos = "".join(c for c in unicodedata.normalize("NFD", texto) if unicodedata.category(c) != "Mn")
+    texto = str(codigo or "").strip().lstrip("'").strip()
+    # Los Cf hay que sacarlos antes de comparar nada: son invisibles.
+    sin_invisibles = "".join(c for c in texto if unicodedata.category(c) != "Cf")
+    sin_guiones = "".join(_GUIONES.get(c, c) for c in sin_invisibles)
+    sin_acentos = "".join(
+        c for c in unicodedata.normalize("NFD", sin_guiones) if unicodedata.category(c) != "Mn"
+    )
     return "".join(sin_acentos.split()).upper()
 
 
@@ -517,3 +551,41 @@ def unificar_grupo(items: list) -> ItemConteoInventario:
     for item in resto:
         db.session.delete(item)
     return principal
+
+
+# Nombre corto para los caracteres que no se ven pero separan dos códigos.
+_INVISIBLES = {
+    " ": "espacio duro",
+    "​": "espacio de ancho cero",
+    "‌": "separador de ancho cero",
+    "‍": "unión de ancho cero",
+    "⁠": "unión invisible",
+    "﻿": "marca BOM",
+    "­": "guion suave",
+    "\t": "tabulador",
+}
+
+
+def rarezas_del_codigo(codigo) -> list:
+    """Qué tiene este código que no se ve en pantalla.
+
+    Dos códigos que sólo se diferencian en un carácter invisible se ven
+    idénticos, así que en la pantalla de depuración no habría forma de saber
+    por qué aparecen repetidos. Esto lo explica en palabras.
+    """
+    texto = str(codigo or "")
+    encontradas = []
+    if texto != texto.strip():
+        encontradas.append("espacios al principio o al final")
+    if texto.startswith("'"):
+        encontradas.append("apóstrofe de Excel")
+    if " " in texto.strip():
+        encontradas.append("espacios en medio")
+    for caracter, nombre in _INVISIBLES.items():
+        if caracter in texto:
+            encontradas.append(nombre)
+    for caracter in _GUIONES:
+        if caracter in texto:
+            encontradas.append("guion tipográfico")
+            break
+    return encontradas

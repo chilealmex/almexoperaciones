@@ -40,7 +40,16 @@
             {% for grupo in grupos %}
             {% for item in grupo %}
             <tr class="{{ 'border-top border-2' if loop.first else '' }}">
-              <td class="{{ 'fw-semibold' if loop.first else 'ps-4 text-muted' }}">{{ item.codigo }}</td>
+              <td class="{{ 'fw-semibold' if loop.first else 'ps-4 text-muted' }}">
+                {{ item.codigo }}
+                {# Sin esto, dos códigos que sólo se diferencian en un carácter
+                   invisible se ven idénticos y no hay forma de entender por qué
+                   salen repetidos. #}
+                {% set rarezas = rarezas_del_codigo(item.codigo) %}
+                {% if rarezas %}
+                <span class="badge bg-warning text-dark fw-normal">{{ rarezas|join(', ') }}</span>
+                {% endif %}
+              </td>
               <td>{{ item.nombre or '—' }}</td>
               <td class="num">{{ item.cantidad_qms }}</td>
               <td class="num">{{ item.cantidad_defontana }}</td>

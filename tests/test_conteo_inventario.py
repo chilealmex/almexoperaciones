@@ -665,3 +665,108 @@ def test_congelar_el_stock_sigue_funcionando_con_la_carga_en_lote(db, empresa):
     assert ItemConteoInventario.query.filter_by(codigo="COD-001").first().cantidad_qms == 15
     assert ItemConteoInventario.query.filter_by(codigo="COD-002").first().cantidad_qms == 99
     assert resultado["congelados"] == 1
+
+
+# --- Códigos iguales que se ven distintos (o peor: que se ven iguales) ---
+
+def test_los_caracteres_invisibles_no_separan_un_codigo(db, empresa):
+    """Excel mete caracteres que no se ven y partían el artículo en dos.
+
+    En pantalla los dos códigos se ven idénticos, así que el problema era
+    imposible de diagnosticar mirando.
+    """
+    from app.utils.importar_conteo import codigo_normalizado
+
+    base = "KIT-ST3150213420X8"
+    iguales = [
+        "KIT-ST 3150213420X8",      # espacio normal
+        "KIT-ST\xa03150213420X8",   # espacio duro
+        "KIT-ST​3150213420X8", # espacio de ancho cero
+        "KIT-ST­3150213420X8", # guion suave
+        "KIT-ST﻿3150213420X8", # marca BOM
+        "KIT-ST‍3150213420X8", # unión de ancho cero
+        "KIT–ST3150213420X8",  # guion largo
+        "KIT−ST3150213420X8",  # signo menos
+        "'KIT-ST3150213420X8",      # apóstrofe de Excel
+        "kit-st3150213420x8",       # minúsculas
+        "  KIT-ST3150213420X8  ",   # espacios alrededor
+    ]
+    for variante in iguales:
+        assert codigo_normalizado(variante) == codigo_normalizado(base), repr(variante)
+
+
+def test_dos_codigos_de_verdad_distintos_no_se_unen(db, empresa):
+    from app.utils.importar_conteo import codigo_normalizado
+
+    assert codigo_normalizado("KIT-ST315") != codigo_normalizado("KIT-ST316")
+    assert codigo_normalizado("ABC-1") != codigo_normalizado("ABC-2")
+
+
+def test_importar_cruza_el_codigo_con_caracter_invisible(db, empresa):
+    """Lo que importa de verdad: que no cree una fila nueva."""
+    qms = """﻿Sucursal;Linea Negocio;Categoria;Stock;Descripción;Unidad;Código Único;ubicacion_bodega
+Casa Matriz;GOMAS;CAT;10;KIT ST;UN;KIT-ST3150213420X8;RACK A
+"""
+    importar_qms(_fs(qms.encode("utf-8"), "qms.csv"), empresa.id)
+
+    # Defontana trae el mismo código con un espacio de ancho cero en medio
+    defontana = (
+        "CodArticulo;Descripci\xf3n Art\xedculo;CodBodega;Nombre Bodega;Saldo Stock;Unidad\r\n"
+        '"KIT-ST​3150213420X8";"KIT ST";"BC";"BODEGA CENTRAL";"7";"UN"\r\n'
+    )
+    importar_defontana(_fs(defontana.encode("cp1252", "ignore"), "def.csv"), empresa.id)
+
+    items = ItemConteoInventario.query.filter_by(empresa_id=empresa.id).all()
+    assert len(items) == 1, [i.codigo for i in items]  # una sola fila, no dos
+    assert items[0].cantidad_qms == 10
+    assert items[0].cantidad_defontana == 7
+
+
+def test_el_codigo_se_guarda_sin_caracteres_invisibles(db, empresa):
+    qms = """﻿Sucursal;Linea Negocio;Categoria;Stock;Descripción;Unidad;Código Único;ubicacion_bodega
+Casa Matriz;GOMAS;CAT;10;KIT ST;UN;KIT-ST​315;RACK A
+"""
+    importar_qms(_fs(qms.encode("utf-8"), "qms.csv"), empresa.id)
+
+    item = ItemConteoInventario.query.filter_by(empresa_id=empresa.id).one()
+    assert item.codigo == "KIT-ST315"
+    assert "​" not in item.codigo
+
+
+def test_la_pantalla_de_depuracion_explica_la_diferencia_invisible(client, usuario_admin, empresa, db):
+    """Dos códigos que se ven iguales necesitan que la pantalla diga en qué difieren."""
+    from tests.conftest import login
+
+    db.session.add_all([
+        ItemConteoInventario(empresa_id=empresa.id, codigo="KIT-ST315",
+                             cantidad_qms=1, cantidad_defontana=0),
+        ItemConteoInventario(empresa_id=empresa.id, codigo="KIT-ST​315",
+                             cantidad_qms=0, cantidad_defontana=2),
+    ])
+    db.session.commit()
+
+    login(client, "admin@test.cl")
+    texto = client.get("/inventario/conteo/duplicados").get_data(as_text=True)
+    assert "espacio de ancho cero" in texto
+
+
+def test_unificar_junta_el_par_con_caracter_invisible(client, usuario_admin, empresa, db):
+    from tests.conftest import login
+
+    db.session.add_all([
+        ItemConteoInventario(empresa_id=empresa.id, codigo="KIT-ST315",
+                             cantidad_qms=10, cantidad_defontana=0, cantidad_fisica=9),
+        ItemConteoInventario(empresa_id=empresa.id, codigo="KIT-ST​315",
+                             cantidad_qms=0, cantidad_defontana=4),
+    ])
+    db.session.commit()
+
+    login(client, "admin@test.cl")
+    client.post("/inventario/conteo/duplicados/unificar",
+                data={"clave": "KIT-ST315"}, follow_redirects=True)
+
+    items = ItemConteoInventario.query.filter_by(empresa_id=empresa.id).all()
+    assert len(items) == 1
+    assert items[0].cantidad_qms == 10
+    assert items[0].cantidad_defontana == 4
+    assert items[0].cantidad_fisica == 9  # el conteo de bodega se conserva
