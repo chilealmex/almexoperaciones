@@ -307,4 +307,26 @@ document.addEventListener("DOMContentLoaded", function () {
       campo.dispatchEvent(new Event("input", { bubbles: true }));
     });
   });
+
+  // Formularios que tardan (importar una planilla de miles de filas): avisan que
+  // están trabajando y bloquean el botón.
+  //
+  // Sin esto la página se queda quieta sin señal de nada, parece colgada y la
+  // reacción natural es volver a apretar. Ese segundo envío no acelera nada:
+  // procesa el mismo archivo otra vez en paralelo, deja ocupado un proceso más
+  // del servidor y hace que las dos importaciones terminen más tarde.
+  document.querySelectorAll("[data-boton-ocupado]").forEach(function (formulario) {
+    formulario.addEventListener("submit", function () {
+      var boton = formulario.querySelector('button[type="submit"]');
+      if (!boton) return;
+      // El submit ya se disparó; deshabilitar aquí no cancela este envío,
+      // sólo impide los siguientes.
+      setTimeout(function () {
+        boton.disabled = true;
+        boton.textContent = formulario.getAttribute("data-boton-ocupado");
+      }, 0);
+      var aviso = formulario.querySelector("[data-aviso-ocupado]");
+      if (aviso) aviso.hidden = false;
+    });
+  });
 });
