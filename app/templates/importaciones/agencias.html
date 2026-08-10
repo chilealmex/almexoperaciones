@@ -34,30 +34,51 @@
   </div>
 </form>
 
-{% for bloque in bloques %}
-<div class="card mb-3">
-  <div class="card-header d-flex align-items-center justify-content-between">
-    <span class="fw-semibold">{{ bloque.agencia }}</span>
-    <span class="{{ 'text-success' if bloque.saldo_total >= 0 else 'text-danger' }}">
-      Saldo neto: {{ '+' if bloque.saldo_total >= 0 else '' }}{{ bloque.saldo_total|clp }}
-    </span>
-  </div>
+{% if bloques %}
+{# Una sola tabla para todas las agencias. Antes cada agencia era una tabla
+   aparte y cada una calculaba el ancho de sus columnas por su cuenta, así que
+   Fecha, PEI, Proveedor y los montos quedaban corridos de un grupo a otro y
+   costaba comparar hacia abajo. Con una tabla y filas de encabezado por
+   agencia, todas las columnas caen en la misma vertical. #}
+<div class="table-card">
   <div class="table-responsive">
-    <table class="table table-sm mb-0">
-      <thead><tr><th>Fecha PEI</th><th>PEI</th><th>Proveedor</th><th>N° OC</th><th class="num">Monto guía</th><th class="num">Saldo</th><th></th></tr></thead>
+    <table class="table table-sm align-middle mb-0 tabla-agencias">
+      <thead>
+        <tr>
+          <th>Fecha PEI</th>
+          <th>PEI</th>
+          <th>Proveedor</th>
+          <th>N° OC</th>
+          <th class="num">Monto guía</th>
+          <th class="num">Saldo</th>
+          <th></th>
+        </tr>
+      </thead>
       <tbody>
+        {% for bloque in bloques %}
+        <tr class="fila-agencia">
+          <td colspan="4">{{ bloque.agencia }}</td>
+          <td class="num text-muted">{{ bloque.importaciones|length }} mov.</td>
+          {# El saldo neto va en la misma columna que los saldos de abajo, para
+             poder leer el total y sus partes en la misma vertical. #}
+          <td class="num {{ 'saldo-positivo' if bloque.saldo_total >= 0 else 'saldo-negativo' }}">
+            {{ '+' if bloque.saldo_total >= 0 else '' }}{{ bloque.saldo_total|clp }}
+          </td>
+          <td></td>
+        </tr>
         {% for i in bloque.importaciones %}
         <tr>
-          <td>{{ i.fecha_pei|fecha if i.fecha_pei else '—' }}</td>
+          <td class="text-nowrap">{{ i.fecha_pei|fecha if i.fecha_pei else '—' }}</td>
           <td class="fw-semibold">{{ i.pei or '—' }}</td>
-          <td>{{ i.proveedor_nombre or '—' }}</td>
+          <td class="celda-proveedor">{{ i.proveedor_nombre or '—' }}</td>
           <td>{{ i.oc or '—' }}</td>
           <td class="num">{{ i.monto|clp }}</td>
           <td class="num {{ 'text-success' if i.saldo_signado >= 0 else 'text-danger' }}">
             {{ '+' if i.saldo_signado >= 0 else '' }}{{ i.saldo_signado|clp }}
           </td>
-          <td class="text-end"><a href="{{ url_for('importaciones.detalle', importacion_id=i.id) }}" class="small">Ver detalle →</a></td>
+          <td class="text-end"><a href="{{ url_for('importaciones.detalle', importacion_id=i.id) }}" class="small text-nowrap">Ver detalle →</a></td>
         </tr>
+        {% endfor %}
         {% endfor %}
       </tbody>
     </table>
@@ -65,6 +86,6 @@
 </div>
 {% else %}
 <div class="alert alert-info">No hay movimientos de agencia que coincidan con el filtro.</div>
-{% endfor %}
+{% endif %}
 
 {% endblock %}

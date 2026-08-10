@@ -535,3 +535,39 @@ def test_secciones_de_cuadratura_contable_aparecen_plegadas_por_defecto(client, 
     assert 'aria-expanded="false"' in texto
     assert 'class="collapse show"' not in texto
     assert 'aria-expanded="true"' not in texto
+
+
+def test_agencias_usa_una_sola_tabla_para_que_las_columnas_queden_alineadas(
+    client, usuario_admin, empresa, db
+):
+    """Con una tabla por agencia, cada una calculaba sus anchos por su cuenta y
+    las columnas quedaban corridas de un grupo a otro. Una sola tabla con filas
+    de encabezado por agencia es lo que garantiza que caigan en la misma vertical.
+    """
+    import re
+    from datetime import date
+    from tests.conftest import login
+
+    # Dos agencias con nombres y proveedores de largo muy distinto: es el caso
+    # que antes descuadraba los anchos entre grupos.
+    db.session.add_all([
+        Importacion(empresa_id=empresa.id, agencia="UNITED PARCEL SERVICE DE CHILE LIMITADA",
+                    fecha_pei=date(2026, 7, 6), pei=62, oc="14423",
+                    proveedor_nombre="ONLINE COMPONENTS"),
+        Importacion(empresa_id=empresa.id, agencia="DHL",
+                    fecha_pei=date(2026, 7, 8), pei=56, oc="14443",
+                    proveedor_nombre="MCMASTER CAR"),
+    ])
+    db.session.commit()
+
+    login(client, "admin@test.cl")
+    texto = client.get("/importaciones/agencias").get_data(as_text=True)
+
+    assert texto.count("<table") == 1, "cada agencia volvió a tener su propia tabla"
+    assert texto.count("fila-agencia") >= 2      # una fila de encabezado por agencia
+    assert "UNITED PARCEL SERVICE DE CHILE LIMITADA" in texto
+    assert "DHL" in texto
+    assert "MCMASTER CAR" in texto
+
+    # Los títulos se escriben una sola vez, no uno por grupo.
+    assert len(re.findall(r"<th[^>]*>\s*Monto guía", texto)) == 1

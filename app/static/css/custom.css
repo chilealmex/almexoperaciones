@@ -1189,4 +1189,23 @@ input.campo-excel.esta-vacio::placeholder {
    engordar las celdas. */
 @media (max-width: 992px) {
   .costeo-celda-manual, .costeo-celda-activo-fijo { background-clip: padding-box; }
+/* ===== Movimientos por agencia =====
+   Una sola tabla con una fila de encabezado por agencia. Antes cada agencia
+   era su propia tabla y las columnas quedaban corridas entre grupos. */
+.tabla-agencias .fila-agencia > td {
+  background: #eef2f7;
+  border-top: 2px solid #c8d3e0;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.tabla-agencias .fila-agencia .saldo-positivo { color: #157347; }
+.tabla-agencias .fila-agencia .saldo-negativo { color: #b02a37; }
+
+/* El proveedor es lo más largo; se le deja el espacio y se corta el resto. */
+.tabla-agencias .celda-proveedor {
+  max-width: 22rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
