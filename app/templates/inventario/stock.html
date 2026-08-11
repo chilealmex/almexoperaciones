@@ -125,9 +125,9 @@
 </p>
 {% endif %}
 
-<div class="table-card d-none d-lg-block">
+<div class="table-card table-card-alto d-none d-lg-block">
   <div class="table-responsive">
-    <table class="table table-hover align-middle mb-0" id="tabla-stock">
+    <table class="table table-hover align-middle mb-0 tabla-stock" id="tabla-stock">
       <thead>
         <tr>
           {{ t.th('Código', 'codigo', orden, direccion) }}
@@ -137,10 +137,10 @@
           {{ t.th('Defontana', 'cantidad_defontana', orden, direccion, 'num') }}
           <th class="num">Dif. sistemas</th>
           {{ t.th('Físico', 'cantidad_fisica', orden, direccion, 'num') }}
-          <th>Registrado por</th>
-          {{ t.th('Fecha y hora', 'contado_en', orden, direccion) }}
-          {{ t.th('Ubicación', 'ubicacion', orden, direccion, 'd-none d-xxl-table-cell') }}
-          {{ t.th('Línea de negocio', 'linea_negocio', orden, direccion, 'd-none d-xxl-table-cell') }}
+          <th class="d-none d-xl-table-cell">Registrado por</th>
+          {{ t.th('Fecha y hora', 'contado_en', orden, direccion, 'd-none d-xl-table-cell') }}
+          {{ t.th('Ubicación', 'ubicacion', orden, direccion, 'solo-pantalla-ancha') }}
+          {{ t.th('Línea de negocio', 'linea_negocio', orden, direccion, 'solo-pantalla-ancha') }}
         </tr>
         <tr class="filtros-fila">
           {{ t.filtro('f_codigo', filtros_columna, 'filtros-stock', 'Código') }}
@@ -152,15 +152,15 @@
           {{ t.sin_filtro('num') }}
           {{ t.sin_filtro() }}
           {{ t.sin_filtro() }}
-          {{ t.filtro('f_ubicacion', filtros_columna, 'filtros-stock', 'Ubicación', 'd-none d-xxl-table-cell') }}
-          {{ t.filtro('f_linea', filtros_columna, 'filtros-stock', 'Línea', 'd-none d-xxl-table-cell') }}
+          {{ t.filtro('f_ubicacion', filtros_columna, 'filtros-stock', 'Ubicación', 'solo-pantalla-ancha') }}
+          {{ t.filtro('f_linea', filtros_columna, 'filtros-stock', 'Línea', 'solo-pantalla-ancha') }}
         </tr>
       </thead>
       <tbody>
         {% for i in paginacion.items %}
-        <tr data-fila="{{ i.id }}" class="{{ 'table-warning' if i.tiene_diferencia else '' }}">
+        <tr data-fila="{{ i.id }}" class="{{ 'table-warning' if i.tiene_diferencia else '' }}{{ ' fila-contada' if i.contado }}">
           <td class="text-nowrap fw-semibold">{{ i.codigo }}</td>
-          <td class="celda-nombre"><span class="texto-clamp-2" title="{{ i.nombre or '' }}">{{ i.nombre or '—' }}</span></td>
+          <td class="celda-nombre" title="{{ i.nombre or '' }}">{{ i.nombre or '—' }}</td>
           <td class="text-nowrap">
             {% if i.unidades_coinciden %}
             {{ i.unidad_qms or i.unidad_defontana or '—' }}
@@ -179,9 +179,10 @@
             <span class="badge bg-success">0</span>
             {% endif %}
           </td>
-          <td class="num" style="min-width: 7rem;">
+          <td class="num celda-fisico" style="min-width: 7rem;">
             {% if puede('inventario', 'editar') %}
             <input type="number" inputmode="numeric" class="form-control form-control-sm text-end input-fisico"
+                   placeholder=" "
                    value="{{ i.cantidad_fisica if i.contado else '' }}"
                    data-url="{{ url_for('inventario.stock_contar', item_id=i.id) }}"
                    aria-label="Cantidad física de {{ i.codigo }}">
@@ -189,18 +190,18 @@
             {{ i.cantidad_fisica if i.contado else '—' }}
             {% endif %}
           </td>
-          <td class="celda-registro text-nowrap">
+          <td class="celda-registro text-nowrap d-none d-xl-table-cell">
             {% if i.contado and i.contado_por %}
             {{ i.contado_por.nombre_completo }}
             {% else %}
             <span class="text-muted small">—</span>
             {% endif %}
           </td>
-          <td class="celda-fecha text-nowrap text-muted small">
+          <td class="celda-fecha text-nowrap text-muted small d-none d-xl-table-cell">
             {{ i.contado_en|fecha_hora if i.contado else '—' }}
           </td>
-          <td class="d-none d-xl-table-cell">{{ i.ubicacion or '—' }}</td>
-          <td class="d-none d-xl-table-cell">{{ i.linea_negocio or '—' }}</td>
+          <td class="solo-pantalla-ancha celda-ubicacion" title="{{ i.ubicacion or '' }}">{{ i.ubicacion or '—' }}</td>
+          <td class="solo-pantalla-ancha celda-linea" title="{{ i.linea_negocio or '' }}">{{ i.linea_negocio or '—' }}</td>
         </tr>
         {% else %}
         <tr><td colspan="11" class="text-center text-muted py-4">Sin resultados{% if q %} para "{{ q }}"{% endif %}.</td></tr>

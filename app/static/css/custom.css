@@ -1189,6 +1189,7 @@ input.campo-excel.esta-vacio::placeholder {
    engordar las celdas. */
 @media (max-width: 992px) {
   .costeo-celda-manual, .costeo-celda-activo-fijo { background-clip: padding-box; }
+}
 /* ===== Movimientos por agencia =====
    Una sola tabla con una fila de encabezado por agencia. Antes cada agencia
    era su propia tabla y las columnas quedaban corridas entre grupos. */
@@ -1243,3 +1244,64 @@ input.campo-excel.esta-vacio::placeholder {
    empujaban la tabla fuera de la pantalla. */
 .tabla-resumen-imp .col-acciones .btn { padding: 0.15rem 0.45rem; font-size: 0.8rem; }
 .tabla-resumen-imp .col-notas { max-width: 12rem; }
+
+/* ===== Stock y conteo =====
+   La pantalla de trabajo durante una toma. Lo que se busca: que las filas
+   midan todas lo mismo, que no haya una barra de desplazamiento dentro de
+   otra, y que la casilla donde se escribe lo contado salte a la vista. */
+
+/* Sin alto máximo: la tabla ya vivía dentro de un recuadro con su propia
+   barra, así que había que desplazarse dos veces (la página y la tabla) para
+   llegar a la misma fila. Ahora manda el desplazamiento de la página y el
+   encabezado se queda pegado arriba igual. */
+.table-card.table-card-alto .table-responsive { max-height: none; }
+
+.tabla-stock td,
+.tabla-stock th { vertical-align: middle; }
+
+/* Una línea por celda: el nombre se recortaba a dos y cada fila terminaba con
+   un alto distinto. El nombre completo sigue disponible pasando el mouse. */
+.tabla-stock .celda-nombre {
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* La columna de trabajo. Se marca para encontrarla sin buscar, y lo ya
+   contado queda en verde para ver el avance de un vistazo. */
+.tabla-stock .celda-fisico { background: rgba(255, 214, 0, 0.1); }
+.tabla-stock .input-fisico {
+  min-width: 5.5rem;
+  text-align: right;
+  font-weight: 600;
+}
+.tabla-stock .input-fisico:not(:placeholder-shown) {
+  background: #e7f6ec;
+  border-color: #7cc79a;
+}
+.tabla-stock tr.fila-contada .celda-fisico { background: rgba(25, 135, 84, 0.08); }
+
+/* Las filas con diferencia ya venían resaltadas; se baja el tono para que no
+   compita con la casilla de conteo. */
+.tabla-stock tbody tr.table-warning { --bs-table-bg: rgba(255, 193, 7, 0.12); }
+
+/* Ubicación y línea de negocio también en una línea: son textos largos que
+   volvían a descuadrar el alto de las filas. */
+.tabla-stock .celda-ubicacion,
+.tabla-stock .celda-linea {
+  max-width: 10rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Bootstrap decide por el ancho de la ventana, pero aquí lo que queda libre es
+   la ventana menos el menú lateral. Ubicación y Línea de negocio son datos de
+   apoyo: aparecen recién cuando de verdad sobra sitio. */
+.solo-pantalla-ancha { display: none !important; }
+
+@media (min-width: 1700px) {
+  .tabla-stock .celda-nombre { max-width: 24rem; }
+  .solo-pantalla-ancha { display: table-cell !important; }
+}

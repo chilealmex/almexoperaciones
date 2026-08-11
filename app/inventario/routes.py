@@ -54,6 +54,20 @@ def resumen():
 FILTROS_STOCK = ("todos", "diferencias", "sin_contar", "contados")
 
 
+def filtro_stock(args, por_defecto="todos") -> str:
+    """Qué se está mostrando cuando no se eligió nada.
+
+    La pantalla llega con "sin_contar": durante una toma, lo ya contado no
+    requiere trabajo y abrirla con los miles de artículos obliga a filtrar a
+    mano en cada recarga. La descarga a Excel, en cambio, llega con "todos":
+    un archivo descargado se entiende como el registro completo, y entregar
+    sólo una parte sin avisar se presta a confusión. Si el usuario eligió un
+    filtro, ese manda en los dos casos.
+    """
+    filtro = (args.get("filtro") or "").strip()
+    return filtro if filtro in FILTROS_STOCK else por_defecto
+
+
 COLUMNAS_STOCK = {
     "codigo": ItemConteoInventario.codigo,
     "nombre": ItemConteoInventario.nombre,
@@ -68,16 +82,14 @@ COLUMNAS_STOCK = {
 }
 
 
-def _consulta_stock(args):
+def _consulta_stock(args, filtro_por_defecto="todos"):
     """Consulta del cruce de stock con búsqueda, filtros por columna y orden aplicados.
 
     La comparte el listado en pantalla y la exportación a Excel, para que el
     informe descargado sea exactamente lo que el usuario está viendo.
     """
     q = (args.get("q") or "").strip()
-    filtro = args.get("filtro", "todos")
-    if filtro not in FILTROS_STOCK:
-        filtro = "todos"
+    filtro = filtro_stock(args, filtro_por_defecto)
 
     base = ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id)
     if q:
@@ -114,7 +126,9 @@ def _consulta_stock(args):
 @bp.route("/stock")
 @require_permission("inventario", "ver")
 def stock():
-    consulta, q, filtro, filtros_columna, orden, direccion = _consulta_stock(request.args)
+    consulta, q, filtro, filtros_columna, orden, direccion = _consulta_stock(
+        request.args, filtro_por_defecto="sin_contar"
+    )
     pagina = request.args.get("pagina", 1, type=int)
     paginacion = consulta.paginate(page=max(1, pagina), per_page=100, error_out=False)
 
