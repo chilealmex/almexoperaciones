@@ -1,10 +1,12 @@
 document.addEventListener("DOMContentLoaded", function () {
-  var alerts = document.querySelectorAll(".alert");
-  alerts.forEach(function (alert) {
-    setTimeout(function () {
-      alert.classList.remove("show");
-    }, 6000);
-  });
+  // Los avisos ya NO se borran solos.
+  //
+  // Antes desaparecían a los 6 segundos. Con una importación que tarda cerca
+  // de un minuto, para cuando la persona volvía a mirar la pantalla el aviso
+  // ya no estaba: quedaba sin saber si el archivo se cargó bien o falló.
+  // Ahora se quedan hasta que se cierran con la X o hasta cambiar de página,
+  // que además es lo que corresponde para un error: no debería poder pasar
+  // inadvertido.
 
   // Filtros escritos bajo los títulos de las tablas: se envían solos tras una
   // pausa al escribir, o al instante con Enter / al cambiar un desplegable.
