@@ -181,12 +181,17 @@ class ItemConteoInventario(db.Model, _CalculosConteoMixin):
     linea_negocio = db.Column(db.String(120), nullable=True)
     ubicacion = db.Column(db.String(255), nullable=True)
     categoria = db.Column(db.String(120), nullable=True)
-    cantidad_qms = db.Column(db.Integer, default=0, nullable=False)
-    cantidad_defontana = db.Column(db.Integer, default=0, nullable=False)
-    cantidad_fisica = db.Column(db.Integer, nullable=True)
+    # BigInteger y no Integer: el entero normal de PostgreSQL llega a
+    # 2.147.483.647 y un valor mayor no se guarda mal, revienta la importación
+    # entera con un error 500. Basta una celda con un costo o un stock fuera de
+    # rango en la planilla —o una columna leída como el total en vez del
+    # unitario— para dejar sin cargar el archivo completo.
+    cantidad_qms = db.Column(db.BigInteger, default=0, nullable=False)
+    cantidad_defontana = db.Column(db.BigInteger, default=0, nullable=False)
+    cantidad_fisica = db.Column(db.BigInteger, nullable=True)
     # Costo unitario y unidad de medida según cada sistema (para el ajuste de inventario)
-    costo_unitario_qms = db.Column(db.Integer, nullable=True)
-    costo_unitario_defontana = db.Column(db.Integer, nullable=True)
+    costo_unitario_qms = db.Column(db.BigInteger, nullable=True)
+    costo_unitario_defontana = db.Column(db.BigInteger, nullable=True)
     unidad_qms = db.Column(db.String(20), nullable=True)
     unidad_defontana = db.Column(db.String(20), nullable=True)
     contado_por_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"), nullable=True)
@@ -278,12 +283,14 @@ class TomaInventarioDetalle(db.Model, _CalculosConteoMixin):
 
     unidad_qms = db.Column(db.String(20), nullable=True)
     unidad_defontana = db.Column(db.String(20), nullable=True)
-    costo_unitario_qms = db.Column(db.Integer, nullable=True)
-    costo_unitario_defontana = db.Column(db.Integer, nullable=True)
+    # Del mismo tipo que en el cruce vivo: al cerrar una toma estos valores se
+    # copian tal cual, así que si aquí fueran más chicos el cierre fallaría.
+    costo_unitario_qms = db.Column(db.BigInteger, nullable=True)
+    costo_unitario_defontana = db.Column(db.BigInteger, nullable=True)
 
-    cantidad_qms = db.Column(db.Integer, default=0, nullable=False)
-    cantidad_defontana = db.Column(db.Integer, default=0, nullable=False)
-    cantidad_fisica = db.Column(db.Integer, nullable=True)
+    cantidad_qms = db.Column(db.BigInteger, default=0, nullable=False)
+    cantidad_defontana = db.Column(db.BigInteger, default=0, nullable=False)
+    cantidad_fisica = db.Column(db.BigInteger, nullable=True)
 
     contado_por_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"), nullable=True)
     contado_en = db.Column(db.DateTime, nullable=True)

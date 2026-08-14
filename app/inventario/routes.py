@@ -3,9 +3,10 @@ import io
 from collections import Counter
 from datetime import date, datetime, timezone
 
-from flask import render_template, redirect, url_for, flash, request, abort, jsonify, make_response
+from flask import render_template, redirect, url_for, flash, request, abort, jsonify, make_response, current_app
 from flask_login import current_user
 from sqlalchemy import or_, and_
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.inventario import bp
 from app.inventario.forms import AccionForm, ImportarCsvForm
@@ -1075,6 +1076,35 @@ def conteo_plantilla_defontana():
     )
 
 
+def _avisar_fallo_de_importacion(error, sistema: str) -> None:
+    """Deja un mensaje entendible en vez de una página de error.
+
+    Si la importación revienta, la persona ve un "Internal Server Error" sin
+    ninguna pista: no sabe si el archivo se cargó a medias, si tiene que
+    reintentar, ni qué corregir. Se deshace lo escrito y se explica qué pasó.
+    """
+    db.session.rollback()
+    detalle = str(getattr(error, "orig", error))
+    if "out of range" in detalle or "too large" in detalle:
+        mensaje = (
+            f"No se pudo importar {sistema}: hay una cantidad o un costo demasiado grande "
+            "en la planilla. Suele ser una celda con un número mal pegado, o la columna "
+            "de valor total leída como costo unitario. Revisa el archivo y vuelve a subirlo."
+        )
+    elif "value too long" in detalle:
+        mensaje = (
+            f"No se pudo importar {sistema}: algún texto de la planilla es más largo de lo "
+            "que admite el sistema. Revisa códigos y descripciones muy extensos."
+        )
+    else:
+        mensaje = (
+            f"No se pudo importar {sistema}. No se guardó nada, así que puedes corregir el "
+            "archivo y volver a intentarlo. Detalle técnico: " + detalle[:200]
+        )
+    current_app.logger.exception("Falló la importación de %s", sistema)
+    flash(mensaje, "danger")
+
+
 def _resumen_importacion(resultado: dict) -> str:
     """Texto del aviso tras importar, mencionando los congelados sólo si los hubo."""
     detalle = [f"{resultado['creados']} nuevos", f"{resultado['actualizados']} actualizados"]
@@ -1095,6 +1125,8 @@ def conteo_importar_qms():
             flash(f"QMS importado: {_resumen_importacion(resultado)}", "success")
         except ValueError as e:
             flash(str(e), "danger")
+        except SQLAlchemyError as e:
+            _avisar_fallo_de_importacion(e, "QMS")
     else:
         flash("Selecciona un archivo .csv o .xlsx válido.", "danger")
     return redirect(url_for("inventario.conteo_importar"))
@@ -1112,6 +1144,8 @@ def conteo_importar_defontana():
             flash(f"Defontana importado: {_resumen_importacion(resultado)}", "success")
         except ValueError as e:
             flash(str(e), "danger")
+        except SQLAlchemyError as e:
+            _avisar_fallo_de_importacion(e, "Defontana")
     else:
         flash("Selecciona un archivo .csv o .xlsx válido.", "danger")
     return redirect(url_for("inventario.conteo_importar"))

@@ -770,3 +770,80 @@ def test_unificar_junta_el_par_con_caracter_invisible(client, usuario_admin, emp
     assert items[0].cantidad_qms == 10
     assert items[0].cantidad_defontana == 4
     assert items[0].cantidad_fisica == 9  # el conteo de bodega se conserva
+
+
+# --- Valores fuera de rango: reventaban la importación entera con un error 500 ---
+
+def test_un_costo_gigante_no_tumba_la_importacion(db, empresa):
+    """El entero normal de PostgreSQL llega a 2.147.483.647.
+
+    Una sola celda por sobre ese valor no se guardaba mal: hacía fallar el
+    archivo completo con un error 500, sin cargar nada y sin decir por qué.
+    """
+    qms = """﻿Sucursal;Linea Negocio;Categoria;Stock;Descripción;Unidad;Código Único;ubicacion_bodega;Valor Unitario
+Casa Matriz;GOMAS;CAT;1;ARTICULO CARO;UN;CARO-01;RACK;5000000000
+"""
+    resultado = importar_qms(_fs(qms.encode("utf-8"), "qms.csv"), empresa.id)
+    assert resultado["creados"] == 1
+
+    item = ItemConteoInventario.query.filter_by(codigo="CARO-01").one()
+    assert item.costo_unitario_qms == 5_000_000_000
+    assert item.costo_unitario_qms > 2_147_483_647  # no cabría en un Integer
+
+
+def test_un_stock_gigante_tampoco_la_tumba(db, empresa):
+    defontana = (
+        "CodArticulo;Descripci\xf3n Art\xedculo;CodBodega;Nombre Bodega;Saldo Stock;Unidad\r\n"
+        '"MUCHO-01";"ARTICULO";"BC";"BODEGA";"3000000000";"UN"\r\n'
+    )
+    resultado = importar_defontana(_fs(defontana.encode("cp1252"), "def.csv"), empresa.id)
+    assert resultado["creados"] == 1
+    assert ItemConteoInventario.query.filter_by(codigo="MUCHO-01").one().cantidad_defontana == 3_000_000_000
+
+
+def test_las_cantidades_y_costos_son_bigint():
+    """Las pruebas corren en SQLite, que no respeta el límite del Integer.
+
+    Sin esta comprobación, volver las columnas a Integer pasaría inadvertido
+    aquí y reventaría recién en producción, sobre PostgreSQL, dejando la
+    importación diaria sin funcionar.
+    """
+    from sqlalchemy import BigInteger
+
+    from app.models.conteo_inventario import TomaInventarioDetalle
+
+    campos = ("cantidad_qms", "cantidad_defontana", "cantidad_fisica",
+              "costo_unitario_qms", "costo_unitario_defontana")
+    for modelo in (ItemConteoInventario, TomaInventarioDetalle):
+        for campo in campos:
+            tipo = modelo.__table__.columns[campo].type
+            assert isinstance(tipo, BigInteger), (
+                f"{modelo.__tablename__}.{campo} debería ser BigInteger, es {tipo}"
+            )
+
+
+def test_si_la_importacion_falla_se_avisa_en_vez_de_mostrar_un_error_500(client, usuario_admin, empresa, db):
+    """Una página de "Internal Server Error" no le dice nada a quien importa."""
+    from unittest.mock import patch
+
+    from sqlalchemy.exc import DataError
+    from tests.conftest import login
+
+    login(client, "admin@test.cl")
+    planilla = (
+        "﻿Sucursal;Linea Negocio;Categoria;Stock;Descripción;Unidad;Código Único;ubicacion_bodega\n"
+        "Casa Matriz;GOMAS;CAT;1;ARTICULO;UN;COD-001;RACK\n"
+    ).encode("utf-8")
+
+    fallo = DataError("INSERT ...", {}, Exception("integer out of range"))
+    with patch("app.inventario.routes.importar_qms", side_effect=fallo):
+        respuesta = client.post(
+            "/inventario/conteo/importar/qms",
+            data={"qms-archivo": (io.BytesIO(planilla), "qms.csv")},
+            content_type="multipart/form-data", follow_redirects=True,
+        )
+
+    assert respuesta.status_code == 200, "debe responder la página, no un error 500"
+    texto = respuesta.get_data(as_text=True)
+    assert "No se pudo importar QMS" in texto
+    assert "demasiado grande" in texto
