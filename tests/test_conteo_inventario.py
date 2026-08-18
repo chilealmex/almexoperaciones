@@ -801,25 +801,37 @@ def test_un_stock_gigante_tampoco_la_tumba(db, empresa):
     assert ItemConteoInventario.query.filter_by(codigo="MUCHO-01").one().cantidad_defontana == 3_000_000_000
 
 
-def test_las_cantidades_y_costos_son_bigint():
+def test_las_cantidades_y_costos_aguantan_cifras_grandes():
     """Las pruebas corren en SQLite, que no respeta el límite del Integer.
 
     Sin esta comprobación, volver las columnas a Integer pasaría inadvertido
     aquí y reventaría recién en producción, sobre PostgreSQL, dejando la
     importación diaria sin funcionar.
+
+    Los costos son BigInteger (pesos enteros, sin techo práctico) y las
+    cantidades numeric(22,3), que admite las mismas cifras y además los
+    decimales de los artículos que se miden en metros o kilos.
     """
-    from sqlalchemy import BigInteger
+    from sqlalchemy import BigInteger, Numeric
 
     from app.models.conteo_inventario import TomaInventarioDetalle
 
-    campos = ("cantidad_qms", "cantidad_defontana", "cantidad_fisica",
-              "costo_unitario_qms", "costo_unitario_defontana")
+    esperado = {
+        "cantidad_qms": Numeric,
+        "cantidad_defontana": Numeric,
+        "cantidad_fisica": Numeric,
+        "costo_unitario_qms": BigInteger,
+        "costo_unitario_defontana": BigInteger,
+    }
     for modelo in (ItemConteoInventario, TomaInventarioDetalle):
-        for campo in campos:
+        for campo, tipo_esperado in esperado.items():
             tipo = modelo.__table__.columns[campo].type
-            assert isinstance(tipo, BigInteger), (
-                f"{modelo.__tablename__}.{campo} debería ser BigInteger, es {tipo}"
+            assert isinstance(tipo, tipo_esperado), (
+                f"{modelo.__tablename__}.{campo} debería ser {tipo_esperado.__name__}, es {tipo}"
             )
+            if tipo_esperado is Numeric:
+                # 19 enteros (el rango del bigint que había antes) + 3 decimales.
+                assert (tipo.precision, tipo.scale) == (22, 3)
 
 
 def test_si_la_importacion_falla_se_avisa_en_vez_de_mostrar_un_error_500(client, usuario_admin, empresa, db):

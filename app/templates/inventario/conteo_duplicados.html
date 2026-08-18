@@ -51,11 +51,11 @@
                 {% endif %}
               </td>
               <td>{{ item.nombre or '—' }}</td>
-              <td class="num">{{ item.cantidad_qms }}</td>
-              <td class="num">{{ item.cantidad_defontana }}</td>
+              <td class="num">{{ item.cantidad_qms|cantidad }}</td>
+              <td class="num">{{ item.cantidad_defontana|cantidad }}</td>
               <td class="num">
                 {% if item.cantidad_fisica is not none %}
-                <span class="badge bg-success">{{ item.cantidad_fisica }}</span>
+                <span class="badge bg-success">{{ item.cantidad_fisica|cantidad }}</span>
                 {% else %}<span class="text-muted">—</span>{% endif %}
               </td>
               {% if loop.first %}
@@ -106,11 +106,11 @@
           <tr>
             <td class="fw-semibold">{{ item.codigo }}</td>
             <td>{{ item.nombre or '—' }}</td>
-            <td class="num">{{ item.cantidad_qms }}</td>
-            <td class="num">{{ item.cantidad_defontana }}</td>
+            <td class="num">{{ item.cantidad_qms|cantidad }}</td>
+            <td class="num">{{ item.cantidad_defontana|cantidad }}</td>
             <td class="num">
               {% if item.cantidad_fisica is not none %}
-              <span class="badge bg-warning text-dark">{{ item.cantidad_fisica }}</span>
+              <span class="badge bg-warning text-dark">{{ item.cantidad_fisica|cantidad }}</span>
               {% else %}<span class="text-muted">—</span>{% endif %}
             </td>
           </tr>

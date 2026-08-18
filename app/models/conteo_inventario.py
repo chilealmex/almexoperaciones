@@ -1,7 +1,12 @@
 from datetime import datetime, timezone
 
 from app.extensions import db
+from app.utils.cantidades import DECIMALES, PRECISION, a_entero_clp
 from app.utils.unidades import son_equivalentes
+
+# Tipo común de las cantidades de stock, en las dos tablas del conteo: el cruce
+# vivo y la foto archivada (ver app/utils/cantidades.py).
+CANTIDAD = db.Numeric(PRECISION, DECIMALES)
 
 
 class _CalculosConteoMixin:
@@ -18,9 +23,9 @@ class _CalculosConteoMixin:
         return self.cantidad_fisica is not None
 
     @property
-    def diferencia_sistemas(self) -> int:
+    def diferencia_sistemas(self):
         """QMS - Defontana. Distinto de 0 significa que los dos sistemas no cuadran entre sí."""
-        return self.cantidad_qms - self.cantidad_defontana
+        return (self.cantidad_qms or 0) - (self.cantidad_defontana or 0)
 
     @property
     def diferencia_fisica_qms(self):
@@ -45,22 +50,26 @@ class _CalculosConteoMixin:
             return self.costo_unitario_qms
         return self.costo_unitario_defontana
 
+    # Las valorizaciones se redondean a pesos enteros: la cantidad puede traer
+    # decimales (12,5 metros) pero la plata en Chile no tiene centavos, y estas
+    # cifras se guardan y se muestran como pesos.
+
     @property
     def valor_qms(self) -> int:
         """Costo unitario QMS x cantidad QMS. No sustituye el costo si falta: es 0."""
-        return (self.cantidad_qms or 0) * (self.costo_unitario_qms or 0)
+        return a_entero_clp((self.cantidad_qms or 0) * (self.costo_unitario_qms or 0))
 
     @property
     def valor_defontana(self) -> int:
         """Costo unitario Defontana x cantidad Defontana. Nunca usa el costo de QMS como reemplazo."""
-        return (self.cantidad_defontana or 0) * (self.costo_unitario_defontana or 0)
+        return a_entero_clp((self.cantidad_defontana or 0) * (self.costo_unitario_defontana or 0))
 
     @property
     def valor_fisico(self):
         """Valorización del conteo físico al costo de referencia. None si no se ha contado."""
         if not self.contado:
             return None
-        return self.cantidad_fisica * (self.costo_referencia or 0)
+        return a_entero_clp(self.cantidad_fisica * (self.costo_referencia or 0))
 
     @property
     def diferencia_costo_unitario(self):
@@ -92,13 +101,15 @@ class _CalculosConteoMixin:
         """Valor del ajuste contra QMS: (físico - QMS) x costo de referencia."""
         if not self.contado:
             return None
-        return (self.cantidad_fisica - (self.cantidad_qms or 0)) * (self.costo_referencia or 0)
+        return a_entero_clp((self.cantidad_fisica - (self.cantidad_qms or 0)) * (self.costo_referencia or 0))
 
     @property
     def diferencia_valor_fisico_defontana(self):
         if not self.contado:
             return None
-        return (self.cantidad_fisica - (self.cantidad_defontana or 0)) * (self.costo_referencia or 0)
+        return a_entero_clp(
+            (self.cantidad_fisica - (self.cantidad_defontana or 0)) * (self.costo_referencia or 0)
+        )
 
     @property
     def desviacion_costo_pct(self):
@@ -121,7 +132,7 @@ class _CalculosConteoMixin:
         diferencia = self.diferencia_costo_unitario
         if diferencia is None:
             return None
-        return diferencia * (self.cantidad_qms or 0)
+        return a_entero_clp(diferencia * (self.cantidad_qms or 0))
 
     @property
     def par_de_unidades(self):
@@ -186,9 +197,11 @@ class ItemConteoInventario(db.Model, _CalculosConteoMixin):
     # entera con un error 500. Basta una celda con un costo o un stock fuera de
     # rango en la planilla —o una columna leída como el total en vez del
     # unitario— para dejar sin cargar el archivo completo.
-    cantidad_qms = db.Column(db.BigInteger, default=0, nullable=False)
-    cantidad_defontana = db.Column(db.BigInteger, default=0, nullable=False)
-    cantidad_fisica = db.Column(db.BigInteger, nullable=True)
+    # Numeric y no entero: hay artículos que se miden en metros, kilos o litros
+    # y "12,5" es una cantidad real. Tres decimales (ver app/utils/cantidades.py).
+    cantidad_qms = db.Column(CANTIDAD, default=0, nullable=False)
+    cantidad_defontana = db.Column(CANTIDAD, default=0, nullable=False)
+    cantidad_fisica = db.Column(CANTIDAD, nullable=True)
     # Costo unitario y unidad de medida según cada sistema (para el ajuste de inventario)
     costo_unitario_qms = db.Column(db.BigInteger, nullable=True)
     costo_unitario_defontana = db.Column(db.BigInteger, nullable=True)
@@ -288,9 +301,9 @@ class TomaInventarioDetalle(db.Model, _CalculosConteoMixin):
     costo_unitario_qms = db.Column(db.BigInteger, nullable=True)
     costo_unitario_defontana = db.Column(db.BigInteger, nullable=True)
 
-    cantidad_qms = db.Column(db.BigInteger, default=0, nullable=False)
-    cantidad_defontana = db.Column(db.BigInteger, default=0, nullable=False)
-    cantidad_fisica = db.Column(db.BigInteger, nullable=True)
+    cantidad_qms = db.Column(CANTIDAD, default=0, nullable=False)
+    cantidad_defontana = db.Column(CANTIDAD, default=0, nullable=False)
+    cantidad_fisica = db.Column(CANTIDAD, nullable=True)
 
     contado_por_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"), nullable=True)
     contado_en = db.Column(db.DateTime, nullable=True)

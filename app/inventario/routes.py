@@ -22,10 +22,11 @@ from app.utils.importar_conteo import (
     importar_qms,
     unificar_grupo,
 )
+from app.utils.cantidades import a_cantidad
 from app.utils.formatting import format_clp, format_fecha_hora
 from app.utils.graficos import COLOR, serie, widget_seguro
 from app.utils.paneles import panel_inventario
-from app.utils.exportar import responder_excel, responder_plantilla_excel, col, CLP, ENTERO, FECHA, PORCENTAJE
+from app.utils.exportar import responder_excel, responder_plantilla_excel, col, CLP, CANTIDAD, FECHA, PORCENTAJE
 
 
 def _stats_inventario():
@@ -378,9 +379,9 @@ def historial_excel(toma_id):
         col("Unidad Defontana", ancho=17),
         col("Costo unitario QMS", ancho=18, formato=CLP),
         col("Costo unitario Defontana", ancho=22, formato=CLP),
-        col("Stock QMS", ancho=12, formato=ENTERO, total="suma"),
-        col("Stock Defontana", ancho=16, formato=ENTERO, total="suma"),
-        col("Stock físico", ancho=13, formato=ENTERO, total="suma"),
+        col("Stock QMS", ancho=12, formato=CANTIDAD, total="suma"),
+        col("Stock Defontana", ancho=16, formato=CANTIDAD, total="suma"),
+        col("Stock físico", ancho=13, formato=CANTIDAD, total="suma"),
         col("Contado por", ancho=26),
         col("Fecha y hora del conteo", ancho=22),
         col("Categoría", ancho=24),
@@ -458,12 +459,12 @@ def stock_excel():
         col("Costo unitario QMS", ancho=18, formato=CLP),
         col("Costo unitario Defontana", ancho=22, formato=CLP),
         col("Dif. costo unitario", ancho=18, formato=CLP),
-        col("Stock QMS", ancho=12, formato=ENTERO, total="suma"),
-        col("Stock Defontana", ancho=16, formato=ENTERO, total="suma"),
-        col("Dif. sistemas", ancho=14, formato=ENTERO, total="suma"),
-        col("Stock físico", ancho=13, formato=ENTERO, total="suma"),
-        col("Físico vs QMS", ancho=14, formato=ENTERO, total="suma"),
-        col("Físico vs Defontana", ancho=18, formato=ENTERO, total="suma"),
+        col("Stock QMS", ancho=12, formato=CANTIDAD, total="suma"),
+        col("Stock Defontana", ancho=16, formato=CANTIDAD, total="suma"),
+        col("Dif. sistemas", ancho=14, formato=CANTIDAD, total="suma"),
+        col("Stock físico", ancho=13, formato=CANTIDAD, total="suma"),
+        col("Físico vs QMS", ancho=14, formato=CANTIDAD, total="suma"),
+        col("Físico vs Defontana", ancho=18, formato=CANTIDAD, total="suma"),
         col("Estado del conteo", ancho=18),
         col("Contado por", ancho=26),
         col("Fecha y hora del conteo", ancho=22),
@@ -520,10 +521,12 @@ def stock_contar(item_id):
         item.contado_por_id = None
         item.contado_en = None
     else:
-        try:
-            cantidad = int(valor)
-        except ValueError:
-            return jsonify({"ok": False, "error": "Ingresa un número entero."}), 400
+        # Se aceptan decimales: hay artículos que se cuentan en metros, kilos o
+        # litros, y ahí "12,5" es la cantidad real. Vale escribirlo con coma o
+        # con punto, que es como sale de la calculadora del teléfono.
+        cantidad = a_cantidad(valor)
+        if cantidad is None:
+            return jsonify({"ok": False, "error": "Ingresa un número, por ejemplo 12 o 12,5."}), 400
         if cantidad < 0:
             return jsonify({"ok": False, "error": "La cantidad no puede ser negativa."}), 400
         item.cantidad_fisica = cantidad
@@ -748,9 +751,9 @@ def ajuste_excel():
         col("Descripción", ancho=48),
         col("Costo unitario QMS", ancho=18, formato=CLP),
         col("Costo unitario Defontana", ancho=22, formato=CLP),
-        col("Stock QMS", ancho=12, formato=ENTERO, total="suma"),
-        col("Stock Defontana", ancho=16, formato=ENTERO, total="suma"),
-        col("Stock físico", ancho=13, formato=ENTERO, total="suma"),
+        col("Stock QMS", ancho=12, formato=CANTIDAD, total="suma"),
+        col("Stock Defontana", ancho=16, formato=CANTIDAD, total="suma"),
+        col("Stock físico", ancho=13, formato=CANTIDAD, total="suma"),
         col("Valor QMS", ancho=16, formato=CLP, total="suma"),
         col("Valor Defontana", ancho=17, formato=CLP, total="suma"),
         col("Dif. valorización", ancho=18, formato=CLP, total="suma"),

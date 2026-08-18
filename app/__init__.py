@@ -1,8 +1,10 @@
 import logging
 import os
 import sys
+from decimal import Decimal
 
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, g
+from flask.json.provider import DefaultJSONProvider
 from flask_wtf.csrf import CSRFError
 from werkzeug.exceptions import HTTPException
 
@@ -14,9 +16,26 @@ from app.utils.navegacion import construir_navegacion, ENDPOINT_A_SUBMODULO
 _SIN_ESPECIFICAR = object()
 
 
+class _JSONConDecimales(DefaultJSONProvider):
+    """Deja que las respuestas JSON lleven Decimal.
+
+    Las cantidades de inventario se guardan con decimales (metros, kilos), y el
+    conteo de la pantalla de stock responde por JSON con esas diferencias. Sin
+    esto, cada conteo de un artículo medido en metros terminaría en error 500.
+    """
+
+    @staticmethod
+    def default(objeto):
+        if isinstance(objeto, Decimal):
+            # float y no str: el JavaScript de la pantalla los usa como números.
+            return float(objeto)
+        return DefaultJSONProvider.default(objeto)
+
+
 def create_app(config_name=None):
     config_name = config_name or os.environ.get("FLASK_ENV", "development")
     app = Flask(__name__, instance_relative_config=True)
+    app.json = _JSONConDecimales(app)
     app.config.from_object(CONFIG_MAP[config_name])
 
     os.makedirs(app.instance_path, exist_ok=True)

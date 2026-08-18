@@ -16,6 +16,7 @@ Uso típico desde una vista:
 """
 
 from datetime import date, datetime
+from decimal import Decimal
 from io import BytesIO
 
 from flask import make_response
@@ -27,6 +28,9 @@ from openpyxl.utils import get_column_letter
 CLP = '"$"#,##0;[Red]-"$"#,##0'
 ENTERO = "#,##0"
 DECIMAL = "#,##0.00"
+# Cantidades de inventario: los decimales se muestran sólo si existen, para que
+# un stock de 1.234 unidades no salga como "1.234,000" al lado de "12,5 metros".
+CANTIDAD = "#,##0.###"
 FECHA = "DD-MM-YYYY"
 PORCENTAJE = "0.0%"
 
@@ -109,7 +113,9 @@ def _escribir_totales(hoja, columnas, filas, fila_totales):
             total = sum(
                 valores[indice - 1]
                 for valores in filas
-                if indice - 1 < len(valores) and isinstance(valores[indice - 1], (int, float))
+                if indice - 1 < len(valores)
+                and isinstance(valores[indice - 1], (int, float, Decimal))
+                and not isinstance(valores[indice - 1], bool)
             )
             celda.value = total
             if columna["formato"]:

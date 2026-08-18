@@ -117,9 +117,9 @@
           </td>
           <td class="num">{{ d.costo_unitario_qms|clp if d.costo_unitario_qms is not none else '—' }}</td>
           <td class="num">{{ d.costo_unitario_defontana|clp if d.costo_unitario_defontana is not none else '—' }}</td>
-          <td class="num">{{ d.cantidad_qms }}</td>
-          <td class="num">{{ d.cantidad_defontana }}</td>
-          <td class="num">{{ d.cantidad_fisica if d.contado else '—' }}</td>
+          <td class="num">{{ d.cantidad_qms|cantidad }}</td>
+          <td class="num">{{ d.cantidad_defontana|cantidad }}</td>
+          <td class="num">{{ d.cantidad_fisica|cantidad if d.contado else '—' }}</td>
           <td class="text-nowrap">
             {% if d.contado_por %}
             <div class="small">{{ d.contado_por.nombre_completo }}</div>

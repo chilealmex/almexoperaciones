@@ -1,6 +1,8 @@
 from datetime import timezone
 from zoneinfo import ZoneInfo
 
+from app.utils.cantidades import format_cantidad, format_cantidad_signo
+
 # Las fechas se guardan en UTC y se muestran en hora de Chile continental.
 ZONA_LOCAL = ZoneInfo("America/Santiago")
 
@@ -47,5 +49,7 @@ def format_fecha_hora(value) -> str:
 def register_filters(app):
     app.jinja_env.filters["clp"] = format_clp
     app.jinja_env.filters["numero"] = format_numero
+    app.jinja_env.filters["cantidad"] = format_cantidad
+    app.jinja_env.filters["cantidad_signo"] = format_cantidad_signo
     app.jinja_env.filters["fecha"] = format_fecha
     app.jinja_env.filters["fecha_hora"] = format_fecha_hora

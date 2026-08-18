@@ -7,30 +7,20 @@ from sqlalchemy import update
 
 from app.extensions import db
 from app.models.conteo_inventario import ItemConteoInventario
+from app.utils.cantidades import a_cantidad
 
 _ESPACIOS_RE = re.compile(r"\s+")
+CERO = a_cantidad(0)
 
 
-def _a_entero(valor) -> int:
-    """Convierte un número de stock (típicamente entero, a veces con decimales) a int.
+def _a_cantidad(valor):
+    """Convierte un número de stock a Decimal, conservando los decimales.
 
-    Acepta tanto texto (CSV) como números nativos (Excel vía openpyxl).
+    Acepta tanto texto (CSV) como números nativos (Excel vía openpyxl). Los
+    decimales no se redondean: hay artículos que se miden en metros o kilos y
+    "12,5" es el stock real, no un entero mal escrito.
     """
-    if valor is None or valor == "":
-        return 0
-    if isinstance(valor, (int, float)):
-        return round(valor)
-    limpio = str(valor).strip()
-    if not limpio:
-        return 0
-    try:
-        return int(limpio)
-    except ValueError:
-        pass
-    try:
-        return round(float(limpio))
-    except ValueError:
-        return 0
+    return a_cantidad(valor, por_defecto=CERO)
 
 
 def _a_monto(valor):
@@ -311,7 +301,7 @@ def importar_qms(file_storage, empresa_id: int, solo_no_contados: bool = False) 
         codigo = _normalizar_codigo(fila.get(columna_codigo) or "")
         if not codigo:
             continue
-        cantidad = _a_entero(fila.get(columna_stock, "0"))
+        cantidad = _a_cantidad(fila.get(columna_stock, "0"))
         if codigo not in acumulado:
             acumulado[codigo] = {
                 "cantidad": 0,
@@ -417,7 +407,7 @@ def importar_defontana(file_storage, empresa_id: int, solo_no_contados: bool = F
         codigo = _normalizar_codigo(fila.get(columna_codigo) or "")
         if not codigo:
             continue
-        cantidad = _a_entero(fila.get(columna_stock, "0"))
+        cantidad = _a_cantidad(fila.get(columna_stock, "0"))
         bodega = _texto(fila.get(columna_bodega), 255) if columna_bodega else ""
         if codigo not in acumulado:
             acumulado[codigo] = {

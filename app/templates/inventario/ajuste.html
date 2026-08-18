@@ -25,11 +25,11 @@
 <div class="row g-3 mb-3">
   <div class="col-6 col-lg-3">
     {{ g.kpi('Valorización QMS', totales.valor_qms|clp, color='var(--chart-1)',
-             pie=totales.stock_qms ~ ' unidades en stock') }}
+             pie=(totales.stock_qms|cantidad) ~ ' unidades en stock') }}
   </div>
   <div class="col-6 col-lg-3">
     {{ g.kpi('Valorización Defontana', totales.valor_defontana|clp, color='var(--brand-500)',
-             pie=totales.stock_defontana ~ ' unidades en stock') }}
+             pie=(totales.stock_defontana|cantidad) ~ ' unidades en stock') }}
   </div>
   {% set dif_valor = totales.valor_qms - totales.valor_defontana %}
   <div class="col-6 col-lg-3">
@@ -56,7 +56,7 @@
     {% call g.tarjeta('Valorización comparada', 'Stock total por fuente, al costo de cada sistema') %}
       {{ g.barras(grafico_valorizacion, vacio='Falta cargar el costo unitario.') }}
       <div class="kpi-foot mt-3">
-        Físico contado: {{ totales.stock_fisico }} unidades sobre {{ totales.contados }} artículos
+        Físico contado: {{ totales.stock_fisico|cantidad }} unidades sobre {{ totales.contados }} artículos
         (QMS declara {{ totales.valor_qms_contados|clp }} para esos mismos artículos).
       </div>
     {% endcall %}
@@ -131,9 +131,9 @@
           <td class="celda-nombre"><span class="texto-clamp-2" title="{{ i.nombre or '' }}">{{ i.nombre or '—' }}</span></td>
           <td class="num">{{ i.costo_unitario_qms|clp if i.costo_unitario_qms is not none else '—' }}</td>
           <td class="num">{{ i.costo_unitario_defontana|clp if i.costo_unitario_defontana is not none else '—' }}</td>
-          <td class="num">{{ i.cantidad_qms }}</td>
-          <td class="num">{{ i.cantidad_defontana }}</td>
-          <td class="num">{{ i.cantidad_fisica if i.contado else '—' }}</td>
+          <td class="num">{{ i.cantidad_qms|cantidad }}</td>
+          <td class="num">{{ i.cantidad_defontana|cantidad }}</td>
+          <td class="num">{{ i.cantidad_fisica|cantidad if i.contado else '—' }}</td>
           <td class="num">{{ i.valor_qms|clp if i.costo_unitario_qms is not none else '—' }}</td>
           <td class="num">{{ i.valor_defontana|clp if i.costo_unitario_defontana is not none else '—' }}</td>
           <td class="num">
@@ -164,9 +164,9 @@
       <tfoot>
         <tr class="fw-bold">
           <td colspan="4">Totales del filtro ({{ totales.articulos }} artículos)</td>
-          <td class="num">{{ totales.stock_qms }}</td>
-          <td class="num">{{ totales.stock_defontana }}</td>
-          <td class="num">{{ totales.stock_fisico }}</td>
+          <td class="num">{{ totales.stock_qms|cantidad }}</td>
+          <td class="num">{{ totales.stock_defontana|cantidad }}</td>
+          <td class="num">{{ totales.stock_fisico|cantidad }}</td>
           <td class="num">{{ totales.valor_qms|clp }}</td>
           <td class="num">{{ totales.valor_defontana|clp }}</td>
           <td class="num">{{ (totales.valor_qms - totales.valor_defontana)|clp }}</td>

@@ -121,6 +121,7 @@
 {% if puede('inventario', 'editar') %}
 <p class="text-muted small">
   Escribe la cantidad contada en la columna <strong>Físico</strong> y presiona Enter (o sal del campo) para guardar.
+  Si el artículo se mide en metros, kilos o litros puedes anotar decimales con coma: <strong>12,5</strong>.
   Las diferencias se recalculan al instante. Los campos bajo cada título filtran el listado y los títulos ordenan al hacer clic.
 </p>
 {% endif %}
@@ -170,24 +171,24 @@
             </span>
             {% endif %}
           </td>
-          <td class="num">{{ i.cantidad_qms }}</td>
-          <td class="num">{{ i.cantidad_defontana }}</td>
+          <td class="num">{{ i.cantidad_qms|cantidad }}</td>
+          <td class="num">{{ i.cantidad_defontana|cantidad }}</td>
           <td class="num">
             {% if i.diferencia_sistemas != 0 %}
-            <span class="badge bg-danger">{{ '%+d'|format(i.diferencia_sistemas) }}</span>
+            <span class="badge bg-danger">{{ i.diferencia_sistemas|cantidad_signo }}</span>
             {% else %}
             <span class="badge bg-success">0</span>
             {% endif %}
           </td>
           <td class="num celda-fisico" style="min-width: 7rem;">
             {% if puede('inventario', 'editar') %}
-            <input type="number" inputmode="numeric" class="form-control form-control-sm text-end input-fisico"
+            <input type="text" inputmode="decimal" class="form-control form-control-sm text-end input-fisico"
                    placeholder=" "
-                   value="{{ i.cantidad_fisica if i.contado else '' }}"
+                   value="{{ i.cantidad_fisica|cantidad if i.contado else '' }}"
                    data-url="{{ url_for('inventario.stock_contar', item_id=i.id) }}"
                    aria-label="Cantidad física de {{ i.codigo }}">
             {% else %}
-            {{ i.cantidad_fisica if i.contado else '—' }}
+            {{ i.cantidad_fisica|cantidad if i.contado else '—' }}
             {% endif %}
           </td>
           <td class="celda-registro text-nowrap d-none d-xl-table-cell">
@@ -221,7 +222,7 @@
         <div class="stock-card-nombre" title="{{ i.nombre or '' }}">{{ i.nombre or '—' }}</div>
       </div>
       {% if i.diferencia_sistemas != 0 %}
-      <span class="badge bg-danger">{{ '%+d'|format(i.diferencia_sistemas) }}</span>
+      <span class="badge bg-danger">{{ i.diferencia_sistemas|cantidad_signo }}</span>
       {% else %}
       <span class="badge bg-success">0</span>
       {% endif %}
@@ -240,21 +241,21 @@
     <div class="stock-card-grid">
       <div>
         <span class="lbl">QMS</span>
-        <span class="val">{{ i.cantidad_qms }}</span>
+        <span class="val">{{ i.cantidad_qms|cantidad }}</span>
       </div>
       <div>
         <span class="lbl">Defontana</span>
-        <span class="val">{{ i.cantidad_defontana }}</span>
+        <span class="val">{{ i.cantidad_defontana|cantidad }}</span>
       </div>
       <div>
         <span class="lbl">Físico</span>
         {% if puede('inventario', 'editar') %}
-        <input type="number" inputmode="numeric" class="form-control form-control-sm input-fisico"
-               value="{{ i.cantidad_fisica if i.contado else '' }}"
+        <input type="text" inputmode="decimal" class="form-control form-control-sm input-fisico"
+               value="{{ i.cantidad_fisica|cantidad if i.contado else '' }}"
                data-url="{{ url_for('inventario.stock_contar', item_id=i.id) }}"
                aria-label="Cantidad física de {{ i.codigo }}">
         {% else %}
-        <span class="val">{{ i.cantidad_fisica if i.contado else '—' }}</span>
+        <span class="val">{{ i.cantidad_fisica|cantidad if i.contado else '—' }}</span>
         {% endif %}
       </div>
     </div>
@@ -263,13 +264,13 @@
       <div class="diff-item">
         vs QMS
         <span class="celda-dif-qms">
-          {% if i.contado %}<span class="badge {{ 'bg-success' if i.diferencia_fisica_qms == 0 else 'bg-danger' }}">{{ '%+d'|format(i.diferencia_fisica_qms) }}</span>{% else %}—{% endif %}
+          {% if i.contado %}<span class="badge {{ 'bg-success' if i.diferencia_fisica_qms == 0 else 'bg-danger' }}">{{ i.diferencia_fisica_qms|cantidad_signo }}</span>{% else %}—{% endif %}
         </span>
       </div>
       <div class="diff-item">
         vs Defontana
         <span class="celda-dif-def">
-          {% if i.contado %}<span class="badge {{ 'bg-success' if i.diferencia_fisica_defontana == 0 else 'bg-danger' }}">{{ '%+d'|format(i.diferencia_fisica_defontana) }}</span>{% else %}—{% endif %}
+          {% if i.contado %}<span class="badge {{ 'bg-success' if i.diferencia_fisica_defontana == 0 else 'bg-danger' }}">{{ i.diferencia_fisica_defontana|cantidad_signo }}</span>{% else %}—{% endif %}
         </span>
       </div>
     </div>
@@ -317,13 +318,24 @@
 (function () {
   var token = "{{ csrf_token() }}";
 
+  // Las cantidades pueden traer decimales (metros, kilos). Se muestran a la
+  // chilena —coma decimal, punto de miles— y sin ceros de relleno, igual que
+  // el filtro |cantidad de las celdas que vienen ya escritas del servidor.
+  function formatearCantidad(valor) {
+    var texto = Math.abs(valor).toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
+    var partes = texto.split('.');
+    partes[0] = partes[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    return (valor < 0 ? '-' : '') + partes.join(',');
+  }
+
   function pintarBadge(celda, valor) {
     if (!celda) return;
     if (valor === null || valor === undefined) {
       celda.innerHTML = '<span class="text-muted small">—</span>';
       return;
     }
-    var signo = valor > 0 ? '+' + valor : String(valor);
+    var texto = formatearCantidad(valor);
+    var signo = valor > 0 ? '+' + texto : texto;
     var clase = valor === 0 ? 'bg-success' : 'bg-danger';
     celda.innerHTML = '<span class="badge ' + clase + '">' + signo + '</span>';
   }
