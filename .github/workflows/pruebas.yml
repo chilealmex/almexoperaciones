@@ -1,0 +1,62 @@
+# Corre la batería de pruebas en cada push y en cada pull request.
+#
+# Hasta ahora lo único que verificaba un cambio era ejecutarlas a mano antes de
+# entregarlo. Eso funciona mientras nadie se olvide; esto no se olvida. Si algo
+# se rompe, aparece una marca roja en el commit ANTES de que Render despliegue,
+# y el error se ve acá en vez de descubrirse con el sitio caído.
+#
+# Ojo con lo que esto NO cubre: las pruebas corren sobre SQLite y no tocan
+# Render ni Neon, así que no detectan problemas del entorno (una conexión que
+# se corta, una variable mal puesta en el panel). Para eso está /estado y el
+# log del despliegue.
+name: Pruebas
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+# Si se empuja dos veces seguidas, la corrida vieja se cancela: interesa el
+# resultado del último commit, no el de todos los intermedios.
+concurrency:
+  group: pruebas-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pruebas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          # La misma versión que usa Render (PYTHON_VERSION en el panel), para
+          # que lo que pasa acá pase también allá.
+          python-version: "3.12.4"
+          cache: pip
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Comprobar que las migraciones tienen una sola cabeza
+        # Dos migraciones en paralelo hacen fallar 'flask db upgrade' en el
+        # despliegue con "Multiple head revisions". Se detecta acá, que es
+        # gratis, en vez de allá, que deja el sitio a medio actualizar.
+        run: |
+          python - <<'FIN'
+          from app.utils.estado_sistema import revision_del_codigo
+          cabeza = revision_del_codigo()
+          if isinstance(cabeza, list):
+              raise SystemExit(f"Hay {len(cabeza)} migraciones sin unir: {', '.join(cabeza)}")
+          print(f"Cabeza de migraciones: {cabeza}")
+          FIN
+
+      - name: Correr las pruebas
+        run: python -m pytest -q

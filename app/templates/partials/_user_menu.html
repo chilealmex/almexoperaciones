@@ -19,6 +19,9 @@
     </li>
     <li><hr class="dropdown-divider"></li>
     <li><a class="dropdown-item" href="{{ url_for('auth.perfil') }}">Mi perfil</a></li>
+    {% if current_user.es_admin_o_superior %}
+    <li><a class="dropdown-item" href="{{ url_for('core.estado') }}">Estado del sistema</a></li>
+    {% endif %}
     <li><a class="dropdown-item" href="{{ url_for('auth.logout') }}">Cerrar sesión</a></li>
   </ul>
 </div>

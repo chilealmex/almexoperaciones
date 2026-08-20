@@ -1,9 +1,31 @@
+# ATENCIÓN: Render NO está aplicando este archivo.
+#
+# Está comprobado: acá dice "--workers 2 --threads 8" y el servidor corre
+# "--workers 3"; acá el buildCommand tiene cuatro tramos y el panel tiene tres.
+# El panel de Render quedó congelado antes del 1 de agosto de 2026 y no volvió
+# a sincronizarse. Ya había pasado en julio (ver el commit que revierte el
+# cambio de nombre del servicio con el comentario "Render no lo aplica via
+# Blueprint sync").
+#
+# O sea: MODIFICAR ESTE ARCHIVO NO CAMBIA NADA EN EL SERVIDOR.
+#
+# La fuente de verdad es el panel de Render (Settings y Environment). Este
+# archivo se mantiene porque describe la configuración correcta y porque sirve
+# si algún día se reconecta el Blueprint, pero cualquier cambio hay que
+# copiarlo a mano al panel.
+#
+# Los valores que deben estar en el panel, y qué hacer cuando un despliegue
+# falla, están en docs/despliegue.md.
+
 services:
   - type: web
     name: gestor-pyme
     runtime: python
     plan: free
-    buildCommand: "pip install -r requirements.txt && flask db upgrade && python seeds/seed_dev.py && python scripts/importar_respaldo_html.py seeds/respaldo_importaciones_20260731.json"
+    # Igual al del panel. El tramo de importar_respaldo_html.py se sacó: era una
+    # carga inicial de una sola vez, ya hecha, y correrla en cada despliegue
+    # sólo agregaba una forma más de que el build fallara.
+    buildCommand: "pip install -r requirements.txt && flask db upgrade && python seeds/seed_dev.py"
     # Los procesos "sync" atienden UNA petición cada uno: con tres personas
     # usando el sistema quedaban todos ocupados, el chequeo de salud de Render
     # esperaba en la cola y a los 5 segundos daba la instancia por caída.

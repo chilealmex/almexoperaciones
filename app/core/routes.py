@@ -11,12 +11,36 @@ from app.models.arriendo import ArriendoEntrada, ArriendoSalida
 from app.models.documento import Documento
 from app.models.importacion import Importacion
 from app.utils import importaciones_calculo as calculo_importaciones
+from app.utils.estado_sistema import estado_del_sistema
 from app.utils.graficos import COLOR, COLOR_ESTADO, serie, proximos_meses, widget_seguro
 
 
 @bp.route("/healthz")
 def healthz():
+    """Chequeo de salud de Render: no toca la base a propósito.
+
+    Si consultara la base, una caída momentánea de la conexión haría que Render
+    diera la instancia por muerta y la reiniciara, empeorando el problema en vez
+    de avisarlo. El diagnóstico de la base va en /estado, que es para mirar.
+    """
     return "ok", 200
+
+
+@bp.route("/estado")
+@login_required
+def estado():
+    """Qué versión está corriendo y si la base está al día.
+
+    Existe para no tener que adivinar cuando algo falla: dice si la base
+    responde, en qué revisión está y cuántas migraciones le faltan respecto del
+    código desplegado. El caso silencioso —código nuevo con base vieja— es el
+    que más cuesta descubrir y acá salta de inmediato.
+    """
+    from app.extensions import db
+
+    if not current_user.es_admin_o_superior:
+        abort(403)
+    return render_template("core/estado.html", estado=estado_del_sistema(db))
 
 
 def _panel_inventario():

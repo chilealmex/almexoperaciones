@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Estado del sistema{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <h1>Estado del sistema</h1>
+    <p class="page-sub">Qué versión está corriendo y si la base de datos está al día con ella.</p>
+  </div>
+</div>
+
+{% if estado.al_dia %}
+<div class="alert alert-success">
+  <strong>Todo en orden.</strong> La base responde y está en la misma versión que el código desplegado.
+</div>
+{% elif not estado.base_responde %}
+<div class="alert alert-danger">
+  <strong>La base de datos no responde.</strong>
+  Mientras esto siga así, las pantallas que consultan datos van a fallar.
+  <div class="small mt-2"><code>{{ estado.error_base }}</code></div>
+</div>
+{% elif estado.cabezas_multiples %}
+<div class="alert alert-danger">
+  <strong>Hay {{ estado.cabezas_multiples|length }} migraciones sin unir.</strong>
+  Dos cambios agregaron migraciones en paralelo. Mientras no se unan, el despliegue
+  va a fallar al aplicarlas.
+  <div class="small mt-2">{{ estado.cabezas_multiples|join(', ') }}</div>
+</div>
+{% else %}
+<div class="alert alert-warning">
+  <strong>La base está atrasada respecto del código.</strong>
+  Falta{{ '' if estado.pendientes|length == 1 else 'n' }}
+  {{ estado.pendientes|length }} migración{{ '' if estado.pendientes|length == 1 else 'es' }} por aplicar.
+  Las pantallas nuevas pueden fallar hasta que se apliquen.
+  <div class="small mt-2">{{ estado.pendientes|join(' → ') }}</div>
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <tbody>
+          <tr>
+            <th style="width: 16rem;">Base de datos</th>
+            <td>
+              {% if estado.base_responde %}
+              <span class="badge bg-success">responde</span>
+              {% else %}
+              <span class="badge bg-danger">no responde</span>
+              {% endif %}
+              <span class="text-muted ms-2">{{ estado.motor }}</span>
+            </td>
+          </tr>
+          <tr>
+            <th>Versión de la base</th>
+            <td><code>{{ estado.revision_base or '—' }}</code></td>
+          </tr>
+          <tr>
+            <th>Versión que espera el código</th>
+            <td><code>{{ estado.revision_codigo or '—' }}</code></td>
+          </tr>
+          <tr>
+            <th>Migraciones del proyecto</th>
+            <td>{{ estado.total_migraciones }}</td>
+          </tr>
+          <tr>
+            <th>Commit desplegado</th>
+            <td><code>{{ estado.commit or 'no informado' }}</code></td>
+          </tr>
+          <tr>
+            <th>Entorno</th>
+            <td>{{ estado.entorno }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="card mt-3">
+  <div class="card-body">
+    <h2 class="h6">Cómo leer esto</h2>
+    <p class="small text-muted mb-2">
+      Las dos versiones tienen que ser iguales. Si la de la base está atrasada, el despliegue
+      subió el código pero la migración no llegó a aplicarse: la aplicación arranca igual, y
+      falla recién cuando alguien entra a una pantalla que usa lo nuevo.
+    </p>
+    <p class="small text-muted mb-0">
+      Para arreglarlo, hay que aplicar las migraciones pendientes contra la base
+      (ver <code>docs/despliegue.md</code>) y volver a desplegar.
+    </p>
+  </div>
+</div>
+
+{% endblock %}
