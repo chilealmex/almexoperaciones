@@ -1305,3 +1305,14 @@ input.campo-excel.esta-vacio::placeholder {
   .tabla-stock .celda-nombre { max-width: 24rem; }
   .solo-pantalla-ancha { display: table-cell !important; }
 }
+
+/* Celdas de texto largo (razón social, descripción del documento) en una sola
+   línea: sin esto las filas de la conciliación crecían a tres renglones y la
+   tabla se volvía ilegible. El texto completo queda en el title, al pasar el
+   cursor. */
+.celda-recortada {
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

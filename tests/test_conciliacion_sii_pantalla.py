@@ -115,6 +115,23 @@ def test_el_detalle_dice_en_que_se_diferencia(client, db, empresa, usuario_admin
     assert "Solo en SII" in body
 
 
+def test_el_detalle_se_abre_con_un_boton_y_no_alarga_las_filas(client, db, empresa, usuario_admin):
+    """El texto largo iba dentro de la fila y la hacía crecer a tres renglones."""
+    login(client, "admin@test.cl")
+    _cargar(client)
+    conciliacion = ConciliacionSii.query.one()
+
+    body = client.get(
+        f"/contabilidad/conciliacion-sii/{conciliacion.id}/compra"
+    ).get_data(as_text=True)
+
+    # El detalle viaja en el botón, no suelto en la celda
+    assert 'data-bs-target="#modal-diferencia"' in body
+    assert 'data-detalle="Neto: $100.000 vs $90.000' in body
+    # Y las razones sociales se recortan a una línea
+    assert "celda-recortada" in body
+
+
 def test_la_tabla_trae_los_totales_de_cada_columna(client, db, empresa, usuario_admin):
     """El otro pedido: los valores totales por columna."""
     login(client, "admin@test.cl")
@@ -248,3 +265,181 @@ def test_aparece_en_el_menu_de_contabilidad(client, db, empresa, usuario_admin):
     login(client, "admin@test.cl")
     body = client.get("/contabilidad/conciliacion-sii").get_data(as_text=True)
     assert "Conciliación SII" in body
+
+
+# --- Aceptar una diferencia que es correcta ---
+#
+# Hay descuadres que no son errores: las facturas de combustible llevan
+# impuesto específico y el SII y Defontana no lo reparten igual entre neto e
+# impuestos. Sin poder darlos por buenos, el mes nunca llega a cero pendientes.
+
+
+def _documento_con_diferencia(libro):
+    return next(d for d in libro.documentos if d.estado == "dif_monto")
+
+
+def _aceptar(client, conciliacion, documento, motivo=None):
+    datos = {"motivo": motivo} if motivo is not None else {}
+    return client.post(
+        f"/contabilidad/conciliacion-sii/{conciliacion.id}/compra/{documento.id}/aceptar",
+        data=datos, follow_redirects=True,
+    )
+
+
+def test_aceptar_una_diferencia_la_saca_de_pendientes(client, db, empresa, usuario_admin):
+    login(client, "admin@test.cl")
+    _cargar(client)
+    conciliacion = ConciliacionSii.query.one()
+    libro = conciliacion.compras
+    pendientes_antes = libro.pendientes
+    documento = _documento_con_diferencia(libro)
+
+    _aceptar(client, conciliacion, documento)
+
+    db.session.expire_all()
+    conciliacion = ConciliacionSii.query.one()
+    documento = db.session.get(ConciliacionSiiDocumento, documento.id)
+    assert documento.aceptado is True
+    assert documento.motivo_aceptacion == "Impuesto específico a los combustibles"
+    assert documento.aceptado_por_id == usuario_admin.id
+    assert documento.aceptado_en is not None
+    assert conciliacion.compras.n_aceptados == 1
+    assert conciliacion.compras.pendientes == pendientes_antes - 1
+
+
+def test_aceptar_no_cambia_ningun_monto(client, db, empresa, usuario_admin):
+    """Aceptar es dejar constancia de una revisión, no corregir la contabilidad."""
+    login(client, "admin@test.cl")
+    _cargar(client)
+    conciliacion = ConciliacionSii.query.one()
+    documento = _documento_con_diferencia(conciliacion.compras)
+    antes = (documento.neto_sii, documento.neto_defontana, documento.total_sii,
+             documento.total_defontana, documento.diferencia, documento.estado)
+
+    _aceptar(client, conciliacion, documento)
+
+    db.session.expire_all()
+    documento = db.session.get(ConciliacionSiiDocumento, documento.id)
+    despues = (documento.neto_sii, documento.neto_defontana, documento.total_sii,
+               documento.total_defontana, documento.diferencia, documento.estado)
+    assert antes == despues
+
+
+def test_se_puede_escribir_otro_motivo(client, db, empresa, usuario_admin):
+    login(client, "admin@test.cl")
+    _cargar(client)
+    conciliacion = ConciliacionSii.query.one()
+    documento = _documento_con_diferencia(conciliacion.compras)
+
+    _aceptar(client, conciliacion, documento, motivo="Nota de crédito emitida en agosto")
+
+    db.session.expire_all()
+    assert db.session.get(
+        ConciliacionSiiDocumento, documento.id
+    ).motivo_aceptacion == "Nota de crédito emitida en agosto"
+
+
+def test_volver_a_pulsar_deshace_la_aceptacion(client, db, empresa, usuario_admin):
+    login(client, "admin@test.cl")
+    _cargar(client)
+    conciliacion = ConciliacionSii.query.one()
+    documento = _documento_con_diferencia(conciliacion.compras)
+    _aceptar(client, conciliacion, documento)
+
+    _aceptar(client, conciliacion, documento)
+
+    db.session.expire_all()
+    documento = db.session.get(ConciliacionSiiDocumento, documento.id)
+    assert documento.aceptado is False
+    assert documento.motivo_aceptacion is None
+    assert ConciliacionSii.query.one().compras.n_aceptados == 0
+
+
+def test_la_aceptacion_sobrevive_a_recargar_los_archivos(client, db, empresa, usuario_admin):
+    """La conciliación se recarga varias veces en el mes; el trabajo no se pierde."""
+    login(client, "admin@test.cl")
+    _cargar(client)
+    conciliacion = ConciliacionSii.query.one()
+    documento = _documento_con_diferencia(conciliacion.compras)
+    llave = (documento.tipo_doc, documento.folio)
+    _aceptar(client, conciliacion, documento, motivo="Impuesto específico")
+
+    _cargar(client)  # se vuelven a subir los mismos archivos
+
+    db.session.expire_all()
+    libro = ConciliacionSii.query.one().compras
+    reaparecido = next(d for d in libro.documentos if (d.tipo_doc, d.folio) == llave)
+    assert reaparecido.aceptado is True
+    assert reaparecido.motivo_aceptacion == "Impuesto específico"
+    assert reaparecido.aceptado_por_id == usuario_admin.id
+    assert libro.n_aceptados == 1
+
+
+def test_si_el_asiento_se_corrige_la_aceptacion_no_se_arrastra(client, db, empresa, usuario_admin):
+    """Aceptada una diferencia, si después el documento pasa a cuadrar, se limpia."""
+    login(client, "admin@test.cl")
+    _cargar(client)
+    conciliacion = ConciliacionSii.query.one()
+    documento = _documento_con_diferencia(conciliacion.compras)
+    _aceptar(client, conciliacion, documento)
+
+    # El libro corregido: ahora el folio 1001 calza con el SII
+    libro_corregido = LIBRO_COMPRAS.replace(
+        "<td>90.000</td><td>0</td><td>17.100</td><td>107.100</td>",
+        "<td>100.000</td><td>0</td><td>19.000</td><td>119.000</td>",
+    )
+    _cargar(client, defontana_compra=_archivo(libro_corregido, "compras.xls", "cp1252"))
+
+    db.session.expire_all()
+    libro = ConciliacionSii.query.one().compras
+    reaparecido = next(d for d in libro.documentos if d.folio == "1001")
+    assert reaparecido.estado == "coincide"
+    assert reaparecido.aceptado is False
+    assert libro.n_aceptados == 0
+
+
+def test_no_se_acepta_un_documento_que_ya_cuadra(client, db, empresa, usuario_admin):
+    login(client, "admin@test.cl")
+    _cargar(client)
+    conciliacion = ConciliacionSii.query.one()
+    cuadrado = next(d for d in conciliacion.ventas.documentos if d.estado == "coincide")
+
+    respuesta = client.post(
+        f"/contabilidad/conciliacion-sii/{conciliacion.id}/venta/{cuadrado.id}/aceptar",
+        data={}, follow_redirects=True,
+    )
+
+    assert "no hay diferencia que aceptar" in respuesta.get_data(as_text=True)
+    db.session.expire_all()
+    assert db.session.get(ConciliacionSiiDocumento, cuadrado.id).aceptado is False
+
+
+def test_el_filtro_de_pendientes_ignora_las_aceptadas(client, db, empresa, usuario_admin):
+    login(client, "admin@test.cl")
+    _cargar(client)
+    conciliacion = ConciliacionSii.query.one()
+    documento = _documento_con_diferencia(conciliacion.compras)
+    _aceptar(client, conciliacion, documento)
+
+    url = f"/contabilidad/conciliacion-sii/{conciliacion.id}/compra"
+    pendientes = client.get(f"{url}?filtro=pendientes").get_data(as_text=True)
+    aceptadas = client.get(f"{url}?filtro=aceptados").get_data(as_text=True)
+
+    assert "Totales (1 documento)" in pendientes   # sólo queda el "solo en SII"
+    assert "Totales (1 documento)" in aceptadas
+    assert "✓ aceptada" in aceptadas
+
+
+def test_sin_permiso_de_edicion_no_se_puede_aceptar(client, db, empresa, usuario_bodega, usuario_admin):
+    login(client, "admin@test.cl")
+    _cargar(client)
+    conciliacion = ConciliacionSii.query.one()
+    documento = _documento_con_diferencia(conciliacion.compras)
+    client.get("/logout")
+
+    login(client, "bodega@test.cl")
+    respuesta = _aceptar(client, conciliacion, documento)
+
+    assert respuesta.status_code == 403
+    db.session.expire_all()
+    assert db.session.get(ConciliacionSiiDocumento, documento.id).aceptado is False

@@ -656,7 +656,12 @@ def exportar_periodo_dif_tc(periodo_id):
 # empresa esté contabilizado igual en Defontana. Los dos libros —compras y
 # ventas— se cargan por separado, porque rara vez están listos el mismo día.
 
-FILTROS_CONCILIACION = ("pendientes",) + ESTADOS_CONCILIACION
+FILTROS_CONCILIACION = ("pendientes", "aceptados") + ESTADOS_CONCILIACION
+
+# Motivo más frecuente, para no obligar a escribirlo cada vez: las facturas de
+# combustible llevan impuesto específico y el SII y Defontana no lo reparten
+# igual entre neto e impuestos.
+MOTIVO_HABITUAL = "Impuesto específico a los combustibles"
 
 # MESES_NOMBRES es una tupla base 0; acá los meses se manejan como 1-12.
 MESES_ELEGIBLES = [(numero, MESES_NOMBRES[numero - 1]) for numero in range(1, 13)]
@@ -680,10 +685,19 @@ def _guardar_cruce(conciliacion, clave_libro, resultado, nombre_sii, nombre_defo
     la foto de ahora, no el historial de intentos.
     """
     libro = conciliacion.libro_por_clave(clave_libro)
+    aceptaciones = {}
     if libro is None:
         libro = ConciliacionSiiLibro(libro=clave_libro, cargas=0)
         conciliacion.libros.append(libro)
     else:
+        # Las diferencias ya revisadas se guardan por tipo y folio antes de
+        # borrar, y se vuelven a poner sobre el cruce nuevo. La conciliación se
+        # recarga varias veces en el mes mientras se corrigen asientos, y perder
+        # ese trabajo en cada recarga haría inútil poder aceptarlas.
+        aceptaciones = {
+            d.llave: (d.motivo_aceptacion, d.aceptado_por_id, d.aceptado_en)
+            for d in libro.documentos if d.aceptado
+        }
         for documento in list(libro.documentos):
             db.session.delete(documento)
         db.session.flush()
@@ -706,7 +720,14 @@ def _guardar_cruce(conciliacion, clave_libro, resultado, nombre_sii, nombre_defo
                   "iva_sii", "iva_defontana", "total_sii", "total_defontana"):
         setattr(libro, campo, totales[campo])
 
+    reaplicadas = 0
     for orden, fila in enumerate(resultado["filas"]):
+        previa = aceptaciones.get((fila["tipo_doc"], fila["folio"]))
+        # Sólo se reaplica si el documento sigue sin cuadrar: si el asiento se
+        # corrigió y ahora calza, no hay nada que aceptar.
+        reaplicar = bool(previa) and fila["estado"] != "coincide"
+        if reaplicar:
+            reaplicadas += 1
         libro.documentos.append(ConciliacionSiiDocumento(
             tipo_doc=fila["tipo_doc"],
             tipo_doc_desc=fila["tipo_doc_desc"][:60],
@@ -725,7 +746,12 @@ def _guardar_cruce(conciliacion, clave_libro, resultado, nombre_sii, nombre_defo
             estado=fila["estado"],
             diferencia_descrita=(fila["diferencia_descrita"] or "")[:400] or None,
             orden=orden,
+            aceptado=reaplicar,
+            motivo_aceptacion=previa[0] if reaplicar else None,
+            aceptado_por_id=previa[1] if reaplicar else None,
+            aceptado_en=previa[2] if reaplicar else None,
         ))
+    libro.n_aceptados = reaplicadas
     return libro
 
 
@@ -836,7 +862,12 @@ def _documentos_filtrados(libro, args):
             ConciliacionSiiDocumento.contraparte_defontana.ilike(patron),
         ))
     if filtro == "pendientes":
-        consulta = consulta.filter(ConciliacionSiiDocumento.estado != "coincide")
+        consulta = consulta.filter(
+            ConciliacionSiiDocumento.estado != "coincide",
+            ConciliacionSiiDocumento.aceptado.is_(False),
+        )
+    elif filtro == "aceptados":
+        consulta = consulta.filter(ConciliacionSiiDocumento.aceptado.is_(True))
     elif filtro:
         consulta = consulta.filter(ConciliacionSiiDocumento.estado == filtro)
 
@@ -888,6 +919,9 @@ def ver_libro_conciliacion_sii(conciliacion_id, clave):
         filtro=filtro,
         tipo=tipo,
         mes_nombre=_nombre_de_mes(conciliacion.mes),
+        motivo_habitual=MOTIVO_HABITUAL,
+        accion=AccionForm(),
+        puede_editar=current_user.tiene_permiso("contabilidad", "editar"),
     )
 
 
@@ -938,6 +972,61 @@ def exportar_libro_conciliacion_sii(conciliacion_id, clave):
         columnas,
         filas,
         periodo,
+    )
+
+
+@bp.route("/conciliacion-sii/<int:conciliacion_id>/<clave>/<int:documento_id>/aceptar", methods=["POST"])
+@require_permission("contabilidad", "editar")
+def aceptar_diferencia_conciliacion_sii(conciliacion_id, clave, documento_id):
+    """Da por buena la diferencia de un documento, o deshace esa decisión.
+
+    No cambia ningún monto ni oculta la fila: sólo deja constancia de que
+    alguien la revisó y decidió que está bien, y la saca de lo pendiente. El
+    caso típico es el combustible, donde el impuesto específico hace que el
+    neto del SII y el de Defontana nunca calcen.
+    """
+    if clave not in ("compra", "venta"):
+        abort(404)
+    conciliacion = _conciliacion_or_404(conciliacion_id)
+    libro = _libro_or_404(conciliacion, clave)
+    if not AccionForm().validate_on_submit():
+        abort(400)
+
+    documento = ConciliacionSiiDocumento.query.filter_by(
+        id=documento_id, libro_id=libro.id
+    ).first_or_404()
+
+    if documento.aceptado:
+        documento.aceptado = False
+        documento.motivo_aceptacion = None
+        documento.aceptado_por_id = None
+        documento.aceptado_en = None
+        mensaje = f"El documento {documento.tipo_doc}/{documento.folio} vuelve a contarse como pendiente."
+    elif documento.estado == "coincide":
+        flash("Ese documento ya cuadra: no hay diferencia que aceptar.", "warning")
+        return redirect(_volver_al_libro(conciliacion, clave))
+    else:
+        motivo = (request.form.get("motivo") or "").strip() or MOTIVO_HABITUAL
+        documento.aceptado = True
+        documento.motivo_aceptacion = motivo[:200]
+        documento.aceptado_por_id = current_user.id
+        documento.aceptado_en = datetime.now(timezone.utc)
+        mensaje = f"Diferencia aceptada en {documento.tipo_doc}/{documento.folio}: {motivo}."
+
+    libro.n_aceptados = sum(
+        1 for d in libro.documentos if d.aceptado and d.estado != "coincide"
+    )
+    db.session.commit()
+    flash(mensaje, "success")
+    return redirect(_volver_al_libro(conciliacion, clave))
+
+
+def _volver_al_libro(conciliacion, clave):
+    """Vuelve a la misma pantalla conservando búsqueda y filtros."""
+    argumentos = {k: v for k, v in request.args.items() if k in ("q", "filtro", "tipo")}
+    return url_for(
+        "contabilidad.ver_libro_conciliacion_sii",
+        conciliacion_id=conciliacion.id, clave=clave, **argumentos,
     )
 
 

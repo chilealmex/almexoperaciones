@@ -249,6 +249,8 @@ class ConciliacionSiiLibro(db.Model):
     n_dif_monto = db.Column(db.Integer, nullable=False, default=0)
     # Cuadra la plata pero el RUT o la razón social no coinciden.
     n_dif_datos = db.Column(db.Integer, nullable=False, default=0)
+    # Diferencias revisadas y dadas por buenas (impuesto específico y similares).
+    n_aceptados = db.Column(db.Integer, nullable=False, default=0)
 
     # BigInteger: son sumas de todo un mes de facturación en pesos.
     neto_sii = db.Column(db.BigInteger, nullable=False, default=0)
@@ -277,9 +279,15 @@ class ConciliacionSiiLibro(db.Model):
 
     @property
     def pendientes(self) -> int:
-        """Documentos que exigen revisión: los que no cuadran, de cualquier tipo."""
-        return ((self.n_solo_sii or 0) + (self.n_solo_defontana or 0)
-                + (self.n_dif_monto or 0) + (self.n_dif_datos or 0))
+        """Documentos que todavía exigen trabajo.
+
+        Los que no cuadran, menos los que alguien ya revisó y dio por buenos:
+        una factura de combustible con impuesto específico descuadra siempre, y
+        seguir contándola haría que el mes nunca llegue a cero.
+        """
+        sin_cuadrar = ((self.n_solo_sii or 0) + (self.n_solo_defontana or 0)
+                       + (self.n_dif_monto or 0) + (self.n_dif_datos or 0))
+        return max(0, sin_cuadrar - (self.n_aceptados or 0))
 
     @property
     def cuadra(self) -> bool:
@@ -335,7 +343,22 @@ class ConciliacionSiiDocumento(db.Model):
     diferencia_descrita = db.Column(db.String(400), nullable=True)
     orden = db.Column(db.Integer, nullable=False, default=0)
 
+    # Diferencia revisada y dada por buena. Hay descuadres que son correctos:
+    # las facturas de combustible llevan impuesto específico, que el SII y
+    # Defontana no reparten igual entre neto e impuestos. Marcarlas saca el
+    # documento de lo pendiente sin ocultarlo ni alterar los montos.
+    aceptado = db.Column(db.Boolean, nullable=False, default=False)
+    motivo_aceptacion = db.Column(db.String(200), nullable=True)
+    aceptado_por_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"), nullable=True)
+    aceptado_en = db.Column(db.DateTime, nullable=True)
+
     libro_ref = db.relationship("ConciliacionSiiLibro", back_populates="documentos")
+    aceptado_por = db.relationship("Usuario")
+
+    @property
+    def llave(self):
+        """Identifica al documento entre recargas del mismo libro."""
+        return (self.tipo_doc, self.folio)
 
     def __repr__(self):
         return f"<ConciliacionSiiDocumento {self.tipo_doc}/{self.folio} {self.estado}>"

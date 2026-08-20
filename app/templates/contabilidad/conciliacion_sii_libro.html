@@ -1,5 +1,77 @@
 {% extends "base.html" %}
-{% block title %}Conciliación {{ libro.etiqueta }} — {{ mes_nombre }} {{ conciliacion.anio }}{% endblock %}
+{% block title %}Conciliación {{ libro.etiqueta }} — {{ mes_nombre }} {{ conciliacion.anio }}<div class="modal fade" id="modal-diferencia" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="modal-diferencia-titulo">Diferencia</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-2"><span class="badge bg-secondary" id="modal-diferencia-estado"></span></p>
+        <ul class="ps-3" id="modal-diferencia-lista"></ul>
+
+        {% if puede_editar %}
+        <hr>
+        <form method="post" id="modal-diferencia-form">
+          {{ accion.hidden_tag() }}
+          <div id="modal-diferencia-aceptar">
+            <p class="small text-muted mb-2">
+              ¿Esta diferencia es correcta y no hay nada que corregir? Acéptala y deja de
+              contarse como pendiente. El caso habitual es el combustible: el impuesto
+              específico hace que el neto del SII y el de Defontana nunca calcen.
+            </p>
+            <label class="form-label small mb-1">Motivo</label>
+            <input type="text" name="motivo" class="form-control form-control-sm mb-2"
+                   value="{{ motivo_habitual }}" maxlength="200">
+            <button type="submit" class="btn btn-success btn-sm">Aceptar la diferencia</button>
+          </div>
+          <div id="modal-diferencia-deshacer" style="display:none;">
+            <p class="small mb-2">
+              Esta diferencia ya fue aceptada<span id="modal-diferencia-quien"></span>:
+              <strong id="modal-diferencia-motivo"></strong>
+            </p>
+            <button type="submit" class="btn btn-outline-secondary btn-sm">Volver a dejarla pendiente</button>
+          </div>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // El detalle viaja en los data- del botón; el modal es uno solo y se rellena
+  // al abrirse. Así la tabla queda de una línea por fila y el texto largo no
+  // ensancha la pantalla.
+  document.getElementById('modal-diferencia').addEventListener('show.bs.modal', function (evento) {
+    var boton = evento.relatedTarget;
+    if (!boton) return;
+    document.getElementById('modal-diferencia-titulo').textContent = boton.dataset.titulo || 'Diferencia';
+    document.getElementById('modal-diferencia-estado').textContent = boton.dataset.estado || '';
+    var lista = document.getElementById('modal-diferencia-lista');
+    lista.innerHTML = '';
+    (boton.dataset.detalle || '').split(' · ').forEach(function (parte) {
+      if (!parte) return;
+      var item = document.createElement('li');
+      item.textContent = parte;
+      lista.appendChild(item);
+    });
+
+    var formulario = document.getElementById('modal-diferencia-form');
+    if (!formulario) return;  // sin permiso de edición no se muestra
+    formulario.action = boton.dataset.url || '';
+    var aceptada = !!boton.dataset.aceptado;
+    document.getElementById('modal-diferencia-aceptar').style.display = aceptada ? 'none' : '';
+    document.getElementById('modal-diferencia-deshacer').style.display = aceptada ? '' : 'none';
+    if (aceptada) {
+      document.getElementById('modal-diferencia-motivo').textContent = boton.dataset.motivo || '';
+      var quien = boton.dataset.quien;
+      document.getElementById('modal-diferencia-quien').textContent = quien ? ' por ' + quien : '';
+    }
+  });
+</script>
+
+{% endblock %}
 {% block content %}
 
 {% set clases_estado = {
@@ -31,7 +103,8 @@
       ('solo_sii', 'Solo en SII', libro.n_solo_sii),
       ('solo_defontana', 'Solo en Defontana', libro.n_solo_defontana),
       ('dif_monto', 'Dif. de monto', libro.n_dif_monto),
-      ('dif_datos', 'Dif. de datos', libro.n_dif_datos)] %}
+      ('dif_datos', 'Dif. de datos', libro.n_dif_datos),
+      ('aceptados', 'Aceptadas', libro.n_aceptados)] %}
   <div class="col-6 col-md">
     <a href="{{ url_for('contabilidad.ver_libro_conciliacion_sii', conciliacion_id=conciliacion.id, clave=libro.libro, filtro=clave) }}"
        class="card text-decoration-none h-100 {{ 'border-primary' if filtro == clave }}">
@@ -54,7 +127,8 @@
     <label class="form-label small mb-1">Estado</label>
     <select name="filtro" class="form-select form-select-sm">
       <option value="">Todos</option>
-      <option value="pendientes" {{ 'selected' if filtro == 'pendientes' }}>Sólo lo que no cuadra</option>
+      <option value="pendientes" {{ 'selected' if filtro == 'pendientes' }}>Sólo lo que falta revisar</option>
+      <option value="aceptados" {{ 'selected' if filtro == 'aceptados' }}>Diferencias aceptadas</option>
       {% for clave, etiqueta in etiquetas_estado.items() %}
       <option value="{{ clave }}" {{ 'selected' if filtro == clave }}>{{ etiqueta }}</option>
       {% endfor %}
@@ -87,7 +161,7 @@
           <th>Estado</th>
           <th>Tipo Doc.</th>
           <th>Folio</th>
-          <th style="min-width: 20rem;">En qué se diferencia</th>
+          <th class="text-center">Detalle</th>
           <th>Fecha</th>
           <th>RUT (SII)</th>
           <th>Razón social (SII)</th>
@@ -101,15 +175,35 @@
       <tbody>
         {% for d in documentos %}
         <tr>
-          <td><span class="badge {{ clases_estado.get(d.estado, 'bg-secondary') }}">{{ etiquetas_estado.get(d.estado, d.estado) }}</span></td>
-          <td class="text-nowrap">{{ d.tipo_doc_desc or d.tipo_doc }}</td>
+          <td>
+            <span class="badge {{ clases_estado.get(d.estado, 'bg-secondary') }}">{{ etiquetas_estado.get(d.estado, d.estado) }}</span>
+            {% if d.aceptado %}
+            <span class="badge bg-light text-success border border-success ms-1"
+                  title="{{ d.motivo_aceptacion }}">✓ aceptada</span>
+            {% endif %}
+          </td>
+          <td class="celda-recortada" title="{{ d.tipo_doc_desc or d.tipo_doc }}">{{ d.tipo_doc_desc or d.tipo_doc }}</td>
           <td>{{ d.folio }}</td>
-          <td class="small">{{ d.diferencia_descrita or '' }}</td>
+          <td class="text-center">
+            {% if d.diferencia_descrita %}
+            <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2"
+                    data-bs-toggle="modal" data-bs-target="#modal-diferencia"
+                    data-titulo="{{ d.tipo_doc_desc or d.tipo_doc }} N° {{ d.folio }}"
+                    data-estado="{{ etiquetas_estado.get(d.estado, d.estado) }}"
+                    data-detalle="{{ d.diferencia_descrita }}"
+                    data-url="{{ url_for('contabilidad.aceptar_diferencia_conciliacion_sii', conciliacion_id=conciliacion.id, clave=libro.libro, documento_id=d.id, **request.args) }}"
+                    data-aceptado="{{ '1' if d.aceptado else '' }}"
+                    data-motivo="{{ d.motivo_aceptacion or '' }}"
+                    data-quien="{{ d.aceptado_por.nombre_completo if d.aceptado_por else '' }}">Ver</button>
+            {% else %}
+            <span class="text-muted">—</span>
+            {% endif %}
+          </td>
           <td class="text-nowrap">{{ d.fecha or '—' }}</td>
           <td class="text-nowrap">{{ d.rut_sii or '—' }}</td>
-          <td>{{ d.contraparte_sii or '—' }}</td>
+          <td class="celda-recortada" title="{{ d.contraparte_sii or '' }}">{{ d.contraparte_sii or '—' }}</td>
           <td class="text-nowrap {{ 'text-danger fw-semibold' if d.rut_sii and d.rut_defontana and d.rut_sii != d.rut_defontana }}">{{ d.rut_defontana or '—' }}</td>
-          <td>{{ d.contraparte_defontana or '—' }}</td>
+          <td class="celda-recortada" title="{{ d.contraparte_defontana or '' }}">{{ d.contraparte_defontana or '—' }}</td>
           {% for campo, etiqueta in columnas_monto %}
           {% set valor = d[campo] %}
           <td class="num {{ 'text-danger fw-semibold' if campo.startswith('dif') and valor != 0 }}">{{ valor|clp }}</td>
@@ -140,5 +234,77 @@
   {% endif %}
 </div>
 {% endif %}
+
+<div class="modal fade" id="modal-diferencia" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="modal-diferencia-titulo">Diferencia</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-2"><span class="badge bg-secondary" id="modal-diferencia-estado"></span></p>
+        <ul class="ps-3" id="modal-diferencia-lista"></ul>
+
+        {% if puede_editar %}
+        <hr>
+        <form method="post" id="modal-diferencia-form">
+          {{ accion.hidden_tag() }}
+          <div id="modal-diferencia-aceptar">
+            <p class="small text-muted mb-2">
+              ¿Esta diferencia es correcta y no hay nada que corregir? Acéptala y deja de
+              contarse como pendiente. El caso habitual es el combustible: el impuesto
+              específico hace que el neto del SII y el de Defontana nunca calcen.
+            </p>
+            <label class="form-label small mb-1">Motivo</label>
+            <input type="text" name="motivo" class="form-control form-control-sm mb-2"
+                   value="{{ motivo_habitual }}" maxlength="200">
+            <button type="submit" class="btn btn-success btn-sm">Aceptar la diferencia</button>
+          </div>
+          <div id="modal-diferencia-deshacer" style="display:none;">
+            <p class="small mb-2">
+              Esta diferencia ya fue aceptada<span id="modal-diferencia-quien"></span>:
+              <strong id="modal-diferencia-motivo"></strong>
+            </p>
+            <button type="submit" class="btn btn-outline-secondary btn-sm">Volver a dejarla pendiente</button>
+          </div>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // El detalle viaja en los data- del botón; el modal es uno solo y se rellena
+  // al abrirse. Así la tabla queda de una línea por fila y el texto largo no
+  // ensancha la pantalla.
+  document.getElementById('modal-diferencia').addEventListener('show.bs.modal', function (evento) {
+    var boton = evento.relatedTarget;
+    if (!boton) return;
+    document.getElementById('modal-diferencia-titulo').textContent = boton.dataset.titulo || 'Diferencia';
+    document.getElementById('modal-diferencia-estado').textContent = boton.dataset.estado || '';
+    var lista = document.getElementById('modal-diferencia-lista');
+    lista.innerHTML = '';
+    (boton.dataset.detalle || '').split(' · ').forEach(function (parte) {
+      if (!parte) return;
+      var item = document.createElement('li');
+      item.textContent = parte;
+      lista.appendChild(item);
+    });
+
+    var formulario = document.getElementById('modal-diferencia-form');
+    if (!formulario) return;  // sin permiso de edición no se muestra
+    formulario.action = boton.dataset.url || '';
+    var aceptada = !!boton.dataset.aceptado;
+    document.getElementById('modal-diferencia-aceptar').style.display = aceptada ? 'none' : '';
+    document.getElementById('modal-diferencia-deshacer').style.display = aceptada ? '' : 'none';
+    if (aceptada) {
+      document.getElementById('modal-diferencia-motivo').textContent = boton.dataset.motivo || '';
+      var quien = boton.dataset.quien;
+      document.getElementById('modal-diferencia-quien').textContent = quien ? ' por ' + quien : '';
+    }
+  });
+</script>
 
 {% endblock %}

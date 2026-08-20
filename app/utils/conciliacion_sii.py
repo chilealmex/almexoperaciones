@@ -14,6 +14,12 @@ Los dos sistemas exportan en formatos distintos:
 
 Este módulo lee los dos, los normaliza a la misma forma y los cruza por
 tipo de documento + folio, que es la única llave que ambos comparten.
+
+No todo descuadre es un error. Las facturas de combustible llevan impuesto
+específico y los dos sistemas no lo reparten igual entre neto e impuestos, así
+que nunca van a calzar. Esos casos se revisan y se dan por buenos desde la
+pantalla (ver el campo 'aceptado' de ConciliacionSiiDocumento); acá sólo se
+detecta la diferencia, la decisión de aceptarla es de quien concilia.
 """
 
 import csv
@@ -407,9 +413,15 @@ def diferencias_de(fila) -> list:
             "diferencia": None,
         })
 
+    # La razón social sólo se informa cuando el RUT no alcanza para saber si es
+    # la misma empresa. Con el RUT igual, un nombre distinto no es un error:
+    # Defontana lo guarda abreviado y recortado ("SOCIEDAD ESTACIONES DE
+    # SERVICIO ARAGON LIMITADA" queda como "SOC ESTA DE SERV A RAGON LTDA"), y
+    # marcarlo llenaba el informe de avisos falsos que tapaban los reales.
     nombre_sii = fila.get("contraparte_sii", "")
     nombre_defo = fila.get("contraparte_defontana", "")
-    if (nombre_sii and nombre_defo
+    ruts_confirman_identidad = bool(rut_sii and rut_defo and rut_sii == rut_defo)
+    if (nombre_sii and nombre_defo and not ruts_confirman_identidad
             and normalizar_nombre(nombre_sii) != normalizar_nombre(nombre_defo)):
         detalles.append({
             "campo": "contraparte",

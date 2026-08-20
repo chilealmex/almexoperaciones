@@ -280,15 +280,46 @@ def test_un_rut_distinto_se_informa_aunque_los_montos_calcen(db):
     assert "RUT distinto" in fila["diferencia_descrita"]
 
 
-def test_una_razon_social_distinta_tambien_se_informa(db):
-    comun = {"tipo_doc": "33", "folio": "1", "rut": "76123456-7", "fecha": "01/08/2026",
+def test_con_el_mismo_rut_un_nombre_distinto_no_es_diferencia(db):
+    """Defontana abrevia y recorta la razón social; el RUT es la identidad real.
+
+    Sobre datos reales esto generaba 71 avisos falsos contra 4 diferencias de
+    monto verdaderas, y las tapaba por completo.
+    """
+    comun = {"tipo_doc": "33", "folio": "1", "rut": "78205293-4", "fecha": "01/08/2026",
              "neto": 100000, "exento": 0, "iva": 19000, "total": 119000}
-    sii = [dict(comun, contraparte="COMERCIAL ALFA SPA")]
-    defo = [dict(comun, contraparte="DISTRIBUIDORA BETA LTDA")]
+    sii = [dict(comun, contraparte="SOCIEDAD ESTACIONES DE SERVICIO ARAGON LIMITADA")]
+    defo = [dict(comun, contraparte="SOC ESTA DE SERV A RAGON LTDA")]
+
+    fila = cruzar(sii, defo, "compra")["filas"][0]
+
+    assert fila["estado"] == "coincide"
+    assert fila["diferencia_descrita"] == ""
+
+
+def test_sin_rut_para_comparar_el_nombre_si_se_informa(db):
+    """Si falta el RUT en un lado, la razón social es la única señal de identidad."""
+    comun = {"tipo_doc": "33", "folio": "1", "fecha": "01/08/2026",
+             "neto": 100000, "exento": 0, "iva": 19000, "total": 119000}
+    sii = [dict(comun, rut="76123456-7", contraparte="COMERCIAL ALFA SPA")]
+    defo = [dict(comun, rut="", contraparte="DISTRIBUIDORA BETA LTDA")]
 
     fila = cruzar(sii, defo, "compra")["filas"][0]
 
     assert fila["estado"] == "dif_datos"
+    assert "Razón social" in fila["diferencia_descrita"]
+
+
+def test_con_ruts_distintos_se_informan_los_dos_datos(db):
+    comun = {"tipo_doc": "33", "folio": "1", "fecha": "01/08/2026",
+             "neto": 100000, "exento": 0, "iva": 19000, "total": 119000}
+    sii = [dict(comun, rut="76123456-7", contraparte="COMERCIAL ALFA SPA")]
+    defo = [dict(comun, rut="77999888-6", contraparte="DISTRIBUIDORA BETA LTDA")]
+
+    fila = cruzar(sii, defo, "compra")["filas"][0]
+
+    assert fila["estado"] == "dif_datos"
+    assert "RUT distinto" in fila["diferencia_descrita"]
     assert "Razón social" in fila["diferencia_descrita"]
 
 
@@ -310,17 +341,17 @@ def test_normalizar_nombre_ignora_puntuacion_acentos_y_espacios():
 
 
 def test_una_diferencia_de_monto_manda_sobre_una_de_datos(db):
-    """Si además de la plata baila el nombre, el estado es el de monto: es lo grave."""
-    comun = {"tipo_doc": "33", "folio": "1", "rut": "76123456-7", "fecha": "01/08/2026",
+    """Si además de la plata baila el RUT, el estado es el de monto: es lo grave."""
+    comun = {"tipo_doc": "33", "folio": "1", "fecha": "01/08/2026", "contraparte": "ALFA",
              "exento": 0}
-    sii = [dict(comun, contraparte="ALFA", neto=100000, iva=19000, total=119000)]
-    defo = [dict(comun, contraparte="BETA", neto=90000, iva=17100, total=107100)]
+    sii = [dict(comun, rut="76123456-7", neto=100000, iva=19000, total=119000)]
+    defo = [dict(comun, rut="77999888-6", neto=90000, iva=17100, total=107100)]
 
     fila = cruzar(sii, defo, "compra")["filas"][0]
 
     assert fila["estado"] == "dif_monto"
-    # Pero igual se informa el nombre, que también hay que corregir.
-    assert "Razón social" in fila["diferencia_descrita"]
+    # Pero igual se informa el RUT, que también hay que corregir.
+    assert "RUT distinto" in fila["diferencia_descrita"]
 
 
 def test_sin_diferencias_no_se_describe_nada(db):
