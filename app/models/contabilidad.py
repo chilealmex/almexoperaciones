@@ -171,3 +171,171 @@ class LineaDifTc(db.Model):
 
     def __repr__(self):
         return f"<LineaDifTc {self.cuenta}/{self.numero_doc}>"
+
+
+class ConciliacionSii(db.Model):
+    """Un mes de conciliación entre el RCV del SII y los libros de Defontana.
+
+    El período agrupa los dos libros —compras y ventas—, que se cargan por
+    separado: es normal tener listo el de compras y estar esperando el de
+    ventas, y no tiene sentido bloquear uno por el otro.
+    """
+
+    __tablename__ = "conciliaciones_sii"
+    __table_args__ = (
+        db.UniqueConstraint("empresa_id", "anio", "mes", name="uq_conciliacion_sii_mes"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    empresa_id = db.Column(db.Integer, db.ForeignKey("empresas.id"), nullable=False)
+    anio = db.Column(db.Integer, nullable=False)
+    mes = db.Column(db.Integer, nullable=False)
+
+    creado_en = db.Column(db.DateTime, server_default=db.func.now())
+    actualizado_en = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now())
+
+    libros = db.relationship(
+        "ConciliacionSiiLibro", back_populates="conciliacion",
+        cascade="all, delete-orphan", order_by="ConciliacionSiiLibro.libro",
+    )
+
+    def libro_por_clave(self, clave):
+        return next((l for l in self.libros if l.libro == clave), None)
+
+    @property
+    def compras(self):
+        return self.libro_por_clave("compra")
+
+    @property
+    def ventas(self):
+        return self.libro_por_clave("venta")
+
+    def __repr__(self):
+        return f"<ConciliacionSii {self.anio}-{self.mes:02d}>"
+
+
+class ConciliacionSiiLibro(db.Model):
+    """El cruce de un libro (compras o ventas) dentro de un período.
+
+    Guarda los totales y los conteos ya calculados además del detalle. Sin eso,
+    el listado de períodos tendría que recorrer todos los documentos de todos
+    los meses para pintar una tabla de resumen.
+    """
+
+    __tablename__ = "conciliacion_sii_libros"
+    __table_args__ = (
+        db.UniqueConstraint("conciliacion_id", "libro", name="uq_conciliacion_sii_libro"),
+    )
+
+    LIBROS = (("compra", "Compras"), ("venta", "Ventas"))
+
+    id = db.Column(db.Integer, primary_key=True)
+    conciliacion_id = db.Column(
+        db.Integer, db.ForeignKey("conciliaciones_sii.id"), nullable=False, index=True
+    )
+    libro = db.Column(db.String(10), nullable=False)
+
+    archivo_sii = db.Column(db.String(255), nullable=True)
+    archivo_defontana = db.Column(db.String(255), nullable=True)
+    cargado_en = db.Column(db.DateTime, server_default=db.func.now())
+    cargado_por_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"), nullable=True)
+    # Cuántas veces se recargó el mismo libro: la conciliación se rehace varias
+    # veces en el mes a medida que se van corrigiendo los asientos.
+    cargas = db.Column(db.Integer, nullable=False, default=1)
+
+    n_coincide = db.Column(db.Integer, nullable=False, default=0)
+    n_solo_sii = db.Column(db.Integer, nullable=False, default=0)
+    n_solo_defontana = db.Column(db.Integer, nullable=False, default=0)
+    n_dif_monto = db.Column(db.Integer, nullable=False, default=0)
+    # Cuadra la plata pero el RUT o la razón social no coinciden.
+    n_dif_datos = db.Column(db.Integer, nullable=False, default=0)
+
+    # BigInteger: son sumas de todo un mes de facturación en pesos.
+    neto_sii = db.Column(db.BigInteger, nullable=False, default=0)
+    neto_defontana = db.Column(db.BigInteger, nullable=False, default=0)
+    exento_sii = db.Column(db.BigInteger, nullable=False, default=0)
+    exento_defontana = db.Column(db.BigInteger, nullable=False, default=0)
+    iva_sii = db.Column(db.BigInteger, nullable=False, default=0)
+    iva_defontana = db.Column(db.BigInteger, nullable=False, default=0)
+    total_sii = db.Column(db.BigInteger, nullable=False, default=0)
+    total_defontana = db.Column(db.BigInteger, nullable=False, default=0)
+
+    conciliacion = db.relationship("ConciliacionSii", back_populates="libros")
+    cargado_por = db.relationship("Usuario")
+    documentos = db.relationship(
+        "ConciliacionSiiDocumento", back_populates="libro_ref",
+        cascade="all, delete-orphan",
+    )
+
+    @property
+    def etiqueta(self) -> str:
+        return dict(self.LIBROS).get(self.libro, self.libro)
+
+    @property
+    def diferencia(self) -> int:
+        return (self.total_sii or 0) - (self.total_defontana or 0)
+
+    @property
+    def pendientes(self) -> int:
+        """Documentos que exigen revisión: los que no cuadran, de cualquier tipo."""
+        return ((self.n_solo_sii or 0) + (self.n_solo_defontana or 0)
+                + (self.n_dif_monto or 0) + (self.n_dif_datos or 0))
+
+    @property
+    def cuadra(self) -> bool:
+        return self.pendientes == 0
+
+    def __repr__(self):
+        return f"<ConciliacionSiiLibro {self.libro} #{self.conciliacion_id}>"
+
+
+class ConciliacionSiiDocumento(db.Model):
+    """Un documento del cruce, con lo que dice cada sistema lado a lado.
+
+    Se guardan las dos versiones completas —no sólo la diferencia— porque para
+    corregir un asiento hay que ver qué puso cada uno en cada columna.
+    """
+
+    __tablename__ = "conciliacion_sii_documentos"
+
+    id = db.Column(db.Integer, primary_key=True)
+    libro_id = db.Column(
+        db.Integer, db.ForeignKey("conciliacion_sii_libros.id"), nullable=False, index=True
+    )
+
+    tipo_doc = db.Column(db.String(10), nullable=False)
+    tipo_doc_desc = db.Column(db.String(60), nullable=True)
+    folio = db.Column(db.String(40), nullable=False)
+    # Texto y no fecha: cada sistema la escribe a su manera y aquí sólo se
+    # muestra; convertirla obligaría a descartar documentos por un formato raro.
+    fecha = db.Column(db.String(20), nullable=True)
+
+    rut_sii = db.Column(db.String(20), nullable=True)
+    contraparte_sii = db.Column(db.String(200), nullable=True)
+    rut_defontana = db.Column(db.String(20), nullable=True)
+    contraparte_defontana = db.Column(db.String(200), nullable=True)
+
+    neto_sii = db.Column(db.BigInteger, nullable=False, default=0)
+    neto_defontana = db.Column(db.BigInteger, nullable=False, default=0)
+    exento_sii = db.Column(db.BigInteger, nullable=False, default=0)
+    exento_defontana = db.Column(db.BigInteger, nullable=False, default=0)
+    iva_sii = db.Column(db.BigInteger, nullable=False, default=0)
+    iva_defontana = db.Column(db.BigInteger, nullable=False, default=0)
+    total_sii = db.Column(db.BigInteger, nullable=False, default=0)
+    total_defontana = db.Column(db.BigInteger, nullable=False, default=0)
+    # Una diferencia por columna, no sólo la del total: permite ver de un
+    # vistazo si lo que baila es el neto, el exento o el IVA.
+    dif_neto = db.Column(db.BigInteger, nullable=False, default=0)
+    dif_exento = db.Column(db.BigInteger, nullable=False, default=0)
+    dif_iva = db.Column(db.BigInteger, nullable=False, default=0)
+    diferencia = db.Column(db.BigInteger, nullable=False, default=0)
+
+    estado = db.Column(db.String(20), nullable=False)
+    # En qué se diferencian, ya escrito: "Neto: $100.000 vs $90.000 · IVA: ...".
+    diferencia_descrita = db.Column(db.String(400), nullable=True)
+    orden = db.Column(db.Integer, nullable=False, default=0)
+
+    libro_ref = db.relationship("ConciliacionSiiLibro", back_populates="documentos")
+
+    def __repr__(self):
+        return f"<ConciliacionSiiDocumento {self.tipo_doc}/{self.folio} {self.estado}>"

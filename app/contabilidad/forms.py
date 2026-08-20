@@ -52,3 +52,33 @@ class ImportarMayorForm(FlaskForm):
         "Mayor contable (.xlsx)",
         validators=[FileRequired("Elige el archivo Excel."), FileAllowed(["xlsx"], "Debe ser un archivo .xlsx")],
     )
+
+
+class ConciliacionSiiForm(FlaskForm):
+    """Los cuatro archivos de un mes: el RCV del SII y los libros de Defontana.
+
+    Los cuatro son opcionales por separado, pero cada libro necesita su par: sin
+    el archivo del SII y el de Defontana no hay nada que cruzar. Es normal tener
+    listo el de compras y estar esperando el de ventas, así que se permite
+    cargar uno ahora y el otro después, sobre el mismo período.
+    """
+
+    anio = IntegerField("Año", validators=[DataRequired(), NumberRange(min=2000, max=2100)])
+    mes = SelectField("Mes", coerce=int, validators=[DataRequired()])
+
+    sii_compra = FileField(
+        "RCV Compra (SII)",
+        validators=[Optional(), FileAllowed(["csv"], "El RCV del SII se descarga en .csv")],
+    )
+    defontana_compra = FileField(
+        "Libro de Compras (Defontana)",
+        validators=[Optional(), FileAllowed(["xls", "xlsx", "html", "htm"], "El libro de Defontana se descarga en .xls")],
+    )
+    sii_venta = FileField(
+        "RCV Venta (SII)",
+        validators=[Optional(), FileAllowed(["csv"], "El RCV del SII se descarga en .csv")],
+    )
+    defontana_venta = FileField(
+        "Libro de Ventas (Defontana)",
+        validators=[Optional(), FileAllowed(["xls", "xlsx", "html", "htm"], "El libro de Defontana se descarga en .xls")],
+    )

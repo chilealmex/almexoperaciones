@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}Conciliación {{ libro.etiqueta }} — {{ mes_nombre }} {{ conciliacion.anio }}{% endblock %}
+{% block content %}
+
+{% set clases_estado = {
+  'coincide': 'bg-success',
+  'solo_sii': 'bg-warning text-dark',
+  'solo_defontana': 'bg-info text-dark',
+  'dif_monto': 'bg-danger',
+  'dif_datos': 'bg-secondary',
+} %}
+
+<div class="page-head">
+  <div>
+    <h1>{{ libro.etiqueta }} — {{ mes_nombre }} {{ conciliacion.anio }}</h1>
+    <p class="page-sub">
+      RCV del SII contra el libro de Defontana, documento por documento.
+      {% if libro.archivo_sii %}<br><span class="text-muted small">SII: {{ libro.archivo_sii }} · Defontana: {{ libro.archivo_defontana }}</span>{% endif %}
+    </p>
+  </div>
+  <div class="d-flex gap-2">
+    <a href="{{ url_for('contabilidad.exportar_libro_conciliacion_sii', conciliacion_id=conciliacion.id, clave=libro.libro, **request.args) }}"
+       class="btn btn-outline-secondary btn-sm">⬇ Excel</a>
+    <a href="{{ url_for('contabilidad.conciliacion_sii') }}" class="btn btn-outline-secondary btn-sm">Volver</a>
+  </div>
+</div>
+
+<div class="row g-2 mb-3">
+  {% for clave, etiqueta, valor in [
+      ('coincide', 'Coincide', libro.n_coincide),
+      ('solo_sii', 'Solo en SII', libro.n_solo_sii),
+      ('solo_defontana', 'Solo en Defontana', libro.n_solo_defontana),
+      ('dif_monto', 'Dif. de monto', libro.n_dif_monto),
+      ('dif_datos', 'Dif. de datos', libro.n_dif_datos)] %}
+  <div class="col-6 col-md">
+    <a href="{{ url_for('contabilidad.ver_libro_conciliacion_sii', conciliacion_id=conciliacion.id, clave=libro.libro, filtro=clave) }}"
+       class="card text-decoration-none h-100 {{ 'border-primary' if filtro == clave }}">
+      <div class="card-body py-2 px-3">
+        <div class="small text-muted">{{ etiqueta }}</div>
+        <div class="fs-5 fw-semibold">{{ valor }}</div>
+      </div>
+    </a>
+  </div>
+  {% endfor %}
+</div>
+
+<form method="get" class="row g-2 align-items-end mb-3">
+  <div class="col-12 col-md-4">
+    <label class="form-label small mb-1">Buscar</label>
+    <input type="search" name="q" value="{{ q }}" class="form-control form-control-sm"
+           placeholder="Folio, RUT, proveedor o cliente...">
+  </div>
+  <div class="col-6 col-md-3">
+    <label class="form-label small mb-1">Estado</label>
+    <select name="filtro" class="form-select form-select-sm">
+      <option value="">Todos</option>
+      <option value="pendientes" {{ 'selected' if filtro == 'pendientes' }}>Sólo lo que no cuadra</option>
+      {% for clave, etiqueta in etiquetas_estado.items() %}
+      <option value="{{ clave }}" {{ 'selected' if filtro == clave }}>{{ etiqueta }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-6 col-md-3">
+    <label class="form-label small mb-1">Tipo de documento</label>
+    <select name="tipo" class="form-select form-select-sm">
+      <option value="">Todos</option>
+      {% for t in tipos %}
+      <option value="{{ t }}" {{ 'selected' if tipo == t }}>{{ tipos_desc.get(t, 'Doc. ' ~ t) }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-auto">
+    <button type="submit" class="btn btn-primary btn-sm">Filtrar</button>
+    {% if q or filtro or tipo %}
+    <a href="{{ url_for('contabilidad.ver_libro_conciliacion_sii', conciliacion_id=conciliacion.id, clave=libro.libro) }}"
+       class="btn btn-outline-secondary btn-sm">Limpiar</a>
+    {% endif %}
+  </div>
+</form>
+
+{% if documentos %}
+<div class="table-card table-card-alto">
+  <div class="table-responsive">
+    <table class="table table-sm table-hover align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Estado</th>
+          <th>Tipo Doc.</th>
+          <th>Folio</th>
+          <th style="min-width: 20rem;">En qué se diferencia</th>
+          <th>Fecha</th>
+          <th>RUT (SII)</th>
+          <th>Razón social (SII)</th>
+          <th>RUT (Defontana)</th>
+          <th>Razón social (Defontana)</th>
+          {% for campo, etiqueta in columnas_monto %}
+          <th class="num">{{ etiqueta }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in documentos %}
+        <tr>
+          <td><span class="badge {{ clases_estado.get(d.estado, 'bg-secondary') }}">{{ etiquetas_estado.get(d.estado, d.estado) }}</span></td>
+          <td class="text-nowrap">{{ d.tipo_doc_desc or d.tipo_doc }}</td>
+          <td>{{ d.folio }}</td>
+          <td class="small">{{ d.diferencia_descrita or '' }}</td>
+          <td class="text-nowrap">{{ d.fecha or '—' }}</td>
+          <td class="text-nowrap">{{ d.rut_sii or '—' }}</td>
+          <td>{{ d.contraparte_sii or '—' }}</td>
+          <td class="text-nowrap {{ 'text-danger fw-semibold' if d.rut_sii and d.rut_defontana and d.rut_sii != d.rut_defontana }}">{{ d.rut_defontana or '—' }}</td>
+          <td>{{ d.contraparte_defontana or '—' }}</td>
+          {% for campo, etiqueta in columnas_monto %}
+          {% set valor = d[campo] %}
+          <td class="num {{ 'text-danger fw-semibold' if campo.startswith('dif') and valor != 0 }}">{{ valor|clp }}</td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr class="fila-totales">
+          <td colspan="9">Totales ({{ documentos|length }} documento{{ '' if documentos|length == 1 else 's' }})</td>
+          {% for campo, etiqueta in columnas_monto %}
+          <td class="num {{ 'text-danger' if campo.startswith('dif') and totales[campo] != 0 }}">{{ totales[campo]|clp }}</td>
+          {% endfor %}
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+</div>
+<p class="text-muted small mt-2">
+  Los totales de abajo son de lo que estás viendo: si filtras, se recalculan sobre las filas filtradas.
+</p>
+{% else %}
+<div class="alert alert-info">
+  {% if q or filtro or tipo %}
+  Ningún documento coincide con el filtro.
+  {% else %}
+  Este libro no tiene documentos cargados.
+  {% endif %}
+</div>
+{% endif %}
+
+{% endblock %}

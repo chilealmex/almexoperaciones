@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timezone
 
 from flask import abort, flash, redirect, render_template, request, url_for
 from flask_login import current_user
@@ -6,13 +6,27 @@ from flask_login import current_user
 from app.contabilidad import bp
 from app.contabilidad.forms import (
     AccionForm,
+    ConciliacionSiiForm,
     ImportarMayorForm,
     ImportarProvisionesForm,
     NuevaProvisionForm,
     PeriodoDifTcForm,
 )
 from app.extensions import db
-from app.models.contabilidad import LineaDifTc, PeriodoDifTc, ProvisionIngreso, TipoCambioDifTc
+from app.models.contabilidad import (
+    ConciliacionSii,
+    ConciliacionSiiDocumento,
+    ConciliacionSiiLibro,
+    LineaDifTc,
+    PeriodoDifTc,
+    ProvisionIngreso,
+    TipoCambioDifTc,
+)
+from app.utils.conciliacion_sii import COLUMNAS_MONTO as COLUMNAS_MONTO_CONCILIACION
+from app.utils.conciliacion_sii import ESTADO_ETIQUETAS as ESTADO_ETIQUETAS_CONCILIACION
+from app.utils.conciliacion_sii import ESTADOS as ESTADOS_CONCILIACION
+from app.utils.conciliacion_sii import TIPOS_DOCUMENTO as TIPOS_DOCUMENTO_SII
+from app.utils.conciliacion_sii import ArchivoInvalido, cruzar, leer_libro_defontana, leer_rcv_sii
 from app.utils.decorators import require_permission
 from app.utils.dif_tipo_cambio import recalcular_periodo, totales_periodo
 from app.utils.dif_tipo_cambio_excel import PlanillaInvalida as PlanillaInvalidaMayor
@@ -634,3 +648,307 @@ def exportar_periodo_dif_tc(periodo_id):
         "Tipos de cambio aplicados: "
         + (", ".join(f"{tc.moneda} {tc.valor}" for tc in periodo.tipos_cambio) or "sin definir"),
     )
+
+
+# --- Conciliación SII / Defontana ----------------------------------------
+#
+# Cada mes se comprueba que lo que el SII tiene registrado a nombre de la
+# empresa esté contabilizado igual en Defontana. Los dos libros —compras y
+# ventas— se cargan por separado, porque rara vez están listos el mismo día.
+
+FILTROS_CONCILIACION = ("pendientes",) + ESTADOS_CONCILIACION
+
+# MESES_NOMBRES es una tupla base 0; acá los meses se manejan como 1-12.
+MESES_ELEGIBLES = [(numero, MESES_NOMBRES[numero - 1]) for numero in range(1, 13)]
+
+
+def _nombre_de_mes(numero) -> str:
+    return MESES_NOMBRES[numero - 1] if 1 <= (numero or 0) <= 12 else ""
+
+
+def _conciliacion_or_404(conciliacion_id):
+    return ConciliacionSii.query.filter_by(
+        id=conciliacion_id, empresa_id=_empresa_id()
+    ).first_or_404()
+
+
+def _guardar_cruce(conciliacion, clave_libro, resultado, nombre_sii, nombre_defontana):
+    """Reemplaza el cruce de un libro con el recién calculado.
+
+    Se borra el anterior en vez de acumular: la conciliación se rehace varias
+    veces en el mes a medida que se corrigen los asientos, y lo que interesa es
+    la foto de ahora, no el historial de intentos.
+    """
+    libro = conciliacion.libro_por_clave(clave_libro)
+    if libro is None:
+        libro = ConciliacionSiiLibro(libro=clave_libro, cargas=0)
+        conciliacion.libros.append(libro)
+    else:
+        for documento in list(libro.documentos):
+            db.session.delete(documento)
+        db.session.flush()
+
+    libro.archivo_sii = (nombre_sii or "")[:255] or None
+    libro.archivo_defontana = (nombre_defontana or "")[:255] or None
+    libro.cargado_en = datetime.now(timezone.utc)
+    libro.cargado_por_id = current_user.id
+    libro.cargas = (libro.cargas or 0) + 1
+
+    conteos = resultado["conteos"]
+    libro.n_coincide = conteos["coincide"]
+    libro.n_solo_sii = conteos["solo_sii"]
+    libro.n_solo_defontana = conteos["solo_defontana"]
+    libro.n_dif_monto = conteos["dif_monto"]
+    libro.n_dif_datos = conteos["dif_datos"]
+
+    totales = resultado["totales"]
+    for campo in ("neto_sii", "neto_defontana", "exento_sii", "exento_defontana",
+                  "iva_sii", "iva_defontana", "total_sii", "total_defontana"):
+        setattr(libro, campo, totales[campo])
+
+    for orden, fila in enumerate(resultado["filas"]):
+        libro.documentos.append(ConciliacionSiiDocumento(
+            tipo_doc=fila["tipo_doc"],
+            tipo_doc_desc=fila["tipo_doc_desc"][:60],
+            folio=fila["folio"][:40],
+            fecha=(fila["fecha"] or "")[:20] or None,
+            rut_sii=(fila["rut_sii"] or "")[:20] or None,
+            contraparte_sii=(fila["contraparte_sii"] or "")[:200] or None,
+            rut_defontana=(fila["rut_defontana"] or "")[:20] or None,
+            contraparte_defontana=(fila["contraparte_defontana"] or "")[:200] or None,
+            neto_sii=fila["neto_sii"], neto_defontana=fila["neto_defontana"],
+            exento_sii=fila["exento_sii"], exento_defontana=fila["exento_defontana"],
+            iva_sii=fila["iva_sii"], iva_defontana=fila["iva_defontana"],
+            total_sii=fila["total_sii"], total_defontana=fila["total_defontana"],
+            dif_neto=fila["dif_neto"], dif_exento=fila["dif_exento"],
+            dif_iva=fila["dif_iva"], diferencia=fila["diferencia"],
+            estado=fila["estado"],
+            diferencia_descrita=(fila["diferencia_descrita"] or "")[:400] or None,
+            orden=orden,
+        ))
+    return libro
+
+
+@bp.route("/conciliacion-sii")
+@require_permission("contabilidad", "ver")
+def conciliacion_sii():
+    conciliaciones = (
+        ConciliacionSii.query.filter_by(empresa_id=_empresa_id())
+        .order_by(ConciliacionSii.anio.desc(), ConciliacionSii.mes.desc())
+        .all()
+    )
+    hoy = date.today()
+    form = ConciliacionSiiForm(anio=hoy.year, mes=hoy.month)
+    form.mes.choices = MESES_ELEGIBLES
+    return render_template(
+        "contabilidad/conciliacion_sii.html",
+        conciliaciones=conciliaciones,
+        form=form,
+        accion=AccionForm(),
+        meses=MESES_NOMBRES,
+    )
+
+
+@bp.route("/conciliacion-sii/cargar", methods=["POST"])
+@require_permission("contabilidad", "editar")
+def cargar_conciliacion_sii():
+    form = ConciliacionSiiForm()
+    form.mes.choices = MESES_ELEGIBLES
+    if not form.validate_on_submit():
+        for errores in form.errors.values():
+            for error in errores:
+                flash(error, "danger")
+        return redirect(url_for("contabilidad.conciliacion_sii"))
+
+    pares = {
+        "compra": (form.sii_compra.data, form.defontana_compra.data),
+        "venta": (form.sii_venta.data, form.defontana_venta.data),
+    }
+    if not any(archivo_sii or archivo_defo for archivo_sii, archivo_defo in pares.values()):
+        flash("Elige al menos un par de archivos para cruzar.", "warning")
+        return redirect(url_for("contabilidad.conciliacion_sii"))
+
+    conciliacion = ConciliacionSii.query.filter_by(
+        empresa_id=_empresa_id(), anio=form.anio.data, mes=form.mes.data
+    ).first()
+    if conciliacion is None:
+        conciliacion = ConciliacionSii(
+            empresa_id=_empresa_id(), anio=form.anio.data, mes=form.mes.data
+        )
+        db.session.add(conciliacion)
+        db.session.flush()
+
+    mensajes, avisos = [], []
+    for clave, (archivo_sii, archivo_defo) in pares.items():
+        etiqueta = "Compras" if clave == "compra" else "Ventas"
+        if not archivo_sii and not archivo_defo:
+            continue
+        if not archivo_sii or not archivo_defo:
+            falta = "el RCV del SII" if not archivo_sii else "el libro de Defontana"
+            avisos.append(f"{etiqueta}: falta {falta}, así que no se cruzó.")
+            continue
+        try:
+            documentos_sii = leer_rcv_sii(archivo_sii, clave)
+            documentos_defo = leer_libro_defontana(archivo_defo)
+        except ArchivoInvalido as error:
+            avisos.append(f"{etiqueta}: {error}")
+            continue
+
+        resultado = cruzar(documentos_sii, documentos_defo, clave)
+        _guardar_cruce(conciliacion, clave, resultado, archivo_sii.filename, archivo_defo.filename)
+        conteos = resultado["conteos"]
+        mensajes.append(
+            f"{etiqueta}: {len(resultado['filas'])} documentos · "
+            f"{conteos['coincide']} coinciden · {conteos['solo_sii']} solo en el SII · "
+            f"{conteos['solo_defontana']} solo en Defontana · "
+            f"{conteos['dif_monto']} con diferencia de monto · "
+            f"{conteos['dif_datos']} con diferencia de datos"
+        )
+
+    if not mensajes:
+        db.session.rollback()
+        for aviso in avisos or ["No se pudo cruzar nada con los archivos entregados."]:
+            flash(aviso, "danger")
+        return redirect(url_for("contabilidad.conciliacion_sii"))
+
+    db.session.commit()
+    flash(" ".join(mensajes), "success")
+    for aviso in avisos:
+        flash(aviso, "warning")
+    return redirect(url_for("contabilidad.conciliacion_sii"))
+
+
+def _documentos_filtrados(libro, args):
+    """Documentos del libro con la búsqueda y el filtro de estado aplicados."""
+    busqueda = (args.get("q") or "").strip()
+    filtro = args.get("filtro") or ""
+    if filtro not in FILTROS_CONCILIACION:
+        filtro = ""
+
+    consulta = ConciliacionSiiDocumento.query.filter_by(libro_id=libro.id)
+    if busqueda:
+        patron = f"%{busqueda}%"
+        consulta = consulta.filter(db.or_(
+            ConciliacionSiiDocumento.folio.ilike(patron),
+            ConciliacionSiiDocumento.rut_sii.ilike(patron),
+            ConciliacionSiiDocumento.rut_defontana.ilike(patron),
+            ConciliacionSiiDocumento.contraparte_sii.ilike(patron),
+            ConciliacionSiiDocumento.contraparte_defontana.ilike(patron),
+        ))
+    if filtro == "pendientes":
+        consulta = consulta.filter(ConciliacionSiiDocumento.estado != "coincide")
+    elif filtro:
+        consulta = consulta.filter(ConciliacionSiiDocumento.estado == filtro)
+
+    tipo = (args.get("tipo") or "").strip()
+    if tipo:
+        consulta = consulta.filter(ConciliacionSiiDocumento.tipo_doc == tipo)
+
+    documentos = consulta.order_by(ConciliacionSiiDocumento.orden).all()
+    return documentos, busqueda, filtro, tipo
+
+
+def _totales_de_documentos(documentos):
+    """Suma cada columna de plata de lo que se está viendo en pantalla."""
+    return {
+        campo: sum(getattr(d, campo) or 0 for d in documentos)
+        for campo, _etiqueta in COLUMNAS_MONTO_CONCILIACION
+    }
+
+
+def _libro_or_404(conciliacion, clave):
+    libro = conciliacion.libro_por_clave(clave)
+    if libro is None:
+        abort(404)
+    return libro
+
+
+@bp.route("/conciliacion-sii/<int:conciliacion_id>/<clave>")
+@require_permission("contabilidad", "ver")
+def ver_libro_conciliacion_sii(conciliacion_id, clave):
+    if clave not in ("compra", "venta"):
+        abort(404)
+    conciliacion = _conciliacion_or_404(conciliacion_id)
+    libro = _libro_or_404(conciliacion, clave)
+
+    documentos, busqueda, filtro, tipo = _documentos_filtrados(libro, request.args)
+    tipos = sorted({d.tipo_doc for d in libro.documentos}, key=lambda t: t.zfill(4))
+
+    return render_template(
+        "contabilidad/conciliacion_sii_libro.html",
+        conciliacion=conciliacion,
+        libro=libro,
+        documentos=documentos,
+        totales=_totales_de_documentos(documentos),
+        columnas_monto=COLUMNAS_MONTO_CONCILIACION,
+        etiquetas_estado=ESTADO_ETIQUETAS_CONCILIACION,
+        tipos=tipos,
+        tipos_desc=TIPOS_DOCUMENTO_SII,
+        q=busqueda,
+        filtro=filtro,
+        tipo=tipo,
+        mes_nombre=_nombre_de_mes(conciliacion.mes),
+    )
+
+
+@bp.route("/conciliacion-sii/<int:conciliacion_id>/<clave>.xlsx")
+@require_permission("contabilidad", "ver")
+def exportar_libro_conciliacion_sii(conciliacion_id, clave):
+    if clave not in ("compra", "venta"):
+        abort(404)
+    conciliacion = _conciliacion_or_404(conciliacion_id)
+    libro = _libro_or_404(conciliacion, clave)
+    documentos, _q, _filtro, _tipo = _documentos_filtrados(libro, request.args)
+
+    columnas = [
+        col("Estado", ancho=20, total="texto"),
+        col("Tipo Doc.", ancho=28),
+        col("Folio", ancho=12),
+        col("En qué se diferencia", ancho=60),
+        col("Fecha", ancho=12),
+        col("RUT (SII)", ancho=15),
+        col("Razón social (SII)", ancho=34),
+        col("RUT (Defontana)", ancho=15),
+        col("Razón social (Defontana)", ancho=34),
+    ]
+    columnas += [col(etiqueta, ancho=16, formato=CLP, total="suma")
+                 for _campo, etiqueta in COLUMNAS_MONTO_CONCILIACION]
+
+    filas = []
+    for documento in documentos:
+        fila = [
+            ESTADO_ETIQUETAS_CONCILIACION.get(documento.estado, documento.estado),
+            documento.tipo_doc_desc or documento.tipo_doc,
+            documento.folio,
+            documento.diferencia_descrita or "",
+            documento.fecha or "",
+            documento.rut_sii or "",
+            documento.contraparte_sii or "",
+            documento.rut_defontana or "",
+            documento.contraparte_defontana or "",
+        ]
+        fila += [getattr(documento, campo) or 0 for campo, _e in COLUMNAS_MONTO_CONCILIACION]
+        filas.append(fila)
+
+    etiqueta = "Compras" if clave == "compra" else "Ventas"
+    periodo = f"{_nombre_de_mes(conciliacion.mes)} {conciliacion.anio}"
+    return responder_excel(
+        f"conciliacion-sii-{clave}-{conciliacion.anio}-{conciliacion.mes:02d}",
+        f"Conciliación SII / Defontana — {etiqueta}",
+        columnas,
+        filas,
+        periodo,
+    )
+
+
+@bp.route("/conciliacion-sii/<int:conciliacion_id>/eliminar", methods=["POST"])
+@require_permission("contabilidad", "editar")
+def eliminar_conciliacion_sii(conciliacion_id):
+    conciliacion = _conciliacion_or_404(conciliacion_id)
+    if not AccionForm().validate_on_submit():
+        abort(400)
+    etiqueta = f"{_nombre_de_mes(conciliacion.mes)} {conciliacion.anio}"
+    db.session.delete(conciliacion)
+    db.session.commit()
+    flash(f"Se eliminó la conciliación de {etiqueta}.", "success")
+    return redirect(url_for("contabilidad.conciliacion_sii"))

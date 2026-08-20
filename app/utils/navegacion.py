@@ -309,6 +309,18 @@ MODULOS = (
                 ),
             },
             {
+                "clave": "conciliacion_sii",
+                "etiqueta": "Conciliación SII",
+                "endpoint": "contabilidad.conciliacion_sii",
+                "endpoints": (
+                    "contabilidad.conciliacion_sii",
+                    "contabilidad.cargar_conciliacion_sii",
+                    "contabilidad.ver_libro_conciliacion_sii",
+                    "contabilidad.exportar_libro_conciliacion_sii",
+                    "contabilidad.eliminar_conciliacion_sii",
+                ),
+            },
+            {
                 "clave": "dif_tc",
                 "etiqueta": "Dif TC PR/CL",
                 "endpoint": "contabilidad.dif_tc",

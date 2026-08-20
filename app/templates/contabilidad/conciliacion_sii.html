@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}Conciliación SII / Defontana{% endblock %}
+{% block content %}
+{% set puede_editar = puede('contabilidad', 'editar') %}
+
+<div class="page-head">
+  <div>
+    <h1>Conciliación SII / Defontana</h1>
+    <p class="page-sub">Cruce mes a mes entre el Registro de Compras y Ventas del SII y los libros de Defontana.</p>
+  </div>
+</div>
+
+{% if puede_editar %}
+<div class="card mb-4">
+  <div class="card-header">Cargar un período</div>
+  <div class="card-body">
+    <form method="post" action="{{ url_for('contabilidad.cargar_conciliacion_sii') }}"
+          enctype="multipart/form-data" class="row g-3">
+      {{ form.hidden_tag() }}
+      <div class="col-6 col-md-2">
+        {{ form.mes.label(class="form-label small mb-1") }}
+        {{ form.mes(class="form-select form-select-sm") }}
+      </div>
+      <div class="col-6 col-md-2">
+        {{ form.anio.label(class="form-label small mb-1") }}
+        {{ form.anio(class="form-control form-control-sm") }}
+      </div>
+      <div class="col-12"></div>
+
+      <div class="col-12 col-md-3">
+        {{ form.sii_compra.label(class="form-label small mb-1") }}
+        {{ form.sii_compra(class="form-control form-control-sm") }}
+      </div>
+      <div class="col-12 col-md-3">
+        {{ form.defontana_compra.label(class="form-label small mb-1") }}
+        {{ form.defontana_compra(class="form-control form-control-sm") }}
+      </div>
+      <div class="col-12 col-md-3">
+        {{ form.sii_venta.label(class="form-label small mb-1") }}
+        {{ form.sii_venta(class="form-control form-control-sm") }}
+      </div>
+      <div class="col-12 col-md-3">
+        {{ form.defontana_venta.label(class="form-label small mb-1") }}
+        {{ form.defontana_venta(class="form-control form-control-sm") }}
+      </div>
+
+      <div class="col-12">
+        <button type="submit" class="btn btn-primary btn-sm" data-boton-ocupado="Cruzando…">Cruzar período</button>
+      </div>
+    </form>
+    <div class="form-text mt-2">
+      Cada libro necesita sus dos archivos: el del SII y el de Defontana. Puedes cargar sólo compras ahora
+      y ventas después, sobre el mismo mes. Si vuelves a cargar un libro, reemplaza al anterior.
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% macro celda_libro(conciliacion, libro, clave) %}
+  {% if libro %}
+  <td class="num">{{ libro.n_coincide }}</td>
+  <td class="num">{{ libro.n_solo_sii }}</td>
+  <td class="num">{{ libro.n_solo_defontana }}</td>
+  <td class="num">{{ libro.n_dif_monto }}</td>
+  <td class="num">{{ libro.n_dif_datos }}</td>
+  <td class="num">{{ libro.total_sii|clp }}</td>
+  <td class="num">{{ libro.total_defontana|clp }}</td>
+  <td class="num {{ 'text-danger fw-semibold' if libro.diferencia != 0 }}">{{ libro.diferencia|clp }}</td>
+  <td>
+    <a href="{{ url_for('contabilidad.ver_libro_conciliacion_sii', conciliacion_id=conciliacion.id, clave=clave) }}"
+       class="btn btn-outline-secondary btn-sm">Ver</a>
+  </td>
+  {% else %}
+  <td colspan="9" class="text-muted small text-center">Sin cargar</td>
+  {% endif %}
+{% endmacro %}
+
+{% if conciliaciones %}
+<div class="card">
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <thead>
+          <tr>
+            <th rowspan="2" class="align-bottom">Período</th>
+            <th rowspan="2" class="align-bottom">Libro</th>
+            <th colspan="5" class="text-center">Documentos</th>
+            <th colspan="3" class="text-center">Montos</th>
+            <th rowspan="2"></th>
+          </tr>
+          <tr>
+            <th class="num">Coincide</th>
+            <th class="num">Solo SII</th>
+            <th class="num">Solo Defo.</th>
+            <th class="num">Dif. monto</th>
+            <th class="num">Dif. datos</th>
+            <th class="num">Total SII</th>
+            <th class="num">Total Defontana</th>
+            <th class="num">Diferencia</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in conciliaciones %}
+          {% for clave, etiqueta in [('compra', 'Compras'), ('venta', 'Ventas')] %}
+          {% set libro = c.libro_por_clave(clave) %}
+          <tr>
+            {% if loop.first %}
+            <td rowspan="2" class="align-middle">
+              <strong>{{ meses[c.mes - 1] }} {{ c.anio }}</strong>
+              {% if puede_editar %}
+              <form method="post" class="d-inline"
+                    action="{{ url_for('contabilidad.eliminar_conciliacion_sii', conciliacion_id=c.id) }}"
+                    onsubmit="return confirm('¿Eliminar la conciliación de {{ meses[c.mes - 1] }} {{ c.anio }}? No se puede deshacer.');">
+                {{ accion.hidden_tag() }}
+                <button type="submit" class="btn btn-link btn-sm text-danger p-0 ms-2" title="Eliminar período">🗑</button>
+              </form>
+              {% endif %}
+            </td>
+            {% endif %}
+            <td>
+              {{ etiqueta }}
+              {% if libro and libro.cuadra %}
+              <span class="badge bg-success ms-1">cuadra</span>
+              {% elif libro %}
+              <span class="badge bg-danger ms-1">{{ libro.pendientes }} por revisar</span>
+              {% endif %}
+            </td>
+            {{ celda_libro(c, libro, clave) }}
+          </tr>
+          {% endfor %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% else %}
+<div class="alert alert-info">
+  Todavía no hay ningún período cruzado.
+  {% if puede_editar %}Sube arriba los archivos del SII y de Defontana del mes que quieras revisar.{% endif %}
+</div>
+{% endif %}
+
+{% endblock %}

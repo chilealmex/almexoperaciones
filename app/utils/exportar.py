@@ -127,11 +127,22 @@ def _escribir_totales(hoja, columnas, filas, fila_totales):
     return hay_totales
 
 
+# Excel no acepta estos caracteres en el nombre de una hoja y revienta al
+# guardar. Un título con una barra —"SII / Defontana"— es de lo más razonable
+# para el informe, así que se limpia acá en vez de prohibirlo en cada pantalla.
+_PROHIBIDOS_EN_HOJA = str.maketrans({c: "-" for c in r":\/?*[]"})
+
+
+def nombre_de_hoja(titulo: str) -> str:
+    """Nombre de hoja válido: sin caracteres prohibidos y de 31 caracteres o menos."""
+    return (titulo or "").translate(_PROHIBIDOS_EN_HOJA).strip()[:31] or "Informe"
+
+
 def construir_libro(titulo, columnas, filas, subtitulo=""):
     """Arma el libro de Excel completo y lo devuelve en memoria."""
     libro = Workbook()
     hoja = libro.active
-    hoja.title = titulo[:31] or "Informe"  # Excel limita el nombre de la hoja
+    hoja.title = nombre_de_hoja(titulo)
 
     _escribir_encabezado(hoja, titulo, subtitulo, len(columnas))
 
