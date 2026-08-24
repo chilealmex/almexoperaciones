@@ -30,7 +30,7 @@
     {% for parametro, valor in filtros_columna.items() if valor %}
     <input type="hidden" name="{{ parametro }}" value="{{ valor }}">
     {% endfor %}
-    <label class="form-label small mb-0 text-muted">Mes de llegada</label>
+    <label class="form-label small mb-0 text-muted">Mes de cierre</label>
     <select name="mes" class="form-select form-select-sm" style="width: auto;" onchange="this.form.submit()">
       <option value="">Todos los meses</option>
       {% for clave, etiqueta in meses %}

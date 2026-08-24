@@ -34,6 +34,7 @@ from app.utils import costeo_importacion_calculo as costeo_calculo
 from app.utils.decorators import require_permission
 from app.utils.exportar import CLP, FECHA, col, responder_excel
 from app.utils.formatting import format_clp
+from app.utils.nombres import agrupar_por_nombre, clave_de_nombre
 
 MESES_ES = (
     "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -121,7 +122,16 @@ def _agencias_disponibles():
         .order_by(Importacion.agencia)
         .all()
     )
-    return [f[0] for f in filas]
+    # Mismo criterio que el listado: dos formas de escribir la misma agencia
+    # no pueden ser dos opciones distintas del desplegable.
+    vistas, opciones = set(), []
+    for (nombre,) in filas:
+        clave = clave_de_nombre(nombre)
+        if clave in vistas:
+            continue
+        vistas.add(clave)
+        opciones.append((nombre or "").strip())
+    return opciones
 
 
 def _meses_disponibles(importaciones):
@@ -164,7 +174,11 @@ def _aplicar_filtros_lista(query, args):
             )
         )
     if agencia:
-        query = query.filter(Importacion.agencia == agencia)
+        # Comparar el texto exacto dejaba fuera las importaciones de la misma
+        # agencia escrita distinto, que es justo lo que el filtro debe juntar.
+        clave = clave_de_nombre(agencia)
+        ids = [i.id for i in query.all() if clave_de_nombre(i.agencia) == clave]
+        query = query.filter(Importacion.id.in_(ids or [-1]))
     query = _filtro_mes(query, Importacion.fecha_pei, mes)
     if estado:
         query = query.filter(Importacion.estado == estado)
@@ -197,12 +211,15 @@ def dashboard():
         for m in meses
     ]
 
-    por_agencia = {}
-    for i in importaciones:
-        if not i.agencia:
-            continue
-        por_agencia[i.agencia] = por_agencia.get(i.agencia, 0) + i.saldo_signado
-    agencias_saldo = sorted(por_agencia.items(), key=lambda kv: abs(kv[1]), reverse=True)[:8]
+    agencias_saldo = sorted(
+        (
+            (nombre, sum(i.saldo_signado for i in lista))
+            for nombre, lista in agrupar_por_nombre(
+                [i for i in importaciones if i.agencia], lambda i: i.agencia
+            )
+        ),
+        key=lambda kv: abs(kv[1]), reverse=True,
+    )[:8]
 
     por_proveedor = {}
     for i in importaciones:
@@ -675,14 +692,13 @@ def agencias():
     query = _aplicar_filtros_lista(_query_base(), request.args)
     importaciones = query.order_by(Importacion.fecha_pei.desc().nullslast()).all()
 
-    grupos = {}
-    for i in importaciones:
-        clave = i.agencia or "Sin agencia"
-        grupos.setdefault(clave, []).append(i)
-
+    # Se agrupa tolerando espacios de más, acentos, mayúsculas y caracteres
+    # invisibles: la misma agencia escrita de dos formas aparecía como dos
+    # bloques, cada uno con un saldo parcial y ninguno con el saldo real.
     bloques = []
-    for agencia_nombre in sorted(grupos):
-        lista = grupos[agencia_nombre]
+    for agencia_nombre, lista in agrupar_por_nombre(
+        importaciones, lambda i: i.agencia or "Sin agencia"
+    ):
         saldo_total = sum(i.saldo_signado for i in lista)
         bloques.append({
             "agencia": agencia_nombre,
@@ -1005,16 +1021,16 @@ ESTADOS_COSTEO_FILTRO = ("todos", "pendiente", "en_proceso", "cerrado")
 
 # Los costeos sin fecha de llegada no caen en ningún mes, pero tampoco pueden
 # desaparecer del listado: van al final, en su propio grupo.
-SIN_FECHA = "Sin fecha de llegada"
+SIN_FECHA = "Sin mes de cierre"
 
 
 def _meses_de_costeos():
-    """Meses con costeos, para el desplegable del filtro. Los más nuevos primero."""
+    """Meses de cierre con costeos, para el desplegable. Los más nuevos primero."""
     fechas = (
-        db.session.query(CosteoImportacion.fecha_llegada)
+        db.session.query(CosteoImportacion.mes_cierre)
         .filter(
             CosteoImportacion.empresa_id == _empresa_id(),
-            CosteoImportacion.fecha_llegada.isnot(None),
+            CosteoImportacion.mes_cierre.isnot(None),
         )
         .distinct()
         .all()
@@ -1028,10 +1044,15 @@ def _agrupar_por_anio_y_mes(resumen):
 
     Con las importaciones de varios años en una sola tabla había que ir leyendo
     fecha por fecha para ubicarse. Agrupadas, el año y el mes se ven de una.
+
+    El corte es el **mes de cierre**, no la fecha de llegada: lo que se necesita
+    ver junto es todo lo que cierra en un mismo mes contable, aunque haya
+    llegado en meses distintos. Los costeos que todavía no tienen mes de cierre
+    —los que siguen abiertos— van a un grupo propio al final.
     """
     por_anio = {}
     for fila in resumen:
-        fecha = fila["costeo"].fecha_llegada
+        fecha = fila["costeo"].mes_cierre
         anio = fecha.year if fecha else None
         mes = fecha.month if fecha else None
         por_anio.setdefault(anio, {}).setdefault(mes, []).append(fila)
@@ -1107,10 +1128,11 @@ def costeo_detallado_lista():
     if filtro_estado != "todos":
         query = query.filter(CosteoImportacion.estado == filtro_estado)
 
-    # El mes se toma de la fecha de llegada, que es la que ella usa para ubicar
-    # una importación; los costeos sin fecha quedan fuera al filtrar.
+    # El filtro mira el mismo campo que agrupa la tabla —el mes de cierre—: si
+    # uno filtrara por llegada y la otra agrupara por cierre, los números de
+    # los botones no cuadrarían con lo que se ve.
     mes = (request.args.get("mes") or "").strip()
-    query = _filtro_mes(query, CosteoImportacion.fecha_llegada, mes)
+    query = _filtro_mes(query, CosteoImportacion.mes_cierre, mes)
 
     query, orden, direccion = _ordenar(
         query, request.args, COLUMNAS_ORDEN_COSTEO, "fecha_llegada", direccion_por_defecto="desc"
@@ -1124,7 +1146,7 @@ def costeo_detallado_lista():
         CosteoImportacion.estado, db.func.count(CosteoImportacion.id)
     ).filter(CosteoImportacion.empresa_id == _empresa_id())
     por_estado = dict(
-        _filtro_mes(conteo_query, CosteoImportacion.fecha_llegada, mes)
+        _filtro_mes(conteo_query, CosteoImportacion.mes_cierre, mes)
         .group_by(CosteoImportacion.estado)
         .all()
     )

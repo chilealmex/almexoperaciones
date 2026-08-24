@@ -640,3 +640,72 @@ def test_la_etiqueta_del_saldo_sigue_al_signo_del_total(db, empresa):
     assert a_favor.etiqueta_saldo == "A favor"
     assert en_contra.etiqueta_saldo == "En contra"
     assert etiqueta_de_saldo(a_favor.saldo_signado + en_contra.saldo_signado) == "Sin saldo"
+
+
+def test_la_misma_agencia_escrita_distinto_va_en_un_solo_bloque(client, usuario_admin, empresa, db):
+    """El caso real: dos bloques "UNITED PARCEL SERVICE DE CHILE LIMITADA".
+
+    Se veían idénticos en pantalla y cada uno mostraba un saldo parcial, así que
+    ninguno de los dos era el saldo verdadero de la agencia.
+    """
+    from datetime import date
+
+    nombre = "UNITED PARCEL SERVICE DE CHILE LIMITADA"
+    db.session.add_all([
+        Importacion(empresa_id=empresa.id, agencia=nombre, fecha_pei=date(2026, 7, 6),
+                    pei=52, saldo_agencia=1240664, tipo_saldo="en_contra"),
+        Importacion(empresa_id=empresa.id, agencia=nombre + " ", fecha_pei=date(2026, 7, 8),
+                    pei=56, saldo_agencia=1089320, tipo_saldo="en_contra"),
+    ])
+    db.session.commit()
+
+    login(client, "admin@test.cl")
+    texto = client.get("/importaciones/agencias").get_data(as_text=True)
+
+    # Sólo dentro de la tabla: en el desplegable el nombre sale igual, y ahí
+    # aparece dos veces por opción (en el value y en el texto).
+    cuerpo = texto[texto.index("<tbody>"):texto.index("</tbody>")]
+    assert cuerpo.count(nombre) == 1, "la agencia sigue apareciendo en dos bloques"
+    # Y el saldo del bloque es la suma de los dos movimientos, no uno de ellos
+    assert "$-2.329.984" in cuerpo
+
+
+def test_el_desplegable_no_ofrece_la_misma_agencia_dos_veces(client, usuario_admin, empresa, db):
+    from datetime import date
+
+    nombre = "DHL EXPRESS"
+    db.session.add_all([
+        Importacion(empresa_id=empresa.id, agencia=nombre, fecha_pei=date(2026, 7, 6), pei=1),
+        Importacion(empresa_id=empresa.id, agencia="dhl  express", fecha_pei=date(2026, 7, 7), pei=2),
+    ])
+    db.session.commit()
+
+    login(client, "admin@test.cl")
+    texto = client.get("/importaciones/agencias").get_data(as_text=True)
+
+    opciones = texto[texto.index('name="agencia"'):]
+    opciones = opciones[:opciones.index("</select>")]
+    assert opciones.count("<option") == 2, "una opción por agencia real, más 'Todas'"
+
+
+def test_filtrar_por_agencia_trae_las_dos_formas_de_escribirla(client, usuario_admin, empresa, db):
+    """Si el filtro compara el texto exacto, deja fuera justo lo que debe juntar."""
+    from datetime import date
+
+    nombre = "AGENCIA MARITIMA DEL SUR"
+    db.session.add_all([
+        Importacion(empresa_id=empresa.id, agencia=nombre, fecha_pei=date(2026, 7, 6),
+                    pei=71, proveedor_nombre="PROVEEDOR UNO"),
+        Importacion(empresa_id=empresa.id, agencia=nombre.lower() + " ", fecha_pei=date(2026, 7, 7),
+                    pei=72, proveedor_nombre="PROVEEDOR DOS"),
+        Importacion(empresa_id=empresa.id, agencia="OTRA AGENCIA", fecha_pei=date(2026, 7, 8),
+                    pei=73, proveedor_nombre="PROVEEDOR TRES"),
+    ])
+    db.session.commit()
+
+    login(client, "admin@test.cl")
+    texto = client.get(f"/importaciones/agencias?agencia={nombre}").get_data(as_text=True)
+
+    assert "PROVEEDOR UNO" in texto
+    assert "PROVEEDOR DOS" in texto
+    assert "PROVEEDOR TRES" not in texto

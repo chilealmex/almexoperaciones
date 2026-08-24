@@ -1423,11 +1423,11 @@ def test_solo_un_superadmin_ve_el_boton_de_reabrir(client, usuario_admin, empres
     assert "Reabrir" in client.get("/importaciones/costeo-detallado").get_data(as_text=True)
 
 
-def test_el_listado_se_filtra_por_mes_de_llegada(client, usuario_admin, empresa, db):
+def test_el_listado_se_filtra_por_mes_de_cierre(client, usuario_admin, empresa, db):
     from datetime import date
 
-    _crear_costeo(db, empresa, n_importacion="DE-AGOSTO", fecha_llegada=date(2026, 8, 12))
-    _crear_costeo(db, empresa, n_importacion="DE-JULIO", fecha_llegada=date(2026, 7, 3))
+    _crear_costeo(db, empresa, n_importacion="DE-AGOSTO", mes_cierre=date(2026, 8, 1))
+    _crear_costeo(db, empresa, n_importacion="DE-JULIO", mes_cierre=date(2026, 7, 1))
     login(client, "admin@test.cl")
 
     texto = client.get("/importaciones/costeo-detallado?mes=2026-08").get_data(as_text=True)
@@ -1442,9 +1442,9 @@ def test_el_conteo_de_los_botones_sigue_al_mes(client, usuario_admin, empresa, d
     import re
     from datetime import date
 
-    _crear_costeo(db, empresa, n_importacion="A1", fecha_llegada=date(2026, 8, 1), estado="cerrado")
-    _crear_costeo(db, empresa, n_importacion="J1", fecha_llegada=date(2026, 7, 1), estado="cerrado")
-    _crear_costeo(db, empresa, n_importacion="J2", fecha_llegada=date(2026, 7, 2), estado="cerrado")
+    _crear_costeo(db, empresa, n_importacion="A1", mes_cierre=date(2026, 8, 1), estado="cerrado")
+    _crear_costeo(db, empresa, n_importacion="J1", mes_cierre=date(2026, 7, 1), estado="cerrado")
+    _crear_costeo(db, empresa, n_importacion="J2", mes_cierre=date(2026, 7, 1), estado="cerrado")
     login(client, "admin@test.cl")
 
     def conteo(texto, etiqueta):
@@ -1463,9 +1463,9 @@ def test_el_listado_se_agrupa_por_ano_y_dentro_por_mes(client, usuario_admin, em
     """Lo que ella pidió: el año arriba y los meses adentro, del más nuevo al más viejo."""
     from datetime import date
 
-    _crear_costeo(db, empresa, n_importacion="A-2025", fecha_llegada=date(2025, 5, 2))
-    _crear_costeo(db, empresa, n_importacion="A-JUL", fecha_llegada=date(2026, 7, 3))
-    _crear_costeo(db, empresa, n_importacion="A-AGO", fecha_llegada=date(2026, 8, 12))
+    _crear_costeo(db, empresa, n_importacion="A-2025", mes_cierre=date(2025, 5, 1))
+    _crear_costeo(db, empresa, n_importacion="A-JUL", mes_cierre=date(2026, 7, 1))
+    _crear_costeo(db, empresa, n_importacion="A-AGO", mes_cierre=date(2026, 8, 1))
     login(client, "admin@test.cl")
 
     texto = client.get("/importaciones/costeo-detallado").get_data(as_text=True)
@@ -1482,15 +1482,15 @@ def test_el_listado_se_agrupa_por_ano_y_dentro_por_mes(client, usuario_admin, em
     assert cuerpo.count("fila-mes") == 3
 
 
-def test_un_costeo_sin_fecha_no_desaparece_del_listado(client, usuario_admin, empresa, db):
-    """Agrupar por fecha no puede esconder lo que todavía no la tiene."""
-    _crear_costeo(db, empresa, n_importacion="SIN-FECHA")
+def test_un_costeo_sin_cerrar_no_desaparece_del_listado(client, usuario_admin, empresa, db):
+    """Agrupar por mes de cierre no puede esconder lo que sigue abierto."""
+    _crear_costeo(db, empresa, n_importacion="ABIERTA", estado="en_proceso")
     login(client, "admin@test.cl")
 
     texto = client.get("/importaciones/costeo-detallado").get_data(as_text=True)
 
-    assert "SIN-FECHA" in texto
-    assert "Sin fecha de llegada" in texto
+    assert "ABIERTA" in texto
+    assert "Sin mes de cierre" in texto
 
 
 def test_se_guarda_el_mes_de_cierre_de_la_importacion(client, usuario_admin, empresa, db):
@@ -1603,7 +1603,7 @@ def test_los_grupos_no_muestran_el_total_del_mes(client, usuario_admin, empresa,
     """
     from datetime import date
 
-    _crear_costeo(db, empresa, n_importacion="A1", fecha_llegada=date(2026, 8, 1))
+    _crear_costeo(db, empresa, n_importacion="A1", mes_cierre=date(2026, 8, 1))
     login(client, "admin@test.cl")
 
     cuerpo = _cuerpo_tabla(client.get("/importaciones/costeo-detallado").get_data(as_text=True))
@@ -1621,8 +1621,8 @@ def test_el_ano_mas_reciente_viene_abierto_y_los_anteriores_plegados(client, usu
     """Se trabaja en el año en curso; el historial no tiene que ocupar la pantalla."""
     from datetime import date
 
-    _crear_costeo(db, empresa, n_importacion="NUEVA", fecha_llegada=date(2026, 8, 1))
-    _crear_costeo(db, empresa, n_importacion="VIEJA", fecha_llegada=date(2025, 3, 1))
+    _crear_costeo(db, empresa, n_importacion="NUEVA", mes_cierre=date(2026, 8, 1))
+    _crear_costeo(db, empresa, n_importacion="VIEJA", mes_cierre=date(2025, 3, 1))
     login(client, "admin@test.cl")
 
     cuerpo = _cuerpo_tabla(client.get("/importaciones/costeo-detallado").get_data(as_text=True))
@@ -1640,7 +1640,7 @@ def test_cada_fila_sabe_de_que_grupo_cuelga(client, usuario_admin, empresa, db):
     """Sin ese vínculo el plegado no tendría a qué filas ocultar."""
     from datetime import date
 
-    _crear_costeo(db, empresa, n_importacion="A1", fecha_llegada=date(2026, 8, 12))
+    _crear_costeo(db, empresa, n_importacion="A1", mes_cierre=date(2026, 8, 1))
     login(client, "admin@test.cl")
 
     cuerpo = _cuerpo_tabla(client.get("/importaciones/costeo-detallado").get_data(as_text=True))
