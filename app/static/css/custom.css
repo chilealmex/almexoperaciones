@@ -741,6 +741,9 @@ tr.filtros-fila .form-select {
 .select-estado {
   font-weight: 600;
   border-width: 1px;
+  /* Sin esto el select se encoge a la columna y recorta la etiqueta: "En curso"
+     quedaba como "En cur" y "Pendiente" como "Pendie". Medido en el navegador. */
+  min-width: 8.5rem;
 }
 .select-estado.estado-pendiente {
   background-color: var(--danger-bg);
@@ -1195,6 +1198,21 @@ input.campo-excel.esta-vacio::placeholder {
 @media (max-width: 992px) {
   .costeo-celda-manual, .costeo-celda-activo-fijo { background-clip: padding-box; }
 }
+/* ===== Costeo agrupado por año y mes =====
+   Una sola tabla con filas de encabezado: así las columnas caen en la misma
+   vertical en todos los grupos, que es lo que se pierde al partir en tablas. */
+.fila-anio > td {
+  background: #e7edf5;
+  border-top: 2px solid #c8d3e0;
+  font-size: 0.95rem;
+}
+.fila-mes > td {
+  background: #f4f7fa;
+  font-weight: 600;
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+}
+
 /* ===== Movimientos por agencia =====
    Una sola tabla con una fila de encabezado por agencia. Antes cada agencia
    era su propia tabla y las columnas quedaban corridas entre grupos. */

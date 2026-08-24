@@ -15,8 +15,17 @@ from app.importaciones.forms import (
     ProveedorImportacionForm,
 )
 from app.models.activo_fijo import CategoriaActivo
-from app.models.importacion import DinRegistro, Importacion, ImportacionAsientoLinea, ProveedorImportacion
+from app.models.importacion import (
+    DinRegistro,
+    Importacion,
+    ImportacionAsientoLinea,
+    ProveedorImportacion,
+    etiqueta_de_saldo,
+)
 from app.models.costeo_importacion import (
+    CLASE_SELECT_ESTADO_COSTEO,
+    COLOR_ESTADO_COSTEO,
+    ESTADOS_COSTEO,
     CosteoImportacion,
     CosteoImportacionProducto,
 )
@@ -210,7 +219,7 @@ def dashboard():
         .order_by(CosteoImportacion.fecha_llegada.desc().nullslast())
         .all()
     )
-    costeos_listos = [c for c in en_proceso if abs(costeo_calculo.diferencia_cuadratura(c)) < 0.01]
+    costeos_listos = [c for c in en_proceso if costeo_calculo.cuadra_cuadratura(c)]
 
     return render_template(
         "importaciones/dashboard.html",
@@ -667,7 +676,12 @@ def agencias():
     for agencia_nombre in sorted(grupos):
         lista = grupos[agencia_nombre]
         saldo_total = sum(i.saldo_signado for i in lista)
-        bloques.append({"agencia": agencia_nombre, "importaciones": lista, "saldo_total": saldo_total})
+        bloques.append({
+            "agencia": agencia_nombre,
+            "importaciones": lista,
+            "saldo_total": saldo_total,
+            "etiqueta_saldo": etiqueta_de_saldo(saldo_total),
+        })
     bloques.sort(key=lambda b: abs(b["saldo_total"]), reverse=True)
 
     todas = _query_base().all()
@@ -915,6 +929,22 @@ def _opciones_importacion_para_costeo():
     ]
 
 
+def _mes_a_fecha(texto):
+    """'2026-08' -> date(2026, 8, 1). Vacío o mal escrito -> None.
+
+    Se guarda el día 1 para que el mes de cierre se pueda agrupar y filtrar con
+    las mismas funciones de fecha que usa el resto del módulo.
+    """
+    texto = (texto or "").strip()
+    if not texto:
+        return None
+    try:
+        anio, mes = texto.split("-")[:2]
+        return date(int(anio), int(mes), 1)
+    except (ValueError, TypeError):
+        return None
+
+
 def _poblar_costeo_desde_form(costeo, form):
     costeo.n_importacion = form.n_importacion.data.strip() if form.n_importacion.data else None
     costeo.fecha_llegada = form.fecha_llegada.data
@@ -931,6 +961,7 @@ def _poblar_costeo_desde_form(costeo, form):
     costeo.solicitud_compra = form.solicitud_compra.data.strip() if form.solicitud_compra.data else None
     costeo.tasa_ad_valorem = (form.tasa_ad_valorem.data or 0) / 100
     costeo.estado = form.estado.data
+    costeo.mes_cierre = _mes_a_fecha(form.mes_cierre.data)
     costeo.importacion_id = form.importacion_id.data or None
 
 
@@ -962,7 +993,65 @@ COLUMNAS_ORDEN_COSTEO = {
     "proveedor": CosteoImportacion.proveedor,
 }
 
-ESTADOS_COSTEO_FILTRO = ("todos", "en_proceso", "cerrado")
+ESTADOS_COSTEO_FILTRO = ("todos", "pendiente", "en_proceso", "cerrado")
+
+# Los costeos sin fecha de llegada no caen en ningún mes, pero tampoco pueden
+# desaparecer del listado: van al final, en su propio grupo.
+SIN_FECHA = "Sin fecha de llegada"
+
+
+def _meses_de_costeos():
+    """Meses con costeos, para el desplegable del filtro. Los más nuevos primero."""
+    fechas = (
+        db.session.query(CosteoImportacion.fecha_llegada)
+        .filter(
+            CosteoImportacion.empresa_id == _empresa_id(),
+            CosteoImportacion.fecha_llegada.isnot(None),
+        )
+        .distinct()
+        .all()
+    )
+    claves = sorted({fecha.strftime("%Y-%m") for (fecha,) in fechas}, reverse=True)
+    return [(clave, f"{MESES_ES[int(clave[5:7]) - 1]} {clave[:4]}") for clave in claves]
+
+
+def _agrupar_por_anio_y_mes(resumen):
+    """Arma [{anio, total, meses: [{etiqueta, total, filas}]}], del más nuevo al más viejo.
+
+    Con las importaciones de varios años en una sola tabla había que ir leyendo
+    fecha por fecha para ubicarse. Agrupadas, el año y el mes se ven de una.
+    """
+    por_anio = {}
+    for fila in resumen:
+        fecha = fila["costeo"].fecha_llegada
+        anio = fecha.year if fecha else None
+        mes = fecha.month if fecha else None
+        por_anio.setdefault(anio, {}).setdefault(mes, []).append(fila)
+
+    anios = []
+    # None (sin fecha) al final: sorted() no compara None con int.
+    for anio in sorted((a for a in por_anio if a is not None), reverse=True) + (
+        [None] if None in por_anio else []
+    ):
+        meses_del_anio = por_anio[anio]
+        meses = []
+        for mes in sorted((m for m in meses_del_anio if m is not None), reverse=True) + (
+            [None] if None in meses_del_anio else []
+        ):
+            filas = meses_del_anio[mes]
+            meses.append({
+                "etiqueta": MESES_ES[mes - 1] if mes else SIN_FECHA,
+                "filas": filas,
+                "total": sum(f["costo_total_clp"] for f in filas),
+            })
+        anios.append({
+            "anio": anio,
+            "etiqueta": str(anio) if anio else SIN_FECHA,
+            "meses": meses,
+            "total": sum(m["total"] for m in meses),
+            "cantidad": sum(len(m["filas"]) for m in meses),
+        })
+    return anios
 
 
 def _filtros_de_columna(query, args, columnas):
@@ -1009,23 +1098,29 @@ def costeo_detallado_lista():
     if filtro_estado != "todos":
         query = query.filter(CosteoImportacion.estado == filtro_estado)
 
+    # El mes se toma de la fecha de llegada, que es la que ella usa para ubicar
+    # una importación; los costeos sin fecha quedan fuera al filtrar.
+    mes = (request.args.get("mes") or "").strip()
+    query = _filtro_mes(query, CosteoImportacion.fecha_llegada, mes)
+
     query, orden, direccion = _ordenar(
         query, request.args, COLUMNAS_ORDEN_COSTEO, "fecha_llegada", direccion_por_defecto="desc"
     )
     lista = query.order_by(CosteoImportacion.id.desc()).all()
 
     # Contar en la base en vez de traerse todos los costeos solo para contarlos.
+    # El conteo sigue al mes elegido: si el filtro dice "Agosto", el número del
+    # botón tiene que ser el de agosto y no el de todo el año.
+    conteo_query = db.session.query(
+        CosteoImportacion.estado, db.func.count(CosteoImportacion.id)
+    ).filter(CosteoImportacion.empresa_id == _empresa_id())
     por_estado = dict(
-        db.session.query(CosteoImportacion.estado, db.func.count(CosteoImportacion.id))
-        .filter(CosteoImportacion.empresa_id == _empresa_id())
+        _filtro_mes(conteo_query, CosteoImportacion.fecha_llegada, mes)
         .group_by(CosteoImportacion.estado)
         .all()
     )
-    conteo_estados = {
-        "todos": sum(por_estado.values()),
-        "en_proceso": por_estado.get("en_proceso", 0),
-        "cerrado": por_estado.get("cerrado", 0),
-    }
+    conteo_estados = {"todos": sum(por_estado.values())}
+    conteo_estados.update({clave: por_estado.get(clave, 0) for clave, _e in ESTADOS_COSTEO})
 
     resumen = []
     for costeo in lista:
@@ -1036,16 +1131,23 @@ def costeo_detallado_lista():
                 "costeo": costeo,
                 "costo_total_clp": totales["costo_total_clp"],
                 "cantidad_productos": len(costeo.productos),
-                "cuadrado": abs(costeo_calculo.diferencia_cuadratura(costeo, totales)) < 0.01,
+                "cuadrado": costeo_calculo.cuadra_cuadratura(costeo, totales),
             }
         )
     return render_template(
         "importaciones/costeo_detallado_lista.html",
         resumen=resumen,
         accion_form=AccionForm(),
+        anios=_agrupar_por_anio_y_mes(resumen),
+        meses_es=MESES_ES,
         filtros_columna=filtros_columna,
         filtro_estado=filtro_estado,
         conteo_estados=conteo_estados,
+        mes=mes,
+        meses=_meses_de_costeos(),
+        estados_costeo=ESTADOS_COSTEO,
+        color_estado=COLOR_ESTADO_COSTEO,
+        clase_select_estado=CLASE_SELECT_ESTADO_COSTEO,
         orden=orden,
         direccion=direccion,
     )
@@ -1129,7 +1231,7 @@ def cambiar_estado_costeo(costeo_id):
         flash("Este costeo está cerrado. Solo un superadmin puede reabrirlo.", "warning")
         return redirect(request.referrer or url_for("importaciones.costeo_detallado_lista"))
     nuevo_estado = request.form.get("estado", "")
-    if nuevo_estado in ("en_proceso", "cerrado"):
+    if nuevo_estado in dict(ESTADOS_COSTEO):
         costeo.estado = nuevo_estado
         db.session.commit()
     return redirect(request.referrer or url_for("importaciones.costeo_detallado_lista"))
@@ -1166,6 +1268,8 @@ def ver_costeo_detallado(costeo_id):
     datos_form.importacion_id.choices = _opciones_importacion_para_costeo()
     datos_form.tasa_ad_valorem.data = (costeo.tasa_ad_valorem or 0) * 100
     datos_form.importacion_id.data = costeo.importacion_id or 0
+    # El <input type="month"> espera "AAAA-MM"; en la base es una fecha.
+    datos_form.mes_cierre.data = costeo.mes_cierre.strftime("%Y-%m") if costeo.mes_cierre else ""
     return render_template(
         "importaciones/costeo_detallado_ver.html",
         costeo=costeo,

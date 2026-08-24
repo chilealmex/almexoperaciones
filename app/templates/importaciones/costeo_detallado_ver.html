@@ -158,6 +158,14 @@
             </td>
           </tr>
           <tr>
+            <th>{{ datos_form.mes_cierre.label.text }}</th>
+            <td>
+              {# type="month" da un selector de mes y devuelve "2026-08". #}
+              {{ datos_form.mes_cierre(class="form-control form-control-sm campo-excel", type="month", disabled=not puede_editar) }}
+              <div class="form-text">Mes contable en que se cierra esta importación.</div>
+            </td>
+          </tr>
+          <tr>
             <th>{{ datos_form.importacion_id.label.text }}</th>
             <td>
               {{ datos_form.importacion_id(class="form-select form-select-sm campo-excel", disabled=not puede_editar) }}

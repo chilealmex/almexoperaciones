@@ -2,6 +2,8 @@ from flask_wtf import FlaskForm
 from wtforms import DateField, FloatField, IntegerField, SelectField, StringField, TextAreaField
 from wtforms.validators import DataRequired, Length, NumberRange, Optional
 
+from app.models.costeo_importacion import ESTADOS_COSTEO
+
 TRATADO_CHOICES = [("SI", "Sí"), ("NO", "No"), ("PARCIAL", "Parcial")]
 
 
@@ -75,9 +77,12 @@ class CosteoImportacionForm(FlaskForm):
     tasa_ad_valorem = FloatField(
         "Tasa Ad Valorem (%)", validators=[Optional(), NumberRange(min=0, max=100)], default=6
     )
+    # El mes de cierre se elige con un <input type="month">, que entrega
+    # "2026-08"; se guarda como el día 1 de ese mes.
+    mes_cierre = StringField("Mes de cierre", validators=[Optional(), Length(max=7)])
     estado = SelectField(
         "Estado",
-        choices=[("en_proceso", "En proceso"), ("cerrado", "Cerrado")],
+        choices=list(ESTADOS_COSTEO),
         default="en_proceso",
     )
     importacion_id = SelectField("Importación (PEI) vinculada", coerce=int, validators=[Optional()])

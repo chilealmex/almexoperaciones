@@ -168,6 +168,20 @@ def recalcular(costeo):
         producto.impacto_pct = impacto_pct
 
 
+# Una diferencia de hasta esto no es plata sin repartir: es el redondeo del
+# prorrateo. Los montos se reparten entre los productos y se redondean, así que
+# la suma casi nunca da exactamente el total del documento. Antes se exigía
+# menos de un centavo y costeos correctos aparecían como "Revisar" por cuatro
+# centésimas. Se aplica en la unidad de cada columna: en la moneda del invoice
+# para el EXW, y en pesos para las demás.
+TOLERANCIA_CUADRATURA = 10
+
+
+def cuadra_cuadratura(costeo, totales=None) -> bool:
+    """¿La diferencia del EXW cabe en el redondeo?"""
+    return abs(diferencia_cuadratura(costeo, totales)) <= TOLERANCIA_CUADRATURA
+
+
 def diferencia_cuadratura(costeo, totales=None):
     """Diferencia entre el EXW total de los documentos y la suma de EXW de los productos.
 
@@ -212,7 +226,7 @@ def comparacion_por_columna(costeo, totales=None):
     # N productos el total puede correrse hasta N pesos respecto del documento.
     # Eso es el redondeo del prorrateo, no plata sin repartir: marcarlo en rojo
     # sería una falsa alarma en cada costeo con varias líneas.
-    tolerancia_clp = max(1, len(costeo.productos))
+    tolerancia_clp = max(TOLERANCIA_CUADRATURA, len(costeo.productos))
 
     # Mientras no llegue la DIN no hay documento de Ad Valorem, y cada producto
     # aplica la tasa teórica (CIF x tasa). En ese caso la referencia es lo que
@@ -233,10 +247,9 @@ def comparacion_por_columna(costeo, totales=None):
         documentos = _num(referencia.get(clave))
         productos = sum(_num(getattr(p, atributo)) for p in costeo.productos)
         diferencia = round(documentos - productos, 2)
-        # exw_moneda va en la moneda del invoice, con decimales y sin redondear:
-        # ahí cualquier diferencia real importa y sólo se perdona el ruido del
-        # cálculo con decimales.
-        tolerancia = 0.01 if clave == "exw_moneda" else tolerancia_clp
+        # exw_moneda va en la moneda del invoice; las demás en pesos. El límite
+        # es el mismo número en la unidad de cada una.
+        tolerancia = TOLERANCIA_CUADRATURA if clave == "exw_moneda" else tolerancia_clp
         resultado[clave] = {
             "documentos": documentos,
             "productos": productos,

@@ -1,10 +1,30 @@
 from app.extensions import db
 
 MONEDAS = (("USD", "USD"), ("EUR", "EUR"), ("CLP", "CLP"))
+# El valor guardado de "En curso" sigue siendo 'en_proceso': cambió sólo la
+# etiqueta, así que no hace falta migrar ningún dato.
 ESTADOS_COSTEO = (
-    ("en_proceso", "En proceso"),
+    ("pendiente", "Pendiente"),
+    ("en_proceso", "En curso"),
     ("cerrado", "Cerrado"),
 )
+
+# Rojo lo que no ha partido, amarillo lo que está a medias, verde lo terminado.
+# Dos juegos de clases porque son dos controles distintos: la insignia usa las
+# de Bootstrap y el desplegable las del sistema de diseño, que ya existían y
+# tienen los mismos colores en versión suave —bg-danger sobre un <select> queda
+# rojo sólido y no se lee—.
+COLOR_ESTADO_COSTEO = {
+    "pendiente": "bg-danger",
+    "en_proceso": "bg-warning text-dark",
+    "cerrado": "bg-success",
+}
+
+CLASE_SELECT_ESTADO_COSTEO = {
+    "pendiente": "estado-pendiente",
+    "en_proceso": "estado-costeando",
+    "cerrado": "estado-cerrado",
+}
 
 
 class CosteoImportacion(db.Model):
@@ -28,6 +48,10 @@ class CosteoImportacion(db.Model):
     solicitud_compra = db.Column(db.String(40), nullable=True)
     tasa_ad_valorem = db.Column(db.Float, nullable=False, default=0.06)
     estado = db.Column(db.String(15), nullable=False, default="en_proceso")
+    # Mes contable en que se cierra la importación. Es un dato del costeo y no
+    # se deduce de la fecha de llegada: una importación que llega a fin de mes
+    # suele cerrarse contablemente en el mes siguiente.
+    mes_cierre = db.Column(db.Date, nullable=True)
 
     # --- Control DIN de esta importación (antes era un submódulo aparte) ---
     din_agencia = db.Column(db.String(100), nullable=True)

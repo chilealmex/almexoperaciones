@@ -13,11 +13,31 @@
   {% endif %}
 </div>
 
-<form method="get" id="filtros-costeo"></form>
-<div class="filtro-pills mb-3">
-  {{ t.pill('Todos', 'todos', filtro_estado, conteo_estados.todos) }}
-  {{ t.pill('En proceso', 'en_proceso', filtro_estado, conteo_estados.en_proceso) }}
-  {{ t.pill('Cerrado', 'cerrado', filtro_estado, conteo_estados.cerrado) }}
+<form method="get" id="filtros-costeo">
+  {% if mes %}<input type="hidden" name="mes" value="{{ mes }}">{% endif %}
+</form>
+
+<div class="d-flex flex-wrap align-items-center gap-3 mb-3">
+  <div class="filtro-pills">
+    {{ t.pill('Todos', 'todos', filtro_estado, conteo_estados.todos) }}
+    {% for clave, etiqueta in estados_costeo %}
+    {{ t.pill(etiqueta, clave, filtro_estado, conteo_estados[clave]) }}
+    {% endfor %}
+  </div>
+  <form method="get" class="d-flex align-items-center gap-2 ms-auto">
+    {# El estado y los filtros de columna viajan juntos para no perderse al cambiar de mes. #}
+    {% if filtro_estado != 'todos' %}<input type="hidden" name="filtro" value="{{ filtro_estado }}">{% endif %}
+    {% for parametro, valor in filtros_columna.items() if valor %}
+    <input type="hidden" name="{{ parametro }}" value="{{ valor }}">
+    {% endfor %}
+    <label class="form-label small mb-0 text-muted">Mes de llegada</label>
+    <select name="mes" class="form-select form-select-sm" style="width: auto;" onchange="this.form.submit()">
+      <option value="">Todos los meses</option>
+      {% for clave, etiqueta in meses %}
+      <option value="{{ clave }}" {{ 'selected' if clave == mes }}>{{ etiqueta }}</option>
+      {% endfor %}
+    </select>
+  </form>
 </div>
 
 <div class="table-responsive">
@@ -28,7 +48,7 @@
         {{ t.th('Fecha llegada', 'fecha_llegada', orden, direccion) }}
         {{ t.th('Proveedor', 'proveedor', orden, direccion) }}
         <th>OT</th>
-        <th class="num">Productos</th><th class="num">Costo total</th><th>Cuadratura</th><th>Estado</th><th>PEI vinculado</th><th></th>
+        <th class="num">Productos</th><th class="num">Costo total</th><th>Cuadratura</th><th>Estado</th><th>Cierre</th><th>Mes de cierre</th><th>PEI vinculado</th><th></th>
       </tr>
       <tr class="filtros-fila">
         {{ t.filtro('f_n_importacion', filtros_columna, 'filtros-costeo', 'N° Importación') }}
@@ -41,41 +61,75 @@
         {{ t.sin_filtro() }}
         {{ t.sin_filtro() }}
         {{ t.sin_filtro() }}
+        {{ t.sin_filtro() }}
+        {{ t.sin_filtro() }}
       </tr>
     </thead>
     <tbody>
-      {% for fila in resumen %}
+      {% for anio in anios %}
+      {# Una fila de encabezado por año y otra por mes: la tabla sigue siendo
+         una sola, así que las columnas caen en la misma vertical en todos los
+         grupos. #}
+      <tr class="fila-anio">
+        <td colspan="9"><strong>{{ anio.etiqueta }}</strong>
+          <span class="text-muted small ms-2">{{ anio.cantidad }} {{ 'importación' if anio.cantidad == 1 else 'importaciones' }}</span>
+        </td>
+        <td class="num fw-semibold">{{ anio.total|clp }}</td>
+        <td colspan="2"></td>
+      </tr>
+      {% for m in anio.meses %}
+      <tr class="fila-mes">
+        <td colspan="9" class="ps-4">{{ m.etiqueta }}</td>
+        <td class="num">{{ m.total|clp }}</td>
+        <td colspan="2"></td>
+      </tr>
+      {% for fila in m.filas %}
       <tr>
-        <td class="fw-semibold"><a href="{{ url_for('importaciones.ver_costeo_detallado', costeo_id=fila.costeo.id) }}">{{ fila.costeo.n_importacion or '—' }}</a></td>
+        <td class="fw-semibold ps-4"><a href="{{ url_for('importaciones.ver_costeo_detallado', costeo_id=fila.costeo.id) }}">{{ fila.costeo.n_importacion or '—' }}</a></td>
         <td>{{ fila.costeo.fecha_llegada|fecha if fila.costeo.fecha_llegada else '—' }}</td>
-        <td>{{ fila.costeo.proveedor or '—' }}</td>
+        <td class="celda-recortada" title="{{ fila.costeo.proveedor or '' }}">{{ fila.costeo.proveedor or '—' }}</td>
         <td>{{ fila.costeo.orden_trabajo or '—' }}</td>
         <td class="num">{{ fila.cantidad_productos }}</td>
         <td class="num">{{ fila.costo_total_clp|clp }}</td>
         <td>
           <span class="badge {{ 'bg-success' if fila.cuadrado else 'bg-danger' }}">{{ 'Cuadrado' if fila.cuadrado else 'Revisar' }}</span>
         </td>
+        {# Estado: sólo las tres opciones, con su color. Un costeo cerrado se
+           muestra como insignia y no como lista: reabrirlo es cosa de la
+           columna de al lado, que exige superadmin. #}
+        <td>
+          {% set estado_actual = fila.costeo.estado %}
+          {% if estado_actual != 'cerrado' and puede('importaciones', 'editar') %}
+          <form method="post" action="{{ url_for('importaciones.cambiar_estado_costeo', costeo_id=fila.costeo.id) }}">
+            {{ accion_form.hidden_tag() }}
+            <select name="estado" class="form-select form-select-sm select-estado {{ clase_select_estado.get(estado_actual, '') }}"
+                    onchange="this.form.submit()">
+              {% for clave, etiqueta in estados_costeo %}
+              <option value="{{ clave }}" {{ 'selected' if clave == estado_actual }}>{{ etiqueta }}</option>
+              {% endfor %}
+            </select>
+          </form>
+          {% else %}
+          <span class="badge {{ color_estado.get(estado_actual, 'bg-secondary') }}">
+            {{ dict(estados_costeo).get(estado_actual, estado_actual) }}
+          </span>
+          {% endif %}
+        </td>
+        {# Cierre: vacío mientras no se cierre. Con el candado cuando ya está. #}
         <td>
           {% if fila.costeo.estado == 'cerrado' %}
-          <span class="badge bg-success">🔒 Cerrado</span>
+          <span class="text-nowrap">🔒 Cerrado</span>
           {% if current_user.es_superadmin %}
           <form method="post" action="{{ url_for('importaciones.cambiar_estado_costeo', costeo_id=fila.costeo.id) }}" class="d-inline">
             {{ accion_form.hidden_tag() }}
             <input type="hidden" name="estado" value="en_proceso">
-            <button type="submit" class="btn btn-link btn-sm p-0 ms-1" title="Reabrir (solo superadmin)" onclick="return confirm('¿Reabrir este costeo y dejarlo en proceso?')">🔓 Reabrir</button>
+            <button type="submit" class="btn btn-link btn-sm p-0 ms-1" title="Reabrir (solo superadmin)" onclick="return confirm('¿Reabrir este costeo y dejarlo en curso?')">🔓 Reabrir</button>
           </form>
           {% endif %}
-          {% elif puede('importaciones', 'editar') %}
-          <form method="post" action="{{ url_for('importaciones.cambiar_estado_costeo', costeo_id=fila.costeo.id) }}">
-            {{ accion_form.hidden_tag() }}
-            <select name="estado" class="form-select form-select-sm" onchange="this.form.submit()">
-              <option value="en_proceso" {{ 'selected' if fila.costeo.estado == 'en_proceso' }}>En proceso</option>
-              <option value="cerrado">Cerrado</option>
-            </select>
-          </form>
-          {% else %}
-          <span class="badge bg-secondary">En proceso</span>
           {% endif %}
+        </td>
+        <td class="text-nowrap">
+          {% if fila.costeo.mes_cierre %}{{ meses_es[fila.costeo.mes_cierre.month - 1] }} {{ fila.costeo.mes_cierre.year }}{% else %}—{% endif %}
         </td>
         <td>
           {% if fila.costeo.importacion %}
@@ -86,8 +140,10 @@
           <a href="{{ url_for('importaciones.ver_costeo_detallado', costeo_id=fila.costeo.id) }}" class="btn btn-sm btn-outline-secondary">Abrir</a>
         </td>
       </tr>
+      {% endfor %}
+      {% endfor %}
       {% else %}
-      <tr><td colspan="10" class="text-center text-muted">Aún no hay costeos registrados.</td></tr>
+      <tr><td colspan="12" class="text-center text-muted">Aún no hay costeos registrados.</td></tr>
       {% endfor %}
     </tbody>
   </table>

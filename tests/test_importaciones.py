@@ -603,3 +603,40 @@ def test_el_resumen_no_deja_que_las_filas_crezcan_a_dos_lineas(client, usuario_a
 
     # Notas es la columna opcional más ancha: sólo aparece cuando de verdad cabe.
     assert "d-none d-xxl-table-cell" in texto
+
+
+def test_agencias_dice_si_el_saldo_es_a_favor_o_en_contra(client, usuario_admin, empresa, db):
+    """El signo solo no lo dice: hay que leerlo escrito."""
+    from datetime import date
+
+    db.session.add_all([
+        Importacion(empresa_id=empresa.id, agencia="DHL", fecha_pei=date(2026, 7, 8),
+                    pei=56, saldo_agencia=120000, tipo_saldo="a_favor"),
+        Importacion(empresa_id=empresa.id, agencia="FEDEX", fecha_pei=date(2026, 7, 9),
+                    pei=57, saldo_agencia=80000, tipo_saldo="en_contra"),
+    ])
+    db.session.commit()
+
+    login(client, "admin@test.cl")
+    texto = client.get("/importaciones/agencias").get_data(as_text=True)
+
+    assert "A favor / En contra" in texto
+    assert "A favor" in texto
+    assert "En contra" in texto
+
+
+def test_la_etiqueta_del_saldo_sigue_al_signo_del_total(db, empresa):
+    """El total de la agencia es la suma con signo, no el tipo de cada movimiento."""
+    from app.models.importacion import etiqueta_de_saldo
+
+    assert etiqueta_de_saldo(150000) == "A favor"
+    assert etiqueta_de_saldo(-150000) == "En contra"
+    assert etiqueta_de_saldo(0) == "Sin saldo"
+
+    a_favor = Importacion(empresa_id=empresa.id, agencia="DHL",
+                          saldo_agencia=90000, tipo_saldo="a_favor")
+    en_contra = Importacion(empresa_id=empresa.id, agencia="DHL",
+                            saldo_agencia=90000, tipo_saldo="en_contra")
+    assert a_favor.etiqueta_saldo == "A favor"
+    assert en_contra.etiqueta_saldo == "En contra"
+    assert etiqueta_de_saldo(a_favor.saldo_signado + en_contra.saldo_signado) == "Sin saldo"

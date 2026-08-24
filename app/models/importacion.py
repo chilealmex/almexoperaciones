@@ -6,6 +6,17 @@ TRATADOS_TLC = (("SI", "Sí"), ("NO", "No"), ("PARCIAL", "Parcial"))
 ESTADOS_DIN = (("pendiente", "Pendiente"), ("revision", "Revisión"), ("pagado", "Pagado"))
 
 
+def etiqueta_de_saldo(monto) -> str:
+    """Dice de qué lado está el saldo, que es lo que se pregunta al mirarlo.
+
+    Positivo es plata que la agencia le debe a Almex; negativo, lo que Almex le
+    debe a la agencia. El signo solo no lo dice: hay que leerlo escrito.
+    """
+    if not monto:
+        return "Sin saldo"
+    return "A favor" if monto > 0 else "En contra"
+
+
 class ProveedorImportacion(db.Model):
     """Proveedor extranjero del catálogo usado para armar las importaciones."""
 
@@ -79,6 +90,10 @@ class Importacion(db.Model):
     def saldo_signado(self):
         signo = -1 if self.tipo_saldo == "en_contra" else 1
         return (self.saldo_agencia or 0) * signo
+
+    @property
+    def etiqueta_saldo(self) -> str:
+        return etiqueta_de_saldo(self.saldo_signado)
 
 
 class ImportacionAsientoLinea(db.Model):

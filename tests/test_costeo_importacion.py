@@ -1271,3 +1271,254 @@ def test_el_indicador_de_cuadratura_no_marca_rojo_por_unos_centavos(client, usua
     texto = client.get(f"/importaciones/costeo-detallado/{costeo.id}").get_data(as_text=True)
     bloque = texto[texto.find("Cuadratura EXW"):texto.find("Cuadratura EXW") + 400]
     assert "is-danger" not in bloque, "marca descuadre por el redondeo de los decimales"
+
+
+# --- Estado, cierre, mes de cierre y agrupación del listado ---
+
+
+def test_el_estado_ofrece_solo_pendiente_en_curso_y_cerrado(client, usuario_admin, empresa, db):
+    """Tres opciones y ninguna más; 'En proceso' pasó a llamarse 'En curso'."""
+    _crear_costeo(db, empresa, n_importacion="IMP-1", estado="en_proceso")
+    login(client, "admin@test.cl")
+
+    texto = client.get("/importaciones/costeo-detallado").get_data(as_text=True)
+
+    fila = texto[texto.find('<select name="estado"'):]
+    fila = fila[:fila.find("</select>")]
+    assert fila.count("<option") == 3
+    for etiqueta in ("Pendiente", "En curso", "Cerrado"):
+        assert f">{etiqueta}</option>" in fila
+    assert "En proceso" not in fila
+
+
+def test_cada_estado_lleva_su_color(client, usuario_admin, empresa, db):
+    """Verde cerrado, amarillo en curso, rojo pendiente."""
+    from app.models.costeo_importacion import CLASE_SELECT_ESTADO_COSTEO, COLOR_ESTADO_COSTEO
+
+    assert COLOR_ESTADO_COSTEO["cerrado"] == "bg-success"
+    assert COLOR_ESTADO_COSTEO["en_proceso"].startswith("bg-warning")
+    assert COLOR_ESTADO_COSTEO["pendiente"] == "bg-danger"
+
+    _crear_costeo(db, empresa, n_importacion="IMP-1", estado="pendiente")
+    login(client, "admin@test.cl")
+
+    texto = client.get("/importaciones/costeo-detallado").get_data(as_text=True)
+    assert CLASE_SELECT_ESTADO_COSTEO["pendiente"] in texto
+
+
+def test_se_puede_dejar_un_costeo_en_pendiente(client, usuario_admin, empresa, db):
+    costeo = _crear_costeo(db, empresa, n_importacion="IMP-1", estado="en_proceso")
+    login(client, "admin@test.cl")
+
+    client.post(
+        f"/importaciones/costeo-detallado/{costeo.id}/estado",
+        data={"estado": "pendiente"}, follow_redirects=True,
+    )
+
+    assert CosteoImportacion.query.filter_by(id=costeo.id).one().estado == "pendiente"
+
+
+def test_la_columna_de_cierre_va_vacia_mientras_no_se_cierre(client, usuario_admin, empresa, db):
+    """Lo que ella pidió: si aún no se cierra, que no salga nada."""
+    _crear_costeo(db, empresa, n_importacion="IMP-1", estado="en_proceso")
+    login(client, "admin@test.cl")
+
+    texto = client.get("/importaciones/costeo-detallado").get_data(as_text=True)
+
+    assert "🔒 Cerrado" not in texto
+    assert "Reabrir" not in texto
+
+
+def test_un_costeo_cerrado_muestra_el_candado_en_su_columna(client, usuario_admin, empresa, db):
+    _crear_costeo(db, empresa, n_importacion="IMP-1", estado="cerrado")
+    login(client, "admin@test.cl")
+
+    texto = client.get("/importaciones/costeo-detallado").get_data(as_text=True)
+
+    assert "🔒 Cerrado" in texto
+    assert '<select name="estado"' not in texto
+
+
+def test_solo_un_superadmin_ve_el_boton_de_reabrir(client, usuario_admin, empresa, db):
+    _crear_costeo(db, empresa, n_importacion="IMP-1", estado="cerrado")
+
+    login(client, "admin@test.cl")
+    assert "Reabrir" not in client.get("/importaciones/costeo-detallado").get_data(as_text=True)
+
+    _crear_superadmin(db, empresa)
+    client.get("/logout")
+    login(client, "super@test.cl")
+    assert "Reabrir" in client.get("/importaciones/costeo-detallado").get_data(as_text=True)
+
+
+def test_el_listado_se_filtra_por_mes_de_llegada(client, usuario_admin, empresa, db):
+    from datetime import date
+
+    _crear_costeo(db, empresa, n_importacion="DE-AGOSTO", fecha_llegada=date(2026, 8, 12))
+    _crear_costeo(db, empresa, n_importacion="DE-JULIO", fecha_llegada=date(2026, 7, 3))
+    login(client, "admin@test.cl")
+
+    texto = client.get("/importaciones/costeo-detallado?mes=2026-08").get_data(as_text=True)
+
+    assert "DE-AGOSTO" in texto
+    assert "DE-JULIO" not in texto
+    assert "Agosto 2026" in texto and "Julio 2026" in texto
+
+
+def test_el_conteo_de_los_botones_sigue_al_mes(client, usuario_admin, empresa, db):
+    """Si el filtro dice agosto, el número del botón tiene que ser el de agosto."""
+    import re
+    from datetime import date
+
+    _crear_costeo(db, empresa, n_importacion="A1", fecha_llegada=date(2026, 8, 1), estado="cerrado")
+    _crear_costeo(db, empresa, n_importacion="J1", fecha_llegada=date(2026, 7, 1), estado="cerrado")
+    _crear_costeo(db, empresa, n_importacion="J2", fecha_llegada=date(2026, 7, 2), estado="cerrado")
+    login(client, "admin@test.cl")
+
+    def conteo(texto, etiqueta):
+        bloque = texto[texto.find("filtro-pills"):texto.find("</div>", texto.find("filtro-pills"))]
+        trozo = bloque[bloque.find(etiqueta) + len(etiqueta):]
+        return re.search(r"(\d+)", trozo).group(1)
+
+    sin_filtro = client.get("/importaciones/costeo-detallado").get_data(as_text=True)
+    de_agosto = client.get("/importaciones/costeo-detallado?mes=2026-08").get_data(as_text=True)
+
+    assert conteo(sin_filtro, "Cerrado") == "3"
+    assert conteo(de_agosto, "Cerrado") == "1"
+
+
+def test_el_listado_se_agrupa_por_ano_y_dentro_por_mes(client, usuario_admin, empresa, db):
+    """Lo que ella pidió: el año arriba y los meses adentro, del más nuevo al más viejo."""
+    from datetime import date
+
+    _crear_costeo(db, empresa, n_importacion="A-2025", fecha_llegada=date(2025, 5, 2))
+    _crear_costeo(db, empresa, n_importacion="A-JUL", fecha_llegada=date(2026, 7, 3))
+    _crear_costeo(db, empresa, n_importacion="A-AGO", fecha_llegada=date(2026, 8, 12))
+    login(client, "admin@test.cl")
+
+    texto = client.get("/importaciones/costeo-detallado").get_data(as_text=True)
+    # Sólo el cuerpo de la tabla: los meses también salen en el desplegable del
+    # filtro, que va antes y desordenaría la comparación de posiciones.
+    cuerpo = texto[texto.index("<tbody>"):texto.index("</tbody>")]
+
+    # Los encabezados van del más nuevo al más viejo: 2026 antes que 2025, y
+    # dentro de 2026, agosto antes que julio.
+    posiciones = [cuerpo.find(x) for x in ("2026", "Agosto", "Julio", "2025")]
+    assert all(p > 0 for p in posiciones), posiciones
+    assert posiciones == sorted(posiciones), "los grupos no van del más nuevo al más viejo"
+    assert cuerpo.count("fila-anio") == 2
+    assert cuerpo.count("fila-mes") == 3
+
+
+def test_un_costeo_sin_fecha_no_desaparece_del_listado(client, usuario_admin, empresa, db):
+    """Agrupar por fecha no puede esconder lo que todavía no la tiene."""
+    _crear_costeo(db, empresa, n_importacion="SIN-FECHA")
+    login(client, "admin@test.cl")
+
+    texto = client.get("/importaciones/costeo-detallado").get_data(as_text=True)
+
+    assert "SIN-FECHA" in texto
+    assert "Sin fecha de llegada" in texto
+
+
+def test_se_guarda_el_mes_de_cierre_de_la_importacion(client, usuario_admin, empresa, db):
+    from datetime import date
+
+    costeo = _crear_costeo(db, empresa, n_importacion="IMP-1")
+    login(client, "admin@test.cl")
+
+    client.post(
+        f"/importaciones/costeo-detallado/{costeo.id}/guardar",
+        data={"n_importacion": "IMP-1", "mes_cierre": "2026-09",
+              "estado": "en_proceso", "importacion_id": 0, "tasa_ad_valorem": 6},
+        follow_redirects=True,
+    )
+
+    assert CosteoImportacion.query.filter_by(id=costeo.id).one().mes_cierre == date(2026, 9, 1)
+
+
+def test_un_mes_de_cierre_en_blanco_o_mal_escrito_queda_vacio(client, usuario_admin, empresa, db):
+    costeo = _crear_costeo(db, empresa, n_importacion="IMP-1")
+    login(client, "admin@test.cl")
+
+    for valor in ("", "no-es-un-mes"):
+        client.post(
+            f"/importaciones/costeo-detallado/{costeo.id}/guardar",
+            data={"n_importacion": "IMP-1", "mes_cierre": valor,
+                  "estado": "en_proceso", "importacion_id": 0, "tasa_ad_valorem": 6},
+            follow_redirects=True,
+        )
+        assert CosteoImportacion.query.filter_by(id=costeo.id).one().mes_cierre is None
+
+
+def test_el_mes_de_cierre_se_muestra_en_el_listado(client, usuario_admin, empresa, db):
+    from datetime import date
+
+    _crear_costeo(db, empresa, n_importacion="IMP-1", mes_cierre=date(2026, 9, 1))
+    login(client, "admin@test.cl")
+
+    texto = client.get("/importaciones/costeo-detallado").get_data(as_text=True)
+
+    assert "Mes de cierre" in texto
+    assert "Septiembre 2026" in texto
+
+
+# --- Tolerancia de cuadratura ---
+
+
+def _poner_exw(db, costeo, documento, producto):
+    """Deja el EXW del invoice en `documento` y el del único producto en `producto`.
+
+    Se escribe directo el exw_moneda del producto en vez de pasar por recalcular():
+    lo que se quiere probar es la diferencia entre lo declarado y lo repartido,
+    así que hay que poder fijar las dos puntas.
+    """
+    inv1 = costeo.documento_por_rol("inv1")
+    inv1.valor_tc = 900
+    inv1.valor_total_inv = documento
+    costeo.productos.append(CosteoImportacionProducto(
+        codigo="A", producto="Uno", cantidad=1,
+        valor_unitario_tc=producto, exw_moneda=producto,
+    ))
+    db.session.commit()
+    return costeo
+
+
+def test_una_diferencia_de_centavos_cuadra(db, empresa):
+    """Su caso real: la Importación 1300 marcaba "Revisar" por -0,04.
+
+    El prorrateo redondea, así que la suma de los productos casi nunca da
+    exactamente el total del documento. Antes se exigía menos de un centavo y
+    costeos correctos aparecían en rojo.
+    """
+    from app.utils import costeo_importacion_calculo as calc
+
+    assert calc.TOLERANCIA_CUADRATURA == 10
+
+    costeo = _crear_costeo(db, empresa, n_importacion="IMP-1300")
+    # Un producto con EXW 0,04 menos que el documento
+    _poner_exw(db, costeo, documento=1000.0, producto=999.96)
+
+    assert abs(calculo.diferencia_cuadratura(costeo)) == 0.04
+    assert calculo.cuadra_cuadratura(costeo) is True
+
+
+def test_una_diferencia_grande_sigue_marcandose(db, empresa):
+    from app.utils import costeo_importacion_calculo as calc
+
+    costeo = _crear_costeo(db, empresa, n_importacion="IMP-2")
+    _poner_exw(db, costeo, documento=1000.0, producto=900.0)
+
+    assert calc.cuadra_cuadratura(costeo) is False
+
+
+def test_el_limite_de_la_tolerancia_es_inclusivo(db, empresa):
+    from app.utils import costeo_importacion_calculo as calc
+
+    justo = _crear_costeo(db, empresa, n_importacion="JUSTO")
+    _poner_exw(db, justo, documento=1000.0, producto=990.0)
+    assert calc.cuadra_cuadratura(justo) is True, "10 exacto tiene que cuadrar"
+
+    pasado = _crear_costeo(db, empresa, n_importacion="PASADO")
+    _poner_exw(db, pasado, documento=1000.0, producto=989.99)
+    assert calc.cuadra_cuadratura(pasado) is False

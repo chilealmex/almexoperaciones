@@ -51,6 +51,7 @@
           <th>N° OC</th>
           <th class="num">Monto guía</th>
           <th class="num">Saldo</th>
+          <th>A favor / En contra</th>
           <th></th>
         </tr>
       </thead>
@@ -64,6 +65,11 @@
           <td class="num {{ 'saldo-positivo' if bloque.saldo_total >= 0 else 'saldo-negativo' }}">
             {{ '+' if bloque.saldo_total >= 0 else '' }}{{ bloque.saldo_total|clp }}
           </td>
+          <td>
+            <span class="badge {{ 'bg-success' if bloque.saldo_total > 0 else ('bg-danger' if bloque.saldo_total < 0 else 'bg-secondary') }}">
+              {{ bloque.etiqueta_saldo }}
+            </span>
+          </td>
           <td></td>
         </tr>
         {% for i in bloque.importaciones %}
@@ -75,6 +81,9 @@
           <td class="num">{{ i.monto|clp }}</td>
           <td class="num {{ 'text-success' if i.saldo_signado >= 0 else 'text-danger' }}">
             {{ '+' if i.saldo_signado >= 0 else '' }}{{ i.saldo_signado|clp }}
+          </td>
+          <td class="small {{ 'text-success' if i.saldo_signado > 0 else ('text-danger' if i.saldo_signado < 0 else 'text-muted') }}">
+            {{ i.etiqueta_saldo }}
           </td>
           <td class="text-end"><a href="{{ url_for('importaciones.detalle', importacion_id=i.id) }}" class="small text-nowrap">Ver detalle →</a></td>
         </tr>
