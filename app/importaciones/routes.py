@@ -16,6 +16,8 @@ from app.importaciones.forms import (
 )
 from app.models.activo_fijo import CategoriaActivo
 from app.models.importacion import (
+    COLOR_ESTADO_IMPORTACION,
+    ESTADOS_IMPORTACION,
     DinRegistro,
     Importacion,
     ImportacionAsientoLinea,
@@ -265,6 +267,8 @@ def resumen():
     return render_template(
         "importaciones/resumen.html",
         importaciones=importaciones,
+        estados_importacion=dict(ESTADOS_IMPORTACION),
+        color_estado=COLOR_ESTADO_IMPORTACION,
         agencias=_agencias_disponibles(),
         meses=_meses_disponibles(todas),
         estado_form=AccionForm(),
@@ -705,6 +709,8 @@ def agencias():
             "importaciones": lista,
             "saldo_total": saldo_total,
             "etiqueta_saldo": etiqueta_de_saldo(saldo_total),
+            # Un saldo con importaciones abiertas todavía puede moverse.
+            "abiertas": sum(1 for i in lista if i.estado != "cerrado"),
         })
     bloques.sort(key=lambda b: abs(b["saldo_total"]), reverse=True)
 
@@ -712,6 +718,8 @@ def agencias():
     return render_template(
         "importaciones/agencias.html",
         bloques=bloques,
+        estados_importacion=dict(ESTADOS_IMPORTACION),
+        color_estado=COLOR_ESTADO_IMPORTACION,
         agencias=_agencias_disponibles(),
         meses=_meses_disponibles(todas),
         filtros=request.args,

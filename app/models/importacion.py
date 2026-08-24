@@ -1,6 +1,15 @@
 from app.extensions import db
 
 ESTADOS_IMPORTACION = (("pendiente", "Pendiente"), ("costeando", "Costeando"), ("cerrado", "Cerrado"))
+
+# Rojo lo que no ha partido, amarillo lo que está a medias, verde lo terminado.
+# Vive acá y no en cada plantilla para que las pantallas que muestran el estado
+# no terminen pintándolo de colores distintos.
+COLOR_ESTADO_IMPORTACION = {
+    "pendiente": "bg-danger",
+    "costeando": "bg-warning text-dark",
+    "cerrado": "bg-success",
+}
 TIPOS_SALDO = (("a_favor", "A favor"), ("en_contra", "En contra"))
 TRATADOS_TLC = (("SI", "Sí"), ("NO", "No"), ("PARCIAL", "Parcial"))
 ESTADOS_DIN = (("pendiente", "Pendiente"), ("revision", "Revisión"), ("pagado", "Pagado"))

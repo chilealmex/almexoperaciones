@@ -81,8 +81,8 @@
           {% else %}—{% endif %}
         </td>
         <td class="col-estado">
-          <span class="badge {{ 'bg-success' if i.estado == 'cerrado' else ('bg-warning text-dark' if i.estado == 'costeando' else 'bg-danger') }}">
-            {{ '🔒 ' if i.estado == 'cerrado' }}{{ {'pendiente': 'Pendiente', 'costeando': 'Costeando', 'cerrado': 'Cerrado'}[i.estado] }}
+          <span class="badge {{ color_estado.get(i.estado, 'bg-secondary') }}">
+            {{ '🔒 ' if i.estado == 'cerrado' }}{{ estados_importacion.get(i.estado, i.estado) }}
           </span>
           {% if i.estado == 'cerrado' and current_user.es_superadmin %}
           <form method="post" action="{{ url_for('importaciones.cambiar_estado', importacion_id=i.id) }}" class="d-inline">

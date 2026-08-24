@@ -52,6 +52,7 @@
           <th class="num">Monto guía</th>
           <th class="num">Saldo</th>
           <th>A favor / En contra</th>
+          <th>Estado</th>
           <th></th>
         </tr>
       </thead>
@@ -70,6 +71,15 @@
               {{ bloque.etiqueta_saldo }}
             </span>
           </td>
+          {# Cuántas de esta agencia siguen sin cerrar: es lo que hay que
+             resolver antes de dar el saldo por bueno. #}
+          <td class="small text-nowrap">
+            {% if bloque.abiertas %}
+            <span class="text-danger">{{ bloque.abiertas }} sin cerrar</span>
+            {% else %}
+            <span class="text-success">Todas cerradas</span>
+            {% endif %}
+          </td>
           <td></td>
         </tr>
         {% for i in bloque.importaciones %}
@@ -84,6 +94,11 @@
           </td>
           <td class="small {{ 'text-success' if i.saldo_signado > 0 else ('text-danger' if i.saldo_signado < 0 else 'text-muted') }}">
             {{ i.etiqueta_saldo }}
+          </td>
+          <td>
+            <span class="badge {{ color_estado.get(i.estado, 'bg-secondary') }}">
+              {{ '🔒 ' if i.estado == 'cerrado' }}{{ estados_importacion.get(i.estado, i.estado) }}
+            </span>
           </td>
           <td class="text-end"><a href="{{ url_for('importaciones.detalle', importacion_id=i.id) }}" class="small text-nowrap">Ver detalle →</a></td>
         </tr>

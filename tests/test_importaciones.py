@@ -709,3 +709,68 @@ def test_filtrar_por_agencia_trae_las_dos_formas_de_escribirla(client, usuario_a
     assert "PROVEEDOR UNO" in texto
     assert "PROVEEDOR DOS" in texto
     assert "PROVEEDOR TRES" not in texto
+
+
+def test_agencias_dice_si_cada_importacion_esta_cerrada(client, usuario_admin, empresa, db):
+    from datetime import date
+
+    db.session.add_all([
+        Importacion(empresa_id=empresa.id, agencia="DHL", fecha_pei=date(2026, 7, 6),
+                    pei=81, proveedor_nombre="CERRADA SA", estado="cerrado"),
+        Importacion(empresa_id=empresa.id, agencia="DHL", fecha_pei=date(2026, 7, 7),
+                    pei=82, proveedor_nombre="EN CURSO SA", estado="costeando"),
+        Importacion(empresa_id=empresa.id, agencia="DHL", fecha_pei=date(2026, 7, 8),
+                    pei=83, proveedor_nombre="SIN EMPEZAR SA", estado="pendiente"),
+    ])
+    db.session.commit()
+
+    login(client, "admin@test.cl")
+    cuerpo = client.get("/importaciones/agencias").get_data(as_text=True)
+    cuerpo = cuerpo[cuerpo.index("<tbody>"):cuerpo.index("</tbody>")]
+
+    assert "Estado" in client.get("/importaciones/agencias").get_data(as_text=True)
+    for etiqueta in ("Cerrado", "Costeando", "Pendiente"):
+        assert etiqueta in cuerpo, f"falta el estado {etiqueta}"
+    # Con su color: verde lo cerrado, rojo lo que no ha partido
+    assert "bg-success" in cuerpo and "bg-danger" in cuerpo
+
+
+def test_la_agencia_avisa_cuantas_le_quedan_sin_cerrar(client, usuario_admin, empresa, db):
+    """Un saldo con importaciones abiertas todavía se puede mover."""
+    from datetime import date
+
+    db.session.add_all([
+        Importacion(empresa_id=empresa.id, agencia="DHL", fecha_pei=date(2026, 7, 6),
+                    pei=91, estado="cerrado"),
+        Importacion(empresa_id=empresa.id, agencia="DHL", fecha_pei=date(2026, 7, 7),
+                    pei=92, estado="pendiente"),
+        Importacion(empresa_id=empresa.id, agencia="FEDEX", fecha_pei=date(2026, 7, 8),
+                    pei=93, estado="cerrado"),
+    ])
+    db.session.commit()
+
+    login(client, "admin@test.cl")
+    cuerpo = client.get("/importaciones/agencias").get_data(as_text=True)
+    cuerpo = cuerpo[cuerpo.index("<tbody>"):cuerpo.index("</tbody>")]
+
+    assert "1 sin cerrar" in cuerpo      # DHL
+    assert "Todas cerradas" in cuerpo    # FEDEX
+
+
+def test_el_color_del_estado_es_el_mismo_en_resumen_y_en_agencias(client, usuario_admin, empresa, db):
+    """Vivía escrito a mano en cada plantilla y podían separarse."""
+    from app.models.importacion import COLOR_ESTADO_IMPORTACION
+
+    assert COLOR_ESTADO_IMPORTACION["cerrado"] == "bg-success"
+    assert COLOR_ESTADO_IMPORTACION["costeando"].startswith("bg-warning")
+    assert COLOR_ESTADO_IMPORTACION["pendiente"] == "bg-danger"
+
+    from datetime import date
+    db.session.add(Importacion(empresa_id=empresa.id, agencia="DHL",
+                               fecha_pei=date(2026, 7, 6), pei=95, estado="costeando"))
+    db.session.commit()
+
+    login(client, "admin@test.cl")
+    for ruta in ("/importaciones/resumen", "/importaciones/agencias"):
+        texto = client.get(ruta).get_data(as_text=True)
+        assert COLOR_ESTADO_IMPORTACION["costeando"] in texto, f"{ruta} no usa el color común"
