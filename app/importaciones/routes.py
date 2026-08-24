@@ -1048,6 +1048,7 @@ def _agrupar_por_anio_y_mes(resumen):
         ):
             filas = meses_del_anio[mes]
             meses.append({
+                "numero": mes,
                 "etiqueta": MESES_ES[mes - 1] if mes else SIN_FECHA,
                 "filas": filas,
                 "total": sum(f["costo_total_clp"] for f in filas),

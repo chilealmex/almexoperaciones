@@ -1206,6 +1206,16 @@ input.campo-excel.esta-vacio::placeholder {
   border-top: 2px solid #c8d3e0;
   font-size: 0.95rem;
 }
+.grupo-plegable { cursor: pointer; }
+.grupo-plegable:hover > td { filter: brightness(0.97); }
+.chevron-grupo {
+  display: inline-block;
+  width: 1rem;
+  transition: transform 0.15s ease;
+  color: var(--muted);
+}
+.grupo-plegable[aria-expanded="false"] .chevron-grupo { transform: rotate(-90deg); }
+
 .fila-mes > td {
   background: #f4f7fa;
   font-weight: 600;

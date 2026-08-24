@@ -1406,7 +1406,8 @@ def test_un_costeo_cerrado_muestra_el_candado_en_su_columna(client, usuario_admi
 
     texto = client.get("/importaciones/costeo-detallado").get_data(as_text=True)
 
-    assert "🔒 Cerrado" in texto
+    assert "🔒" in texto
+    assert "Cerrado" in texto
     assert '<select name="estado"' not in texto
 
 
@@ -1530,7 +1531,7 @@ def test_el_mes_de_cierre_se_muestra_en_el_listado(client, usuario_admin, empres
 
     texto = client.get("/importaciones/costeo-detallado").get_data(as_text=True)
 
-    assert "Mes de cierre" in texto
+    assert "Mes cierre" in texto
     assert "Septiembre 2026" in texto
 
 
@@ -1593,3 +1594,68 @@ def test_el_limite_de_la_tolerancia_es_inclusivo(db, empresa):
     pasado = _crear_costeo(db, empresa, n_importacion="PASADO")
     _poner_exw(db, pasado, documento=1000.0, producto=989.99)
     assert calc.cuadra_cuadratura(pasado) is False
+
+
+def test_los_grupos_no_muestran_el_total_del_mes(client, usuario_admin, empresa, db):
+    """El monto suelto en la fila del mes se veía mal y no aportaba.
+
+    El total del año sí queda: es el que se mira de reojo.
+    """
+    from datetime import date
+
+    _crear_costeo(db, empresa, n_importacion="A1", fecha_llegada=date(2026, 8, 1))
+    login(client, "admin@test.cl")
+
+    cuerpo = _cuerpo_tabla(client.get("/importaciones/costeo-detallado").get_data(as_text=True))
+
+    fila_mes = cuerpo[cuerpo.index("fila-mes"):]
+    fila_mes = fila_mes[:fila_mes.index("</tr>")]
+    assert "$" not in fila_mes, f"la fila del mes sigue trayendo un monto: {fila_mes}"
+
+    fila_anio = cuerpo[cuerpo.index("fila-anio"):]
+    fila_anio = fila_anio[:fila_anio.index("</tr>")]
+    assert "$" in fila_anio, "el total del año sí tiene que quedar"
+
+
+def test_el_ano_mas_reciente_viene_abierto_y_los_anteriores_plegados(client, usuario_admin, empresa, db):
+    """Se trabaja en el año en curso; el historial no tiene que ocupar la pantalla."""
+    from datetime import date
+
+    _crear_costeo(db, empresa, n_importacion="NUEVA", fecha_llegada=date(2026, 8, 1))
+    _crear_costeo(db, empresa, n_importacion="VIEJA", fecha_llegada=date(2025, 3, 1))
+    login(client, "admin@test.cl")
+
+    cuerpo = _cuerpo_tabla(client.get("/importaciones/costeo-detallado").get_data(as_text=True))
+
+    fila_2026 = _fila_con(cuerpo, 'data-abre="anio-2026"')
+    fila_2025 = _fila_con(cuerpo, 'data-abre="anio-2025"')
+    assert 'aria-expanded="true"' in fila_2026
+    assert 'aria-expanded="false"' in fila_2025
+    # Y las filas del año viejo nacen ocultas
+    assert "hidden" in _fila_con(cuerpo, "VIEJA")
+    assert "hidden" not in _fila_con(cuerpo, "NUEVA")
+
+
+def test_cada_fila_sabe_de_que_grupo_cuelga(client, usuario_admin, empresa, db):
+    """Sin ese vínculo el plegado no tendría a qué filas ocultar."""
+    from datetime import date
+
+    _crear_costeo(db, empresa, n_importacion="A1", fecha_llegada=date(2026, 8, 12))
+    login(client, "admin@test.cl")
+
+    cuerpo = _cuerpo_tabla(client.get("/importaciones/costeo-detallado").get_data(as_text=True))
+
+    assert 'data-abre="mes-2026-8"' in cuerpo          # la cabecera del mes
+    assert 'data-de="mes-2026-8"' in _fila_con(cuerpo, "A1")   # y el costeo cuelga de ella
+    assert 'data-de="anio-2026"' in cuerpo             # el mes cuelga del año
+
+
+def _cuerpo_tabla(texto):
+    return texto[texto.index("<tbody>"):texto.index("</tbody>")]
+
+
+def _fila_con(cuerpo, aguja):
+    """La fila <tr> completa que contiene esa aguja."""
+    pos = cuerpo.index(aguja)
+    inicio = cuerpo.rindex("<tr", 0, pos)
+    return cuerpo[inicio:cuerpo.index("</tr>", pos)]
