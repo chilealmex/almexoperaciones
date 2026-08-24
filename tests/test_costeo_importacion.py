@@ -582,6 +582,77 @@ def test_traer_costeo_producto_copia_los_montos_al_asiento_costeo(client, usuari
     )
 
 
+def test_traer_del_costeo_tambien_llena_ecomex_y_deja_la_dif_en_cero(client, usuario_admin, empresa, db):
+    """ECOMEX es la referencia y DIF es la resta contra el HABER.
+
+    El botón llenaba sólo el HABER, así que ECOMEX quedaba en cero y la DIF
+    terminaba copiando el HABER: la columna no comparaba nada. Con las dos
+    iguales la DIF parte en cero, que es lo correcto recién traído del Costeo.
+    """
+    from app.models.importacion import Importacion
+    from app.utils import importaciones_calculo as importaciones_calc
+
+    importacion = Importacion(empresa_id=empresa.id, pei="76", proveedor_nombre="ACME", monto=1_000_000)
+    db.session.add(importacion)
+    db.session.flush()
+    importaciones_calc.sembrar_lineas_plantilla(importacion)
+    db.session.commit()
+
+    costeo = _crear_costeo(db, empresa, n_importacion="76", importacion_id=importacion.id)
+    _cargar_ejemplo_real(costeo, db)
+
+    login(client, "admin@test.cl")
+    client.post(
+        f"/importaciones/detalle/{importacion.id}/grupo/costeo/traer-costeo-producto",
+        follow_redirects=True,
+    )
+    _db.session.refresh(importacion)
+
+    roles = (
+        "costeo_invoice", "costeo_seguro", "costeo_fleteintl", "costeo_crating",
+        "costeo_advalorem", "costeo_almacenaje", "costeo_desconsolidacion",
+        "costeo_habilitacion", "costeo_fletenacional", "costeo_gastosagencia",
+        "costeo_cargoterminal",
+    )
+    for rol in roles:
+        linea = importacion.linea_por_rol("costeo", rol)
+        assert linea.ecomex == linea.haber, f"{rol}: ECOMEX no quedó igual al HABER"
+        assert linea.dif == 0, f"{rol}: la diferencia debería partir en cero"
+
+    # Y no quedó todo en cero por casualidad: el invoice trae un monto real.
+    assert importacion.linea_por_rol("costeo", "costeo_invoice").ecomex > 0
+
+
+def test_si_se_corrige_el_haber_la_dif_muestra_el_desvio(client, usuario_admin, empresa, db):
+    """ECOMEX queda como la foto del Costeo; el HABER es lo que se asienta."""
+    from app.models.importacion import Importacion
+    from app.utils import importaciones_calculo as importaciones_calc
+
+    importacion = Importacion(empresa_id=empresa.id, pei="77", proveedor_nombre="ACME", monto=1_000_000)
+    db.session.add(importacion)
+    db.session.flush()
+    importaciones_calc.sembrar_lineas_plantilla(importacion)
+    db.session.commit()
+
+    costeo = _crear_costeo(db, empresa, n_importacion="77", importacion_id=importacion.id)
+    _cargar_ejemplo_real(costeo, db)
+
+    login(client, "admin@test.cl")
+    client.post(
+        f"/importaciones/detalle/{importacion.id}/grupo/costeo/traer-costeo-producto",
+        follow_redirects=True,
+    )
+    _db.session.refresh(importacion)
+
+    linea = importacion.linea_por_rol("costeo", "costeo_almacenaje")
+    referencia = linea.ecomex
+    linea.haber = referencia + 5000
+    importaciones_calc.recalcular(importacion)
+
+    assert linea.ecomex == referencia, "la referencia del Costeo no se toca al editar el HABER"
+    assert linea.dif == 5000
+
+
 def test_traer_costeo_producto_sin_vinculo_avisa_y_no_falla(client, usuario_admin, empresa, db):
     from app.models.importacion import Importacion
     from app.utils import importaciones_calculo as importaciones_calc

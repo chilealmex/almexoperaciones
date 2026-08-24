@@ -619,21 +619,29 @@ def traer_costeo_producto(importacion_id):
     totales = costeo_calculo.totales_documentos(costeo_producto)
     ad_valorem_total = sum(p.ad_valorem_clp or 0 for p in costeo_producto.productos)
 
+    # El monto va a las dos columnas. ECOMEX es la referencia —lo que dice el
+    # Costeo— y HABER lo que queda asentado; DIF es la resta de ambas. Llenando
+    # sólo el HABER, la DIF terminaba copiando el HABER (ECOMEX quedaba en
+    # cero) y la columna no comparaba nada. Con las dos iguales la DIF parte en
+    # cero, y si después se corrige el HABER a mano el desvío salta solo.
     actualizadas = 0
     for rol, (origen, clave) in MAPA_COSTEO_PRODUCTO_A_ASIENTO.items():
         linea = importacion.linea_por_rol("costeo", rol)
         if not linea:
             continue
         if origen == "total":
-            linea.haber = totales[clave]
+            monto = totales[clave]
         else:
             gasto = costeo_producto.gasto_por_rol(clave)
-            linea.haber = gasto.valor_clp if gasto else 0
+            monto = gasto.valor_clp if gasto else 0
+        linea.haber = monto
+        linea.ecomex = monto
         actualizadas += 1
 
     linea_advalorem = importacion.linea_por_rol("costeo", "costeo_advalorem")
     if linea_advalorem:
         linea_advalorem.haber = ad_valorem_total
+        linea_advalorem.ecomex = ad_valorem_total
         actualizadas += 1
 
     calculo.recalcular(importacion)
