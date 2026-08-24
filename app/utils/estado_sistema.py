@@ -53,18 +53,43 @@ def revision_del_codigo(carpeta=None):
     return cabezas or None
 
 
-def _faltantes(cadena, desde, hasta) -> list:
-    """Migraciones que hay entre la revisión de la base y la del código."""
-    if not hasta or desde == hasta:
-        return []
-    faltan, actual = [], hasta
-    while actual and actual != desde:
-        faltan.append(actual)
+def _linaje(cadena, revision) -> list:
+    """De una revisión hacia atrás hasta la raíz, ella incluida."""
+    linaje, actual, vistas = [], revision, set()
+    while actual and actual not in vistas:
+        vistas.add(actual)
+        linaje.append(actual)
         actual = cadena.get(actual)
-        if actual is None and desde is not None:
-            # La revisión de la base no está en la cadena: no se puede comparar.
-            return faltan
-    return list(reversed(faltan))
+    return linaje
+
+
+def _comparar(cadena, base, codigo) -> dict:
+    """Qué le falta a la base para estar al día con el código.
+
+    Hay dos desenlaces distintos y confundirlos desinforma. Si la revisión de
+    la base es un ancestro de la del código, va atrasada y se puede decir
+    exactamente qué falta. Si no aparece en la cadena, este código no la
+    conoce: pasa cuando un despliegue alcanzó a aplicar la migración de un
+    commit nuevo pero se cayó antes de publicar el código, así que la base
+    quedó adelantada y el sitio siguió con la versión anterior —y esa revisión
+    todavía no existe en esta carpeta de migraciones—.
+
+    Antes esto se resolvía caminando hacia atrás desde el código hasta dar con
+    la revisión de la base; cuando no estaba, la caminata llegaba a la raíz y
+    devolvía la cadena entera, avisando que faltaban *todas* las migraciones.
+    """
+    vacio = {"pendientes": [], "desconocida": False}
+    if not codigo or base == codigo:
+        return vacio
+    if base is None:  # base sin sellar: hay que aplicarlo todo
+        return {**vacio, "pendientes": list(reversed(_linaje(cadena, codigo)))}
+
+    linaje_codigo = _linaje(cadena, codigo)
+    if base in linaje_codigo:  # la base es ancestro del código: va atrasada
+        corte = linaje_codigo.index(base)
+        return {**vacio, "pendientes": list(reversed(linaje_codigo[:corte]))}
+
+    return {**vacio, "desconocida": True}
 
 
 def estado_del_sistema(db, carpeta_migraciones=None) -> dict:
@@ -96,7 +121,9 @@ def estado_del_sistema(db, carpeta_migraciones=None) -> dict:
             db.session.remove()
 
     cadena = cadena_de_migraciones(carpeta_migraciones)
-    pendientes = _faltantes(cadena, revision_base, revision_codigo) if not error else []
+    comparacion = (_comparar(cadena, revision_base, revision_codigo) if not error
+                   else {"pendientes": [], "desconocida": False})
+    pendientes = comparacion["pendientes"]
 
     return {
         "base_responde": error is None,
@@ -105,7 +132,11 @@ def estado_del_sistema(db, carpeta_migraciones=None) -> dict:
         "revision_codigo": revision_codigo,
         "cabezas_multiples": cabezas,
         "pendientes": pendientes,
-        "al_dia": error is None and not pendientes and not cabezas,
+        # La base está en una revisión que este código no trae: lo habitual es
+        # que el despliegue corriera el upgrade y se cayera antes de publicar.
+        "revision_desconocida": comparacion["desconocida"],
+        "al_dia": (error is None and not pendientes
+                   and not comparacion["desconocida"] and not cabezas),
         "total_migraciones": len(cadena),
         "commit": (os.environ.get("RENDER_GIT_COMMIT") or "")[:12] or None,
         "entorno": os.environ.get("FLASK_ENV", "development"),

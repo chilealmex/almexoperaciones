@@ -44,3 +44,29 @@ def test_el_javascript_tiene_los_parentesis_y_llaves_cuadrados():
         assert sin_comentarios.count(abre) == sin_comentarios.count(cierra), (
             f"main.js no cuadra en '{abre}{cierra}'"
         )
+
+
+def _bloque(selector: str) -> str:
+    """Devuelve el cuerpo de la regla CSS de un selector, sin comentarios."""
+    contenido = _sin_comentarios(CSS.read_text(encoding="utf-8"))
+    patron = re.compile(r"(^|[},])\s*" + re.escape(selector) + r"\s*\{([^}]*)\}", re.M)
+    encontrado = patron.search(contenido)
+    assert encontrado, f"no existe la regla {selector} en custom.css"
+    return encontrado.group(2)
+
+
+def test_el_relleno_de_las_barras_es_un_bloque():
+    """Sin esto, ningún gráfico de barras muestra su valor.
+
+    .bar-fill es un <span>. En un elemento en línea el navegador ignora width y
+    height, así que el relleno medía 0x0 y sólo se veía la pista gris de fondo:
+    todas las barras se veían iguales sin importar el monto. Medido en Chromium:
+    display 'inline', 0x0 px. Con display:block pasó a 160px y 488px para 32,8%
+    y 100%. Afecta a los nueve gráficos de barras de la aplicación.
+    """
+    assert "display: block" in _bloque(".bar-fill")
+
+
+def test_la_pista_de_las_barras_tiene_alto():
+    """Si la pista no tiene alto, no hay dónde dibujar el relleno."""
+    assert "height" in _bloque(".bar-track")

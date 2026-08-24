@@ -80,6 +80,36 @@ def test_una_base_atrasada_dice_cuantas_migraciones_faltan(tmp_path):
     assert estado["pendientes"] == ["ccc", "ddd"]
 
 
+def test_una_base_adelantada_no_dice_que_falta_todo(tmp_path):
+    """El caso real de producción, reproducido tal cual.
+
+    La migración se aplicó y el despliegue se cayó después: la base quedó en
+    una revisión que el código desplegado ni siquiera tiene como archivo,
+    porque venía en el commit que no llegó a publicarse.
+
+    Antes esto se leía caminando hacia atrás desde el código hasta dar con la
+    revisión de la base; como no estaba, la caminata llegaba a la raíz y
+    avisaba que faltaban las 26 migraciones del proyecto. Un susto inventado, y
+    encima apuntando al lado contrario.
+    """
+    _migraciones(tmp_path, {"aaa": None, "bbb": "aaa"})
+
+    estado = estado_del_sistema(_BaseFalsa("ddd"), tmp_path)
+
+    assert estado["pendientes"] == [], "no falta nada por aplicar"
+    assert estado["revision_desconocida"] is True
+    assert estado["al_dia"] is False
+
+
+def test_una_base_sin_sellar_necesita_toda_la_cadena(tmp_path):
+    _migraciones(tmp_path, {"aaa": None, "bbb": "aaa", "ccc": "bbb"})
+
+    estado = estado_del_sistema(_BaseFalsa(None), tmp_path)
+
+    assert estado["pendientes"] == ["aaa", "bbb", "ccc"]
+    assert estado["revision_desconocida"] is False
+
+
 def test_si_la_base_no_responde_se_informa_sin_reventar(tmp_path):
     _migraciones(tmp_path, {"aaa": None})
 

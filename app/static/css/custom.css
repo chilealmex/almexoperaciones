@@ -525,6 +525,11 @@ a.kpi:hover {
   overflow: hidden;
 }
 .bar-fill {
+  /* Sin esto el relleno es un <span> en línea, y width/height no se aplican a
+     un elemento en línea: medía 0x0 y sólo se veía la pista gris de fondo, así
+     que todas las barras se veían iguales sin importar el valor. La pista sí
+     funcionaba de casualidad, porque como hija de un grid se bloquifica. */
+  display: block;
   height: 100%;
   border-radius: 4px;
   background: var(--chart-1);

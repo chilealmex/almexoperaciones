@@ -1,77 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Conciliación {{ libro.etiqueta }} — {{ mes_nombre }} {{ conciliacion.anio }}<div class="modal fade" id="modal-diferencia" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title" id="modal-diferencia-titulo">Diferencia</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
-      </div>
-      <div class="modal-body">
-        <p class="mb-2"><span class="badge bg-secondary" id="modal-diferencia-estado"></span></p>
-        <ul class="ps-3" id="modal-diferencia-lista"></ul>
-
-        {% if puede_editar %}
-        <hr>
-        <form method="post" id="modal-diferencia-form">
-          {{ accion.hidden_tag() }}
-          <div id="modal-diferencia-aceptar">
-            <p class="small text-muted mb-2">
-              ¿Esta diferencia es correcta y no hay nada que corregir? Acéptala y deja de
-              contarse como pendiente. El caso habitual es el combustible: el impuesto
-              específico hace que el neto del SII y el de Defontana nunca calcen.
-            </p>
-            <label class="form-label small mb-1">Motivo</label>
-            <input type="text" name="motivo" class="form-control form-control-sm mb-2"
-                   value="{{ motivo_habitual }}" maxlength="200">
-            <button type="submit" class="btn btn-success btn-sm">Aceptar la diferencia</button>
-          </div>
-          <div id="modal-diferencia-deshacer" style="display:none;">
-            <p class="small mb-2">
-              Esta diferencia ya fue aceptada<span id="modal-diferencia-quien"></span>:
-              <strong id="modal-diferencia-motivo"></strong>
-            </p>
-            <button type="submit" class="btn btn-outline-secondary btn-sm">Volver a dejarla pendiente</button>
-          </div>
-        </form>
-        {% endif %}
-      </div>
-    </div>
-  </div>
-</div>
-
-<script>
-  // El detalle viaja en los data- del botón; el modal es uno solo y se rellena
-  // al abrirse. Así la tabla queda de una línea por fila y el texto largo no
-  // ensancha la pantalla.
-  document.getElementById('modal-diferencia').addEventListener('show.bs.modal', function (evento) {
-    var boton = evento.relatedTarget;
-    if (!boton) return;
-    document.getElementById('modal-diferencia-titulo').textContent = boton.dataset.titulo || 'Diferencia';
-    document.getElementById('modal-diferencia-estado').textContent = boton.dataset.estado || '';
-    var lista = document.getElementById('modal-diferencia-lista');
-    lista.innerHTML = '';
-    (boton.dataset.detalle || '').split(' · ').forEach(function (parte) {
-      if (!parte) return;
-      var item = document.createElement('li');
-      item.textContent = parte;
-      lista.appendChild(item);
-    });
-
-    var formulario = document.getElementById('modal-diferencia-form');
-    if (!formulario) return;  // sin permiso de edición no se muestra
-    formulario.action = boton.dataset.url || '';
-    var aceptada = !!boton.dataset.aceptado;
-    document.getElementById('modal-diferencia-aceptar').style.display = aceptada ? 'none' : '';
-    document.getElementById('modal-diferencia-deshacer').style.display = aceptada ? '' : 'none';
-    if (aceptada) {
-      document.getElementById('modal-diferencia-motivo').textContent = boton.dataset.motivo || '';
-      var quien = boton.dataset.quien;
-      document.getElementById('modal-diferencia-quien').textContent = quien ? ' por ' + quien : '';
-    }
-  });
-</script>
-
-{% endblock %}
+{% block title %}Conciliación {{ libro.etiqueta }} — {{ mes_nombre }} {{ conciliacion.anio }}{% endblock %}
 {% block content %}
 
 {% set clases_estado = {
@@ -84,7 +12,10 @@
 
 <div class="page-head">
   <div>
-    <h1>{{ libro.etiqueta }} — {{ mes_nombre }} {{ conciliacion.anio }}</h1>
+    <h1>
+      {{ libro.etiqueta }} — {{ mes_nombre }} {{ conciliacion.anio }}
+      {% if conciliacion.cerrado %}<span class="badge bg-secondary align-middle">🔒 Cerrado</span>{% endif %}
+    </h1>
     <p class="page-sub">
       RCV del SII contra el libro de Defontana, documento por documento.
       {% if libro.archivo_sii %}<br><span class="text-muted small">SII: {{ libro.archivo_sii }} · Defontana: {{ libro.archivo_defontana }}</span>{% endif %}

@@ -443,3 +443,170 @@ def test_sin_permiso_de_edicion_no_se_puede_aceptar(client, db, empresa, usuario
     assert respuesta.status_code == 403
     db.session.expire_all()
     assert db.session.get(ConciliacionSiiDocumento, documento.id).aceptado is False
+
+
+# --- Cerrar el período ---
+
+
+def _superadmin(db, empresa):
+    """Un superadmin de verdad: es el único que puede reabrir un mes cerrado."""
+    from app.models.usuario import Rol, Usuario
+
+    rol = Rol.query.filter_by(clave="superadmin").first()
+    if rol is None:
+        rol = Rol(clave="superadmin", nombre="Superadmin")
+        db.session.add(rol)
+        db.session.commit()
+    usuario = Usuario(
+        empresa_id=empresa.id,
+        nombre_completo="Jefa de Prueba",
+        nombre_usuario="jefa_prueba",
+        email="jefa@test.cl",
+        rol_id=rol.id,
+    )
+    usuario.set_password("password123")
+    db.session.add(usuario)
+    db.session.commit()
+    return usuario
+
+
+def _cerrar(client, conciliacion_id, estado="cerrado"):
+    return client.post(
+        f"/contabilidad/conciliacion-sii/{conciliacion_id}/estado",
+        data={"estado": estado}, follow_redirects=True,
+    )
+
+
+def test_un_periodo_nace_abierto(client, db, empresa, usuario_admin):
+    login(client, "admin@test.cl")
+    _cargar(client)
+    assert ConciliacionSii.query.one().cerrado is False
+
+
+def test_cerrar_el_periodo_lo_deja_cerrado(client, db, empresa, usuario_admin):
+    login(client, "admin@test.cl")
+    _cargar(client)
+    conciliacion = ConciliacionSii.query.one()
+
+    body = _cerrar(client, conciliacion.id).get_data(as_text=True)
+
+    conciliacion = ConciliacionSii.query.one()
+    assert conciliacion.cerrado is True
+    assert conciliacion.cerrado_por_id == usuario_admin.id
+    assert conciliacion.cerrado_en is not None
+    assert "🔒 Cerrado" in body
+
+
+def test_cargar_sobre_un_mes_cerrado_no_cambia_nada(client, db, empresa, usuario_admin):
+    """Lo que ella pidió: equivocarse de mes no debe pisar lo ya conciliado.
+
+    Se cierra agosto y se vuelve a cargar agosto con cifras distintas; los
+    montos guardados tienen que quedar exactamente iguales.
+    """
+    login(client, "admin@test.cl")
+    _cargar(client)
+    conciliacion = ConciliacionSii.query.one()
+    _cerrar(client, conciliacion.id)
+
+    antes = {(d.tipo_doc, d.folio): d.total_sii
+             for d in ConciliacionSiiDocumento.query.all()}
+    cargas_antes = [l.cargas for l in ConciliacionSii.query.one().libros]
+
+    otro_csv = CSV_COMPRA.replace("100000;19000;119000", "999999;189999;1189998")
+    body = _cargar(client, sii_compra=_archivo(otro_csv, "compra.csv")).get_data(as_text=True)
+
+    despues = {(d.tipo_doc, d.folio): d.total_sii
+               for d in ConciliacionSiiDocumento.query.all()}
+    assert despues == antes, "un mes cerrado no se puede pisar"
+    assert [l.cargas for l in ConciliacionSii.query.one().libros] == cargas_antes
+    assert "está cerrado" in body
+    assert "quedó intacta" in body
+
+
+def test_un_mes_cerrado_no_bloquea_a_los_demas(client, db, empresa, usuario_admin):
+    """Cerrar agosto no puede impedir cargar septiembre."""
+    login(client, "admin@test.cl")
+    _cargar(client)
+    _cerrar(client, ConciliacionSii.query.one().id)
+
+    _cargar(client, mes="9")
+
+    assert sorted(c.mes for c in ConciliacionSii.query.all()) == [8, 9]
+
+
+def test_un_admin_no_reabre_un_periodo_cerrado(client, db, empresa, usuario_admin):
+    login(client, "admin@test.cl")
+    _cargar(client)
+    conciliacion = ConciliacionSii.query.one()
+    _cerrar(client, conciliacion.id)
+
+    body = _cerrar(client, conciliacion.id, estado="abierto").get_data(as_text=True)
+
+    assert ConciliacionSii.query.one().cerrado is True
+    assert "Solo un superadmin" in body
+
+
+def test_un_superadmin_reabre_y_entonces_se_puede_cargar(client, db, empresa, usuario_admin):
+    login(client, "admin@test.cl")
+    _cargar(client)
+    conciliacion = ConciliacionSii.query.one()
+    _cerrar(client, conciliacion.id)
+    _superadmin(db, empresa)
+
+    client.get("/logout")
+    login(client, "jefa@test.cl")
+    _cerrar(client, conciliacion.id, estado="abierto")
+
+    assert ConciliacionSii.query.one().cerrado is False
+    otro_csv = CSV_COMPRA.replace("100000;19000;119000", "999999;189999;1189998")
+    _cargar(client, sii_compra=_archivo(otro_csv, "compra.csv"))
+    assert 1189998 in {d.total_sii for d in ConciliacionSiiDocumento.query.all()}
+
+
+def test_un_periodo_cerrado_no_se_elimina(client, db, empresa, usuario_admin):
+    login(client, "admin@test.cl")
+    _cargar(client)
+    conciliacion = ConciliacionSii.query.one()
+    _cerrar(client, conciliacion.id)
+
+    client.post(
+        f"/contabilidad/conciliacion-sii/{conciliacion.id}/eliminar",
+        follow_redirects=True,
+    )
+
+    assert ConciliacionSii.query.count() == 1
+
+
+def test_en_un_periodo_cerrado_no_se_aceptan_diferencias(client, db, empresa, usuario_admin):
+    login(client, "admin@test.cl")
+    _cargar(client)
+    conciliacion = ConciliacionSii.query.one()
+    documento = ConciliacionSiiDocumento.query.filter_by(estado="dif_monto").first()
+    _cerrar(client, conciliacion.id)
+
+    client.post(
+        f"/contabilidad/conciliacion-sii/{conciliacion.id}/compra/{documento.id}/aceptar",
+        follow_redirects=True,
+    )
+
+    assert ConciliacionSiiDocumento.query.filter_by(id=documento.id).one().aceptado is False
+
+
+def test_el_titulo_de_la_pagina_no_trae_html(client, db, empresa, usuario_admin):
+    """El bloque del título arrastraba el modal completo y su script.
+
+    La prueba anterior sólo miraba el botón que abre el modal, así que el
+    duplicado pasó inadvertido y la pestaña del navegador mostraba código.
+    """
+    login(client, "admin@test.cl")
+    _cargar(client)
+    conciliacion = ConciliacionSii.query.one()
+
+    body = client.get(
+        f"/contabilidad/conciliacion-sii/{conciliacion.id}/compra"
+    ).get_data(as_text=True)
+
+    titulo = body[body.index("<title>") + 7:body.index("</title>")]
+    assert "<" not in titulo, f"el título trae marcado: {titulo[:80]}"
+    assert body.count('id="modal-diferencia"') == 1
+    assert body.index('id="modal-diferencia"') > body.index("</head>")

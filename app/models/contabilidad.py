@@ -179,6 +179,10 @@ class ConciliacionSii(db.Model):
     El período agrupa los dos libros —compras y ventas—, que se cargan por
     separado: es normal tener listo el de compras y estar esperando el de
     ventas, y no tiene sentido bloquear uno por el otro.
+
+    Un mes ya revisado se cierra. Cerrarlo lo deja de solo lectura: el mes se
+    carga eligiendo su año y mes a mano, y equivocarse en esa lista reemplazaba
+    en silencio un mes que ya estaba conciliado.
     """
 
     __tablename__ = "conciliaciones_sii"
@@ -191,6 +195,12 @@ class ConciliacionSii(db.Model):
     anio = db.Column(db.Integer, nullable=False)
     mes = db.Column(db.Integer, nullable=False)
 
+    estado = db.Column(
+        db.String(20), nullable=False, default="abierto", server_default="abierto"
+    )
+    cerrado_en = db.Column(db.DateTime, nullable=True)
+    cerrado_por_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"), nullable=True)
+
     creado_en = db.Column(db.DateTime, server_default=db.func.now())
     actualizado_en = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now())
 
@@ -198,6 +208,11 @@ class ConciliacionSii(db.Model):
         "ConciliacionSiiLibro", back_populates="conciliacion",
         cascade="all, delete-orphan", order_by="ConciliacionSiiLibro.libro",
     )
+    cerrado_por = db.relationship("Usuario")
+
+    @property
+    def cerrado(self) -> bool:
+        return self.estado == "cerrado"
 
     def libro_por_clave(self, clave):
         return next((l for l in self.libros if l.libro == clave), None)

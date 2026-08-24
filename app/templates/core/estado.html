@@ -26,6 +26,22 @@
   va a fallar al aplicarlas.
   <div class="small mt-2">{{ estado.cabezas_multiples|join(', ') }}</div>
 </div>
+{% elif estado.revision_desconocida %}
+<div class="alert alert-info">
+  <strong>La base está en una revisión que este código no conoce.</strong>
+  Lo más habitual es que la base vaya <em>adelantada</em>: un despliegue alcanzó a correr
+  <code>flask db upgrade</code> y se cayó antes de publicar el código, así que la migración
+  quedó aplicada y el sitio siguió con la versión anterior. En ese caso no hay nada que
+  reparar en la base — basta con volver a desplegar, y la migración ya aplicada se salta sola.
+  <div class="small mt-2">
+    Base: <code>{{ estado.revision_base }}</code> ·
+    Código: <code>{{ estado.revision_codigo }}</code>
+  </div>
+  <div class="small mt-2">
+    Si volver a desplegar no la alinea, entonces sí es otra cosa: otra base de datos, u otra
+    rama desplegada.
+  </div>
+</div>
 {% else %}
 <div class="alert alert-warning">
   <strong>La base está atrasada respecto del código.</strong>
@@ -82,13 +98,17 @@
   <div class="card-body">
     <h2 class="h6">Cómo leer esto</h2>
     <p class="small text-muted mb-2">
-      Las dos versiones tienen que ser iguales. Si la de la base está atrasada, el despliegue
-      subió el código pero la migración no llegó a aplicarse: la aplicación arranca igual, y
-      falla recién cuando alguien entra a una pantalla que usa lo nuevo.
+      Las dos versiones tienen que ser iguales, y pueden desalinearse hacia los dos lados.
+      Si la <strong>base está atrasada</strong>, el despliegue subió el código pero la migración
+      no llegó a aplicarse: la aplicación arranca igual y falla recién cuando alguien entra a
+      una pantalla que usa lo nuevo. Hay que aplicar las migraciones pendientes contra la base
+      (ver <code>docs/despliegue.md</code>) y volver a desplegar.
     </p>
     <p class="small text-muted mb-0">
-      Para arreglarlo, hay que aplicar las migraciones pendientes contra la base
-      (ver <code>docs/despliegue.md</code>) y volver a desplegar.
+      Si la versión de la base <strong>no aparece en la cadena</strong>, suele ser al revés:
+      la migración se aplicó y el despliegue se cayó después, así que el sitio quedó corriendo
+      el código anterior —que todavía no trae ese archivo de migración—. No hay nada que
+      reparar en la base; basta con volver a desplegar.
     </p>
   </div>
 </div>

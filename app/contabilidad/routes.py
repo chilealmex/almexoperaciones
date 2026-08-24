@@ -677,6 +677,15 @@ def _conciliacion_or_404(conciliacion_id):
     ).first_or_404()
 
 
+def _etiqueta_periodo(conciliacion) -> str:
+    return f"{_nombre_de_mes(conciliacion.mes)} {conciliacion.anio}"
+
+
+def _conciliacion_bloqueada(conciliacion) -> bool:
+    """Un período cerrado ya se revisó: sólo un superadmin puede tocarlo."""
+    return conciliacion.cerrado and not current_user.es_superadmin
+
+
 def _guardar_cruce(conciliacion, clave_libro, resultado, nombre_sii, nombre_defontana):
     """Reemplaza el cruce de un libro con el recién calculado.
 
@@ -797,6 +806,20 @@ def cargar_conciliacion_sii():
     conciliacion = ConciliacionSii.query.filter_by(
         empresa_id=_empresa_id(), anio=form.anio.data, mes=form.mes.data
     ).first()
+    # Antes de leer un solo archivo: un mes cerrado no se toca. El mes se elige
+    # a mano en una lista y equivocarse ahí reemplazaba en silencio un período
+    # ya conciliado. El bloqueo vale también para el superadmin —el error de
+    # dedo no distingue cargos—; para reemplazarlo hay que reabrirlo a
+    # propósito, que es un acto aparte y queda registrado.
+    if conciliacion is not None and conciliacion.cerrado:
+        flash(
+            f"{_etiqueta_periodo(conciliacion)} está cerrado: no se cargó nada y "
+            "la información anterior quedó intacta. Si de verdad quieres "
+            "reemplazarla, reabre el período primero.",
+            "danger",
+        )
+        return redirect(url_for("contabilidad.conciliacion_sii"))
+
     if conciliacion is None:
         conciliacion = ConciliacionSii(
             empresa_id=_empresa_id(), anio=form.anio.data, mes=form.mes.data
@@ -921,7 +944,10 @@ def ver_libro_conciliacion_sii(conciliacion_id, clave):
         mes_nombre=_nombre_de_mes(conciliacion.mes),
         motivo_habitual=MOTIVO_HABITUAL,
         accion=AccionForm(),
-        puede_editar=current_user.tiene_permiso("contabilidad", "editar"),
+        # Un período cerrado se mira pero no se toca: sin el formulario de
+        # aceptar, el botón no promete algo que la ruta va a rechazar.
+        puede_editar=(current_user.tiene_permiso("contabilidad", "editar")
+                      and not conciliacion.cerrado),
     )
 
 
@@ -992,6 +1018,13 @@ def aceptar_diferencia_conciliacion_sii(conciliacion_id, clave, documento_id):
     if not AccionForm().validate_on_submit():
         abort(400)
 
+    if conciliacion.cerrado:
+        flash(
+            f"{_etiqueta_periodo(conciliacion)} está cerrado. Reábrelo para cambiar algo.",
+            "warning",
+        )
+        return redirect(_volver_al_libro(conciliacion, clave))
+
     documento = ConciliacionSiiDocumento.query.filter_by(
         id=documento_id, libro_id=libro.id
     ).first_or_404()
@@ -1030,13 +1063,51 @@ def _volver_al_libro(conciliacion, clave):
     )
 
 
+@bp.route("/conciliacion-sii/<int:conciliacion_id>/estado", methods=["POST"])
+@require_permission("contabilidad", "editar")
+def cambiar_estado_conciliacion_sii(conciliacion_id):
+    """Cierra el período o lo reabre.
+
+    Cerrar es la forma de decir "este mes ya está revisado". Reabrir es lo que
+    protege: si cualquiera pudiera hacerlo, cerrar no serviría de nada.
+    """
+    conciliacion = _conciliacion_or_404(conciliacion_id)
+    if not AccionForm().validate_on_submit():
+        abort(400)
+
+    nuevo = request.form.get("estado")
+    if nuevo not in ("abierto", "cerrado"):
+        abort(400)
+    if conciliacion.cerrado and not current_user.es_superadmin:
+        flash("Solo un superadmin puede reabrir un período cerrado.", "warning")
+        return redirect(url_for("contabilidad.conciliacion_sii"))
+
+    conciliacion.estado = nuevo
+    if nuevo == "cerrado":
+        conciliacion.cerrado_en = datetime.now(timezone.utc)
+        conciliacion.cerrado_por_id = current_user.id
+        mensaje = (f"{_etiqueta_periodo(conciliacion)} quedó cerrado: ya no se puede "
+                   "cargar ni modificar sin reabrirlo.")
+    else:
+        conciliacion.cerrado_en = None
+        conciliacion.cerrado_por_id = None
+        mensaje = f"{_etiqueta_periodo(conciliacion)} vuelve a estar abierto."
+
+    db.session.commit()
+    flash(mensaje, "success")
+    return redirect(url_for("contabilidad.conciliacion_sii"))
+
+
 @bp.route("/conciliacion-sii/<int:conciliacion_id>/eliminar", methods=["POST"])
 @require_permission("contabilidad", "editar")
 def eliminar_conciliacion_sii(conciliacion_id):
     conciliacion = _conciliacion_or_404(conciliacion_id)
     if not AccionForm().validate_on_submit():
         abort(400)
-    etiqueta = f"{_nombre_de_mes(conciliacion.mes)} {conciliacion.anio}"
+    if _conciliacion_bloqueada(conciliacion):
+        flash("Este período está cerrado. Solo un superadmin puede eliminarlo.", "warning")
+        return redirect(url_for("contabilidad.conciliacion_sii"))
+    etiqueta = _etiqueta_periodo(conciliacion)
     db.session.delete(conciliacion)
     db.session.commit()
     flash(f"Se eliminó la conciliación de {etiqueta}.", "success")
