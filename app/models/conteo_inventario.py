@@ -214,6 +214,21 @@ class ItemConteoInventario(db.Model, _CalculosConteoMixin):
     # planillas ya no son stock vigente.
     en_qms = db.Column(db.Boolean, nullable=False, default=True)
     en_defontana = db.Column(db.Boolean, nullable=False, default=True)
+
+    @property
+    def falta_en(self) -> str:
+        """En qué sistema no está el artículo. Vacío si está en los dos.
+
+        Es la pregunta que se hace al mirar un SKU sin costo o sin unidad: no
+        siempre es un dato mal cargado, muchas veces es que el artículo
+        directamente no existe en uno de los dos sistemas.
+        """
+        if self.en_qms and self.en_defontana:
+            return ""
+        if not self.en_qms and not self.en_defontana:
+            # Ya no viene en ninguna de las dos planillas: dejó de ser stock vigente.
+            return "QMS y Defontana"
+        return "Defontana" if self.en_qms else "QMS"
     actualizado_en = db.Column(
         db.DateTime,
         default=lambda: datetime.now(timezone.utc),

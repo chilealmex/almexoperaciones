@@ -116,6 +116,7 @@
           <th class="num">Dif. costo</th>
           <th class="num">Desviación</th>
           <th class="num">Impacto en stock</th>
+          <th>Falta en</th>
           {{ t.th('Categoría', 'categoria', orden, direccion, 'd-none d-xl-table-cell') }}
         </tr>
         <tr class="filtros-fila">
@@ -128,6 +129,7 @@
           {{ t.sin_filtro('num') }}
           {{ t.sin_filtro('num') }}
           {{ t.sin_filtro('num') }}
+          {{ t.sin_filtro() }}
           {{ t.filtro('f_categoria', filtros_columna, 'filtros-cruce', 'Categoría', 'd-none d-xl-table-cell') }}
         </tr>
       </thead>
@@ -168,6 +170,11 @@
             {% else %}
             {{ i.impacto_diferencia_costo|clp }}
             {% endif %}
+          </td>
+          {# Vacío cuando el artículo está en los dos sistemas: lo que hay que
+             mirar es sólo dónde falta. #}
+          <td class="text-nowrap">
+            {% if i.falta_en %}<span class="badge bg-warning text-dark">{{ i.falta_en }}</span>{% endif %}
           </td>
           <td class="d-none d-xl-table-cell">{{ i.categoria or '—' }}</td>
         </tr>

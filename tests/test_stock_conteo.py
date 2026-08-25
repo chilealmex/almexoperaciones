@@ -229,3 +229,52 @@ def test_si_se_elige_un_filtro_el_excel_lo_respeta(client, usuario_admin, empres
     codigos = {fila[0] for fila in hoja.iter_rows(min_row=2, values_only=True) if fila and fila[0]}
     assert "POR-CONTAR" in codigos
     assert "YA-CONTADO" not in codigos
+
+
+def test_el_boton_de_excel_avisa_que_filtro_va_a_bajar(client, db, empresa, usuario_admin):
+    """La descarga trae lo mismo que la pantalla, filtro incluido.
+
+    Con "Sin contar" puesto, el archivo salía sin ningún conteo físico y
+    parecía que la descarga estuviera perdiendo los datos. El botón lo dice
+    antes de bajarlo.
+    """
+    from app.models.conteo_inventario import ItemConteoInventario
+    from app.utils.cantidades import a_cantidad
+
+    db.session.add(ItemConteoInventario(
+        empresa_id=empresa.id, codigo="C-1", nombre="Cable",
+        cantidad_qms=a_cantidad("100"), cantidad_defontana=a_cantidad("100"),
+        cantidad_fisica=a_cantidad("12,5")))
+    db.session.commit()
+    login(client, "admin@test.cl")
+
+    sin_filtro = client.get("/inventario/stock").get_data(as_text=True)
+    filtrado = client.get("/inventario/stock?filtro=sin_contar").get_data(as_text=True)
+
+    cabecera_sin = sin_filtro[:sin_filtro.index("</div>", sin_filtro.index("⬇ Excel"))]
+    cabecera_con = filtrado[:filtrado.index("</div>", filtrado.index("⬇ Excel"))]
+    assert "Solo sin contar" not in cabecera_sin, "sin filtro no debe decir nada"
+    assert "Solo sin contar" in cabecera_con
+
+
+def test_lo_contado_con_decimales_llega_entero_al_excel(client, db, empresa, usuario_admin):
+    """De punta a punta: se escribe 12,5 en la pantalla y eso sale en el archivo."""
+    import io
+    from openpyxl import load_workbook
+    from app.models.conteo_inventario import ItemConteoInventario
+    from app.utils.cantidades import a_cantidad
+
+    item = ItemConteoInventario(
+        empresa_id=empresa.id, codigo="MET-1", nombre="Cable por metro",
+        cantidad_qms=a_cantidad("100"), cantidad_defontana=a_cantidad("100"))
+    db.session.add(item)
+    db.session.commit()
+
+    login(client, "admin@test.cl")
+    respuesta = client.post(f"/inventario/stock/{item.id}/contar", json={"cantidad": "12,5"})
+    assert respuesta.status_code == 200
+
+    hoja = load_workbook(io.BytesIO(
+        client.get("/inventario/stock.xlsx").get_data())).active
+    valores = [c.value for fila in hoja.iter_rows() for c in fila]
+    assert 12.5 in valores, "el conteo con decimales no llegó al archivo"

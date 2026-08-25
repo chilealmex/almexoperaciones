@@ -9,7 +9,18 @@
     <p class="page-sub">Cruce de existencias QMS / Defontana y registro del conteo físico.</p>
   </div>
   <div class="d-flex gap-2">
-    <a href="{{ url_for('inventario.stock_excel', **request.args) }}" class="btn btn-outline-secondary btn-sm">⬇ Excel</a>
+    {# El Excel baja lo mismo que está en pantalla, filtro incluido. Con
+       "Sin contar" puesto, el archivo salía sin ningún conteo físico y parecía
+       que la descarga los estuviera perdiendo. Decirlo en el botón evita
+       bajar el subconjunto equivocado sin darse cuenta. #}
+    <a href="{{ url_for('inventario.stock_excel', **request.args) }}"
+       class="btn btn-outline-secondary btn-sm"
+       title="Descarga los {{ items|length }} artículos que se están viendo, con los filtros aplicados">
+      {# Sólo cuenta el filtro elegido a mano: la pantalla parte en "sin contar"
+         pero la descarga parte en "todos", así que mirar el filtro de la
+         pantalla haría prometer un recorte que no va a ocurrir. #}
+      ⬇ Excel{% if request.args.get('filtro') and request.args.get('filtro') != 'todos' %} <span class="text-muted">({{ etiqueta_filtro }})</span>{% endif %}
+    </a>
     {% if puede('inventario', 'editar') %}
     <a href="{{ url_for('inventario.conteo_importar') }}" class="btn btn-outline-secondary btn-sm">Importar archivos</a>
     {% endif %}

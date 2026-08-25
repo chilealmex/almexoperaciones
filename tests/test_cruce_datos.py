@@ -158,3 +158,64 @@ def test_cruce_de_datos_exige_sesion(client, empresa):
     respuesta = client.get("/inventario/cruce-datos")
     assert respuesta.status_code == 302
     assert "/login" in respuesta.headers["Location"]
+
+
+# --- Columna "Falta en" ---
+
+
+def _item(db, empresa, codigo, en_qms=True, en_defontana=True):
+    item = ItemConteoInventario(
+        empresa_id=empresa.id, codigo=codigo, nombre=codigo,
+        en_qms=en_qms, en_defontana=en_defontana,
+    )
+    db.session.add(item)
+    db.session.commit()
+    return item
+
+
+def test_falta_en_dice_el_sistema_que_no_lo_tiene(db, empresa):
+    """Un SKU sin costo o sin unidad muchas veces no es un dato mal cargado:
+    es que el artículo no existe en uno de los dos sistemas."""
+    assert _item(db, empresa, "SOLO-QMS", en_defontana=False).falta_en == "Defontana"
+    assert _item(db, empresa, "SOLO-DEFO", en_qms=False).falta_en == "QMS"
+
+
+def test_si_esta_en_los_dos_no_dice_nada(db, empresa):
+    assert _item(db, empresa, "EN-AMBOS").falta_en == ""
+
+
+def test_si_ya_no_esta_en_ninguno_lo_dice_completo(db, empresa):
+    """Dejó de venir en las dos planillas: ya no es stock vigente."""
+    item = _item(db, empresa, "DESAPARECIDO", en_qms=False, en_defontana=False)
+    assert item.falta_en == "QMS y Defontana"
+
+
+def test_la_columna_aparece_en_la_pantalla_de_cruce(client, db, empresa, usuario_admin):
+    _item(db, empresa, "SOLO-QMS", en_defontana=False)
+    _item(db, empresa, "EN-AMBOS")
+    login(client, "admin@test.cl")
+
+    texto = client.get("/inventario/cruce-datos").get_data(as_text=True)
+    cuerpo = texto[texto.index("<tbody>"):texto.index("</tbody>")]
+
+    assert "Falta en" in texto
+    assert "Defontana</span>" in cuerpo
+    # El que está en los dos no agrega ninguna insignia
+    fila_ambos = cuerpo[cuerpo.index("EN-AMBOS"):]
+    fila_ambos = fila_ambos[:fila_ambos.index("</tr>")]
+    assert "bg-warning" not in fila_ambos
+
+
+def test_la_columna_va_tambien_en_el_excel(client, db, empresa, usuario_admin):
+    import io
+    from openpyxl import load_workbook
+
+    _item(db, empresa, "SOLO-DEFO", en_qms=False)
+    login(client, "admin@test.cl")
+
+    hoja = load_workbook(io.BytesIO(
+        client.get("/inventario/cruce-datos.xlsx").get_data())).active
+    valores = [c.value for fila in hoja.iter_rows() for c in fila]
+
+    assert "Falta en" in valores
+    assert "QMS" in valores
