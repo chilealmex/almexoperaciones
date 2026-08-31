@@ -49,7 +49,9 @@ def test_a_monto_interpreta_los_formatos_de_las_planillas(entrada, esperado):
 
 
 def test_normalizar_rut_y_folio():
-    assert normalizar_rut(" 76.123.456-7 ") == "76123456-7"
+    # Sin puntos, sin guion y sin espacios: lo que identifica al RUT son sus
+    # dígitos, no cómo los escribe cada sistema.
+    assert normalizar_rut(" 76.123.456-7 ") == "761234567"
     # Un folio con ceros de relleno es el mismo documento que sin ellos.
     assert normalizar_folio("00123") == "123"
     assert normalizar_folio("123") == "123"
@@ -86,7 +88,7 @@ def test_leer_rcv_compra(db):
     primero = docs[0]
     assert primero["tipo_doc"] == "33"
     assert primero["folio"] == "1001"
-    assert primero["rut"] == "76123456-7"
+    assert primero["rut"] == "76.123.456-7"   # tal como viene en el archivo
     assert primero["contraparte"] == "PROVEEDOR UNO SPA"
     assert primero["neto"] == 100000
     assert primero["iva"] == 19000
@@ -98,7 +100,7 @@ def test_leer_rcv_venta_usa_las_columnas_del_libro_de_ventas(db):
     docs = leer_rcv_sii(_archivo(CSV_VENTA, "venta.csv"), "venta")
 
     assert len(docs) == 1
-    assert docs[0]["rut"] == "60111222-3"
+    assert docs[0]["rut"] == "60.111.222-3"   # tal como viene en el archivo
     assert docs[0]["iva"] == 38000
     assert docs[0]["total"] == 238000
 
@@ -139,7 +141,7 @@ def test_leer_libro_defontana(db):
 
     assert por_folio["1001"]["tipo_doc"] == "33"
     assert por_folio["1001"]["total"] == 119000
-    assert por_folio["1001"]["rut"] == "76123456-7"
+    assert por_folio["1001"]["rut"] == "76.123.456-7"   # tal como viene en el archivo
     # El tipo se arrastra del encabezado "Documento: NN" que va más arriba
     assert por_folio["900"]["tipo_doc"] == "61"
     # Y los paréntesis de la nota de crédito son un monto negativo
@@ -412,3 +414,54 @@ def test_diferencias_de_ignora_las_menores_a_la_tolerancia(db):
         "rut_sii": "76123456-7", "rut_defontana": "76123456-7",
     }
     assert diferencias_de(fila) == []
+
+
+# --- El RUT se compara por sus dígitos, no por cómo se escribe ---
+
+
+def _par(rut_sii, rut_defo, nombre_sii="YOLITO BALART HNOS. LTDA.",
+         nombre_defo="YOLITO BALART HERMANOS LTDA"):
+    comun = {"tipo_doc": "33", "folio": "1", "fecha": "28/07/2026",
+             "neto": 100000, "exento": 0, "iva": 19000, "total": 119000}
+    sii = [dict(comun, rut=rut_sii, contraparte=nombre_sii)]
+    defo = [dict(comun, rut=rut_defo, contraparte=nombre_defo)]
+    return cruzar(sii, defo, "compra")["filas"][0]
+
+
+def test_el_mismo_rut_escrito_distinto_cruza(db):
+    """Caso real: el SII trae 80.565.900-9 y Defontana 80565900-9.
+
+    Comparados en crudo salían como "RUT distinto", y de arrastre se informaba
+    también la razón social del mismo proveedor escrita de dos maneras.
+    """
+    for rut_sii, rut_defo, como in [
+        ("80.565.900-9", "80565900-9", "con y sin puntos"),
+        ("80565900-9", "805659009", "con y sin guion"),
+        ("80.565.900-9", "805659009", "puntos contra pelado"),
+        (" 80565900 - 9 ", "80565900-9", "con espacios de más"),
+        ("80565900-K", "80565900-k", "verificador en distinta caja"),
+    ]:
+        fila = _par(rut_sii, rut_defo)
+        assert fila["estado"] == "coincide", f"{como}: quedó como {fila['estado']}"
+        assert fila["diferencia_descrita"] == "", f"{como}: {fila['diferencia_descrita']}"
+
+
+def test_dos_ruts_de_verdad_distintos_siguen_avisando(db):
+    """La tolerancia no puede llegar a juntar dos empresas distintas."""
+    fila = _par("80565900-9", "76123456-7")
+    assert fila["estado"] == "dif_datos"
+    assert "RUT distinto" in fila["diferencia_descrita"]
+
+
+def test_un_verificador_distinto_no_es_el_mismo_rut(db):
+    """80565900-9 y 80565900-K son contribuyentes distintos."""
+    fila = _par("80565900-9", "80565900-K")
+    assert fila["estado"] == "dif_datos"
+    assert "RUT distinto" in fila["diferencia_descrita"]
+
+
+def test_el_detalle_muestra_el_rut_como_lo_trae_cada_sistema(db):
+    """Se compara normalizado, pero se informa lo que cada uno tiene escrito."""
+    fila = _par("80565900-9", "76.123.456-7")
+    assert "80565900-9" in fila["diferencia_descrita"]
+    assert "76.123.456-7" in fila["diferencia_descrita"]

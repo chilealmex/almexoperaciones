@@ -121,9 +121,20 @@ def a_monto(valor) -> int:
     return -numero if negativo else numero
 
 
+# Lo que separa un RUT de otro son sus dígitos, no cómo se escriben: cada
+# sistema pone puntos y guion a su manera.
+_ADORNOS_RUT = re.compile(r"[.\-\s]")
+
+
 def normalizar_rut(valor) -> str:
-    """RUT sin puntos y en mayúsculas, que es como se puede comparar entre sistemas."""
-    return str(valor or "").strip().upper().replace(".", "")
+    """Sólo lo que identifica al RUT: dígitos y verificador, en mayúscula.
+
+    Se descartan puntos, guion y espacios, así que "80.565.900-9",
+    "80565900-9" y "805659009" son el mismo contribuyente. El verificador se
+    conserva —es parte del RUT— y se pasa a mayúscula para que "80565900-k" y
+    "80565900-K" tampoco se lean como distintos.
+    """
+    return _ADORNOS_RUT.sub("", str(valor or "")).upper()
 
 
 def normalizar_nombre(valor) -> str:
@@ -247,7 +258,7 @@ def leer_rcv_sii(archivo, libro: str) -> list:
         documentos.append({
             "tipo_doc": tipo,
             "folio": normalizar_folio(dato(col_folio)),
-            "rut": normalizar_rut(dato(col_rut)),
+            "rut": _texto(dato(col_rut), 20),
             "contraparte": _texto(dato(col_razon), 200),
             "fecha": _texto(dato(col_fecha), 20),
             "neto": a_monto(dato(col_neto)),
@@ -353,7 +364,7 @@ def leer_libro_defontana(archivo) -> list:
         documentos.append({
             "tipo_doc": tipo_actual,
             "folio": folio,
-            "rut": normalizar_rut(celda(2)),
+            "rut": _texto(celda(2), 20),
             "contraparte": _texto(celda(3), 200),
             "fecha": _texto(celda(1), 20),
             "neto": a_monto(celda(4)),
@@ -403,8 +414,12 @@ def diferencias_de(fila) -> list:
     # Se compara todo lo que describe al documento menos la fecha: los dos
     # sistemas la escriben con formatos distintos y una diferencia ahí casi
     # nunca significa algo, mientras que el RUT o la razón social sí.
+    # Se comparan normalizados: crudos, "80.565.900-9" y "80565900-9" salían
+    # como RUT distinto, y de arrastre se informaba también la razón social del
+    # mismo proveedor escrita de dos maneras.
     rut_sii, rut_defo = fila.get("rut_sii", ""), fila.get("rut_defontana", "")
-    if rut_sii and rut_defo and rut_sii != rut_defo:
+    clave_sii, clave_defo = normalizar_rut(rut_sii), normalizar_rut(rut_defo)
+    if clave_sii and clave_defo and clave_sii != clave_defo:
         detalles.append({
             "campo": "rut",
             "etiqueta": "RUT",
@@ -420,7 +435,7 @@ def diferencias_de(fila) -> list:
     # marcarlo llenaba el informe de avisos falsos que tapaban los reales.
     nombre_sii = fila.get("contraparte_sii", "")
     nombre_defo = fila.get("contraparte_defontana", "")
-    ruts_confirman_identidad = bool(rut_sii and rut_defo and rut_sii == rut_defo)
+    ruts_confirman_identidad = bool(clave_sii and clave_defo and clave_sii == clave_defo)
     if (nombre_sii and nombre_defo and not ruts_confirman_identidad
             and normalizar_nombre(nombre_sii) != normalizar_nombre(nombre_defo)):
         detalles.append({
