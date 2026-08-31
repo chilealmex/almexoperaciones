@@ -133,8 +133,15 @@ def normalizar_rut(valor) -> str:
     "80565900-9" y "805659009" son el mismo contribuyente. El verificador se
     conserva —es parte del RUT— y se pasa a mayúscula para que "80565900-k" y
     "80565900-K" tampoco se lean como distintos.
+
+    También se quitan los ceros de relleno de la izquierda: un sistema exporta
+    "080565900-9" y el otro "80565900-9", y es el mismo RUT. Ningún RUT chileno
+    empieza en cero, así que ese cero siempre es relleno del exportador.
     """
-    return _ADORNOS_RUT.sub("", str(valor or "")).upper()
+    limpio = _ADORNOS_RUT.sub("", str(valor or "")).upper()
+    # Si fueran todos ceros no queda nada; en ese caso se devuelve lo que había,
+    # para no convertir dos valores raros pero distintos en la misma clave.
+    return limpio.lstrip("0") or limpio
 
 
 def normalizar_nombre(valor) -> str:

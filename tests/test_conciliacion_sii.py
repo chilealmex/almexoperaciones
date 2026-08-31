@@ -440,6 +440,11 @@ def test_el_mismo_rut_escrito_distinto_cruza(db):
         ("80.565.900-9", "805659009", "puntos contra pelado"),
         (" 80565900 - 9 ", "80565900-9", "con espacios de más"),
         ("80565900-K", "80565900-k", "verificador en distinta caja"),
+        # Un exportador rellena con cero a la izquierda; ningún RUT chileno
+        # empieza en cero, así que ese cero siempre es relleno.
+        ("080565900-9", "80565900-9", "con cero de relleno"),
+        ("0080565900-9", "805659009", "dos ceros contra pelado"),
+        ("080.565.900-9", "80565900-9", "cero y puntos"),
     ]:
         fila = _par(rut_sii, rut_defo)
         assert fila["estado"] == "coincide", f"{como}: quedó como {fila['estado']}"
@@ -465,3 +470,23 @@ def test_el_detalle_muestra_el_rut_como_lo_trae_cada_sistema(db):
     fila = _par("80565900-9", "76.123.456-7")
     assert "80565900-9" in fila["diferencia_descrita"]
     assert "76.123.456-7" in fila["diferencia_descrita"]
+
+
+def test_el_cero_de_relleno_no_hace_otro_rut(db):
+    assert normalizar_rut("080565900-9") == normalizar_rut("80565900-9")
+    assert normalizar_rut("0076123456-7") == normalizar_rut("76.123.456-7")
+
+
+def test_quitar_ceros_no_junta_ruts_distintos(db):
+    """Sacar el relleno no puede volver iguales a dos contribuyentes distintos."""
+    assert normalizar_rut("076123456-7") != normalizar_rut("080565900-9")
+    # Un cero al medio o al final sí es parte del número y no se toca.
+    assert normalizar_rut("80565900-9") != normalizar_rut("8565900-9")
+    assert normalizar_rut("80565900-0") != normalizar_rut("80565900-9")
+
+
+def test_un_rut_de_puros_ceros_no_desaparece(db):
+    """Caso raro, pero devolver cadena vacía juntaría cosas que no son iguales."""
+    assert normalizar_rut("0") == "0"
+    assert normalizar_rut("000") == "000"
+    assert normalizar_rut("0") != normalizar_rut("000")
