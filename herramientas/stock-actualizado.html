@@ -6,212 +6,225 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 :root{
-  --bg:#F3F5F4; --surface:#FFFFFF; --surface2:#EAEFED; --ink:#18221F; --muted:#5B6964; --line:#D3DCD8;
-  --accent:#245E8F; --accent-ink:#FFFFFF; --accent-soft:#DDE8F2;
-  --in:#1E7A4B; --in-soft:#DDF1E5; --out:#B23A2E; --out-soft:#F8E1DE; --warn:#8F5B00; --warn-soft:#FBEBCB;
+  --bg:#F2F4F3; --surface:#FFFFFF; --surface2:#EDF1EF; --ink:#16201D; --muted:#5E6B66; --line:#DCE3E0;
+  --accent:#245E8F; --accent-ink:#FFFFFF; --accent-soft:#E1EBF4;
+  --in:#1B7446; --in-soft:#E0F2E7; --out:#B0362A; --out-soft:#FAE3E0; --warn:#8A5A00; --warn-soft:#FBEDCF; --gray-soft:#ECEFEE;
   --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
   --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Consolas,monospace;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
     color-scheme:dark;
-    --bg:#111715; --surface:#18201D; --surface2:#1F2926; --ink:#E4ECE8; --muted:#95A59F; --line:#2E3A36;
-    --accent:#7FB2E0; --accent-ink:#0D1A26; --accent-soft:#1C2E3E;
-    --in:#6FD39B; --in-soft:#173325; --out:#F08A7E; --out-soft:#3A1E1B; --warn:#E8B656; --warn-soft:#352812;
+    --bg:#101614; --surface:#171F1C; --surface2:#1D2724; --ink:#E4ECE8; --muted:#97A7A1; --line:#2C3834;
+    --accent:#83B5E2; --accent-ink:#0D1A26; --accent-soft:#1B2D3D;
+    --in:#72D69F; --in-soft:#15301F; --out:#F28C80; --out-soft:#3A1D1A; --warn:#EAB95A; --warn-soft:#342711; --gray-soft:#222C29;
   }
 }
 :root[data-theme="dark"]{
   color-scheme:dark;
-  --bg:#111715; --surface:#18201D; --surface2:#1F2926; --ink:#E4ECE8; --muted:#95A59F; --line:#2E3A36;
-  --accent:#7FB2E0; --accent-ink:#0D1A26; --accent-soft:#1C2E3E;
-  --in:#6FD39B; --in-soft:#173325; --out:#F08A7E; --out-soft:#3A1E1B; --warn:#E8B656; --warn-soft:#352812;
+  --bg:#101614; --surface:#171F1C; --surface2:#1D2724; --ink:#E4ECE8; --muted:#97A7A1; --line:#2C3834;
+  --accent:#83B5E2; --accent-ink:#0D1A26; --accent-soft:#1B2D3D;
+  --in:#72D69F; --in-soft:#15301F; --out:#F28C80; --out-soft:#3A1D1A; --warn:#EAB95A; --warn-soft:#342711; --gray-soft:#222C29;
 }
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.45}
-.wrap{max-width:1320px;margin:0 auto;padding-inline:20px;padding-block:24px 48px;display:flex;flex-direction:column;gap:20px}
-header h1{margin:0;font-size:24px;font-weight:700;letter-spacing:-.01em;text-wrap:balance}
-header p{margin:6px 0 0;color:var(--muted);max-width:76ch}
-.formula{font-family:var(--mono);font-size:13px;background:var(--surface2);padding:2px 6px;border-radius:4px;white-space:nowrap}
+.wrap{max-width:1360px;margin:0 auto;padding-inline:20px;padding-block:22px 48px;display:flex;flex-direction:column;gap:16px}
+h1{margin:0;font-size:22px;font-weight:700;letter-spacing:-.01em}
+.sub{margin:2px 0 0;color:var(--muted);font-size:13px}
+.top{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;justify-content:space-between}
 
-.loaders{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
-.drop{position:relative;display:flex;flex-direction:column;gap:4px;padding:14px 16px;border:1.5px dashed var(--line);border-radius:8px;background:var(--surface);cursor:pointer}
+/* Carga de archivos */
+.loaders{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
+.drop{position:relative;display:flex;align-items:center;gap:12px;padding:12px 14px;border:1.5px dashed var(--line);border-radius:10px;background:var(--surface);cursor:pointer}
 .drop:hover,.drop.over{border-color:var(--accent)}
 .drop:focus-within{outline:2px solid var(--accent);outline-offset:2px}
 .drop input{position:absolute;inset:0;opacity:0;cursor:pointer}
-.drop .k{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.drop .num{flex:none;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:13px;background:var(--surface2);color:var(--muted)}
+.drop .txt{display:flex;flex-direction:column;min-width:0}
 .drop .t{font-weight:600}
-.drop .s{font-size:13px;color:var(--muted);overflow-wrap:anywhere}
+.drop .s{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
 .drop.ok{border-style:solid;border-color:var(--in)}
+.drop.ok .num{background:var(--in);color:var(--surface)}
 .drop.ok .s{color:var(--in)}
 .drop.err{border-style:solid;border-color:var(--out)}
 .drop.err .s{color:var(--out)}
+.sample{padding:9px 14px;border-radius:8px;background:var(--warn-soft);color:var(--warn);font-size:13px;font-weight:500}
 
-.modules{display:flex;flex-wrap:wrap;gap:0;border-bottom:1px solid var(--line)}
-.mod{font:inherit;font-size:14px;font-weight:600;padding:10px 16px;border:0;border-bottom:3px solid transparent;background:none;color:var(--muted);cursor:pointer;margin-bottom:-1px}
-.mod:hover{color:var(--ink)}
-.mod[aria-selected=true]{color:var(--accent);border-bottom-color:var(--accent)}
-.modhelp{margin:0;color:var(--muted);max-width:90ch;font-size:13px}
+/* Vistas */
+.views{display:inline-flex;background:var(--surface2);border-radius:10px;padding:3px;gap:2px;flex-wrap:wrap}
+.view{font:inherit;font-size:13px;font-weight:600;padding:7px 14px;border:0;border-radius:8px;background:transparent;color:var(--muted);cursor:pointer}
+.view[aria-selected=true]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
 
-.opts{display:flex;flex-wrap:wrap;gap:12px 20px;align-items:end;padding:14px 16px;background:var(--surface);border:1px solid var(--line);border-radius:8px}
-.opt{display:flex;flex-direction:column;gap:4px;min-width:0}
-.opt label{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
-select,input[type=search],input[type=number]{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:7px 10px;max-width:100%}
-select:focus,input:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
-.chk{display:flex;gap:8px;align-items:center;font-size:13px}
+/* Resumen */
+.summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:2px;text-align:left;font:inherit;color:inherit}
+button.card{cursor:pointer}
+button.card:hover{border-color:var(--accent)}
+.card .lbl{font-size:12px;font-weight:600;color:var(--muted);letter-spacing:.02em}
+.card .big{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.2}
+.card .val{font-size:14px;font-weight:600;font-variant-numeric:tabular-nums}
+.card.up .big,.card.up .val{color:var(--in)}
+.card.down .big,.card.down .val{color:var(--out)}
+.card.bad .big{color:var(--warn)}
 
-.sample{display:flex;gap:10px;align-items:center;padding:10px 14px;border-radius:8px;background:var(--warn-soft);color:var(--warn);font-size:13px;font-weight:500}
-
-.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:8px;overflow:hidden}
-.stat{background:var(--surface);padding:12px 14px;display:flex;flex-direction:column;gap:2px}
-.stat .n{font-size:21px;font-weight:600;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
-.stat .l{font-size:12px;color:var(--muted)}
-
-.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
-.tabs{display:flex;flex-wrap:wrap;gap:6px}
-.tab{font:inherit;font-size:13px;font-weight:500;padding:6px 12px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer}
-.tab .c{font-variant-numeric:tabular-nums;color:var(--muted);margin-left:4px}
-.tab[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
-.tab[aria-pressed=true] .c{color:inherit;opacity:.8}
-.actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-.btn{font:inherit;font-size:13px;font-weight:600;padding:7px 14px;border-radius:6px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);cursor:pointer}
+/* Barra de filtros */
+.filters{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font:inherit;font-size:13px;font-weight:500;padding:5px 11px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer;display:inline-flex;gap:6px;align-items:center}
+.chip .c{font-variant-numeric:tabular-nums;color:var(--muted);font-size:12px}
+.chip .dot{width:8px;height:8px;border-radius:50%}
+.chip[aria-pressed=true]{background:var(--ink);border-color:var(--ink);color:var(--surface)}
+.chip[aria-pressed=true] .c{color:inherit;opacity:.75}
+.right{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+input[type=search],select{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:7px 10px;max-width:100%}
+input[type=search]{width:240px}
+select:focus,input:focus,button:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.btn{font:inherit;font-size:13px;font-weight:600;padding:7px 14px;border-radius:8px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);cursor:pointer;white-space:nowrap}
 .btn.ghost{background:transparent;color:var(--accent)}
 .note{font-size:12px;color:var(--muted)}
 
-.tablebox{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:8px}
-table{border-collapse:collapse;width:100%;min-width:1000px;font-size:13px}
-th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
-th{position:sticky;top:0;background:var(--surface2);font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
-td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-td.code{font-family:var(--mono);font-size:12px;white-space:nowrap}
-td.name{max-width:300px}
-td.small{font-size:12px;color:var(--muted)}
+details.opts{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:0 14px}
+details.opts summary{cursor:pointer;padding:10px 0;font-size:13px;font-weight:600;color:var(--muted)}
+.optgrid{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:end;padding-bottom:14px}
+.opt{display:flex;flex-direction:column;gap:4px}
+.opt label{font-size:12px;font-weight:600;color:var(--muted)}
+.chk{display:flex;gap:8px;align-items:center;font-size:13px}
+
+/* Tabla */
+.tablebox{overflow:auto;max-height:72vh;background:var(--surface);border:1px solid var(--line);border-radius:10px}
+table{border-collapse:separate;border-spacing:0;width:100%;min-width:1080px;font-size:13px}
+th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--line);vertical-align:middle}
+thead th{position:sticky;top:0;z-index:1;background:var(--surface2);font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
+th.sort{cursor:pointer;user-select:none}
+th.sort:hover{color:var(--ink)}
+th .arr{opacity:.6}
+.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.code{font-family:var(--mono);font-size:12px;font-weight:500}
+.pname{color:var(--muted);font-size:12px;margin-top:1px;min-width:220px;max-width:340px}
+.small{font-size:11px;color:var(--muted)}
 tr.row{cursor:pointer}
+tr.row td:first-child{box-shadow:inset 4px 0 0 var(--stripe, transparent)}
 tr.row:hover td{background:var(--surface2)}
 tr.row.open td{background:var(--accent-soft)}
-.final{font-weight:700;font-size:14px}
-.plus{color:var(--in)} .minus{color:var(--out)}
-.pill{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap}
-.p-mov{background:var(--accent-soft);color:var(--accent)}
-.p-same,.p-warn{background:var(--warn-soft);color:var(--warn)}
-.p-neg,.p-out{background:var(--out-soft);color:var(--out)}
-.p-in{background:var(--in-soft);color:var(--in)}
-.p-ok,.p-pend{background:var(--surface2);color:var(--muted)}
-.pills{display:flex;flex-wrap:wrap;gap:4px}
-.pmp{width:120px;text-align:right;font-variant-numeric:tabular-nums;padding:4px 8px}
+tr.s-up{--stripe:var(--in)} tr.s-down{--stripe:var(--out)} tr.s-nodata,tr.s-nofile{--stripe:var(--warn)}
+.diff{font-size:15px;font-weight:700}
+.plus{color:var(--in)} .minus{color:var(--out)} .mut{color:var(--muted)}
+.pill{display:inline-block;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;white-space:nowrap}
+.a-up{background:var(--in-soft);color:var(--in)}
+.a-down{background:var(--out-soft);color:var(--out)}
+.a-ok{background:var(--gray-soft);color:var(--muted)}
+.a-warn{background:var(--warn-soft);color:var(--warn)}
+.flag{display:inline-block;margin-left:4px;font-size:11px;font-weight:600;color:var(--warn)}
+.pmp{width:110px;text-align:right;font:inherit;font-variant-numeric:tabular-nums;padding:5px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink)}
 .pmp.edited{border-color:var(--accent);background:var(--accent-soft)}
-tr.detail td{background:var(--bg);padding:10px 12px 14px}
-.det{width:100%;min-width:0;font-size:12px}
-.det th{position:static;background:transparent}
-.det td,.det th{padding:5px 8px}
+.pmp.missing{border-color:var(--warn);background:var(--warn-soft)}
+tr.detail td{background:var(--bg);padding:12px 16px 16px}
+.dethead{display:flex;flex-wrap:wrap;gap:6px 20px;font-size:12px;color:var(--muted);margin-bottom:8px}
+.dethead b{color:var(--ink);font-variant-numeric:tabular-nums}
+.det{width:100%;min-width:0;font-size:12px;border-collapse:collapse}
+.det th{position:static;background:transparent;padding:5px 8px;border-bottom:1px solid var(--line)}
+.det td{padding:5px 8px}
 .det tr.pre td{color:var(--muted)}
-.det tr.same td{background:var(--warn-soft)}
-.det tr.zero td{background:var(--out-soft)}
-.empty{padding:28px;text-align:center;color:var(--muted)}
-.more{padding:10px;text-align:center}
-@media (max-width:600px){ header h1{font-size:20px} .wrap{padding-inline:16px} }
-@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+.det tr.after td{font-weight:600}
+.det tr.zero td{background:var(--warn-soft)}
+.empty{padding:32px;text-align:center;color:var(--muted)}
+.foot{font-size:12px;color:var(--muted);max-width:110ch;margin:0}
+.foot b{color:var(--ink)}
+@media (max-width:640px){ h1{font-size:19px} .wrap{padding-inline:16px} input[type=search]{width:100%} .right{width:100%} }
 </style>
 
 <div class="wrap">
-  <header>
-    <h1>Stock post-conteo</h1>
-    <p>Cruza el archivo <b>Stock y conteo</b> con el <b>Informe de Documentos de Inventario</b> de Defontana. Calcula el stock actualizado, lo que hay que regularizar en Defontana con su valor a PMP y los documentos que se registraron con valor $0.</p>
-  </header>
+  <div class="top">
+    <div>
+      <h1>Regularización de inventario</h1>
+      <p class="sub">Compara lo contado en bodega con el saldo de Defontana y te dice qué ajustar, en cuánto y a qué valor.</p>
+    </div>
+    <div class="views" role="tablist" aria-label="Vista">
+      <button class="view" role="tab" data-view="reg" aria-selected="true" type="button">Productos</button>
+      <button class="view" role="tab" data-view="zero" aria-selected="false" type="button">Documentos a costo $0</button>
+    </div>
+  </div>
 
   <section class="loaders">
     <div class="drop" id="dropStock">
       <input type="file" id="fileStock" accept=".xlsx,.xls,.csv" aria-label="Archivo de stock y conteo">
-      <span class="k">Archivo 1</span>
-      <span class="t">Stock y conteo</span>
-      <span class="s" id="stStock">Arrastra o elige el Excel con Código, Stock físico y Fecha y hora del conteo</span>
+      <span class="num">1</span>
+      <span class="txt"><span class="t">Stock y conteo</span><span class="s" id="stStock">Elige o arrastra el Excel del conteo</span></span>
     </div>
     <div class="drop" id="dropMov">
       <input type="file" id="fileMov" accept=".xlsx,.xls,.csv" aria-label="Informe de documentos de Defontana">
-      <span class="k">Archivo 2</span>
-      <span class="t">Informe de Documentos (Defontana)</span>
-      <span class="s" id="stMov">Arrastra o elige el informe con los Ingresos y Egresos</span>
+      <span class="num">2</span>
+      <span class="txt"><span class="t">Informe de Documentos de Defontana</span><span class="s" id="stMov">Elige o arrastra el informe de ingresos y egresos</span></span>
     </div>
   </section>
 
-  <div class="sample" id="sampleNote">Estás viendo datos de ejemplo inventados. Carga tus dos archivos para ver tu stock.</div>
+  <div class="sample" id="sampleNote">Estos son datos de ejemplo inventados. Carga tus dos archivos arriba para ver tu inventario.</div>
 
-  <nav class="modules" role="tablist" aria-label="Módulos">
-    <button class="mod" role="tab" data-mod="stock" aria-selected="true" type="button">Stock actualizado</button>
-    <button class="mod" role="tab" data-mod="reg" aria-selected="false" type="button">Regularización</button>
-    <button class="mod" role="tab" data-mod="zero" aria-selected="false" type="button">Movimientos a costo $0</button>
-  </nav>
-  <p class="modhelp" id="modHelp"></p>
+  <section class="summary" id="summary"></section>
 
-  <section class="opts">
-    <div class="opt">
-      <label for="optBodega">Bodega contada</label>
-      <select id="optBodega"></select>
-    </div>
-    <div class="opt" id="optSameBox">
-      <label for="optSame">Movimientos del mismo día del conteo</label>
-      <select id="optSame">
-        <option value="flag">Ya estaban contados (no sumar, marcar)</option>
-        <option value="add">Ocurrieron después del conteo (sumar)</option>
-      </select>
-    </div>
-    <div class="opt">
-      <label for="optSearch">Buscar</label>
-      <input type="search" id="optSearch" placeholder="Código, nombre o documento">
-    </div>
-    <label class="chk"><input type="checkbox" id="optAprob" checked> Solo documentos aprobados</label>
-  </section>
-
-  <section class="stats" id="stats"></section>
-
-  <div class="bar">
-    <div class="tabs" id="tabs" role="group" aria-label="Filtro"></div>
-    <div class="actions">
-      <span class="note" id="copyNote"></span>
-      <button class="btn ghost" id="btnCopy" type="button">Copiar tabla</button>
+  <section class="filters">
+    <div class="chips" id="chips" role="group" aria-label="Filtro"></div>
+    <div class="right">
+      <input type="search" id="optSearch" placeholder="Buscar código o nombre" aria-label="Buscar">
+      <button class="btn ghost" id="btnCopy" type="button">Copiar</button>
       <button class="btn" id="btnXlsx" type="button">Descargar Excel</button>
     </div>
-  </div>
+  </section>
+  <span class="note" id="copyNote" aria-live="polite"></span>
 
-  <div class="tablebox">
+  <div class="tablebox" id="tablebox">
     <table>
       <thead id="thead"></thead>
       <tbody id="tbody"></tbody>
     </table>
   </div>
-  <p class="note" id="footNote"></p>
+
+  <details class="opts">
+    <summary>Opciones de cálculo</summary>
+    <div class="optgrid">
+      <div class="opt">
+        <label for="optBodega">Bodega contada</label>
+        <select id="optBodega"></select>
+      </div>
+      <div class="opt">
+        <label for="optSame">Documentos del mismo día del conteo</label>
+        <select id="optSame">
+          <option value="before">Ocurrieron antes de contar (ya están en el conteo)</option>
+          <option value="after">Ocurrieron después de contar</option>
+        </select>
+      </div>
+      <label class="chk"><input type="checkbox" id="optAprob" checked> Solo documentos aprobados</label>
+    </div>
+  </details>
+
+  <p class="foot" id="foot"></p>
 </div>
 
 <script>
 (function(){
   const $ = s => document.getElementById(s);
-  const norm = v => String(v ?? '').trim().toUpperCase();
-  const fmt = n => n == null || n === '' || isNaN(n) ? '—' : Number(n).toLocaleString('es-CL', {maximumFractionDigits: 3});
-  const money = n => n == null || isNaN(n) ? '—' : (n < 0 ? '−$' : '$') + Math.abs(Math.round(n)).toLocaleString('es-CL');
-  const pmpFmt = n => n == null || isNaN(n) ? '—' : '$' + Number(n).toLocaleString('es-CL', {maximumFractionDigits: 2});
-  const sgn = n => (n > 0 ? '+' : n < 0 ? '−' : '') + fmt(Math.abs(n));
-  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-  const dayKey = d => d ? d.getFullYear()*10000 + (d.getMonth()+1)*100 + d.getDate() : null;
-  const fmtDate = (d, time) => !d ? '' : String(d.getDate()).padStart(2,'0') + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + d.getFullYear() +
-      (time ? ' ' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0') : '');
   const EPS = 1e-9;
+  const norm = v => String(v ?? '').trim().toUpperCase();
+  const strip = s => norm(s).normalize('NFD').replace(/[̀-ͯ]/g,'');
+  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const fmt = n => n == null || n === '' || isNaN(n) ? '—' : Number(n).toLocaleString('es-CL', {maximumFractionDigits: 3});
+  const sgn = n => n == null ? '—' : (n > EPS ? '+' : n < -EPS ? '−' : '') + fmt(Math.abs(n));
+  const money = n => n == null || isNaN(n) ? '—' : (n < -0.5 ? '−$' : '$') + Math.abs(Math.round(n)).toLocaleString('es-CL');
+  const dayKey = d => d ? d.getFullYear()*10000 + (d.getMonth()+1)*100 + d.getDate() : null;
+  const fmtDate = (d, t) => !d ? '' : String(d.getDate()).padStart(2,'0') + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + d.getFullYear() +
+    (t ? ' ' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0') : '');
 
-  // Acepta "dd-mm-aaaa", "dd/mm/aaaa hh:mm", fechas de Excel (número) u objetos Date
+  // ---------- Lectura de archivos ----------
   function parseDate(v){
     if (v == null || v === '') return null;
     if (v instanceof Date) return isNaN(v) ? null : v;
-    if (typeof v === 'number'){
-      const p = XLSX.SSF.parse_date_code(v);
-      return p ? new Date(p.y, p.m-1, p.d, p.H, p.M, Math.floor(p.S)) : null;
-    }
-    const m = String(v).trim().match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2,4})(?:[ T,]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
-    if (m){
-      let y = +m[3]; if (y < 100) y += 2000;
-      return new Date(y, +m[2]-1, +m[1], +(m[4]||0), +(m[5]||0), +(m[6]||0));
-    }
-    const m2 = String(v).trim().match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/);
-    if (m2) return new Date(+m2[1], +m2[2]-1, +m2[3], +(m2[4]||0), +(m2[5]||0));
-    return null;
+    if (typeof v === 'number'){ const p = XLSX.SSF.parse_date_code(v); return p ? new Date(p.y, p.m-1, p.d, p.H, p.M) : null; }
+    const s = String(v).trim();
+    let m = s.match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2,4})(?:[ T,]+(\d{1,2}):(\d{2}))?/);
+    if (m){ let y = +m[3]; if (y < 100) y += 2000; return new Date(y, +m[2]-1, +m[1], +(m[4]||0), +(m[5]||0)); }
+    m = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/);
+    return m ? new Date(+m[1], +m[2]-1, +m[3], +(m[4]||0), +(m[5]||0)) : null;
   }
   function num(v){
     if (typeof v === 'number') return v;
@@ -220,454 +233,386 @@ tr.detail td{background:var(--bg);padding:10px 12px 14px}
     if (/,\d+$/.test(s)) s = s.replace(/\./g,'').replace(',', '.'); else s = s.replace(/,/g,'');
     const n = Number(s); return isNaN(n) ? null : n;
   }
-  const stripAccents = s => norm(s).normalize('NFD').replace(/[̀-ͯ]/g,'');
-
   function readTable(rows, required){
     for (let i = 0; i < Math.min(rows.length, 30); i++){
-      const h = rows[i].map(stripAccents);
-      if (required.every(r => h.some(x => x === r))){
+      const h = rows[i].map(strip);
+      if (required.every(r => h.includes(r))){
         const idx = {}; h.forEach((x, j) => { if (x && !(x in idx)) idx[x] = j; });
-        return {idx, rows: rows.slice(i+1)};
+        const col = (...names) => { for (const n of names){ const k = strip(n); if (k in idx) return idx[k]; } return -1; };
+        return {col, rows: rows.slice(i+1)};
       }
     }
     return null;
   }
-  const col = (t, ...names) => { for (const n of names){ const k = stripAccents(n); if (k in t.idx) return t.idx[k]; } return -1; };
-
   function parseStock(rows){
     const t = readTable(rows, ['CODIGO', 'STOCK FISICO']);
-    if (!t) throw new Error('No encontré las columnas “Código” y “Stock físico”.');
-    const cC = col(t,'Código'), cN = col(t,'Nombre'), cS = col(t,'Stock físico'), cE = col(t,'Estado del conteo'),
-          cP = col(t,'Contado por'), cF = col(t,'Fecha y hora del conteo','Fecha del conteo','Fecha');
-    if (cF < 0) throw new Error('No encontré la columna “Fecha y hora del conteo”.');
+    if (!t) throw new Error('No encontré las columnas “Código” y “Stock físico”. ¿Es el archivo de Stock y conteo?');
+    const c = {code:t.col('Código'), name:t.col('Nombre'), stock:t.col('Stock físico'), estado:t.col('Estado del conteo'),
+      por:t.col('Contado por'), fecha:t.col('Fecha y hora del conteo','Fecha del conteo','Fecha')};
     const out = [];
     for (const r of t.rows){
-      const code = String(r[cC] ?? '').trim(); if (!code) continue;
-      out.push({code, key: norm(code), name: r[cN] ?? '', stock: num(r[cS]), estado: r[cE] ?? '', por: r[cP] ?? '', fecha: parseDate(r[cF])});
+      const code = String(r[c.code] ?? '').trim(); if (!code) continue;
+      out.push({code, key:norm(code), name:r[c.name] ?? '', stock:num(r[c.stock]), estado:c.estado >= 0 ? r[c.estado] ?? '' : '',
+        por:c.por >= 0 ? r[c.por] ?? '' : '', fecha:c.fecha >= 0 ? parseDate(r[c.fecha]) : null});
     }
     return out;
   }
-
   function parseMov(rows){
     const t = readTable(rows, ['ARTICULO', 'MOVIMIENTO']);
-    if (!t) throw new Error('No encontré las columnas “Artículo” y “Movimiento”.');
-    const g = (...n) => col(t, ...n);
+    if (!t) throw new Error('No encontré las columnas “Artículo” y “Movimiento”. ¿Es el Informe de Documentos de Defontana?');
+    const g = t.col;
     const c = {tipo:g('Tipo Documento'), estado:g('Estado'), folio:g('Folio'), fecha:g('Fecha'), orig:g('Bod. Origen','Bodega Origen'),
-      dest:g('Bod. Destino','Bodega Destino'), motivo:g('Motivo'), mov:g('Movimiento'), ref:g('Referencia'), prov:g('Proveedor'), cli:g('Cliente'),
+      dest:g('Bod. Destino','Bodega Destino'), mov:g('Movimiento'), ref:g('Referencia'), prov:g('Proveedor'), cli:g('Cliente'),
       art:g('Artículo'), desc:g('Descripción'), cant:g('Cant. Movimiento','Cantidad'), um:g('U. Medida'), valor:g('Valor Movimiento'),
       saldo:g('Saldo Inventario'), valorInv:g('Valor Inventario')};
     if (c.cant < 0 || c.fecha < 0) throw new Error('No encontré las columnas “Fecha” y “Cant. Movimiento”.');
+    const at = (r, k) => c[k] >= 0 ? (r[c[k]] ?? '') : '';
     const out = [];
     t.rows.forEach((r, i) => {
-      const art = String(r[c.art] ?? '').trim(); if (!art) return;
-      const mv = stripAccents(r[c.mov]);
+      const art = String(at(r,'art')).trim(); if (!art) return;
+      const mv = strip(at(r,'mov'));
       const kind = mv.startsWith('ING') ? 'in' : mv.startsWith('EGR') ? 'out' : null;
       if (!kind) return;
-      const at = k => c[k] >= 0 ? (r[c[k]] ?? '') : '';
-      out.push({i, art, key: norm(art), kind, qty: Math.abs(num(at('cant')) || 0), fecha: parseDate(at('fecha')),
-        tipo: at('tipo'), estado: at('estado'), folio: at('folio'), orig: String(at('orig')).trim(), dest: String(at('dest')).trim(),
-        motivo: at('motivo'), ref: at('ref') || at('cli') || at('prov'), desc: at('desc'), um: at('um'),
-        valor: c.valor >= 0 ? num(at('valor')) : null, saldo: num(at('saldo')), valorInv: c.valorInv >= 0 ? num(at('valorInv')) : null});
+      out.push({i, art, key:norm(art), kind, qty:Math.abs(num(at(r,'cant')) || 0), fecha:parseDate(at(r,'fecha')),
+        tipo:at(r,'tipo'), estado:at(r,'estado'), folio:at(r,'folio'), orig:String(at(r,'orig')).trim(), dest:String(at(r,'dest')).trim(),
+        ref:at(r,'ref') || at(r,'cli') || at(r,'prov'), desc:at(r,'desc'), um:at(r,'um'),
+        valor:c.valor >= 0 ? num(at(r,'valor')) : null, saldo:num(at(r,'saldo')), valorInv:c.valorInv >= 0 ? num(at(r,'valorInv')) : null});
     });
-    // Orden cronológico estable (el informe ya viene así, pero por si acaso)
     out.sort((a,b) => (a.fecha||0) - (b.fecha||0) || a.i - b.i);
     return out;
   }
 
-  // ---------- Datos de ejemplo (inventados) ----------
+  // ---------- Ejemplo (inventado) ----------
   function sample(){
     const S = [
       ['EJ-PERNO-M16','Perno ejemplo M16 x 40',50,'05-08-2026 10:15'],
-      ['EJ-GUANTE-01','Guante ejemplo de cabritilla',40,'12-08-2026 16:40'],
-      ['EJ-CAJA-500','Caja ejemplo 500x400x400',120,'19-08-2026 09:05'],
+      ['EJ-GUANTE-01','Guante ejemplo de cabritilla',48,'12-08-2026 16:40'],
+      ['EJ-CAJA-500','Caja ejemplo 500x400x400',112,'19-08-2026 09:05'],
       ['EJ-CABLE-45','Cable ejemplo de alimentación 4,5 m',6,'20-08-2026 11:30'],
-      ['EJ-REMACHE','Remache ejemplo 4,0 x 8',180,'10-08-2026 15:00'],
-      ['EJ-KIT-HT','Kit ejemplo de herramientas',2,'18-08-2026 12:00'],
+      ['EJ-REMACHE','Remache ejemplo 4,0 x 8',230,'10-08-2026 15:00'],
+      ['EJ-KIT-HT','Kit ejemplo de herramientas',3,'18-08-2026 12:00'],
+      ['EJ-TUERCA','Tuerca ejemplo 3/8',14,'19-08-2026 17:33'],
       ['EJ-RELE-6A','Relé ejemplo 6A 24VDC',null,'']
-    ].map(r => ({code:r[0], key:norm(r[0]), name:r[1], stock:r[2], estado:r[2]==null?'Pendiente':'Contado', por:r[2]==null?'':'Ejemplo', fecha:parseDate(r[3])}));
-    // art, tipo mov, cant, fecha, doc, ref, valor mov, saldo, valor inv
+    ].map(r => ({code:r[0], key:norm(r[0]), name:r[1], stock:r[2], estado:r[2]==null?'Pendiente':'Contado', por:'', fecha:parseDate(r[3])}));
     const M = [
       ['EJ-PERNO-M16','in',60,'05-01-2026','PARTE DE ENTRADA','Compra',118500,60,118500],
-      ['EJ-PERNO-M16','out',10,'01-08-2026','PARTE DE SALIDA','OT 700',19750,50,98750],
-      ['EJ-PERNO-M16','out',8,'14-08-2026','PARTE DE SALIDA','OT 812',15800,42,82950],
-      ['EJ-PERNO-M16','in',30,'22-08-2026','PARTE DE ENTRADA','Compra',60000,72,142950],
+      ['EJ-PERNO-M16','out',8,'14-08-2026','PARTE DE SALIDA','OT 812',15800,52,102700],
+      ['EJ-PERNO-M16','in',30,'22-08-2026','PARTE DE ENTRADA','Compra',60000,82,162700],
       ['EJ-GUANTE-01','in',50,'10-03-2026','PARTE DE ENTRADA','Compra',64150,50,64150],
-      ['EJ-GUANTE-01','out',2,'12-08-2026','PARTE DE SALIDA','OT 790',2566,48,61584],
-      ['EJ-GUANTE-01','out',6,'25-08-2026','PARTE DE SALIDA','OT 901',7698,42,53886],
+      ['EJ-GUANTE-01','out',6,'25-08-2026','PARTE DE SALIDA','OT 901',7698,44,56452],
       ['EJ-CAJA-500','in',120,'15-04-2026','PARTE DE ENTRADA','Compra',156000,120,156000],
       ['EJ-CAJA-500','out',15,'02-09-2026','ENVÍO A PRODUCCIÓN','OT 950',19500,105,136500],
       ['EJ-CABLE-45','in',6,'02-05-2026','PARTE ENTRADA IMPORTACION','Importación',3321960,6,3321960],
       ['EJ-CABLE-45','out',8,'28-08-2026','52 Guia de Despacho Electronica','GDVELECT 24010',0,-2,0],
-      ['EJ-REMACHE','in',100,'04-08-2026','PARTE DE ENTRADA','Compra',1300,200,2600],
+      ['EJ-REMACHE','in',200,'04-06-2026','PARTE DE ENTRADA','Compra',2600,200,2600],
       ['EJ-KIT-HT','in',2,'06-01-2026','PARTE ENTRADA IMPORTACION','Importación',5239044,2,5239044],
-      ['EJ-KIT-HT','in',1,'18-08-2026','NO OCUPAR2','Entrada sin costo',0,3,5239044]
-    ].map((r, i) => ({i, art:r[0], key:norm(r[0]), kind:r[1], qty:r[2], fecha:parseDate(r[3]), tipo:r[4], estado:'Aprobado', folio:i+1,
-      orig: r[1]==='out' ? 'BODEGA CENTRAL' : '', dest: r[1]==='in' ? 'BODEGA CENTRAL' : '', motivo:'', ref:r[5], desc:'', um:'UN',
-      valor:r[6], saldo:r[7], valorInv:r[8]}));
+      ['EJ-KIT-HT','in',1,'18-07-2026','NO OCUPAR2','Entrada sin costo',0,3,5239044],
+      ['EJ-SELLO-20','Sello ejemplo 20"','in',10,'03-03-2026','PARTE DE ENTRADA','Compra',45000,10,45000]
+    ].map((r, i) => { if (r.length === 10) r = [r[0], ...r.slice(2)]; return {i, art:r[0], key:norm(r[0]), kind:r[1], qty:r[2], fecha:parseDate(r[3]), tipo:r[4],
+      estado:'Aprobado', folio:i+1, orig:r[1]==='out'?'BODEGA CENTRAL':'', dest:r[1]==='in'?'BODEGA CENTRAL':'', ref:r[5],
+      desc: r[0]==='EJ-SELLO-20' ? 'Sello ejemplo 20"' : '', um:'UN', valor:r[6], saldo:r[7], valorInv:r[8]}; });
     return {S, M};
   }
 
   // ---------- Estado ----------
-  const state = {stock: null, mov: null, isSample: true, mod: 'stock', tab: {stock:'mov', reg:'todo', zero:'todo'},
-    limit: 300, open: new Set(), pmpEdit: new Map(), results: [], zero: []};
   const ex = sample();
-  state.stock = ex.S; state.mov = ex.M;
+  const state = {stock:ex.S, mov:ex.M, isSample:true, view:'reg', filter:{reg:'all', zero:'all'},
+    sort:{reg:{k:'code', d:1}, zero:{k:'fecha', d:1}}, open:new Set(), pmpEdit:new Map(), rows:[], zero:[]};
 
   function fillBodegas(){
-    const sel = $('optBodega'), prev = sel.value;
-    const set = new Map();
-    for (const m of state.mov){ const b = m.kind === 'in' ? m.dest : m.orig; if (b) set.set(b, (set.get(b)||0) + 1); }
-    const list = [...set.entries()].sort((a,b) => b[1]-a[1]).map(x => x[0]);
+    const sel = $('optBodega'), prev = sel.value, count = new Map();
+    for (const m of state.mov){ const b = m.kind === 'in' ? m.dest : m.orig; if (b) count.set(b, (count.get(b)||0) + 1); }
+    const list = [...count.entries()].sort((a,b) => b[1]-a[1]).map(x => x[0]);
     sel.innerHTML = '<option value="*">Todas las bodegas</option>' + list.map(b => `<option value="${esc(b)}">${esc(b)}</option>`).join('');
-    sel.value = list.includes(prev) ? prev : (list.find(b => /CENTRAL/i.test(b)) || list[0] || '*');
+    sel.value = list.includes(prev) ? prev : (list.find(b => /CENTRAL/i.test(b)) || '*');
   }
 
-  // PMP de un artículo: el último PMP válido (Valor Inventario / Saldo Inventario con ambos > 0);
-  // si no hay, el costo unitario del último documento con valor; si no hay, nada.
-  function pmpOf(movs, uptoIdx){
-    const lim = uptoIdx == null ? movs.length - 1 : uptoIdx;
-    for (let j = lim; j >= 0; j--){
-      const m = movs[j];
-      if (m.saldo > EPS && m.valorInv > EPS) return {pmp: m.valorInv / m.saldo, src: 'PMP Defontana ' + fmtDate(m.fecha)};
-    }
-    for (let j = lim; j >= 0; j--){
-      const m = movs[j];
-      if (m.qty > EPS && m.valor > EPS) return {pmp: m.valor / m.qty, src: 'Costo del doc. ' + fmtDate(m.fecha)};
-    }
-    // Si no hay nada antes, mirar documentos posteriores
-    if (uptoIdx != null) for (let j = lim + 1; j < movs.length; j++){
-      const m = movs[j];
-      if (m.saldo > EPS && m.valorInv > EPS) return {pmp: m.valorInv / m.saldo, src: 'PMP Defontana ' + fmtDate(m.fecha) + ' (posterior)'};
-      if (m.qty > EPS && m.valor > EPS) return {pmp: m.valor / m.qty, src: 'Costo del doc. ' + fmtDate(m.fecha) + ' (posterior)'};
+  // PMP: último Valor Inventario / Saldo Inventario con ambos > 0; si no hay, costo unitario del último documento con valor.
+  function pmpOf(list, upto){
+    const lim = upto == null ? list.length - 1 : upto;
+    for (let j = lim; j >= 0; j--){ const m = list[j]; if (m.saldo > EPS && m.valorInv > EPS) return {v:m.valorInv / m.saldo, src:'PMP Defontana al ' + fmtDate(m.fecha)}; }
+    for (let j = lim; j >= 0; j--){ const m = list[j]; if (m.qty > EPS && m.valor > EPS) return {v:m.valor / m.qty, src:'Costo doc. del ' + fmtDate(m.fecha)}; }
+    for (let j = lim + 1; j < list.length; j++){
+      const m = list[j];
+      if (m.saldo > EPS && m.valorInv > EPS) return {v:m.valorInv / m.saldo, src:'PMP Defontana al ' + fmtDate(m.fecha)};
+      if (m.qty > EPS && m.valor > EPS) return {v:m.valor / m.qty, src:'Costo doc. del ' + fmtDate(m.fecha)};
     }
     return null;
   }
 
   function compute(){
-    const bod = $('optBodega').value, sameMode = $('optSame').value, onlyAprob = $('optAprob').checked;
-    const aprobOk = m => !onlyAprob || !m.estado || /aprob/i.test(m.estado);
-    const inBod = m => { if (bod === '*') return true; const b = m.kind === 'in' ? m.dest : m.orig; return b === bod; };
-    // Todos los documentos por artículo (para saldo y PMP de Defontana) y los de la bodega (para el stock actualizado)
-    const allBy = new Map(), bodBy = new Map();
+    const bod = $('optBodega').value, sameAfter = $('optSame').value === 'after', onlyAprob = $('optAprob').checked;
+    const byKey = new Map();
     for (const m of state.mov){
-      if (!aprobOk(m)) continue;
-      if (!allBy.has(m.key)) allBy.set(m.key, []);
-      allBy.get(m.key).push(m);
-      if (inBod(m)){ if (!bodBy.has(m.key)) bodBy.set(m.key, []); bodBy.get(m.key).push(m); }
+      if (onlyAprob && m.estado && !/aprob/i.test(m.estado)) continue;
+      if (!byKey.has(m.key)) byKey.set(m.key, []);
+      byKey.get(m.key).push(m);
     }
-    const stockKeys = new Set();
-    state.results = state.stock.map(s => {
-      stockKeys.add(s.key);
-      const movs = bodBy.get(s.key) || [];
-      const all = allBy.get(s.key) || [];
-      const counted = s.fecha != null && s.stock != null;
+    const inBod = m => bod === '*' || (m.kind === 'in' ? m.dest : m.orig) === bod;
+    const build = (s, docs) => {
+      const counted = !!s && s.stock != null && s.fecha != null;
       const ck = counted ? dayKey(s.fecha) : null;
-      const isAfter = m => { const dk = dayKey(m.fecha); return dk > ck || (dk === ck && sameMode === 'add'); };
-      let ins = 0, outs = 0, sameNet = 0, nSame = 0, nPost = 0;
-      for (const m of movs){
-        m._when = 'pre';
-        if (!counted || !m.fecha) continue;
-        const dk = dayKey(m.fecha);
-        if (isAfter(m)){
-          m._when = dk === ck ? 'same-add' : 'post'; nPost++;
-          if (m.kind === 'in') ins += m.qty; else outs += m.qty;
-        } else if (dk === ck){ m._when = 'same'; nSame++; sameNet += m.kind === 'in' ? m.qty : -m.qty; }
+      const after = m => { const dk = dayKey(m.fecha); return dk > ck || (dk === ck && sameAfter); };
+      let ins = 0, outs = 0, sameDay = 0, idx = null;
+      docs.forEach((m, j) => {
+        if (!counted || !m.fecha) return;
+        if (after(m)){ if (inBod(m)){ if (m.kind === 'in') ins += m.qty; else outs += m.qty; } }
+        else { idx = j; if (dayKey(m.fecha) === ck) sameDay++; }
+      });
+      const last = docs.length ? docs[docs.length - 1] : null;
+      const sysNow = last ? last.saldo : null;
+      let sysAtCount = null;
+      if (counted && docs.length){
+        if (idx != null) sysAtCount = docs[idx].saldo;
+        else { const f = docs[0]; if (f.saldo != null) sysAtCount = f.saldo - (f.kind === 'in' ? f.qty : -f.qty); }
       }
-      const final = counted ? s.stock + ins - outs : null;
+      const realNow = counted ? s.stock + ins - outs : null;
+      const diff = counted && sysAtCount != null ? s.stock - sysAtCount : null;
+      const key = s ? s.key : docs[0].key;
+      const pm = docs.length ? pmpOf(docs, idx) : null;
+      const edited = state.pmpEdit.has(key);
+      const pmp = edited ? state.pmpEdit.get(key) : pm ? pm.v : null;
+      let st;
+      if (!s) st = 'nofile';
+      else if (!counted) st = 'nocount';
+      else if (diff == null) st = 'nodata';
+      else st = diff > EPS ? 'up' : diff < -EPS ? 'down' : 'ok';
+      const zeros = docs.filter(m => m.valor != null && Math.abs(m.valor) < EPS && m.qty > EPS).length;
+      return {key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, counted, docs, ins, outs, sameDay,
+        sysAtCount, sysNow, realNow, diff, st, pmp, edited, pmpSrc: edited ? 'Ingresado a mano' : pm ? pm.src : 'Sin costo en Defontana',
+        valor: diff != null && Math.abs(diff) > EPS && pmp != null ? diff * pmp : (st === 'ok' ? 0 : null), zeros};
+    };
+    const seen = new Set();
+    state.rows = state.stock.map(s => { seen.add(s.key); return build(s, byKey.get(s.key) || []); });
+    for (const [k, docs] of byKey) if (!seen.has(k) && docs.some(inBod)) state.rows.push(build(null, docs));
 
-      // Saldo del sistema al momento del conteo = saldo del último documento anterior al conteo.
-      // Si el primer documento es posterior, se reconstruye hacia atrás: saldo − ingreso (o + egreso).
-      let saldoConteo = null, saldoHoy = null, idxConteo = null;
-      if (all.length){
-        const last = all[all.length - 1];
-        saldoHoy = last.saldo;
-        if (counted){
-          for (let j = 0; j < all.length; j++) if (!isAfter(all[j])) idxConteo = j;
-          if (idxConteo != null) saldoConteo = all[idxConteo].saldo;
-          else { const f = all[0]; if (f.saldo != null) saldoConteo = f.saldo - (f.kind === 'in' ? f.qty : -f.qty); }
-        }
-      }
-      const diff = counted && saldoConteo != null ? s.stock - saldoConteo : null;
-      const pm = all.length ? pmpOf(all, idxConteo == null ? null : idxConteo) : null;
-      const edited = state.pmpEdit.has(s.key);
-      const pmp = edited ? state.pmpEdit.get(s.key) : (pm ? pm.pmp : null);
-      const pmpSrc = edited ? 'Ingresado a mano' : (pm ? pm.src : 'Sin costo en el informe');
-      const valorAjuste = diff != null && pmp != null ? diff * pmp : null;
-      const zeros = all.filter(m => m.valor != null && Math.abs(m.valor) < EPS && m.qty > EPS).length;
-      return {...s, counted, movs, all, ins, outs, final, sameNet, nSame, nPost, saldoConteo, saldoHoy, diff, pmp, pmpSrc, edited, valorAjuste, zeros};
-    });
-    state.orphan = [...bodBy.keys()].filter(k => !stockKeys.has(k)).length;
-
-    // Movimientos a valor 0 (todo el informe, bodega elegida)
-    const nameByKey = new Map(state.stock.map(s => [s.key, s.name]));
+    const names = new Map(state.rows.map(r => [r.key, r.name]));
     state.zero = [];
-    for (const [key, list] of bodBy){
-      const all = allBy.get(key) || list;
-      for (const m of list){
-        if (m.valor == null || Math.abs(m.valor) > EPS || m.qty <= EPS) continue;
-        const idx = all.indexOf(m);
-        const pm = pmpOf(all, idx >= 0 ? idx : null);
-        const edited = state.pmpEdit.has(key);
-        const pmp = edited ? state.pmpEdit.get(key) : (pm ? pm.pmp : null);
-        state.zero.push({m, key, name: m.desc || nameByKey.get(key) || '', pmp, pmpSrc: edited ? 'Ingresado a mano' : (pm ? pm.src : 'Sin costo en el informe'),
-          edited, valorSug: pmp != null ? pmp * m.qty : null});
-      }
-    }
-    state.zero.sort((a,b) => (a.m.fecha||0) - (b.m.fecha||0) || a.m.i - b.m.i);
+    for (const [k, docs] of byKey) docs.forEach((m, j) => {
+      if (!inBod(m) || m.valor == null || Math.abs(m.valor) > EPS || m.qty <= EPS) return;
+      const pm = pmpOf(docs, j - 1 >= 0 ? j - 1 : null);
+      const edited = state.pmpEdit.has(k);
+      const pmp = edited ? state.pmpEdit.get(k) : pm ? pm.v : null;
+      state.zero.push({key:k, m, code:m.art, name:m.desc || names.get(k) || '', pmp, edited,
+        pmpSrc: edited ? 'Ingresado a mano' : pm ? pm.src : 'Sin costo en Defontana', valor: pmp != null ? pmp * m.qty : null});
+    });
   }
 
-  // ---------- Definición de módulos ----------
-  const MODS = {
-    stock: {
-      help: 'Para cada artículo contado: stock físico + ingresos − egresos con fecha posterior al conteo. Haz clic en una fila para ver sus documentos.',
-      tabs: [
-        ['mov', 'Con movimientos después del conteo', r => r.counted && r.nPost > 0],
-        ['same', 'Revisar: movimientos el mismo día', r => r.counted && r.nSame > 0],
-        ['neg', 'Stock actualizado negativo', r => r.counted && r.final < 0],
-        ['all', 'Todos los contados', r => r.counted],
-        ['pend', 'Pendientes de conteo', r => !r.counted]
-      ],
-      source: () => state.results,
-      search: r => [r.code, r.name],
-      head: '<tr><th>Código</th><th>Nombre</th><th>Conteo</th><th class="num">Stock físico</th><th class="num">Ingresos</th><th class="num">Egresos</th><th class="num">Stock actualizado</th><th class="num">Mismo día</th><th class="num">Saldo Defontana hoy</th><th>Estado</th></tr>',
-      cols: 10,
-      row: r => {
-        const pills = [];
-        if (!r.counted) pills.push('<span class="pill p-pend">Pendiente</span>');
-        else {
-          if (r.nPost) pills.push(`<span class="pill p-mov">${r.nPost} mov.</span>`);
-          if (r.nSame) pills.push('<span class="pill p-same">Revisar mismo día</span>');
-          if (r.final < 0) pills.push('<span class="pill p-neg">Negativo</span>');
-          if (!pills.length) pills.push('<span class="pill p-ok">Sin cambios</span>');
-        }
-        return `<td class="code">${esc(r.code)}</td><td class="name">${esc(r.name)}</td>
-          <td style="white-space:nowrap">${r.fecha ? fmtDate(r.fecha, true) : '—'}</td>
-          <td class="num">${fmt(r.stock)}</td>
-          <td class="num plus">${r.ins ? '+' + fmt(r.ins) : '—'}</td>
-          <td class="num minus">${r.outs ? '−' + fmt(r.outs) : '—'}</td>
-          <td class="num final">${fmt(r.final)}</td>
-          <td class="num">${r.nSame ? sgn(r.sameNet) : '—'}</td>
-          <td class="num">${fmt(r.saldoHoy)}</td>
-          <td><div class="pills">${pills.join('')}</div></td>`;
-      },
-      stats: R => {
-        const C = R.filter(r => r.counted), wm = C.filter(r => r.nPost > 0);
-        return [
-          [fmt(C.length) + ' / ' + fmt(R.length), 'artículos contados'],
-          [fmt(wm.length), 'con movimientos después del conteo'],
-          ['<span class="plus">+' + fmt(wm.reduce((a,r) => a + r.ins, 0)) + '</span> <span class="minus">−' + fmt(wm.reduce((a,r) => a + r.outs, 0)) + '</span>', 'unidades ingresadas / egresadas'],
-          [fmt(C.filter(r => r.nSame > 0).length), 'para revisar (mismo día)'],
-          [fmt(C.filter(r => r.final < 0).length), 'quedarían en negativo'],
-          [fmt(state.orphan), 'artículos con movimientos que no están en el archivo de stock']
-        ];
-      },
-      exportRows: rows => rows.map(r => ({
-        'Código': r.code, 'Nombre': r.name, 'Estado del conteo': r.estado, 'Contado por': r.por,
-        'Fecha y hora del conteo': r.fecha ? fmtDate(r.fecha, true) : '', 'Stock físico': r.stock,
-        'Ingresos posteriores': r.ins, 'Egresos posteriores': r.outs, 'Stock actualizado': r.final,
-        'Neto mismo día (no sumado)': $('optSame').value === 'flag' && r.nSame ? r.sameNet : '',
-        'Saldo Defontana hoy': r.saldoHoy
-      })),
-      sheet: 'Stock actualizado',
-      foot: 'Defontana entrega solo la fecha del documento, sin hora. Los movimientos del mismo día del conteo se tratan según la opción elegida arriba. “Saldo Defontana hoy” es el saldo del último documento del artículo en el informe.'
-    },
-    reg: {
-      help: 'Compara lo contado con el saldo que tenía Defontana al momento del conteo. La diferencia es lo que hay que ajustar: si es positiva, aumentar (entrada por ajuste); si es negativa, disminuir (salida por ajuste). El valor se propone a PMP, que puedes corregir en la tabla.',
-      tabs: [
-        ['todo', 'Por regularizar', r => r.counted && r.diff != null && Math.abs(r.diff) > EPS],
-        ['up', 'Aumentar', r => r.counted && r.diff > EPS],
-        ['down', 'Disminuir', r => r.counted && r.diff < -EPS],
-        ['nopmp', 'Sin PMP (poner costo)', r => r.counted && r.diff != null && Math.abs(r.diff) > EPS && !(r.pmp > 0)],
-        ['ok', 'Cuadrados', r => r.counted && r.diff != null && Math.abs(r.diff) <= EPS],
-        ['nodata', 'Sin documentos en Defontana', r => r.counted && r.diff == null]
-      ],
-      source: () => state.results,
-      search: r => [r.code, r.name],
-      head: '<tr><th>Código</th><th>Nombre</th><th>Conteo</th><th class="num">Stock físico</th><th class="num">Saldo Defontana al conteo</th><th class="num">Diferencia</th><th>Ajuste</th><th class="num">PMP propuesto</th><th>Origen del PMP</th><th class="num">Valor del ajuste</th></tr>',
-      cols: 10,
-      row: r => {
-        let aj = '<span class="pill p-ok">Sin datos</span>';
-        if (r.diff != null) aj = r.diff > EPS ? '<span class="pill p-in">Aumentar</span>' : r.diff < -EPS ? '<span class="pill p-out">Disminuir</span>' : '<span class="pill p-ok">Cuadrado</span>';
-        const pv = r.pmp != null ? Math.round(r.pmp * 100) / 100 : '';
-        return `<td class="code">${esc(r.code)}</td><td class="name">${esc(r.name)}</td>
-          <td style="white-space:nowrap">${r.fecha ? fmtDate(r.fecha, true) : '—'}</td>
-          <td class="num">${fmt(r.stock)}</td>
-          <td class="num">${fmt(r.saldoConteo)}</td>
-          <td class="num final ${r.diff > EPS ? 'plus' : r.diff < -EPS ? 'minus' : ''}">${r.diff == null ? '—' : sgn(r.diff)}</td>
-          <td>${aj}${r.zeros ? ' <span class="pill p-warn">' + r.zeros + ' doc. a $0</span>' : ''}</td>
-          <td class="num"><input class="pmp${r.edited ? ' edited' : ''}" type="number" min="0" step="any" inputmode="decimal" data-key="${esc(r.key)}" value="${pv}" aria-label="PMP de ${esc(r.code)}"></td>
-          <td class="small">${esc(r.pmpSrc)}</td>
-          <td class="num final ${r.valorAjuste > 0 ? 'plus' : r.valorAjuste < 0 ? 'minus' : ''}">${money(r.valorAjuste)}</td>`;
-      },
-      stats: (R, rows) => {
-        const T = R.filter(MODS.reg.tabs[0][2]);
-        const up = T.filter(r => r.diff > 0), down = T.filter(r => r.diff < 0);
-        const vUp = up.reduce((a,r) => a + (r.valorAjuste || 0), 0), vDown = down.reduce((a,r) => a + (r.valorAjuste || 0), 0);
-        return [
-          [fmt(T.length), 'artículos por regularizar'],
-          ['<span class="plus">' + fmt(up.length) + '</span>', 'aumentar · <span class="plus">' + money(vUp) + '</span>'],
-          ['<span class="minus">' + fmt(down.length) + '</span>', 'disminuir · <span class="minus">' + money(vDown) + '</span>'],
-          [money(vUp + vDown), 'efecto neto a PMP'],
-          [fmt(T.filter(r => !(r.pmp > 0)).length), 'sin PMP: hay que poner el costo'],
-          [fmt(R.filter(r => r.counted && r.diff == null).length), 'contados sin documentos en el informe']
-        ];
-      },
-      exportRows: rows => rows.map(r => ({
-        'Código': r.code, 'Nombre': r.name, 'Fecha y hora del conteo': r.fecha ? fmtDate(r.fecha, true) : '',
-        'Stock físico': r.stock, 'Saldo Defontana al conteo': r.saldoConteo, 'Diferencia': r.diff,
-        'Ajuste': r.diff == null ? 'Sin datos' : r.diff > EPS ? 'Aumentar' : r.diff < -EPS ? 'Disminuir' : 'Cuadrado',
-        'Cantidad a ajustar': r.diff == null ? '' : Math.abs(r.diff), 'PMP propuesto': r.pmp == null ? '' : Math.round(r.pmp * 100) / 100,
-        'Origen del PMP': r.pmpSrc, 'Valor del ajuste': r.valorAjuste == null ? '' : Math.round(r.valorAjuste),
-        'Stock actualizado hoy': r.final, 'Saldo Defontana hoy': r.saldoHoy
-      })),
-      sheet: 'Regularización',
-      foot: 'Saldo al conteo = “Saldo Inventario” del último documento de Defontana anterior al conteo. Si el primer documento del artículo es posterior al conteo, se reconstruye hacia atrás. El saldo de Defontana es del artículo en todas las bodegas. PMP = Valor Inventario / Saldo Inventario del último documento con ambos mayores que 0; si no hay, se usa el costo unitario del último documento con valor. Como el ajuste se hace hoy, la cantidad es la misma que “stock actualizado − saldo Defontana hoy”.'
-    },
-    zero: {
-      help: 'Documentos de Defontana cuyo “Valor Movimiento” es $0: ingresos que entraron sin costo y egresos que salieron sin costo. Se propone el valor que deberían haber tenido a PMP del artículo.',
-      tabs: [
-        ['todo', 'Todos a $0', z => true],
-        ['in', 'Ingresos a $0', z => z.m.kind === 'in'],
-        ['out', 'Egresos a $0', z => z.m.kind === 'out'],
-        ['nopmp', 'Sin PMP para proponer', z => !(z.pmp > 0)]
-      ],
-      source: () => state.zero,
-      search: z => [z.m.art, z.name, z.m.tipo, z.m.ref, z.m.folio],
-      head: '<tr><th>Fecha</th><th>Documento</th><th class="num">Folio</th><th>Referencia</th><th>Código</th><th>Descripción</th><th>Mov.</th><th class="num">Cantidad</th><th class="num">Saldo después</th><th class="num">PMP propuesto</th><th>Origen del PMP</th><th class="num">Valor propuesto</th></tr>',
-      cols: 12,
-      row: z => `<td style="white-space:nowrap">${fmtDate(z.m.fecha)}</td><td>${esc(z.m.tipo)}</td><td class="num">${esc(z.m.folio)}</td>
-          <td class="small">${esc(z.m.ref)}</td><td class="code">${esc(z.m.art)}</td><td class="name">${esc(z.name)}</td>
-          <td>${z.m.kind === 'in' ? '<span class="pill p-in">Ingreso</span>' : '<span class="pill p-out">Egreso</span>'}</td>
-          <td class="num">${fmt(z.m.qty)} ${esc(z.m.um)}</td><td class="num ${z.m.saldo <= 0 ? 'minus' : ''}">${fmt(z.m.saldo)}</td>
-          <td class="num"><input class="pmp${z.edited ? ' edited' : ''}" type="number" min="0" step="any" inputmode="decimal" data-key="${esc(z.key)}" value="${z.pmp != null ? Math.round(z.pmp*100)/100 : ''}" aria-label="PMP de ${esc(z.m.art)}"></td>
-          <td class="small">${esc(z.pmpSrc)}</td><td class="num final">${money(z.valorSug)}</td>`,
-      stats: R => {
-        const ins = R.filter(z => z.m.kind === 'in'), outs = R.filter(z => z.m.kind === 'out');
-        const sum = L => L.reduce((a,z) => a + (z.valorSug || 0), 0);
-        return [
-          [fmt(R.length), 'líneas con valor $0'],
-          [fmt(new Set(R.map(z => z.key)).size), 'artículos distintos'],
-          [fmt(ins.length), 'ingresos a $0 · ' + money(sum(ins)) + ' a PMP'],
-          [fmt(outs.length), 'egresos a $0 · ' + money(sum(outs)) + ' a PMP'],
-          [fmt(outs.filter(z => z.m.saldo != null && z.m.saldo <= 0).length), 'egresos que dejaron el saldo en 0 o negativo'],
-          [fmt(R.filter(z => !(z.pmp > 0)).length), 'sin PMP para proponer']
-        ];
-      },
-      exportRows: rows => rows.map(z => ({
-        'Fecha': fmtDate(z.m.fecha), 'Tipo documento': z.m.tipo, 'Folio': z.m.folio, 'Referencia': z.m.ref,
-        'Código': z.m.art, 'Descripción': z.name, 'Movimiento': z.m.kind === 'in' ? 'Ingreso' : 'Egreso',
-        'Cantidad': z.m.qty, 'U. Medida': z.m.um, 'Saldo después': z.m.saldo,
-        'PMP propuesto': z.pmp == null ? '' : Math.round(z.pmp * 100) / 100, 'Origen del PMP': z.pmpSrc,
-        'Valor propuesto': z.valorSug == null ? '' : Math.round(z.valorSug)
-      })),
-      sheet: 'Movimientos a costo 0',
-      foot: 'Un egreso a $0 suele pasar cuando el artículo no tenía saldo o su PMP era $0 al momento de la salida. Un ingreso a $0 baja el PMP del artículo. El PMP propuesto es el último PMP válido antes del documento; si no hay, el primero que aparece después.'
-    }
+  // ---------- Configuración de las vistas ----------
+  const ACTION = {
+    up:['a-up','Aumentar'], down:['a-down','Disminuir'], ok:['a-ok','Cuadrado'],
+    nodata:['a-warn','Sin saldo en Defontana'], nocount:['a-ok','Sin contar'], nofile:['a-warn','No está en el conteo']
   };
+  const REG_FILTERS = [
+    ['all', 'Todos', r => true, null],
+    ['bad', 'Descuadrados', r => r.st === 'up' || r.st === 'down', 'var(--warn)'],
+    ['up', 'Aumentar', r => r.st === 'up', 'var(--in)'],
+    ['down', 'Disminuir', r => r.st === 'down', 'var(--out)'],
+    ['ok', 'Cuadrados', r => r.st === 'ok', 'var(--muted)'],
+    ['nopmp', 'Falta PMP', r => (r.st === 'up' || r.st === 'down') && !(r.pmp > 0), 'var(--warn)'],
+    ['nodata', 'Sin saldo en Defontana', r => r.st === 'nodata', 'var(--warn)'],
+    ['nocount', 'Sin contar', r => r.st === 'nocount', 'var(--muted)'],
+    ['nofile', 'No están en el conteo', r => r.st === 'nofile', 'var(--warn)']
+  ];
+  const ZERO_FILTERS = [
+    ['all', 'Todos', z => true, null],
+    ['in', 'Ingresos a $0', z => z.m.kind === 'in', 'var(--in)'],
+    ['out', 'Egresos a $0', z => z.m.kind === 'out', 'var(--out)'],
+    ['nopmp', 'Sin PMP', z => !(z.pmp > 0), 'var(--warn)']
+  ];
+  const REG_COLS = [
+    ['code', 'Producto', '', r => r.code],
+    ['contado', 'Contado', 'num', r => r.s ? r.s.stock : null],
+    ['sys', 'Defontana al conteo', 'num', r => r.sysAtCount],
+    ['diff', 'Diferencia', 'num', r => r.diff],
+    ['st', 'Qué hacer', '', r => r.st],
+    ['pmp', 'PMP', 'num', r => r.pmp],
+    ['valor', 'Valor ajuste', 'num', r => r.valor],
+    ['real', 'Stock real hoy', 'num', r => r.realNow],
+    ['now', 'Defontana hoy', 'num', r => r.sysNow]
+  ];
+  const ZERO_COLS = [
+    ['fecha', 'Fecha', '', z => z.m.fecha],
+    ['doc', 'Documento', '', z => z.m.tipo],
+    ['code', 'Producto', '', z => z.code],
+    ['kind', 'Tipo', '', z => z.m.kind],
+    ['qty', 'Cantidad', 'num', z => z.m.qty],
+    ['pmp', 'PMP', 'num', z => z.pmp],
+    ['valor', 'Valor que debió tener', 'num', z => z.valor]
+  ];
 
-  function filtered(){
-    const M = MODS[state.mod];
-    const f = M.tabs.find(t => t[0] === state.tab[state.mod])[2];
-    const q = stripAccents($('optSearch').value);
-    return M.source().filter(r => f(r) && (!q || M.search(r).some(v => stripAccents(v).includes(q))));
+  const pmpInput = (key, v, edited, code) =>
+    `<input class="pmp${edited ? ' edited' : v > 0 ? '' : ' missing'}" type="number" min="0" step="any" inputmode="decimal" data-key="${esc(key)}" value="${v != null ? Math.round(v*100)/100 : ''}" placeholder="Poner costo" aria-label="PMP de ${esc(code)}">`;
+
+  function regRow(r){
+    const [cls, label] = ACTION[r.st];
+    const d = r.diff;
+    const qty = (r.st === 'up' || r.st === 'down') ? ' ' + fmt(Math.abs(d)) : '';
+    return `<tr class="row s-${r.st}${state.open.has(r.key) ? ' open' : ''}" data-key="${esc(r.key)}" tabindex="0">
+      <td><div class="code">${esc(r.code)}</div><div class="pname">${esc(r.name)}</div></td>
+      <td class="num">${r.counted ? fmt(r.s.stock) + '<div class="small">' + fmtDate(r.s.fecha) + '</div>' : '<span class="mut">—</span>'}</td>
+      <td class="num">${fmt(r.sysAtCount)}</td>
+      <td class="num diff ${d > EPS ? 'plus' : d < -EPS ? 'minus' : 'mut'}">${d == null ? '—' : sgn(d)}</td>
+      <td><span class="pill ${cls}">${label}${qty}</span>${r.sameDay && r.counted ? '<span class="flag" title="Hay documentos el mismo día del conteo">· mismo día</span>' : ''}</td>
+      <td class="num">${r.st === 'up' || r.st === 'down' ? pmpInput(r.key, r.pmp, r.edited, r.code) : '<span class="mut">' + (r.pmp != null ? money(r.pmp) : '—') + '</span>'}</td>
+      <td class="num diff ${r.valor > 0.5 ? 'plus' : r.valor < -0.5 ? 'minus' : 'mut'}">${r.st === 'up' || r.st === 'down' ? money(r.valor) : '—'}</td>
+      <td class="num">${fmt(r.realNow)}${r.ins || r.outs ? '<div class="small">' + (r.ins ? '<span class="plus">+' + fmt(r.ins) + '</span> ' : '') + (r.outs ? '<span class="minus">−' + fmt(r.outs) + '</span>' : '') + ' desde el conteo</div>' : ''}</td>
+      <td class="num">${fmt(r.sysNow)}</td></tr>`;
+  }
+  function zeroRow(z){
+    return `<tr>
+      <td class="num" style="text-align:left">${fmtDate(z.m.fecha)}</td>
+      <td>${esc(z.m.tipo)}<div class="small">Folio ${esc(z.m.folio)}${z.m.ref ? ' · ' + esc(z.m.ref) : ''}</div></td>
+      <td><div class="code">${esc(z.code)}</div><div class="pname">${esc(z.name)}</div></td>
+      <td><span class="pill ${z.m.kind === 'in' ? 'a-up' : 'a-down'}">${z.m.kind === 'in' ? 'Ingreso' : 'Egreso'}</span></td>
+      <td class="num">${fmt(z.m.qty)} <span class="small">${esc(z.m.um)}</span></td>
+      <td class="num">${pmpInput(z.key, z.pmp, z.edited, z.code)}<div class="small">${esc(z.pmpSrc)}</div></td>
+      <td class="num diff">${money(z.valor)}</td></tr>`;
+  }
+
+  function detail(r){
+    if (!r.docs.length) return `<tr class="detail"><td colspan="9"><span class="note">Este código no tiene documentos en el informe de Defontana, así que no se conoce su saldo en el sistema. Revisa su stock directamente en Defontana.</span></td></tr>`;
+    const ck = r.counted ? dayKey(r.s.fecha) : null, sameAfter = $('optSame').value === 'after';
+    const when = m => { if (ck == null) return ''; const dk = dayKey(m.fecha); return dk < ck ? 'Antes' : dk > ck ? 'Después' : sameAfter ? 'Mismo día (después)' : 'Mismo día (antes)'; };
+    const rows = r.docs.map(m => {
+      const w = when(m), zero = m.valor != null && Math.abs(m.valor) < EPS && m.qty > EPS;
+      return `<tr class="${zero ? 'zero' : w.startsWith('Antes') || w === 'Mismo día (antes)' ? 'pre' : 'after'}">
+        <td>${fmtDate(m.fecha)}</td><td>${esc(m.tipo)} <span class="small">#${esc(m.folio)}</span></td><td>${esc(m.ref)}</td>
+        <td class="num ${m.kind === 'in' ? 'plus' : 'minus'}">${m.kind === 'in' ? '+' : '−'}${fmt(m.qty)}</td>
+        <td class="num">${money(m.valor)}${zero ? ' <span class="flag">$0</span>' : ''}</td>
+        <td class="num">${fmt(m.saldo)}</td>
+        <td class="num">${m.saldo > EPS && m.valorInv != null ? money(m.valorInv / m.saldo) : '—'}</td>
+        <td>${w}</td></tr>`;
+    }).join('');
+    const head = r.counted ? `<div class="dethead">
+      <span>Contado el <b>${fmtDate(r.s.fecha, true)}</b>${r.s.por ? ' por ' + esc(r.s.por) : ''}: <b>${fmt(r.s.stock)}</b></span>
+      <span>Defontana tenía: <b>${fmt(r.sysAtCount)}</b></span>
+      <span>Origen del PMP: <b>${esc(r.pmpSrc)}</b></span></div>` : '';
+    return `<tr class="detail"><td colspan="9">${head}<table class="det"><thead><tr><th>Fecha</th><th>Documento</th><th>Referencia</th><th class="num">Cantidad</th><th class="num">Valor</th><th class="num">Saldo</th><th class="num">PMP</th><th>Respecto al conteo</th></tr></thead><tbody>${rows}</tbody></table></td></tr>`;
+  }
+
+  // ---------- Pintar ----------
+  function sorted(list, cols){
+    const {k, d} = state.sort[state.view];
+    const get = (cols.find(c => c[0] === k) || cols[0])[3];
+    return list.slice().sort((a, b) => {
+      let x = get(a), y = get(b);
+      if (x instanceof Date) x = +x; if (y instanceof Date) y = +y;
+      if (x == null && y == null) return 0; if (x == null) return 1; if (y == null) return -1;
+      return (typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y), 'es', {numeric:true})) * d;
+    });
   }
 
   function render(){
     compute();
-    const M = MODS[state.mod], R = M.source();
-    document.querySelectorAll('.mod').forEach(b => b.setAttribute('aria-selected', b.dataset.mod === state.mod));
-    $('modHelp').textContent = M.help;
-    $('footNote').textContent = M.foot;
-    $('stats').innerHTML = M.stats(R).map(([n,l]) => `<div class="stat"><span class="n">${n}</span><span class="l">${l}</span></div>`).join('');
-    $('tabs').innerHTML = M.tabs.map(([k, label, f]) =>
-      `<button type="button" class="tab" data-tab="${k}" aria-pressed="${state.tab[state.mod]===k}">${label}<span class="c">${fmt(R.filter(f).length)}</span></button>`).join('');
-    $('thead').innerHTML = M.head;
-    const rows = filtered(), tb = $('tbody');
-    if (!rows.length){ tb.innerHTML = `<tr><td colspan="${M.cols}" class="empty">No hay filas en esta vista.</td></tr>`; return; }
-    let html = '';
-    for (const r of rows.slice(0, state.limit)){
-      if (state.mod === 'zero'){ html += `<tr>${M.row(r)}</tr>`; continue; }
-      const open = state.open.has(r.key);
-      html += `<tr class="row${open ? ' open' : ''}" data-key="${esc(r.key)}" tabindex="0">${M.row(r)}</tr>`;
-      if (open) html += detail(r, M.cols);
-    }
-    if (rows.length > state.limit) html += `<tr><td colspan="${M.cols}" class="more"><button class="btn ghost" type="button" id="btnMore">Mostrar ${fmt(Math.min(300, rows.length - state.limit))} más (de ${fmt(rows.length)})</button></td></tr>`;
-    tb.innerHTML = html;
-  }
+    const reg = state.view === 'reg';
+    document.querySelectorAll('.view').forEach(b => b.setAttribute('aria-selected', b.dataset.view === state.view));
+    const all = reg ? state.rows : state.zero, F = reg ? REG_FILTERS : ZERO_FILTERS, cols = reg ? REG_COLS : ZERO_COLS;
 
-  function detail(r, cols){
-    const list = state.mod === 'reg' ? r.all : r.movs;
-    if (!list.length) return `<tr class="detail"><td colspan="${cols}"><span class="note">Este artículo no tiene documentos en el informe${state.mod === 'stock' ? ' para la bodega elegida' : ''}.</span></td></tr>`;
-    const ck = r.fecha ? dayKey(r.fecha) : null, same = $('optSame').value;
-    const whenOf = m => { if (ck == null || !m.fecha) return 'pre'; const dk = dayKey(m.fecha); return dk < ck ? 'pre' : dk > ck ? 'post' : same === 'add' ? 'same-add' : 'same'; };
-    const label = {pre:'Antes del conteo', post:'Después', same:'Mismo día (contado)', 'same-add':'Mismo día (sumado)'};
-    const trs = list.map(m => {
-      const w = whenOf(m), zero = m.valor != null && Math.abs(m.valor) < EPS && m.qty > EPS;
-      return `<tr class="${zero ? 'zero' : w === 'pre' ? 'pre' : w.startsWith('same') ? 'same' : ''}">
-      <td>${fmtDate(m.fecha)}</td><td>${esc(m.tipo)}</td><td class="num">${esc(m.folio)}</td><td>${esc(m.ref)}</td>
-      <td class="num ${m.kind==='in'?'plus':'minus'}">${m.kind==='in'?'+':'−'}${fmt(m.qty)}</td>
-      <td class="num">${m.valor == null ? '—' : money(m.valor)}${zero ? ' <span class="pill p-warn">$0</span>' : ''}</td>
-      <td class="num">${fmt(m.saldo)}</td><td class="num">${m.saldo > EPS && m.valorInv != null ? pmpFmt(m.valorInv / m.saldo) : '—'}</td>
-      <td>${label[w]}</td></tr>`; }).join('');
-    return `<tr class="detail"><td colspan="${cols}"><table class="det"><thead><tr><th>Fecha</th><th>Documento</th><th class="num">Folio</th><th>Referencia</th><th class="num">Cantidad</th><th class="num">Valor mov.</th><th class="num">Saldo</th><th class="num">PMP</th><th>Respecto al conteo</th></tr></thead><tbody>${trs}</tbody></table></td></tr>`;
+    // Resumen
+    if (reg){
+      const bad = all.filter(r => r.st === 'up' || r.st === 'down'), up = bad.filter(r => r.st === 'up'), down = bad.filter(r => r.st === 'down');
+      const sum = L => L.reduce((a, r) => a + (r.valor || 0), 0);
+      const counted = all.filter(r => r.counted).length;
+      $('summary').innerHTML = `
+        <button class="card bad" type="button" data-go="bad"><span class="lbl">Descuadrados</span><span class="big">${fmt(bad.length)}</span><span class="note">de ${fmt(counted)} productos contados</span></button>
+        <button class="card up" type="button" data-go="up"><span class="lbl">Aumentar en Defontana</span><span class="big">${fmt(up.length)}</span><span class="val">${money(sum(up))}</span></button>
+        <button class="card down" type="button" data-go="down"><span class="lbl">Disminuir en Defontana</span><span class="big">${fmt(down.length)}</span><span class="val">${money(sum(down))}</span></button>
+        <div class="card"><span class="lbl">Efecto neto del ajuste</span><span class="big">${money(sum(bad))}</span><span class="note">${fmt(bad.filter(r => !(r.pmp > 0)).length)} sin PMP (poner costo)</span></div>`;
+    } else {
+      const ins = all.filter(z => z.m.kind === 'in'), outs = all.filter(z => z.m.kind === 'out');
+      const sum = L => L.reduce((a, z) => a + (z.valor || 0), 0);
+      $('summary').innerHTML = `
+        <div class="card"><span class="lbl">Documentos a $0</span><span class="big">${fmt(all.length)}</span><span class="note">${fmt(new Set(all.map(z => z.key)).size)} productos distintos</span></div>
+        <button class="card up" type="button" data-go="in"><span class="lbl">Ingresos sin costo</span><span class="big">${fmt(ins.length)}</span><span class="val">${money(sum(ins))} a PMP</span></button>
+        <button class="card down" type="button" data-go="out"><span class="lbl">Egresos sin costo</span><span class="big">${fmt(outs.length)}</span><span class="val">${money(sum(outs))} a PMP</span></button>
+        <button class="card bad" type="button" data-go="nopmp"><span class="lbl">Sin PMP para proponer</span><span class="big">${fmt(all.filter(z => !(z.pmp > 0)).length)}</span><span class="note">el producto nunca tuvo costo</span></button>`;
+    }
+
+    // Filtros
+    const cur = state.filter[state.view];
+    $('chips').innerHTML = F.map(([k, label, f, color]) => {
+      const n = all.filter(f).length;
+      if (!n && k !== 'all' && k !== cur) return '';
+      return `<button type="button" class="chip" data-f="${k}" aria-pressed="${cur === k}">${color ? `<span class="dot" style="background:${color}"></span>` : ''}${label}<span class="c">${fmt(n)}</span></button>`;
+    }).join('');
+
+    // Tabla
+    const {k: sk, d: sd} = state.sort[state.view];
+    $('thead').innerHTML = '<tr>' + cols.map(([k, label, cls]) => `<th class="sort ${cls}" data-sort="${k}">${label}${sk === k ? ' <span class="arr">' + (sd > 0 ? '▲' : '▼') + '</span>' : ''}</th>`).join('') + '</tr>';
+    const f = (F.find(x => x[0] === cur) || F[0])[2];
+    const q = strip($('optSearch').value);
+    const rows = sorted(all.filter(r => f(r) && (!q || strip(r.code).includes(q) || strip(r.name).includes(q) || (!reg && strip(r.m.tipo + ' ' + r.m.ref + ' ' + r.m.folio).includes(q)))), cols);
+    state.visible = rows;
+    const tb = $('tbody');
+    if (!rows.length){ tb.innerHTML = `<tr><td colspan="${cols.length}" class="empty">No hay productos en esta vista.</td></tr>`; }
+    else {
+      const parts = [];
+      for (const r of rows){ parts.push(reg ? regRow(r) : zeroRow(r)); if (reg && state.open.has(r.key)) parts.push(detail(r)); }
+      tb.innerHTML = parts.join('');
+    }
+
+    $('foot').innerHTML = reg
+      ? '<b>Cómo se calcula.</b> Diferencia = Contado − Defontana al conteo. “Defontana al conteo” es el Saldo Inventario del último documento anterior al conteo (es el saldo del producto en todas las bodegas). Si es positiva hay que <b>aumentar</b> (entrada por ajuste); si es negativa, <b>disminuir</b> (salida por ajuste). Como el ajuste se hace hoy, la cantidad también es igual a Stock real hoy − Defontana hoy. El PMP es Valor Inventario / Saldo Inventario del último documento con saldo; puedes corregirlo en la tabla. Haz clic en un producto para ver sus documentos.'
+      : '<b>Cómo se calcula.</b> Son los documentos cuyo “Valor Movimiento” es $0. El valor que debió tener = cantidad × PMP del producto antes del documento (si no hay, el primero que aparece después). Un egreso a $0 suele ocurrir cuando el producto no tenía saldo o su PMP era $0.';
   }
 
   // ---------- Exportar ----------
+  const regExport = r => ({
+    'Código': r.code, 'Nombre': r.name, 'Qué hacer': ACTION[r.st][1],
+    'Cantidad a ajustar': r.diff != null && Math.abs(r.diff) > EPS ? Math.abs(r.diff) : '',
+    'Contado': r.s ? r.s.stock : '', 'Fecha conteo': r.counted ? fmtDate(r.s.fecha, true) : '',
+    'Defontana al conteo': r.sysAtCount ?? '', 'Diferencia': r.diff ?? '',
+    'PMP': r.pmp != null ? Math.round(r.pmp * 100) / 100 : '', 'Origen PMP': r.pmpSrc,
+    'Valor ajuste': r.valor != null ? Math.round(r.valor) : '',
+    'Stock real hoy': r.realNow ?? '', 'Defontana hoy': r.sysNow ?? ''
+  });
+  const zeroExport = z => ({
+    'Fecha': fmtDate(z.m.fecha), 'Documento': z.m.tipo, 'Folio': z.m.folio, 'Referencia': z.m.ref,
+    'Código': z.code, 'Nombre': z.name, 'Tipo': z.m.kind === 'in' ? 'Ingreso' : 'Egreso', 'Cantidad': z.m.qty,
+    'PMP': z.pmp != null ? Math.round(z.pmp * 100) / 100 : '', 'Origen PMP': z.pmpSrc, 'Valor que debió tener': z.valor != null ? Math.round(z.valor) : ''
+  });
+  const exportRows = () => (state.visible || []).map(state.view === 'reg' ? regExport : zeroExport);
+
   let downloads = null;
-  if (window.claude && typeof window.claude.use === 'function'){
-    window.claude.use('downloads').then(d => { downloads = d; }).catch(() => {});
-  }
-  function detailExport(){
-    const out = [];
-    for (const r of filtered()) for (const m of (state.mod === 'reg' ? r.all : r.movs))
-      out.push({'Código': r.code, 'Fecha': fmtDate(m.fecha), 'Documento': m.tipo, 'Folio': m.folio, 'Referencia': m.ref,
-        'Movimiento': m.kind === 'in' ? 'Ingreso' : 'Egreso', 'Cantidad': m.kind === 'in' ? m.qty : -m.qty,
-        'Valor movimiento': m.valor, 'Saldo inventario': m.saldo, 'Valor inventario': m.valorInv});
-    return out;
-  }
+  if (window.claude && typeof window.claude.use === 'function') window.claude.use('downloads').then(d => { downloads = d; }).catch(() => {});
   $('btnXlsx').addEventListener('click', async () => {
-    const M = MODS[state.mod], wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(M.exportRows(filtered())), M.sheet);
-    if (state.mod !== 'zero') XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(detailExport()), 'Documentos');
-    const name = {stock:'stock-actualizado', reg:'regularizacion-inventario', zero:'movimientos-costo-0'}[state.mod] + '-' + fmtDate(new Date()) + '.xlsx';
+    const rows = exportRows(); if (!rows.length) return;
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), state.view === 'reg' ? 'Regularización' : 'Documentos a costo 0');
+    const name = (state.view === 'reg' ? 'regularizacion-inventario-' : 'documentos-costo-0-') + fmtDate(new Date()) + '.xlsx';
     if (downloads){
-      const buf = XLSX.write(wb, {bookType:'xlsx', type:'array'});
-      try { await downloads.save({filename: name, data: new Blob([buf])}); $('copyNote').textContent = ''; }
-      catch(e){ $('copyNote').textContent = e && e.code === 'declined' ? 'Descarga cancelada.' : 'No se pudo descargar aquí. Usa “Copiar tabla”.'; }
+      try { await downloads.save({filename:name, data:new Blob([XLSX.write(wb, {bookType:'xlsx', type:'array'})])}); $('copyNote').textContent = ''; }
+      catch(e){ $('copyNote').textContent = e && e.code === 'declined' ? 'Descarga cancelada.' : 'No se pudo descargar aquí. Usa “Copiar” y pega en Excel.'; }
     } else XLSX.writeFile(wb, name);
   });
   $('btnCopy').addEventListener('click', () => {
-    const rows = MODS[state.mod].exportRows(filtered()); if (!rows.length) return;
+    const rows = exportRows(); if (!rows.length) return;
     const keys = Object.keys(rows[0]);
-    const tsv = [keys.join('\t'), ...rows.map(r => keys.map(k => r[k] == null ? '' : String(r[k]).replace(/[\t\n]/g,' ')).join('\t'))].join('\n');
+    const tsv = [keys.join('\t'), ...rows.map(r => keys.map(k => String(r[k] ?? '').replace(/[\t\n]/g, ' ')).join('\t'))].join('\n');
     const done = () => { $('copyNote').textContent = fmt(rows.length) + ' filas copiadas. Pégalas en Excel.'; };
     navigator.clipboard.writeText(tsv).then(done).catch(() => {
       const ta = document.createElement('textarea'); ta.value = tsv; document.body.appendChild(ta); ta.select();
-      try { document.execCommand('copy'); done(); } catch(e){ $('copyNote').textContent = 'No se pudo copiar.'; }
+      try { document.execCommand('copy'); done(); } catch(_){ $('copyNote').textContent = 'No se pudo copiar.'; }
       ta.remove();
     });
   });
 
-  // ---------- Carga de archivos ----------
-  function readFile(file){
-    return file.arrayBuffer().then(buf => {
-      const wb = XLSX.read(buf, {type:'array', cellDates:false});
-      return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header:1, raw:true, defval:null, blankrows:false});
-    });
-  }
+  // ---------- Carga ----------
   function setupLoader(inputId, dropId, statusId, parser, key, label){
     const input = $(inputId), drop = $(dropId), st = $(statusId);
     const handle = file => {
       if (!file) return;
       st.textContent = 'Leyendo ' + file.name + '…';
-      readFile(file).then(rows => {
-        const data = parser(rows);
+      file.arrayBuffer().then(buf => {
+        const wb = XLSX.read(buf, {type:'array'});
+        const data = parser(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header:1, raw:true, defval:null, blankrows:false}));
         if (!data.length) throw new Error('El archivo no tiene filas con datos.');
         if (state.isSample){ state.isSample = false; state.stock = []; state.mov = []; state.pmpEdit.clear(); $('sampleNote').hidden = true; }
         state[key] = data;
         drop.classList.remove('err'); drop.classList.add('ok');
-        st.textContent = file.name + ' · ' + data.length.toLocaleString('es-CL') + ' ' + label;
-        state.open.clear(); state.limit = 300;
+        st.textContent = file.name + ' · ' + fmt(data.length) + ' ' + label;
+        state.open.clear();
         if (key === 'mov') fillBodegas();
         render();
       }).catch(e => { drop.classList.remove('ok'); drop.classList.add('err'); st.textContent = e.message || 'No se pudo leer el archivo.'; });
@@ -677,38 +622,34 @@ tr.detail td{background:var(--bg);padding:10px 12px 14px}
     ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, () => drop.classList.remove('over')));
     drop.addEventListener('drop', e => { e.preventDefault(); handle(e.dataTransfer.files[0]); });
   }
-  setupLoader('fileStock', 'dropStock', 'stStock', parseStock, 'stock', 'artículos');
-  setupLoader('fileMov', 'dropMov', 'stMov', parseMov, 'mov', 'líneas de movimiento');
+  setupLoader('fileStock', 'dropStock', 'stStock', parseStock, 'stock', 'códigos');
+  setupLoader('fileMov', 'dropMov', 'stMov', parseMov, 'mov', 'líneas de documentos');
 
   // ---------- Eventos ----------
-  document.querySelector('.modules').addEventListener('click', e => {
-    const b = e.target.closest('.mod'); if (!b) return;
-    state.mod = b.dataset.mod; state.limit = 300; state.open.clear();
-    try { localStorage.setItem('spc-mod', state.mod); } catch(_){}
+  document.querySelector('.views').addEventListener('click', e => {
+    const b = e.target.closest('.view'); if (!b) return;
+    state.view = b.dataset.view; state.open.clear(); render();
+  });
+  $('summary').addEventListener('click', e => { const b = e.target.closest('[data-go]'); if (!b) return; state.filter[state.view] = b.dataset.go; render(); });
+  $('chips').addEventListener('click', e => { const b = e.target.closest('.chip'); if (!b) return; state.filter[state.view] = b.dataset.f; render(); });
+  $('thead').addEventListener('click', e => {
+    const th = e.target.closest('th[data-sort]'); if (!th) return;
+    const s = state.sort[state.view];
+    if (s.k === th.dataset.sort) s.d = -s.d; else { s.k = th.dataset.sort; s.d = 1; }
     render();
   });
-  $('tabs').addEventListener('click', e => { const b = e.target.closest('.tab'); if (!b) return; state.tab[state.mod] = b.dataset.tab; state.limit = 300; render(); });
   ['optBodega','optSame','optAprob'].forEach(id => $(id).addEventListener('change', render));
-  $('optSearch').addEventListener('input', () => { state.limit = 300; render(); });
+  let t; $('optSearch').addEventListener('input', () => { clearTimeout(t); t = setTimeout(render, 150); });
   const toggle = tr => { const k = tr.dataset.key; state.open.has(k) ? state.open.delete(k) : state.open.add(k); render(); };
-  $('tbody').addEventListener('click', e => {
-    if (e.target.id === 'btnMore'){ state.limit += 300; render(); return; }
-    if (e.target.closest('input')) return;
-    const tr = e.target.closest('tr.row'); if (tr) toggle(tr);
-  });
-  $('tbody').addEventListener('keydown', e => {
-    if (e.target.closest('input')) return;
-    const tr = e.target.closest('tr.row'); if (tr && (e.key === 'Enter' || e.key === ' ')){ e.preventDefault(); toggle(tr); }
-  });
-  // PMP editable: al salir del campo se recalcula el valor del ajuste
+  $('tbody').addEventListener('click', e => { if (e.target.closest('input')) return; const tr = e.target.closest('tr.row'); if (tr) toggle(tr); });
+  $('tbody').addEventListener('keydown', e => { if (e.target.closest('input')) return; const tr = e.target.closest('tr.row'); if (tr && (e.key === 'Enter' || e.key === ' ')){ e.preventDefault(); toggle(tr); } });
   $('tbody').addEventListener('change', e => {
     const inp = e.target.closest('input.pmp'); if (!inp) return;
     const v = num(inp.value);
-    if (v == null || inp.value.trim() === '') state.pmpEdit.delete(inp.dataset.key); else state.pmpEdit.set(inp.dataset.key, v);
+    if (v == null) state.pmpEdit.delete(inp.dataset.key); else state.pmpEdit.set(inp.dataset.key, v);
     render();
   });
 
-  try { const m = localStorage.getItem('spc-mod'); if (m && MODS[m]) state.mod = m; } catch(_){}
   fillBodegas();
   render();
 })();
