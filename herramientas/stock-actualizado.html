@@ -93,7 +93,7 @@ details.opts summary{cursor:pointer;padding:10px 0;font-size:13px;font-weight:60
 
 /* Tabla */
 .tablebox{overflow:auto;max-height:72vh;background:var(--surface);border:1px solid var(--line);border-radius:10px}
-table{border-collapse:separate;border-spacing:0;width:100%;min-width:1080px;font-size:13px}
+table{border-collapse:separate;border-spacing:0;width:100%;min-width:1400px;font-size:13px}
 th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--line);vertical-align:middle}
 thead th{position:sticky;top:0;z-index:1;background:var(--surface2);font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
 th.sort{cursor:pointer;user-select:none}
@@ -103,6 +103,11 @@ th .arr{opacity:.6}
 .code{font-family:var(--mono);font-size:12px;font-weight:500}
 .pname{color:var(--muted);font-size:12px;margin-top:1px;min-width:220px;max-width:340px}
 .small{font-size:11px;color:var(--muted)}
+.obs{min-width:300px;max-width:420px}
+.cause{font-weight:700;font-size:12px}
+.why{font-size:12px;margin-top:2px}
+.more-obs{font-size:11px;color:var(--muted);margin-top:4px}
+tr.s-check{--stripe:var(--warn)}
 .alias{font-size:11px;font-weight:600;color:var(--warn);margin-top:2px;max-width:340px}
 tr.row{cursor:pointer}
 tr.row td:first-child{box-shadow:inset 4px 0 0 var(--stripe, transparent)}
@@ -167,6 +172,7 @@ tr.detail td{background:var(--bg);padding:12px 16px 16px}
   <section class="filters">
     <div class="chips" id="chips" role="group" aria-label="Filtro"></div>
     <div class="right">
+      <select id="optCause" aria-label="Causa probable"></select>
       <input type="search" id="optSearch" placeholder="Buscar código o nombre" aria-label="Buscar">
       <button class="btn ghost" id="btnCopy" type="button">Copiar</button>
       <button class="btn" id="btnXlsx" type="button">Descargar Excel</button>
@@ -343,6 +349,82 @@ tr.detail td{background:var(--bg);padding:12px 16px 16px}
     return null;
   }
 
+  // ---------- Causa probable del descuadre ----------
+  const CAUSES = {
+    late:      'Documento registrado después del conteo',
+    sameday:   'Movimiento del mismo día del conteo',
+    dupin:     'Posible ingreso duplicado',
+    notfound:  'No se encontró en bodega',
+    ingnorec:  'Ingreso registrado que no está en bodega',
+    neg:       'Salidas sin ingreso previo',
+    egrnodesp: 'Salida registrada que sigue en bodega',
+    um:        'Posible otra unidad de medida',
+    noin:      'Falta registrar un ingreso',
+    noout:     'Falta registrar una salida'
+  };
+  const near = (a, b) => Math.abs(a - b) < 1e-6;
+  const docTxt = m => `${m.tipo} #${m.folio} del ${fmtDate(m.fecha)} por ${fmt(m.qty)}`;
+  function diagnose(s, docs, after, diff, sys, sameNet, zeros){
+    if (diff == null || Math.abs(diff) <= EPS) return {cause:null, obs:[]};
+    const ad = Math.abs(diff), obs = [];
+    const pre = docs.filter(m => m.fecha && !after(m)), post = docs.filter(m => m.fecha && after(m));
+    let cause = null;
+    // 1. La diferencia la explica un documento registrado después del conteo
+    const kindPost = diff > 0 ? 'in' : 'out';
+    const postK = post.filter(m => m.kind === kindPost);
+    const one = postK.find(m => near(m.qty, ad)), postSum = postK.reduce((a, m) => a + m.qty, 0);
+    if (one){
+      cause = 'late';
+      obs.push(diff > 0 ? `El ingreso ${docTxt(one)} se registró después del conteo, pero la mercadería ya estaba en bodega al contar. Si fue así, no hay que ajustar: Defontana ya quedó bien.`
+                        : `La salida ${docTxt(one)} se registró después del conteo, pero la mercadería ya había salido al contar. Si fue así, no hay que ajustar: Defontana ya quedó bien.`);
+    } else if (postK.length > 1 && near(postSum, ad)){
+      cause = 'late';
+      obs.push(`Los ${diff > 0 ? 'ingresos' : 'egresos'} registrados después del conteo suman ${fmt(postSum)}, igual a la diferencia: probablemente ya ${diff > 0 ? 'estaban en bodega' : 'habían salido'} al contar. Si fue así, no hay que ajustar.`);
+    } else if (Math.abs(sameNet) > EPS && near(diff, -sameNet)){
+      // 2. La explican los documentos del mismo día
+      cause = 'sameday';
+      obs.push(`La diferencia es igual a los documentos del mismo día del conteo (${sgn(sameNet)}): probablemente se contó antes de ese movimiento. Si fue así, no hay que ajustar.`);
+    } else if (diff < 0){
+      const ins = pre.filter(m => m.kind === 'in');
+      const dup = ins.find(m => near(m.qty, ad) && ins.some(o => o !== m && near(o.qty, m.qty) && dayKey(o.fecha) === dayKey(m.fecha)));
+      const ing = ins.filter(m => near(m.qty, ad));
+      if (dup){ cause = 'dupin'; obs.push(`Hay dos ingresos del ${fmtDate(dup.fecha)} por ${fmt(dup.qty)} cada uno, y eso es justo lo que falta: posible ingreso registrado dos veces.`); }
+      else if (Math.abs(s.stock) <= EPS && sys > EPS){ cause = 'notfound'; obs.push(`No se encontró nada en bodega y Defontana tenía ${fmt(sys)}. Revisar otras ubicaciones, préstamos a obra o salidas sin documento.`); }
+      else if (ing.length){ const m = ing[ing.length - 1]; cause = 'ingnorec'; obs.push(`Lo que falta es igual al ingreso ${docTxt(m)}: puede que no haya llegado completo, esté guardado en otra ubicación o se haya ingresado de más.`); }
+    } else {
+      if (sys < -EPS){ cause = 'neg'; obs.push(`Defontana tenía saldo negativo (${fmt(sys)}) al contar: se registraron salidas sin haber ingresado el producto. Falta registrar el ingreso (compra, importación o devolución).`); }
+      else {
+        const eg = pre.filter(m => m.kind === 'out' && near(m.qty, ad));
+        if (eg.length){ const m = eg[eg.length - 1]; cause = 'egrnodesp'; obs.push(`Lo que sobra es igual a la salida ${docTxt(m)}: puede que no se haya despachado o que haya vuelto sin registrar la devolución.`); }
+      }
+    }
+    // 3. Unidad de medida
+    if (!cause && s.stock > EPS && sys > EPS){
+      const r = s.stock / sys, f = [10, 12, 20, 24, 25, 50, 100, 1000].find(x => near(r, x) || near(1 / r, x));
+      if (f){ const um = docs.length ? docs[docs.length - 1].um : ''; cause = 'um';
+        obs.push(`Lo contado es ${near(r, f) ? f + ' veces' : '1/' + f + ' de'} lo que tiene Defontana${um ? ' (en ' + esc(um) + ')' : ''}: posible conteo en otra unidad (caja, paquete, rollo, metro).`); }
+    }
+    // 4. Genérico
+    if (!cause){
+      if (diff > 0){ cause = 'noin'; obs.push(`Hay ${fmt(ad)} más en bodega que en Defontana: falta registrar un ingreso (compra, devolución de OT o de cliente) o se registró una salida de más.`); }
+      else {
+        cause = 'noout';
+        const outs = pre.filter(m => m.kind === 'out'), freq = new Map();
+        outs.forEach(m => freq.set(m.tipo, (freq.get(m.tipo) || 0) + 1));
+        const top = [...freq.entries()].sort((a, b) => b[1] - a[1])[0];
+        obs.push(`Faltan ${fmt(ad)} en bodega: falta registrar una salida (consumo en OT, venta, merma) o se registró un ingreso de más.` + (top ? ` Sus salidas suelen ser “${top[0]}”.` : ''));
+      }
+    }
+    // Notas de apoyo
+    const lastIn = [...pre].reverse().find(m => m.kind === 'in'), lastOut = [...pre].reverse().find(m => m.kind === 'out');
+    if (lastIn) obs.push('Último ingreso antes del conteo: ' + docTxt(lastIn) + '.');
+    if (lastOut) obs.push('Última salida antes del conteo: ' + docTxt(lastOut) + '.');
+    if (!pre.length && docs.length) obs.push('No tenía documentos antes del conteo; el saldo al conteo se calculó hacia atrás desde el primer documento.');
+    if (zeros) obs.push(zeros + (zeros === 1 ? ' documento' : ' documentos') + ' a costo $0.');
+    if (s.nCounted > 1) obs.push('Se contó en ' + s.nCounted + ' códigos distintos y se sumaron.');
+    return {cause, obs};
+  }
+
   function compute(){
     const bod = $('optBodega').value, sameAfter = $('optSame').value === 'after', onlyAprob = $('optAprob').checked;
     // El mismo código puede venir escrito de varias formas: se agrupa por la clave normalizada
@@ -372,11 +454,11 @@ tr.detail td{background:var(--bg);padding:12px 16px 16px}
       const counted = !!s && s.stock != null && s.fecha != null;
       const ck = counted ? dayKey(s.fecha) : null;
       const after = m => { const dk = dayKey(m.fecha); return dk > ck || (dk === ck && sameAfter); };
-      let ins = 0, outs = 0, sameDay = 0, idx = null;
+      let ins = 0, outs = 0, sameDay = 0, sameNet = 0, idx = null;
       docs.forEach((m, j) => {
         if (!counted || !m.fecha) return;
         if (after(m)){ if (inBod(m)){ if (m.kind === 'in') ins += m.qty; else outs += m.qty; } }
-        else { idx = j; if (dayKey(m.fecha) === ck) sameDay++; }
+        else { idx = j; if (dayKey(m.fecha) === ck){ sameDay++; sameNet += m.kind === 'in' ? m.qty : -m.qty; } }
       });
       // Defontana lleva un saldo por cada artículo: si el código existe escrito de varias formas, se suman
       const byArt = new Map();
@@ -407,7 +489,9 @@ tr.detail td{background:var(--bg);padding:12px 16px 16px}
       else if (diff == null) st = 'nodata';
       else st = diff > EPS ? 'up' : diff < -EPS ? 'down' : 'ok';
       const zeros = docs.filter(m => m.valor != null && Math.abs(m.valor) < EPS && m.qty > EPS).length;
-      return {alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, counted, docs, ins, outs, sameDay,
+      const dx = counted ? diagnose(s, docs, after, diff, sysAtCount, sameNet, zeros) : {cause:null, obs:[]};
+      if (dx.cause === 'late' || dx.cause === 'sameday') st = 'check';
+      return {cause:dx.cause, obs:dx.obs, alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, counted, docs, ins, outs, sameDay,
         sysAtCount, sysNow, realNow, diff, st, pmp, edited, pmpSrc: edited ? 'Ingresado a mano' : pm ? pm.src : 'Sin costo en Defontana',
         valor: diff != null && Math.abs(diff) > EPS && pmp != null ? diff * pmp : (st === 'ok' ? 0 : null), zeros};
     };
@@ -429,14 +513,15 @@ tr.detail td{background:var(--bg);padding:12px 16px 16px}
 
   // ---------- Configuración de las vistas ----------
   const ACTION = {
-    up:['a-up','Aumentar'], down:['a-down','Disminuir'], ok:['a-ok','Cuadrado'],
+    up:['a-up','Aumentar'], down:['a-down','Disminuir'], ok:['a-ok','Cuadrado'], check:['a-warn','Revisar antes de ajustar'],
     nodata:['a-warn','Sin saldo en Defontana'], nocount:['a-ok','Sin contar'], nofile:['a-warn','No está en el conteo']
   };
   const REG_FILTERS = [
     ['all', 'Todos', r => true, null],
-    ['bad', 'Descuadrados', r => r.st === 'up' || r.st === 'down', 'var(--warn)'],
+    ['bad', 'Descuadrados', r => r.st === 'up' || r.st === 'down' || r.st === 'check', 'var(--warn)'],
     ['up', 'Aumentar', r => r.st === 'up', 'var(--in)'],
     ['down', 'Disminuir', r => r.st === 'down', 'var(--out)'],
+    ['check', 'Revisar antes de ajustar', r => r.st === 'check', 'var(--warn)'],
     ['ok', 'Cuadrados', r => r.st === 'ok', 'var(--muted)'],
     ['nopmp', 'Falta PMP', r => (r.st === 'up' || r.st === 'down') && !(r.pmp > 0), 'var(--warn)'],
     ['nodata', 'Sin saldo en Defontana', r => r.st === 'nodata', 'var(--warn)'],
@@ -456,6 +541,7 @@ tr.detail td{background:var(--bg);padding:12px 16px 16px}
     ['sys', 'Defontana al conteo', 'num', r => r.sysAtCount],
     ['diff', 'Diferencia', 'num', r => r.diff],
     ['st', 'Qué hacer', '', r => r.st],
+    ['obs', 'Por qué está descuadrado', '', r => r.cause ? CAUSES[r.cause] : null],
     ['pmp', 'PMP', 'num', r => r.pmp],
     ['valor', 'Valor ajuste', 'num', r => r.valor],
     ['real', 'Stock real hoy', 'num', r => r.realNow],
@@ -485,14 +571,24 @@ tr.detail td{background:var(--bg);padding:12px 16px 16px}
     const [cls, label] = ACTION[r.st];
     const d = r.diff;
     const qty = (r.st === 'up' || r.st === 'down') ? ' ' + fmt(Math.abs(d)) : '';
+    const obsCell = r => {
+      if (!r.cause){
+        if (r.st === 'nodata') return '<span class="mut">Sin documentos en el informe: no se conoce el saldo de Defontana.</span>';
+        if (r.st === 'nofile') return '<span class="mut">Tiene documentos en Defontana pero no está en el archivo de conteo.</span>';
+        return '';
+      }
+      const [main, ...rest] = r.obs;
+      return `<div class="cause">${CAUSES[r.cause]}</div><div class="why">${main}</div>${rest.length ? '<div class="more-obs">' + rest.join('<br>') + '</div>' : ''}`;
+    };
     return `<tr class="row s-${r.st}${state.open.has(r.key) ? ' open' : ''}" data-key="${esc(r.key)}" tabindex="0">
       <td><div class="code">${esc(r.code)}</div><div class="pname">${esc(r.name)}</div>${aliasNote(r)}</td>
       <td class="num">${r.counted ? fmt(r.s.stock) + '<div class="small">' + fmtDate(r.s.fecha) + '</div>' : '<span class="mut">—</span>'}</td>
       <td class="num">${fmt(r.sysAtCount)}</td>
       <td class="num diff ${d > EPS ? 'plus' : d < -EPS ? 'minus' : 'mut'}">${d == null ? '—' : sgn(d)}</td>
       <td><span class="pill ${cls}">${label}${qty}</span>${r.sameDay && r.counted ? '<span class="flag" title="Hay documentos el mismo día del conteo">· mismo día</span>' : ''}</td>
-      <td class="num">${r.st === 'up' || r.st === 'down' ? pmpInput(r.key, r.pmp, r.edited, r.code) : '<span class="mut">' + (r.pmp != null ? money(r.pmp) : '—') + '</span>'}</td>
-      <td class="num diff ${r.valor > 0.5 ? 'plus' : r.valor < -0.5 ? 'minus' : 'mut'}">${r.st === 'up' || r.st === 'down' ? money(r.valor) : '—'}</td>
+      <td class="obs">${obsCell(r)}</td>
+      <td class="num">${r.st === 'up' || r.st === 'down' || r.st === 'check' ? pmpInput(r.key, r.pmp, r.edited, r.code) : '<span class="mut">' + (r.pmp != null ? money(r.pmp) : '—') + '</span>'}</td>
+      <td class="num diff ${r.valor > 0.5 ? 'plus' : r.valor < -0.5 ? 'minus' : 'mut'}">${r.st === 'up' || r.st === 'down' || r.st === 'check' ? money(r.valor) : '—'}</td>
       <td class="num">${fmt(r.realNow)}${r.ins || r.outs ? '<div class="small">' + (r.ins ? '<span class="plus">+' + fmt(r.ins) + '</span> ' : '') + (r.outs ? '<span class="minus">−' + fmt(r.outs) + '</span>' : '') + ' desde el conteo</div>' : ''}</td>
       <td class="num">${fmt(r.sysNow)}</td></tr>`;
   }
@@ -548,14 +644,15 @@ tr.detail td{background:var(--bg);padding:12px 16px 16px}
 
     // Resumen
     if (reg){
-      const bad = all.filter(r => r.st === 'up' || r.st === 'down'), up = bad.filter(r => r.st === 'up'), down = bad.filter(r => r.st === 'down');
+      const bad = all.filter(r => r.st === 'up' || r.st === 'down' || r.st === 'check'), up = bad.filter(r => r.st === 'up'), down = bad.filter(r => r.st === 'down'), chk = bad.filter(r => r.st === 'check');
       const sum = L => L.reduce((a, r) => a + (r.valor || 0), 0);
       const counted = all.filter(r => r.counted).length;
       $('summary').innerHTML = `
         <button class="card bad" type="button" data-go="bad"><span class="lbl">Descuadrados</span><span class="big">${fmt(bad.length)}</span><span class="note">de ${fmt(counted)} productos contados</span></button>
         <button class="card up" type="button" data-go="up"><span class="lbl">Aumentar en Defontana</span><span class="big">${fmt(up.length)}</span><span class="val">${money(sum(up))}</span></button>
         <button class="card down" type="button" data-go="down"><span class="lbl">Disminuir en Defontana</span><span class="big">${fmt(down.length)}</span><span class="val">${money(sum(down))}</span></button>
-        <div class="card"><span class="lbl">Efecto neto del ajuste</span><span class="big">${money(sum(bad))}</span><span class="note">${fmt(bad.filter(r => !(r.pmp > 0)).length)} sin PMP (poner costo)</span></div>`;
+        <div class="card"><span class="lbl">Efecto neto del ajuste</span><span class="big">${money(sum(up) + sum(down))}</span><span class="note">${fmt(bad.filter(r => !(r.pmp > 0)).length)} sin PMP (poner costo)</span></div>
+        <button class="card bad" type="button" data-go="check"><span class="lbl">Revisar antes de ajustar</span><span class="big">${fmt(chk.length)}</span><span class="note">la diferencia se explica por la fecha de un documento</span></button>`;
     } else {
       const ins = all.filter(z => z.m.kind === 'in'), outs = all.filter(z => z.m.kind === 'out');
       const sum = L => L.reduce((a, z) => a + (z.valor || 0), 0);
@@ -577,7 +674,16 @@ tr.detail td{background:var(--bg);padding:12px 16px 16px}
     // Tabla
     const {k: sk, d: sd} = state.sort[state.view];
     $('thead').innerHTML = '<tr>' + cols.map(([k, label, cls]) => `<th class="sort ${cls}" data-sort="${k}">${label}${sk === k ? ' <span class="arr">' + (sd > 0 ? '▲' : '▼') + '</span>' : ''}</th>`).join('') + '</tr>';
-    const f = (F.find(x => x[0] === cur) || F[0])[2];
+    let f = (F.find(x => x[0] === cur) || F[0])[2];
+    const sel = $('optCause');
+    sel.hidden = !reg;
+    if (reg){
+      const cnt = new Map(); all.forEach(r => { if (r.cause) cnt.set(r.cause, (cnt.get(r.cause) || 0) + 1); });
+      const prev = state.cause || '';
+      sel.innerHTML = '<option value="">Todas las causas</option>' + Object.keys(CAUSES).filter(k => cnt.has(k)).map(k => `<option value="${k}">${CAUSES[k]} (${fmt(cnt.get(k))})</option>`).join('');
+      sel.value = cnt.has(prev) ? prev : '';
+      if (sel.value){ const f0 = f, c = sel.value; f = r => f0(r) && r.cause === c; }
+    }
     const q = strip($('optSearch').value);
     const rows = sorted(all.filter(r => f(r) && (!q || strip(r.code).includes(q) || strip(r.name).includes(q) || (!reg && strip(r.m.tipo + ' ' + r.m.ref + ' ' + r.m.folio).includes(q)))), cols);
     state.visible = rows;
@@ -596,7 +702,8 @@ tr.detail td{background:var(--bg);padding:12px 16px 16px}
 
   // ---------- Exportar ----------
   const regExport = r => ({
-    'Código': r.code, 'Nombre': r.name, 'Otras formas del código': r.alias.join(', ') + (r.viaName ? (r.alias.length ? ' · ' : '') + 'cruzado por nombre' : ''), 'Qué hacer': ACTION[r.st][1],
+    'Código': r.code, 'Nombre': r.name, 'Otras formas del código': r.alias.join(', ') + (r.viaName ? (r.alias.length ? ' · ' : '') + 'cruzado por nombre' : ''), 'Qué hacer': ACTION[r.st][1], 'Causa probable': r.cause ? CAUSES[r.cause] : '',
+    'Observaciones': r.obs.map(x => x.replace(/<[^>]+>/g, '')).join(' '),
     'Cantidad a ajustar': r.diff != null && Math.abs(r.diff) > EPS ? Math.abs(r.diff) : '',
     'Contado': r.s ? r.s.stock : '', 'Fecha conteo': r.counted ? fmtDate(r.s.fecha, true) : '',
     'Defontana al conteo': r.sysAtCount ?? '', 'Diferencia': r.diff ?? '',
@@ -676,6 +783,7 @@ tr.detail td{background:var(--bg);padding:12px 16px 16px}
     render();
   });
   ['optBodega','optSame','optAprob'].forEach(id => $(id).addEventListener('change', render));
+  $('optCause').addEventListener('change', () => { state.cause = $('optCause').value; render(); });
   let t; $('optSearch').addEventListener('input', () => { clearTimeout(t); t = setTimeout(render, 150); });
   const toggle = tr => { const k = tr.dataset.key; state.open.has(k) ? state.open.delete(k) : state.open.add(k); render(); };
   $('tbody').addEventListener('click', e => { if (e.target.closest('input')) return; const tr = e.target.closest('tr.row'); if (tr) toggle(tr); });
