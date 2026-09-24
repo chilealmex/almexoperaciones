@@ -1,0 +1,509 @@
+<title>Stock post-conteo</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{
+  --bg:#F3F5F4; --surface:#FFFFFF; --surface2:#EAEFED; --ink:#18221F; --muted:#5B6964; --line:#D3DCD8;
+  --accent:#245E8F; --accent-ink:#FFFFFF; --accent-soft:#DDE8F2;
+  --in:#1E7A4B; --in-soft:#DDF1E5; --out:#B23A2E; --out-soft:#F8E1DE; --warn:#8F5B00; --warn-soft:#FBEBCB;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#111715; --surface:#18201D; --surface2:#1F2926; --ink:#E4ECE8; --muted:#95A59F; --line:#2E3A36;
+    --accent:#7FB2E0; --accent-ink:#0D1A26; --accent-soft:#1C2E3E;
+    --in:#6FD39B; --in-soft:#173325; --out:#F08A7E; --out-soft:#3A1E1B; --warn:#E8B656; --warn-soft:#352812;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#111715; --surface:#18201D; --surface2:#1F2926; --ink:#E4ECE8; --muted:#95A59F; --line:#2E3A36;
+  --accent:#7FB2E0; --accent-ink:#0D1A26; --accent-soft:#1C2E3E;
+  --in:#6FD39B; --in-soft:#173325; --out:#F08A7E; --out-soft:#3A1E1B; --warn:#E8B656; --warn-soft:#352812;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.45}
+.wrap{max-width:1280px;margin:0 auto;padding-inline:20px;padding-block:24px 48px;display:flex;flex-direction:column;gap:20px}
+header h1{margin:0;font-size:24px;font-weight:700;letter-spacing:-.01em;text-wrap:balance}
+header p{margin:6px 0 0;color:var(--muted);max-width:72ch}
+.formula{font-family:var(--mono);font-size:13px;background:var(--surface2);padding:2px 6px;border-radius:4px}
+
+.loaders{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.drop{position:relative;display:flex;flex-direction:column;gap:4px;padding:14px 16px;border:1.5px dashed var(--line);border-radius:8px;background:var(--surface);cursor:pointer}
+.drop:hover,.drop.over{border-color:var(--accent)}
+.drop:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+.drop input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.drop .k{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.drop .t{font-weight:600}
+.drop .s{font-size:13px;color:var(--muted)}
+.drop.ok{border-style:solid;border-color:var(--in)}
+.drop.ok .s{color:var(--in)}
+.drop.err{border-style:solid;border-color:var(--out)}
+.drop.err .s{color:var(--out)}
+
+.opts{display:flex;flex-wrap:wrap;gap:12px 20px;align-items:end;padding:14px 16px;background:var(--surface);border:1px solid var(--line);border-radius:8px}
+.opt{display:flex;flex-direction:column;gap:4px;min-width:0}
+.opt label{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+select,input[type=search]{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:7px 10px;max-width:100%}
+select:focus,input:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.chk{display:flex;gap:8px;align-items:center;font-size:13px}
+
+.sample{display:flex;gap:10px;align-items:center;padding:10px 14px;border-radius:8px;background:var(--warn-soft);color:var(--warn);font-size:13px;font-weight:500}
+
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.stat{background:var(--surface);padding:12px 14px;display:flex;flex-direction:column;gap:2px}
+.stat .n{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums}
+.stat .l{font-size:12px;color:var(--muted)}
+
+.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+.tabs{display:flex;flex-wrap:wrap;gap:6px}
+.tab{font:inherit;font-size:13px;font-weight:500;padding:6px 12px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer}
+.tab .c{font-variant-numeric:tabular-nums;color:var(--muted);margin-left:4px}
+.tab[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.tab[aria-pressed=true] .c{color:inherit;opacity:.8}
+.actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.btn{font:inherit;font-size:13px;font-weight:600;padding:7px 14px;border-radius:6px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);cursor:pointer}
+.btn.ghost{background:transparent;color:var(--accent)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.note{font-size:12px;color:var(--muted)}
+
+.tablebox{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:8px}
+table{border-collapse:collapse;width:100%;min-width:980px;font-size:13px}
+th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+th{position:sticky;top:0;background:var(--surface2);font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.code{font-family:var(--mono);font-size:12px;white-space:nowrap}
+td.name{max-width:320px}
+tr.row{cursor:pointer}
+tr.row:hover td{background:var(--surface2)}
+tr.row.open td{background:var(--accent-soft)}
+.final{font-weight:700;font-size:14px}
+.plus{color:var(--in)} .minus{color:var(--out)}
+.pill{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap}
+.p-mov{background:var(--accent-soft);color:var(--accent)}
+.p-same{background:var(--warn-soft);color:var(--warn)}
+.p-neg{background:var(--out-soft);color:var(--out)}
+.p-ok{background:var(--surface2);color:var(--muted)}
+.p-pend{background:var(--surface2);color:var(--muted)}
+.pills{display:flex;flex-wrap:wrap;gap:4px}
+tr.detail td{background:var(--bg);padding:10px 12px 14px}
+.det{width:100%;min-width:0;font-size:12px}
+.det th{position:static;background:transparent}
+.det td,.det th{padding:5px 8px}
+.det tr.pre td{color:var(--muted)}
+.det tr.same td{background:var(--warn-soft)}
+.empty{padding:28px;text-align:center;color:var(--muted)}
+.more{padding:10px;text-align:center}
+@media (max-width:600px){ header h1{font-size:20px} .wrap{padding-inline:16px} }
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Stock actualizado después del conteo</h1>
+    <p>Cruza el archivo <b>Stock y conteo</b> con el <b>Informe de Documentos de Inventario</b> de Defontana. Para cada artículo contado suma los ingresos y resta los egresos con fecha posterior al conteo:
+    <span class="formula">stock actualizado = stock físico + ingresos − egresos</span></p>
+  </header>
+
+  <section class="loaders">
+    <div class="drop" id="dropStock">
+      <input type="file" id="fileStock" accept=".xlsx,.xls,.csv" aria-label="Archivo de stock y conteo">
+      <span class="k">Archivo 1</span>
+      <span class="t">Stock y conteo</span>
+      <span class="s" id="stStock">Arrastra o elige el Excel con Código, Stock físico y Fecha y hora del conteo</span>
+    </div>
+    <div class="drop" id="dropMov">
+      <input type="file" id="fileMov" accept=".xlsx,.xls,.csv" aria-label="Informe de documentos de Defontana">
+      <span class="k">Archivo 2</span>
+      <span class="t">Informe de Documentos (Defontana)</span>
+      <span class="s" id="stMov">Arrastra o elige el informe con los Ingresos y Egresos</span>
+    </div>
+  </section>
+
+  <section class="opts">
+    <div class="opt">
+      <label for="optBodega">Bodega contada</label>
+      <select id="optBodega"></select>
+    </div>
+    <div class="opt">
+      <label for="optSame">Movimientos del mismo día del conteo</label>
+      <select id="optSame">
+        <option value="flag">No sumar y marcar para revisar</option>
+        <option value="add">Sumarlos al stock</option>
+      </select>
+    </div>
+    <div class="opt">
+      <label for="optSearch">Buscar</label>
+      <input type="search" id="optSearch" placeholder="Código o nombre">
+    </div>
+    <label class="chk"><input type="checkbox" id="optAprob" checked> Solo documentos aprobados</label>
+  </section>
+
+  <div class="sample" id="sampleNote">Estás viendo datos de ejemplo inventados. Carga tus dos archivos para ver tu stock.</div>
+
+  <section class="stats" id="stats"></section>
+
+  <div class="bar">
+    <div class="tabs" id="tabs" role="group" aria-label="Filtro"></div>
+    <div class="actions">
+      <span class="note" id="copyNote"></span>
+      <button class="btn ghost" id="btnCopy" type="button">Copiar tabla</button>
+      <button class="btn" id="btnXlsx" type="button">Descargar Excel</button>
+    </div>
+  </div>
+
+  <div class="tablebox">
+    <table>
+      <thead><tr>
+        <th>Código</th><th>Nombre</th><th>Conteo</th>
+        <th class="num">Stock físico</th><th class="num">Ingresos</th><th class="num">Egresos</th>
+        <th class="num">Stock actualizado</th><th class="num">Mismo día</th>
+        <th class="num">Saldo Defontana</th><th>Estado</th>
+      </tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+  <p class="note">Defontana entrega solo la fecha del documento, sin hora. Por eso los movimientos del mismo día del conteo no se pueden ordenar respecto a la hora del conteo y se muestran aparte. “Saldo Defontana” es el saldo que informa el último documento del artículo en el informe, como referencia. Haz clic en una fila para ver sus documentos.</p>
+</div>
+
+<script>
+(function(){
+  const $ = s => document.getElementById(s);
+  const norm = v => String(v ?? '').trim().toUpperCase();
+  const fmt = n => n == null || n === '' ? '—' : Number(n).toLocaleString('es-CL', {maximumFractionDigits: 3});
+  const sgn = n => (n > 0 ? '+' : n < 0 ? '−' : '') + fmt(Math.abs(n));
+  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const dayKey = d => d ? d.getFullYear()*10000 + (d.getMonth()+1)*100 + d.getDate() : null;
+  const fmtDate = (d, time) => !d ? '' : String(d.getDate()).padStart(2,'0') + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + d.getFullYear() +
+      (time ? ' ' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0') : '');
+
+  // Acepta "dd-mm-aaaa", "dd/mm/aaaa hh:mm", fechas de Excel (número) u objetos Date
+  function parseDate(v){
+    if (v == null || v === '') return null;
+    if (v instanceof Date) return isNaN(v) ? null : v;
+    if (typeof v === 'number'){
+      const p = XLSX.SSF.parse_date_code(v);
+      return p ? new Date(p.y, p.m-1, p.d, p.H, p.M, Math.floor(p.S)) : null;
+    }
+    const m = String(v).trim().match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2,4})(?:[ T,]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+    if (m){
+      let y = +m[3]; if (y < 100) y += 2000;
+      return new Date(y, +m[2]-1, +m[1], +(m[4]||0), +(m[5]||0), +(m[6]||0));
+    }
+    const m2 = String(v).trim().match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/);
+    if (m2) return new Date(+m2[1], +m2[2]-1, +m2[3], +(m2[4]||0), +(m2[5]||0));
+    return null;
+  }
+  function num(v){
+    if (typeof v === 'number') return v;
+    if (v == null || v === '') return null;
+    let s = String(v).trim().replace(/\s/g,'');
+    if (/,\d+$/.test(s)) s = s.replace(/\./g,'').replace(',', '.'); else s = s.replace(/,/g,'');
+    const n = Number(s); return isNaN(n) ? null : n;
+  }
+  const stripAccents = s => norm(s).normalize('NFD').replace(/[̀-ͯ]/g,'');
+
+  // Busca la fila de encabezados y devuelve objetos por columna
+  function readTable(rows, required){
+    for (let i = 0; i < Math.min(rows.length, 30); i++){
+      const h = rows[i].map(stripAccents);
+      if (required.every(r => h.some(x => x === r))){
+        const idx = {}; h.forEach((x, j) => { if (x && !(x in idx)) idx[x] = j; });
+        return {idx, rows: rows.slice(i+1)};
+      }
+    }
+    return null;
+  }
+  const col = (t, ...names) => { for (const n of names){ const k = stripAccents(n); if (k in t.idx) return t.idx[k]; } return -1; };
+
+  function parseStock(rows){
+    const t = readTable(rows, ['CODIGO', 'STOCK FISICO']);
+    if (!t) throw new Error('No encontré las columnas “Código” y “Stock físico”.');
+    const cC = col(t,'Código'), cN = col(t,'Nombre'), cS = col(t,'Stock físico'), cE = col(t,'Estado del conteo'),
+          cP = col(t,'Contado por'), cF = col(t,'Fecha y hora del conteo','Fecha del conteo','Fecha');
+    if (cF < 0) throw new Error('No encontré la columna “Fecha y hora del conteo”.');
+    const out = [];
+    for (const r of t.rows){
+      const code = String(r[cC] ?? '').trim(); if (!code) continue;
+      out.push({code, key: norm(code), name: r[cN] ?? '', stock: num(r[cS]), estado: r[cE] ?? '', por: r[cP] ?? '', fecha: parseDate(r[cF])});
+    }
+    return out;
+  }
+
+  function parseMov(rows){
+    const t = readTable(rows, ['ARTICULO', 'MOVIMIENTO']);
+    if (!t) throw new Error('No encontré las columnas “Artículo” y “Movimiento”.');
+    const g = (...n) => col(t, ...n);
+    const c = {tipo:g('Tipo Documento'), estado:g('Estado'), folio:g('Folio'), fecha:g('Fecha'), orig:g('Bod. Origen','Bodega Origen'),
+      dest:g('Bod. Destino','Bodega Destino'), motivo:g('Motivo'), mov:g('Movimiento'), ref:g('Referencia'), prov:g('Proveedor'), cli:g('Cliente'),
+      art:g('Artículo'), desc:g('Descripción'), cant:g('Cant. Movimiento','Cantidad'), saldo:g('Saldo Inventario')};
+    if (c.cant < 0 || c.fecha < 0) throw new Error('No encontré las columnas “Fecha” y “Cant. Movimiento”.');
+    const out = [];
+    t.rows.forEach((r, i) => {
+      const art = String(r[c.art] ?? '').trim(); if (!art) return;
+      const mv = stripAccents(r[c.mov]);
+      const kind = mv.startsWith('ING') ? 'in' : mv.startsWith('EGR') ? 'out' : null;
+      if (!kind) return;
+      const at = k => c[k] >= 0 ? (r[c[k]] ?? '') : '';
+      out.push({i, art, key: norm(art), kind, qty: Math.abs(num(at('cant')) || 0), fecha: parseDate(at('fecha')),
+        tipo: at('tipo'), estado: at('estado'), folio: at('folio'), orig: String(at('orig')).trim(), dest: String(at('dest')).trim(),
+        motivo: at('motivo'), ref: at('ref') || at('cli') || at('prov'), desc: at('desc'), saldo: num(at('saldo'))});
+    });
+    return out;
+  }
+
+  // ---------- Datos de ejemplo (inventados) ----------
+  function sample(){
+    const S = [
+      ['EJ-PERNO-M16','Perno ejemplo M16 x 40',50,'Contado','Ejemplo','05-08-2026 10:15'],
+      ['EJ-GUANTE-01','Guante ejemplo de cabritilla',40,'Contado','Ejemplo','12-08-2026 16:40'],
+      ['EJ-CAJA-500','Caja ejemplo 500x400x400',120,'Contado','Ejemplo','19-08-2026 09:05'],
+      ['EJ-CABLE-45','Cable ejemplo de alimentación 4,5 m',6,'Contado','Ejemplo','20-08-2026 11:30'],
+      ['EJ-REMACHE','Remache ejemplo 4,0 x 8',200,'Contado','Ejemplo','10-08-2026 15:00'],
+      ['EJ-KIT-HT','Kit ejemplo de herramientas',2,'Contado','Ejemplo','18-08-2026 12:00'],
+      ['EJ-RELE-6A','Relé ejemplo 6A 24VDC',null,'Pendiente','','']
+    ].map(r => ({code:r[0], key:norm(r[0]), name:r[1], stock:r[2], estado:r[3], por:r[4], fecha:parseDate(r[5])}));
+    const M = [
+      ['EJ-PERNO-M16','out',10,'01-08-2026','PARTE DE SALIDA','OT 700',40],
+      ['EJ-PERNO-M16','out',8,'14-08-2026','PARTE DE SALIDA','OT 812',42],
+      ['EJ-PERNO-M16','in',30,'22-08-2026','PARTE DE ENTRADA','Compra',72],
+      ['EJ-GUANTE-01','out',2,'12-08-2026','PARTE DE SALIDA','OT 790',38],
+      ['EJ-GUANTE-01','out',6,'25-08-2026','PARTE DE SALIDA','OT 901',32],
+      ['EJ-CAJA-500','out',15,'02-09-2026','ENVÍO A PRODUCCIÓN','OT 950',105],
+      ['EJ-CABLE-45','out',8,'28-08-2026','52 Guia de Despacho Electronica','GDVELECT 24010',-2],
+      ['EJ-REMACHE','in',100,'04-08-2026','PARTE DE ENTRADA','Compra',200],
+      ['EJ-KIT-HT','in',1,'18-08-2026','PARTE ENTRADA IMPORTACION','Importación',3]
+    ].map((r, i) => ({i, art:r[0], key:norm(r[0]), kind:r[1], qty:r[2], fecha:parseDate(r[3]), tipo:r[4], estado:'Aprobado', folio:i+1,
+      orig: r[1]==='out' ? 'BODEGA CENTRAL' : '', dest: r[1]==='in' ? 'BODEGA CENTRAL' : '', motivo:'', ref:r[5], desc:'', saldo:r[6]}));
+    return {S, M};
+  }
+
+  // ---------- Estado ----------
+  const state = {stock: null, mov: null, isSample: true, tab: 'mov', limit: 300, open: new Set(), results: []};
+  const ex = sample();
+  state.stock = ex.S; state.mov = ex.M;
+
+  function fillBodegas(){
+    const sel = $('optBodega'), prev = sel.value;
+    const set = new Map();
+    for (const m of state.mov){ const b = m.kind === 'in' ? m.dest : m.orig; if (b) set.set(b, (set.get(b)||0) + 1); }
+    const list = [...set.entries()].sort((a,b) => b[1]-a[1]).map(x => x[0]);
+    sel.innerHTML = '<option value="*">Todas las bodegas</option>' + list.map(b => `<option value="${esc(b)}">${esc(b)}</option>`).join('');
+    sel.value = list.includes(prev) ? prev : (list.find(b => /CENTRAL/i.test(b)) || list[0] || '*');
+  }
+
+  function compute(){
+    const bod = $('optBodega').value, sameMode = $('optSame').value, onlyAprob = $('optAprob').checked;
+    const byArt = new Map();
+    for (const m of state.mov){
+      if (onlyAprob && m.estado && !/aprob/i.test(m.estado)) continue;
+      if (bod !== '*'){ const b = m.kind === 'in' ? m.dest : m.orig; if (b !== bod) continue; }
+      if (!byArt.has(m.key)) byArt.set(m.key, []);
+      byArt.get(m.key).push(m);
+    }
+    // Saldo Defontana: el del último documento del artículo (todo el informe, sin filtro de bodega)
+    const lastSaldo = new Map();
+    for (const m of state.mov){
+      if (m.saldo == null) continue;
+      const p = lastSaldo.get(m.key);
+      if (!p || (m.fecha && p.fecha && m.fecha > p.fecha) || (+(m.fecha||0) === +(p.fecha||0) && m.i > p.i)) lastSaldo.set(m.key, m);
+    }
+    const stockKeys = new Set();
+    const res = state.stock.map(s => {
+      stockKeys.add(s.key);
+      const movs = (byArt.get(s.key) || []).slice().sort((a,b) => (a.fecha||0) - (b.fecha||0) || a.i - b.i);
+      const counted = s.fecha != null && s.stock != null;
+      let ins = 0, outs = 0, sameNet = 0, nSame = 0, nPost = 0;
+      const ck = counted ? dayKey(s.fecha) : null;
+      for (const m of movs){
+        m._when = 'pre';
+        if (!counted || !m.fecha) continue;
+        const dk = dayKey(m.fecha);
+        if (dk > ck || (dk === ck && sameMode === 'add')){
+          m._when = dk === ck ? 'same-add' : 'post'; nPost++;
+          if (m.kind === 'in') ins += m.qty; else outs += m.qty;
+        } else if (dk === ck){
+          m._when = 'same'; nSame++; sameNet += m.kind === 'in' ? m.qty : -m.qty;
+        }
+      }
+      const final = counted ? s.stock + ins - outs : null;
+      const ls = lastSaldo.get(s.key);
+      return {...s, counted, movs, ins, outs, final, sameNet, nSame, nPost, saldo: ls ? ls.saldo : null};
+    });
+    const orphan = new Set();
+    for (const k of byArt.keys()) if (!stockKeys.has(k)) orphan.add(k);
+    state.results = res;
+    state.orphan = orphan;
+  }
+
+  const tabsDef = [
+    ['mov', 'Con movimientos después del conteo', r => r.counted && r.nPost > 0],
+    ['same', 'Revisar: movimientos el mismo día', r => r.counted && r.nSame > 0],
+    ['neg', 'Stock actualizado negativo', r => r.counted && r.final < 0],
+    ['all', 'Todos los contados', r => r.counted],
+    ['pend', 'Pendientes de conteo', r => !r.counted]
+  ];
+
+  function filtered(){
+    const f = tabsDef.find(t => t[0] === state.tab)[2];
+    const q = stripAccents($('optSearch').value);
+    return state.results.filter(r => f(r) && (!q || stripAccents(r.code).includes(q) || stripAccents(r.name).includes(q)));
+  }
+
+  function render(){
+    compute();
+    const R = state.results, C = R.filter(r => r.counted);
+    const withMov = C.filter(r => r.nPost > 0), neg = C.filter(r => r.final < 0), same = C.filter(r => r.nSame > 0);
+    const totIn = withMov.reduce((a,r) => a + r.ins, 0), totOut = withMov.reduce((a,r) => a + r.outs, 0);
+    $('stats').innerHTML = [
+      [fmt(C.length) + ' / ' + fmt(R.length), 'artículos contados'],
+      [fmt(withMov.length), 'con movimientos después del conteo'],
+      ['<span class="plus">+' + fmt(totIn) + '</span> <span class="minus">−' + fmt(totOut) + '</span>', 'unidades ingresadas / egresadas'],
+      [fmt(same.length), 'para revisar (mismo día)'],
+      [fmt(neg.length), 'quedarían en negativo'],
+      [fmt(state.orphan.size), 'artículos con movimientos que no están en el archivo de stock']
+    ].map(([n,l]) => `<div class="stat"><span class="n">${n}</span><span class="l">${l}</span></div>`).join('');
+
+    $('tabs').innerHTML = tabsDef.map(([k, label, f]) =>
+      `<button type="button" class="tab" data-tab="${k}" aria-pressed="${state.tab===k}">${label}<span class="c">${fmt(R.filter(f).length)}</span></button>`).join('');
+
+    const rows = filtered();
+    const tb = $('tbody');
+    if (!rows.length){ tb.innerHTML = `<tr><td colspan="10" class="empty">No hay artículos en esta vista.</td></tr>`; return; }
+    let html = '';
+    for (const r of rows.slice(0, state.limit)){
+      const pills = [];
+      if (!r.counted) pills.push('<span class="pill p-pend">Pendiente</span>');
+      else {
+        if (r.nPost) pills.push(`<span class="pill p-mov">${r.nPost} mov.</span>`);
+        if (r.nSame) pills.push(`<span class="pill p-same">Revisar mismo día</span>`);
+        if (r.final < 0) pills.push('<span class="pill p-neg">Negativo</span>');
+        if (!pills.length) pills.push('<span class="pill p-ok">Sin cambios</span>');
+      }
+      const open = state.open.has(r.key);
+      html += `<tr class="row${open?' open':''}" data-key="${esc(r.key)}" tabindex="0">
+        <td class="code">${esc(r.code)}</td><td class="name">${esc(r.name)}</td>
+        <td class="num" style="text-align:left">${r.fecha ? fmtDate(r.fecha, true) : '—'}</td>
+        <td class="num">${fmt(r.stock)}</td>
+        <td class="num plus">${r.ins ? '+' + fmt(r.ins) : '—'}</td>
+        <td class="num minus">${r.outs ? '−' + fmt(r.outs) : '—'}</td>
+        <td class="num final">${fmt(r.final)}</td>
+        <td class="num">${r.nSame ? sgn(r.sameNet) : '—'}</td>
+        <td class="num">${fmt(r.saldo)}</td>
+        <td><div class="pills">${pills.join('')}</div></td></tr>`;
+      if (open) html += detail(r);
+    }
+    if (rows.length > state.limit) html += `<tr><td colspan="10" class="more"><button class="btn ghost" type="button" id="btnMore">Mostrar ${fmt(Math.min(300, rows.length - state.limit))} más (de ${fmt(rows.length)})</button></td></tr>`;
+    tb.innerHTML = html;
+  }
+
+  function detail(r){
+    if (!r.movs.length) return `<tr class="detail"><td colspan="10"><span class="note">Este artículo no tiene documentos en el informe para la bodega elegida.</span></td></tr>`;
+    const when = {pre:'Antes del conteo', post:'Después', same:'Mismo día (no sumado)', 'same-add':'Mismo día (sumado)'};
+    const trs = r.movs.map(m => `<tr class="${m._when==='pre'?'pre':m._when.startsWith('same')?'same':''}">
+      <td>${fmtDate(m.fecha)}</td><td>${esc(m.tipo)}</td><td class="num">${esc(m.folio)}</td><td>${esc(m.ref)}</td>
+      <td class="num ${m.kind==='in'?'plus':'minus'}">${m.kind==='in'?'+':'−'}${fmt(m.qty)}</td><td>${when[m._when]}</td></tr>`).join('');
+    return `<tr class="detail"><td colspan="10"><table class="det"><thead><tr><th>Fecha</th><th>Documento</th><th class="num">Folio</th><th>Referencia</th><th class="num">Cantidad</th><th>Respecto al conteo</th></tr></thead><tbody>${trs}</tbody></table></td></tr>`;
+  }
+
+  // ---------- Exportar ----------
+  function exportRows(){
+    return filtered().map(r => ({
+      'Código': r.code, 'Nombre': r.name, 'Estado del conteo': r.estado, 'Contado por': r.por,
+      'Fecha y hora del conteo': r.fecha ? fmtDate(r.fecha, true) : '', 'Stock físico': r.stock,
+      'Ingresos posteriores': r.ins, 'Egresos posteriores': r.outs, 'Stock actualizado': r.final,
+      'Neto mismo día (no sumado)': $('optSame').value === 'flag' && r.nSame ? r.sameNet : '',
+      'Saldo Defontana': r.saldo, 'Diferencia vs Defontana': r.final != null && r.saldo != null ? r.final - r.saldo : ''
+    }));
+  }
+  function exportDetail(){
+    const out = [];
+    for (const r of filtered()) for (const m of r.movs) if (m._when !== 'pre')
+      out.push({'Código': r.code, 'Fecha': fmtDate(m.fecha), 'Documento': m.tipo, 'Folio': m.folio, 'Referencia': m.ref,
+        'Movimiento': m.kind === 'in' ? 'Ingreso' : 'Egreso', 'Cantidad': m.kind === 'in' ? m.qty : -m.qty,
+        'Respecto al conteo': m._when === 'post' ? 'Después' : m._when === 'same' ? 'Mismo día (no sumado)' : 'Mismo día (sumado)'});
+    return out;
+  }
+  let downloads = null;
+  if (window.claude && typeof window.claude.use === 'function'){
+    window.claude.use('downloads').then(d => { downloads = d; }).catch(() => {});
+  }
+  $('btnXlsx').addEventListener('click', async () => {
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(exportRows()), 'Stock actualizado');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(exportDetail()), 'Movimientos');
+    const name = 'stock-actualizado-' + fmtDate(new Date()) + '.xlsx';
+    if (downloads){
+      const buf = XLSX.write(wb, {bookType:'xlsx', type:'array'});
+      try { await downloads.save({filename: name, data: new Blob([buf])}); $('copyNote').textContent = ''; }
+      catch(e){ $('copyNote').textContent = e && e.code === 'declined' ? 'Descarga cancelada.' : 'No se pudo descargar aquí. Usa “Copiar tabla”.'; }
+    } else {
+      XLSX.writeFile(wb, name);
+    }
+  });
+  $('btnCopy').addEventListener('click', () => {
+    const rows = exportRows(); if (!rows.length) return;
+    const keys = Object.keys(rows[0]);
+    const tsv = [keys.join('\t'), ...rows.map(r => keys.map(k => r[k] == null ? '' : String(r[k]).replace(/[\t\n]/g,' ')).join('\t'))].join('\n');
+    const done = () => { $('copyNote').textContent = fmt(rows.length) + ' filas copiadas. Pégalas en Excel.'; };
+    navigator.clipboard.writeText(tsv).then(done).catch(() => {
+      const ta = document.createElement('textarea'); ta.value = tsv; document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); done(); } catch(e){ $('copyNote').textContent = 'No se pudo copiar.'; }
+      ta.remove();
+    });
+  });
+
+  // ---------- Carga de archivos ----------
+  function readFile(file){
+    return file.arrayBuffer().then(buf => {
+      const wb = XLSX.read(buf, {type:'array', cellDates:false});
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      return XLSX.utils.sheet_to_json(ws, {header:1, raw:true, defval:null, blankrows:false});
+    });
+  }
+  function setupLoader(inputId, dropId, statusId, parser, key, label){
+    const input = $(inputId), drop = $(dropId), st = $(statusId);
+    const handle = file => {
+      if (!file) return;
+      st.textContent = 'Leyendo ' + file.name + '…';
+      readFile(file).then(rows => {
+        const data = parser(rows);
+        if (!data.length) throw new Error('El archivo no tiene filas con datos.');
+        if (state.isSample){ state.isSample = false; state.stock = []; state.mov = []; $('sampleNote').hidden = true; }
+        state[key] = data;
+        drop.classList.remove('err'); drop.classList.add('ok');
+        st.textContent = file.name + ' · ' + data.length.toLocaleString('es-CL') + ' ' + label;
+        state.open.clear(); state.limit = 300;
+        if (key === 'mov') fillBodegas();
+        render();
+      }).catch(e => { drop.classList.remove('ok'); drop.classList.add('err'); st.textContent = e.message || 'No se pudo leer el archivo.'; });
+    };
+    input.addEventListener('change', () => { handle(input.files[0]); input.value = ''; });
+    ['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+    ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, () => drop.classList.remove('over')));
+    drop.addEventListener('drop', e => { e.preventDefault(); handle(e.dataTransfer.files[0]); });
+  }
+  setupLoader('fileStock', 'dropStock', 'stStock', parseStock, 'stock', 'artículos');
+  setupLoader('fileMov', 'dropMov', 'stMov', parseMov, 'mov', 'líneas de movimiento');
+
+  // ---------- Eventos ----------
+  $('tabs').addEventListener('click', e => { const b = e.target.closest('.tab'); if (!b) return; state.tab = b.dataset.tab; state.limit = 300; render(); });
+  ['optBodega','optSame','optAprob'].forEach(id => $(id).addEventListener('change', render));
+  $('optSearch').addEventListener('input', () => { state.limit = 300; render(); });
+  const toggle = tr => { const k = tr.dataset.key; state.open.has(k) ? state.open.delete(k) : state.open.add(k); render(); };
+  $('tbody').addEventListener('click', e => {
+    if (e.target.id === 'btnMore'){ state.limit += 300; render(); return; }
+    const tr = e.target.closest('tr.row'); if (tr) toggle(tr);
+  });
+  $('tbody').addEventListener('keydown', e => { const tr = e.target.closest('tr.row'); if (tr && (e.key === 'Enter' || e.key === ' ')){ e.preventDefault(); toggle(tr); } });
+
+  fillBodegas();
+  render();
+})();
+</script>
