@@ -49,6 +49,12 @@ MODULOS = (
                 "endpoints": ("inventario.cruce_datos",),
             },
             {
+                "clave": "regularizacion",
+                "etiqueta": "Regularización",
+                "endpoint": "inventario.regularizacion",
+                "endpoints": ("inventario.regularizacion",),
+            },
+            {
                 "clave": "historial_tomas",
                 "etiqueta": "Historial de tomas",
                 "endpoint": "inventario.historial",
