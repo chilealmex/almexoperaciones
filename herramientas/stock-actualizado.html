@@ -57,6 +57,8 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
    Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
 /* Regularización de inventario (Inventario → Regularización).
    Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
+/* Regularización de inventario (Inventario → Regularización).
+   Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
 .regx{--bg:#F2F4F3; --surface:#FFFFFF; --surface2:#EDF1EF; --ink:#16201D; --muted:#5E6B66; --line:#DCE3E0;
   --accent:#245E8F; --accent-ink:#FFFFFF; --accent-soft:#E1EBF4;
   --in:#1B7446; --in-soft:#E0F2E7; --out:#B0362A; --out-soft:#FAE3E0; --warn:#8A5A00; --warn-soft:#FBEDCF; --gray-soft:#ECEFEE;
@@ -223,6 +225,9 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
 .regx .recount{width:96px;margin-top:4px;text-align:right;font:inherit;font-size:12px;padding:3px 6px;border:1px dashed var(--line);border-radius:6px;background:var(--surface);color:var(--ink)}
 .regx .recount:not(:placeholder-shown){border-style:solid;border-color:var(--accent);background:var(--accent-soft)}
 .regx .linea{font-size:12px;white-space:nowrap}
+.regx .recountbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.regx .recountbar .drop{flex:1 1 320px;padding:8px 12px}
+.regx .recountbar .num{width:24px;height:24px}
 </style>
 <div class="suelta">
 <h1>Regularización de inventario</h1>
@@ -249,6 +254,15 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
       <span class="num">2</span>
       <span class="txt"><span class="t">Informe de Documentos de Defontana</span><span class="s" id="stMov">Elige o arrastra el informe de ingresos y egresos</span></span>
     </div>
+  </section>
+
+  <section class="recountbar">
+    <div class="drop" id="dropRecount">
+      <input type="file" id="fileRecount" accept=".xlsx,.xls,.csv" aria-label="Excel con recuentos de hoy">
+      <span class="num">+</span>
+      <span class="txt"><span class="t">Recuentos de hoy (opcional)</span><span class="s" id="stRecount">Excel con el código y el físico contado hoy: reemplaza el conteo de esos productos</span></span>
+    </div>
+    <button type="button" class="rx-btn ghost sm" id="btnClearRecount" hidden>Quitar recuentos</button>
   </section>
 
   <section class="checkpanel" id="checkPanel" hidden>
@@ -428,6 +442,25 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
   }
   function guardarRecuentos(){
     try { localStorage.setItem('regx-recuentos', JSON.stringify(Object.fromEntries([...state.recount].map(([k, v]) => [k, {qty: v.qty, fecha: +v.fecha}])))); } catch(_){}
+  }
+
+  // Excel de recuentos: una fila por producto con el código y la cantidad contada hoy
+  function parseRecount(rows){
+    for (let i = 0; i < Math.min(rows.length, 30); i++){
+      const h = rows[i].map(strip);
+      const ci = h.findIndex(x => ['CODIGO', 'ARTICULO', 'COD ARTICULO', 'CODIGO ARTICULO'].includes(x));
+      const qi = h.findIndex(x => ['FISICO', 'STOCK FISICO', 'CANTIDAD', 'RECUENTO', 'CONTADO', 'CANTIDAD FISICA'].includes(x));
+      if (ci < 0 || qi < 0) continue;
+      const fi = h.findIndex(x => ['FECHA', 'FECHA Y HORA DEL CONTEO', 'FECHA DEL CONTEO'].includes(x));
+      const out = [];
+      for (const r of rows.slice(i + 1)){
+        const code = String(r[ci] ?? '').trim(), q = num(r[qi]);
+        if (!code || q == null) continue;
+        out.push({key: keyOf(code), qty: q, fecha: (fi >= 0 && parseDate(r[fi])) || new Date()});
+      }
+      return out;
+    }
+    throw new Error('No encontré las columnas del código (Código o Artículo) y de la cantidad (Físico o Cantidad).');
   }
 
   // ---------- Conteo del sistema ----------
@@ -1364,6 +1397,28 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
   setupLoader('fileStock', 'dropStock', 'stStock', parseStock, 'stock', 'códigos');
   setupLoader('fileMov', 'dropMov', 'stMov', parseMov, 'mov', 'líneas de documentos');
   setupLoader('fileMov2', 'dropMov2', 'stMov2', parseMov, 'mov2', 'líneas de documentos');
+  function refreshRecountStatus(){
+    const n = state.recount.size;
+    $('btnClearRecount').hidden = !n;
+    if (n) $('stRecount').textContent = `${fmt(n)} ${n === 1 ? 'producto recontado' : 'productos recontados'}: se usa el recuento en vez del conteo original (filtro “Recontados”).`;
+  }
+  $('fileRecount').addEventListener('change', () => {
+    const file = $('fileRecount').files[0]; $('fileRecount').value = ''; if (!file) return;
+    file.arrayBuffer().then(buf => {
+      const wb = XLSX.read(buf, {type:'array'});
+      const data = parseRecount(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header:1, raw:true, defval:null, blankrows:false}));
+      if (!data.length) throw new Error('El archivo no tiene recuentos.');
+      for (const d of data) state.recount.set(d.key, {qty: d.qty, fecha: d.fecha});
+      guardarRecuentos(); $('dropRecount').classList.remove('err'); $('dropRecount').classList.add('ok');
+      render(); refreshRecountStatus();
+      $('stRecount').textContent = file.name + ' · ' + $('stRecount').textContent;
+    }).catch(e => { $('dropRecount').classList.add('err'); $('stRecount').textContent = e.message || 'No se pudo leer el archivo.'; });
+  });
+  $('btnClearRecount').addEventListener('click', () => {
+    state.recount.clear(); guardarRecuentos(); $('dropRecount').classList.remove('ok');
+    $('stRecount').textContent = 'Excel con el código y el físico contado hoy: reemplaza el conteo de esos productos';
+    render(); refreshRecountStatus();
+  });
   $('ajDocs').addEventListener('click', e => {
     const b = e.target.closest('[data-all]'); if (!b) return;
     const v = b.dataset.all;
@@ -1409,7 +1464,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     if (rc){
       const v = num(rc.value);
       if (v == null) state.recount.delete(rc.dataset.key); else state.recount.set(rc.dataset.key, {qty: v, fecha: new Date()});
-      guardarRecuentos(); render(); return;
+      guardarRecuentos(); render(); refreshRecountStatus(); return;
     }
     const inp = e.target.closest('input.pmp'); if (!inp) return;
     const v = num(inp.value);
@@ -1420,5 +1475,6 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
   fillBodegas();
   fillLineas();
   render();
+  refreshRecountStatus();
 })();
 </script>

@@ -43,6 +43,15 @@
     </div>
   </section>
 
+  <section class="recountbar">
+    <div class="drop" id="dropRecount">
+      <input type="file" id="fileRecount" accept=".xlsx,.xls,.csv" aria-label="Excel con recuentos de hoy">
+      <span class="num">+</span>
+      <span class="txt"><span class="t">Recuentos de hoy (opcional)</span><span class="s" id="stRecount">Excel con el código y el físico contado hoy: reemplaza el conteo de esos productos</span></span>
+    </div>
+    <button type="button" class="rx-btn ghost sm" id="btnClearRecount" hidden>Quitar recuentos</button>
+  </section>
+
   <section class="checkpanel" id="checkPanel" hidden>
     <div class="drop" id="dropMov2">
       <input type="file" id="fileMov2" accept=".xlsx,.xls,.csv" aria-label="Informe de Defontana actualizado">

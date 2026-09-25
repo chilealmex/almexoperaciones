@@ -118,6 +118,25 @@
     try { localStorage.setItem('regx-recuentos', JSON.stringify(Object.fromEntries([...state.recount].map(([k, v]) => [k, {qty: v.qty, fecha: +v.fecha}])))); } catch(_){}
   }
 
+  // Excel de recuentos: una fila por producto con el código y la cantidad contada hoy
+  function parseRecount(rows){
+    for (let i = 0; i < Math.min(rows.length, 30); i++){
+      const h = rows[i].map(strip);
+      const ci = h.findIndex(x => ['CODIGO', 'ARTICULO', 'COD ARTICULO', 'CODIGO ARTICULO'].includes(x));
+      const qi = h.findIndex(x => ['FISICO', 'STOCK FISICO', 'CANTIDAD', 'RECUENTO', 'CONTADO', 'CANTIDAD FISICA'].includes(x));
+      if (ci < 0 || qi < 0) continue;
+      const fi = h.findIndex(x => ['FECHA', 'FECHA Y HORA DEL CONTEO', 'FECHA DEL CONTEO'].includes(x));
+      const out = [];
+      for (const r of rows.slice(i + 1)){
+        const code = String(r[ci] ?? '').trim(), q = num(r[qi]);
+        if (!code || q == null) continue;
+        out.push({key: keyOf(code), qty: q, fecha: (fi >= 0 && parseDate(r[fi])) || new Date()});
+      }
+      return out;
+    }
+    throw new Error('No encontré las columnas del código (Código o Artículo) y de la cantidad (Físico o Cantidad).');
+  }
+
   // ---------- Conteo del sistema ----------
   // La página trae el conteo de "Stock y conteo" como JSON: [código, nombre, stock físico, estado, contado por, fecha y hora]
   function conteoDelSistema(){
@@ -1052,6 +1071,28 @@
   setupLoader('fileStock', 'dropStock', 'stStock', parseStock, 'stock', 'códigos');
   setupLoader('fileMov', 'dropMov', 'stMov', parseMov, 'mov', 'líneas de documentos');
   setupLoader('fileMov2', 'dropMov2', 'stMov2', parseMov, 'mov2', 'líneas de documentos');
+  function refreshRecountStatus(){
+    const n = state.recount.size;
+    $('btnClearRecount').hidden = !n;
+    if (n) $('stRecount').textContent = `${fmt(n)} ${n === 1 ? 'producto recontado' : 'productos recontados'}: se usa el recuento en vez del conteo original (filtro “Recontados”).`;
+  }
+  $('fileRecount').addEventListener('change', () => {
+    const file = $('fileRecount').files[0]; $('fileRecount').value = ''; if (!file) return;
+    file.arrayBuffer().then(buf => {
+      const wb = XLSX.read(buf, {type:'array'});
+      const data = parseRecount(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header:1, raw:true, defval:null, blankrows:false}));
+      if (!data.length) throw new Error('El archivo no tiene recuentos.');
+      for (const d of data) state.recount.set(d.key, {qty: d.qty, fecha: d.fecha});
+      guardarRecuentos(); $('dropRecount').classList.remove('err'); $('dropRecount').classList.add('ok');
+      render(); refreshRecountStatus();
+      $('stRecount').textContent = file.name + ' · ' + $('stRecount').textContent;
+    }).catch(e => { $('dropRecount').classList.add('err'); $('stRecount').textContent = e.message || 'No se pudo leer el archivo.'; });
+  });
+  $('btnClearRecount').addEventListener('click', () => {
+    state.recount.clear(); guardarRecuentos(); $('dropRecount').classList.remove('ok');
+    $('stRecount').textContent = 'Excel con el código y el físico contado hoy: reemplaza el conteo de esos productos';
+    render(); refreshRecountStatus();
+  });
   $('ajDocs').addEventListener('click', e => {
     const b = e.target.closest('[data-all]'); if (!b) return;
     const v = b.dataset.all;
@@ -1097,7 +1138,7 @@
     if (rc){
       const v = num(rc.value);
       if (v == null) state.recount.delete(rc.dataset.key); else state.recount.set(rc.dataset.key, {qty: v, fecha: new Date()});
-      guardarRecuentos(); render(); return;
+      guardarRecuentos(); render(); refreshRecountStatus(); return;
     }
     const inp = e.target.closest('input.pmp'); if (!inp) return;
     const v = num(inp.value);
@@ -1108,4 +1149,5 @@
   fillBodegas();
   fillLineas();
   render();
+  refreshRecountStatus();
 })();
