@@ -134,6 +134,16 @@ tr.detail td{background:var(--bg);padding:12px 16px 16px}
 .det tr.pre td{color:var(--muted)}
 .det tr.after td{font-weight:600}
 .det tr.zero td{background:var(--warn-soft)}
+.checkpanel{display:flex;flex-direction:column;gap:10px}
+.ajbox{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
+.ajbox h3{margin:0;font-size:13px;font-weight:700}
+.ajbox .note{margin:0}
+.ajdoc{display:flex;gap:8px;align-items:center;font-size:13px}
+.ajdoc b{font-variant-numeric:tabular-nums}
+.ajbox details summary{cursor:pointer;font-size:12px;color:var(--muted);padding:4px 0}
+.ajlist{display:flex;flex-direction:column;gap:4px;max-height:220px;overflow:auto;padding:4px 0}
+.a-good{background:var(--in-soft);color:var(--in)}
+tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:var(--warn)}
 .empty{padding:32px;text-align:center;color:var(--muted)}
 .foot{font-size:12px;color:var(--muted);max-width:110ch;margin:0}
 .foot b{color:var(--ink)}
@@ -149,6 +159,7 @@ tr.detail td{background:var(--bg);padding:12px 16px 16px}
     <div class="views" role="tablist" aria-label="Vista">
       <button class="view" role="tab" data-view="reg" aria-selected="true" type="button">Productos</button>
       <button class="view" role="tab" data-view="zero" aria-selected="false" type="button">Documentos a costo $0</button>
+      <button class="view" role="tab" data-view="check" aria-selected="false" type="button">Verificar ajustes</button>
     </div>
   </div>
 
@@ -166,6 +177,15 @@ tr.detail td{background:var(--bg);padding:12px 16px 16px}
   </section>
 
   <div class="sample" id="sampleNote">Estos son datos de ejemplo inventados. Carga tus dos archivos arriba para ver tu inventario.</div>
+
+  <section class="checkpanel" id="checkPanel" hidden>
+    <div class="drop" id="dropMov2">
+      <input type="file" id="fileMov2" accept=".xlsx,.xls,.csv" aria-label="Informe de Defontana actualizado">
+      <span class="num">3</span>
+      <span class="txt"><span class="t">Informe de Documentos de Defontana actualizado (con los ajustes)</span><span class="s" id="stMov2">Descárgalo de nuevo desde Defontana, ya con los ajustes hechos, y súbelo aquí</span></span>
+    </div>
+    <div id="ajDocs"></div>
+  </section>
 
   <section class="summary" id="summary"></section>
 
@@ -325,8 +345,8 @@ tr.detail td{background:var(--bg);padding:12px 16px 16px}
 
   // ---------- Estado ----------
   const ex = sample();
-  const state = {stock:ex.S, mov:ex.M, isSample:true, view:'reg', filter:{reg:'all', zero:'all'},
-    sort:{reg:{k:'code', d:1}, zero:{k:'fecha', d:1}}, open:new Set(), pmpEdit:new Map(), rows:[], zero:[]};
+  const state = {stock:ex.S, mov:ex.M, isSample:true, view:'reg', filter:{reg:'all', zero:'all', check:'all'}, mov2:null, ajSel:null, checkRows:[], docGroups:[],
+    sort:{reg:{k:'code', d:1}, zero:{k:'fecha', d:1}, check:{k:'code', d:1}}, open:new Set(), pmpEdit:new Map(), rows:[], zero:[]};
 
   function fillBodegas(){
     const sel = $('optBodega'), prev = sel.value, count = new Map();
@@ -425,7 +445,7 @@ tr.detail td{background:var(--bg);padding:12px 16px 16px}
     return {cause, obs};
   }
 
-  function compute(){
+  function compute(movList){
     const bod = $('optBodega').value, sameAfter = $('optSame').value === 'after', onlyAprob = $('optAprob').checked;
     // El mismo código puede venir escrito de varias formas: se agrupa por la clave normalizada
     const groups = new Map();
@@ -434,7 +454,7 @@ tr.detail td{background:var(--bg);padding:12px 16px 16px}
     const byName = new Map();
     for (const s of state.stock){ const nk = keyOf(s.name); if (nk.length < 6) continue; byName.set(nk, byName.has(nk) && byName.get(nk) !== s.key ? null : s.key); }
     const byKey = new Map();
-    for (const m of state.mov){
+    for (const m of movList){
       if (onlyAprob && m.estado && !/aprob/i.test(m.estado)) continue;
       m._k = m.key; m._byName = false;
       if (!groups.has(m.key) && byName.get(m.nameKey)){ m._k = byName.get(m.nameKey); m._byName = true; }
@@ -454,10 +474,12 @@ tr.detail td{background:var(--bg);padding:12px 16px 16px}
       const counted = !!s && s.stock != null && s.fecha != null;
       const ck = counted ? dayKey(s.fecha) : null;
       const after = m => { const dk = dayKey(m.fecha); return dk > ck || (dk === ck && sameAfter); };
-      let ins = 0, outs = 0, sameDay = 0, sameNet = 0, idx = null;
+      let ins = 0, outs = 0, sameDay = 0, sameNet = 0, idx = null, aj = 0, ajVal = 0;
+      const ajDocs = docs.filter(m => m._aj);
+      for (const m of ajDocs){ aj += m.kind === 'in' ? m.qty : -m.qty; ajVal += (m.kind === 'in' ? 1 : -1) * (m.valor || 0); }
       docs.forEach((m, j) => {
         if (!counted || !m.fecha) return;
-        if (after(m)){ if (inBod(m)){ if (m.kind === 'in') ins += m.qty; else outs += m.qty; } }
+        if (after(m)){ if (!m._aj && inBod(m)){ if (m.kind === 'in') ins += m.qty; else outs += m.qty; } }
         else { idx = j; if (dayKey(m.fecha) === ck){ sameDay++; sameNet += m.kind === 'in' ? m.qty : -m.qty; } }
       });
       // Defontana lleva un saldo por cada artículo: si el código existe escrito de varias formas, se suman
@@ -489,26 +511,87 @@ tr.detail td{background:var(--bg);padding:12px 16px 16px}
       else if (diff == null) st = 'nodata';
       else st = diff > EPS ? 'up' : diff < -EPS ? 'down' : 'ok';
       const zeros = docs.filter(m => m.valor != null && Math.abs(m.valor) < EPS && m.qty > EPS).length;
-      const dx = counted ? diagnose(s, docs, after, diff, sysAtCount, sameNet, zeros) : {cause:null, obs:[]};
+      const dx = counted ? diagnose(s, docs.filter(m => !m._aj), after, diff, sysAtCount, sameNet, zeros) : {cause:null, obs:[]};
       if (dx.cause === 'late' || dx.cause === 'sameday') st = 'check';
-      return {cause:dx.cause, obs:dx.obs, alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, counted, docs, ins, outs, sameDay,
+      return {cause:dx.cause, obs:dx.obs, alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs,
         sysAtCount, sysNow, realNow, diff, st, pmp, edited, pmpSrc: edited ? 'Ingresado a mano' : pm ? pm.src : 'Sin costo en Defontana',
         valor: diff != null && Math.abs(diff) > EPS && pmp != null ? diff * pmp : (st === 'ok' ? 0 : null), zeros};
     };
     const seen = new Set();
-    state.rows = [...groups.values()].map(list => { const s = mergeGroup(list); seen.add(s.key); return build(s, byKey.get(s.key) || []); });
-    for (const [k, docs] of byKey) if (!seen.has(k) && docs.some(inBod)) state.rows.push(build(null, docs));
+    const rows = [...groups.values()].map(list => { const s = mergeGroup(list); seen.add(s.key); return build(s, byKey.get(s.key) || []); });
+    for (const [k, docs] of byKey) if (!seen.has(k) && docs.some(inBod)) rows.push(build(null, docs));
 
-    const names = new Map(state.rows.map(r => [r.key, r.name]));
-    state.zero = [];
+    const names = new Map(rows.map(r => [r.key, r.name]));
+    const zero = [];
     for (const [k, docs] of byKey) docs.forEach((m, j) => {
       if (!inBod(m) || m.valor == null || Math.abs(m.valor) > EPS || m.qty <= EPS) return;
       const pm = pmpOf(docs, j - 1 >= 0 ? j - 1 : null);
       const edited = state.pmpEdit.has(k);
       const pmp = edited ? state.pmpEdit.get(k) : pm ? pm.v : null;
-      state.zero.push({key:k, m, code:m.art, name:m.desc || names.get(k) || '', pmp, edited,
+      zero.push({key:k, m, code:m.art, name:m.desc || names.get(k) || '', pmp, edited,
         pmpSrc: edited ? 'Ingresado a mano' : pm ? pm.src : 'Sin costo en Defontana', valor: pmp != null ? pmp * m.qty : null});
     });
+    return {rows, zero, orphan: [...byKey.keys()].filter(k => !seen.has(k)).length};
+  }
+
+  // ---------- Verificar ajustes ----------
+  const docId = m => [strip(m.tipo), m.folio, dayKey(m.fecha)].join('|');
+  function computeCheck(){
+    state.checkRows = []; state.docGroups = [];
+    if (!state.mov2) return;
+    state.mov2.forEach(m => { m._aj = false; });
+    const pre = compute(state.mov2).rows;
+    // Documentos posteriores al conteo; se proponen como ajuste los que calzan con las diferencias
+    const groups = new Map();
+    for (const r of pre){
+      if (!r.counted) continue;
+      const ck = dayKey(r.s.fecha);
+      for (const m of r.docs){
+        if (!m.fecha || dayKey(m.fecha) <= ck) continue;
+        const id = docId(m);
+        let g = groups.get(id);
+        if (!g){ g = {id, tipo:m.tipo, folio:m.folio, fecha:m.fecha, lines:0, match:0, valor:0}; groups.set(id, g); }
+        g.lines++; g.valor += (m.kind === 'in' ? 1 : -1) * (m.valor || 0);
+        if (r.diff != null && near(m.qty, Math.abs(r.diff)) && ((r.diff < 0 && m.kind === 'out') || (r.diff > 0 && m.kind === 'in'))) g.match++;
+      }
+    }
+    const list = [...groups.values()];
+    const tot = new Map();
+    for (const m of state.mov2){ const t = tot.get(docId(m)) || {lines:0, valor:0}; t.lines++; t.valor += (m.kind === 'in' ? 1 : -1) * (m.valor || 0); tot.set(docId(m), t); }
+    list.forEach(g => { const t = tot.get(g.id); if (t){ g.lines = t.lines; g.valor = t.valor; } g.auto = g.lines >= 5 && g.match / g.lines >= 0.6; });
+    list.sort((a, b) => (b.auto - a.auto) || (b.fecha - a.fecha));
+    state.docGroups = list;
+    if (!state.ajSel) state.ajSel = new Set(list.filter(g => g.auto).map(g => g.id));
+    state.mov2.forEach(m => { m._aj = state.ajSel.has(docId(m)); });
+    const res = compute(state.mov2).rows;
+    for (const r of res){
+      const hasAj = Math.abs(r.aj) > EPS;
+      if (!r.counted || r.diff == null){ if (hasAj) state.checkRows.push({...r, ck:'other', expected:null, gap:null, cobs:[!r.counted ? 'Se ajustó, pero este producto no está contado.' : 'Se ajustó, pero no hay saldo de Defontana al momento del conteo para comparar.']}); continue; }
+      const expected = r.realNow, actual = r.sysNow, gap = actual - expected;
+      const late = r.cause === 'late' || r.cause === 'sameday';   // la causa se calcula sin los documentos de ajuste
+      const need = r.diff, cobs = [];
+      const dirTxt = g => g > 0 ? `Defontana tiene ${fmt(g)} de más: falta una salida de ${fmt(g)}.` : `Defontana tiene ${fmt(-g)} de menos: falta una entrada de ${fmt(-g)}.`;
+      const ajTxt = hasAj ? r.ajDocs.map(m => `${m.tipo} #${m.folio} (${m.kind === 'in' ? '+' : '−'}${fmt(m.qty)})`).join(', ') : '';
+      let ck;
+      if (Math.abs(gap) <= EPS){
+        if (late && hasAj){
+          ck = 'double';
+          const lateDoc = r.docs.filter(m => !m._aj && m.fecha && dayKey(m.fecha) > dayKey(r.s.fecha) && near(m.qty, Math.abs(need)))[0];
+          cobs.push(`Cuadra en el cálculo, pero antes del ajuste ya se había registrado ${lateDoc ? lateDoc.tipo + ' #' + lateDoc.folio + ' del ' + fmtDate(lateDoc.fecha) : 'un documento'} por la misma cantidad. Si esa mercadería salió o entró antes del conteo, el ajuste la contó dos veces. Cuenta de nuevo: si en bodega hay ${fmt(actual - need)}, reversa el ajuste.`);
+        } else { ck = 'ok'; cobs.push(hasAj ? `Quedó cuadrado con ${ajTxt}. Defontana tiene ${fmt(actual)}, igual al stock real.` : Math.abs(need) <= EPS ? 'Ya estaba cuadrado y sigue cuadrado.' : `Quedó cuadrado sin ajuste: los movimientos posteriores lo corrigieron. Defontana tiene ${fmt(actual)}.`); }
+      } else if (!hasAj){
+        if (late){ ck = 'review'; cobs.push(`No se ajustó. Probablemente no hacía falta: la diferencia la explica un documento registrado después del conteo. Si al contar ya había salido o entrado esa mercadería, está bien así. Si no, ${dirTxt(gap).toLowerCase()}`); }
+        else { ck = 'pending'; cobs.push(`No se ajustó. ${dirTxt(gap)}`); }
+      } else {
+        ck = 'wrong';
+        cobs.push(`Se ajustó ${sgn(r.aj)} con ${ajTxt}, pero había que ajustar ${sgn(need)}. ${dirTxt(gap)}`);
+      }
+      if (r.ins || r.outs) cobs.push(`Movimientos después del conteo (sin contar ajustes): ${r.ins ? '+' + fmt(r.ins) : ''}${r.ins && r.outs ? ' ' : ''}${r.outs ? '−' + fmt(r.outs) : ''}.`);
+      const aj0 = r.ajDocs.filter(m => m.valor != null && Math.abs(m.valor) < EPS && m.qty > EPS);
+      if (aj0.length) cobs.push('El ajuste quedó a costo $0: el producto no tenía costo en Defontana.');
+      if (!hasAj && Math.abs(need) <= EPS && Math.abs(gap) <= EPS) continue;   // cuadrado desde antes, sin ajuste: no se lista
+      state.checkRows.push({...r, ck, expected, gap, cobs});
+    }
   }
 
   // ---------- Configuración de las vistas ----------
@@ -535,6 +618,45 @@ tr.detail td{background:var(--bg);padding:12px 16px 16px}
     ['out', 'Egresos a $0', z => z.m.kind === 'out', 'var(--out)'],
     ['nopmp', 'Sin PMP', z => !(z.pmp > 0), 'var(--warn)']
   ];
+  const CHECK = {
+    ok:['a-good','Quedó bien','good'], double:['a-warn','Cuadra, revisar doble ajuste','warn'], pending:['a-down','Falta ajustar','bad'],
+    wrong:['a-down','Ajuste con diferencia','bad'], review:['a-warn','Revisar si hace falta ajuste','warn'], other:['a-warn','Ajustado sin datos del conteo','warn']
+  };
+  const CHECK_FILTERS = [
+    ['all', 'Todos', r => true, null],
+    ['ok', 'Quedó bien', r => r.ck === 'ok', 'var(--in)'],
+    ['bad', 'Con problema', r => r.ck !== 'ok', 'var(--out)'],
+    ['wrong', 'Ajuste con diferencia', r => r.ck === 'wrong', 'var(--out)'],
+    ['pending', 'Falta ajustar', r => r.ck === 'pending', 'var(--out)'],
+    ['double', 'Posible doble ajuste', r => r.ck === 'double', 'var(--warn)'],
+    ['review', 'Revisar si hace falta', r => r.ck === 'review', 'var(--warn)'],
+    ['other', 'Ajustados sin conteo', r => r.ck === 'other', 'var(--warn)']
+  ];
+  const CHECK_COLS = [
+    ['code', 'Producto', '', r => r.code],
+    ['contado', 'Contado', 'num', r => r.s ? r.s.stock : null],
+    ['need', 'Había que ajustar', 'num', r => r.diff],
+    ['aj', 'Se ajustó', 'num', r => r.aj],
+    ['ck', 'Resultado', '', r => r.ck],
+    ['obs', 'Detalle', '', r => r.ck],
+    ['exp', 'Debería tener Defontana', 'num', r => r.expected],
+    ['now', 'Tiene Defontana', 'num', r => r.sysNow],
+    ['gap', 'Diferencia que queda', 'num', r => r.gap]
+  ];
+  function checkRow(r){
+    const [cls, label, stripe] = CHECK[r.ck];
+    return `<tr class="row s-${stripe}${state.open.has(r.key) ? ' open' : ''}" data-key="${esc(r.key)}" tabindex="0">
+      <td><div class="code">${esc(r.code)}</div><div class="pname">${esc(r.name)}</div>${aliasNote(r)}</td>
+      <td class="num">${r.counted ? fmt(r.s.stock) + '<div class="small">' + fmtDate(r.s.fecha) + '</div>' : '—'}</td>
+      <td class="num diff ${r.diff > EPS ? 'plus' : r.diff < -EPS ? 'minus' : 'mut'}">${r.diff == null ? '—' : sgn(r.diff)}</td>
+      <td class="num diff ${r.aj > EPS ? 'plus' : r.aj < -EPS ? 'minus' : 'mut'}">${Math.abs(r.aj) > EPS ? sgn(r.aj) + '<div class="small">' + money(r.ajVal) + '</div>' : '—'}</td>
+      <td><span class="pill ${cls}">${label}</span></td>
+      <td class="obs"><div class="why">${r.cobs[0]}</div>${r.cobs.length > 1 ? '<div class="more-obs">' + r.cobs.slice(1).join('<br>') + '</div>' : ''}</td>
+      <td class="num">${fmt(r.expected)}</td>
+      <td class="num">${fmt(r.sysNow)}</td>
+      <td class="num diff ${r.gap == null || Math.abs(r.gap) <= EPS ? 'mut' : 'minus'}">${r.gap == null ? '—' : Math.abs(r.gap) <= EPS ? '0' : sgn(r.gap)}</td></tr>`;
+  }
+
   const REG_COLS = [
     ['code', 'Producto', '', r => r.code],
     ['contado', 'Contado', 'num', r => r.s ? r.s.stock : null],
@@ -606,7 +728,7 @@ tr.detail td{background:var(--bg);padding:12px 16px 16px}
   function detail(r){
     if (!r.docs.length) return `<tr class="detail"><td colspan="9"><span class="note">Este código no tiene documentos en el informe de Defontana, así que no se conoce su saldo en el sistema. Revisa su stock directamente en Defontana.</span></td></tr>`;
     const ck = r.counted ? dayKey(r.s.fecha) : null, sameAfter = $('optSame').value === 'after';
-    const when = m => { if (ck == null) return ''; const dk = dayKey(m.fecha); return dk < ck ? 'Antes' : dk > ck ? 'Después' : sameAfter ? 'Mismo día (después)' : 'Mismo día (antes)'; };
+    const when = m => { if (m._aj) return 'Ajuste'; if (ck == null) return ''; const dk = dayKey(m.fecha); return dk < ck ? 'Antes' : dk > ck ? 'Después' : sameAfter ? 'Mismo día (después)' : 'Mismo día (antes)'; };
     const rows = r.docs.map(m => {
       const w = when(m), zero = m.valor != null && Math.abs(m.valor) < EPS && m.qty > EPS;
       return `<tr class="${zero ? 'zero' : w.startsWith('Antes') || w === 'Mismo día (antes)' ? 'pre' : 'after'}">
@@ -636,14 +758,41 @@ tr.detail td{background:var(--bg);padding:12px 16px 16px}
     });
   }
 
+  function renderAjDocs(){
+    const box = $('ajDocs');
+    if (!state.mov2){ box.innerHTML = ''; return; }
+    const G = state.docGroups, auto = G.filter(g => g.auto), rest = G.filter(g => !g.auto);
+    const item = g => `<label class="ajdoc"><input type="checkbox" data-doc="${esc(g.id)}"${state.ajSel.has(g.id) ? ' checked' : ''}> <span>${esc(g.tipo)} <b>#${esc(g.folio)}</b> del ${fmtDate(g.fecha)} · ${fmt(g.lines)} ${g.lines === 1 ? 'línea' : 'líneas'} · ${money(g.valor)}${g.auto ? ' · ' + fmt(g.match) + ' calzan con las diferencias' : ''}</span></label>`;
+    box.innerHTML = `<div class="ajbox"><h3>Documentos de ajuste</h3>
+      <p class="note">${auto.length ? 'Encontré estos documentos que calzan con las diferencias del conteo. Marca o desmarca los que corresponden a ajustes de inventario.' : 'No encontré documentos que calcen con las diferencias. Marca abajo los documentos de ajuste.'}</p>
+      ${auto.map(item).join('')}
+      ${rest.length ? `<details${auto.length ? '' : ' open'}><summary>Otros documentos posteriores al conteo (${fmt(rest.length)})</summary><div class="ajlist">${rest.map(item).join('')}</div></details>` : ''}</div>`;
+  }
+
   function render(){
-    compute();
-    const reg = state.view === 'reg';
+    const base = compute(state.mov);
+    state.rows = base.rows; state.zero = base.zero; state.orphan = base.orphan;
+    computeCheck();
+    const reg = state.view === 'reg', chk = state.view === 'check';
     document.querySelectorAll('.view').forEach(b => b.setAttribute('aria-selected', b.dataset.view === state.view));
-    const all = reg ? state.rows : state.zero, F = reg ? REG_FILTERS : ZERO_FILTERS, cols = reg ? REG_COLS : ZERO_COLS;
+    $('checkPanel').hidden = !chk;
+    if (chk) renderAjDocs();
+    const all = reg ? state.rows : chk ? state.checkRows : state.zero, F = reg ? REG_FILTERS : chk ? CHECK_FILTERS : ZERO_FILTERS, cols = reg ? REG_COLS : chk ? CHECK_COLS : ZERO_COLS;
 
     // Resumen
-    if (reg){
+    if (chk){
+      if (!state.mov2) $('summary').innerHTML = '';
+      else {
+        const n = k => all.filter(r => r.ck === k).length;
+        const ajDocs = state.docGroups.filter(g => state.ajSel.has(g.id));
+        $('summary').innerHTML = `
+        <button class="card up" type="button" data-go="ok"><span class="lbl">Quedaron bien</span><span class="big">${fmt(n('ok'))}</span><span class="note">de ${fmt(all.length)} productos revisados</span></button>
+        <button class="card down" type="button" data-go="wrong"><span class="lbl">Ajuste con diferencia</span><span class="big">${fmt(n('wrong'))}</span><span class="note">se ajustó una cantidad distinta</span></button>
+        <button class="card down" type="button" data-go="pending"><span class="lbl">Falta ajustar</span><span class="big">${fmt(n('pending'))}</span><span class="note">siguen descuadrados</span></button>
+        <button class="card bad" type="button" data-go="double"><span class="lbl">Posible doble ajuste</span><span class="big">${fmt(n('double'))}</span><span class="note">contar de nuevo para confirmar</span></button>
+        <div class="card"><span class="lbl">Ajustes en Defontana</span><span class="big">${money(ajDocs.reduce((a, g) => a + g.valor, 0))}</span><span class="note">${fmt(ajDocs.length)} ${ajDocs.length === 1 ? 'documento' : 'documentos'}</span></div>`;
+      }
+    } else if (reg){
       const bad = all.filter(r => r.st === 'up' || r.st === 'down' || r.st === 'check'), up = bad.filter(r => r.st === 'up'), down = bad.filter(r => r.st === 'down'), chk = bad.filter(r => r.st === 'check');
       const sum = L => L.reduce((a, r) => a + (r.valor || 0), 0);
       const counted = all.filter(r => r.counted).length;
@@ -685,17 +834,21 @@ tr.detail td{background:var(--bg);padding:12px 16px 16px}
       if (sel.value){ const f0 = f, c = sel.value; f = r => f0(r) && r.cause === c; }
     }
     const q = strip($('optSearch').value);
-    const rows = sorted(all.filter(r => f(r) && (!q || strip(r.code).includes(q) || strip(r.name).includes(q) || (!reg && strip(r.m.tipo + ' ' + r.m.ref + ' ' + r.m.folio).includes(q)))), cols);
+    const zer = state.view === 'zero';
+    const rows = sorted(all.filter(r => f(r) && (!q || strip(r.code).includes(q) || strip(r.name).includes(q) || (zer && strip(r.m.tipo + ' ' + r.m.ref + ' ' + r.m.folio).includes(q)))), cols);
     state.visible = rows;
     const tb = $('tbody');
-    if (!rows.length){ tb.innerHTML = `<tr><td colspan="${cols.length}" class="empty">No hay productos en esta vista.</td></tr>`; }
+    if (chk && !state.mov2){ tb.innerHTML = `<tr><td colspan="${cols.length}" class="empty">Sube arriba el Informe de Documentos de Defontana descargado de nuevo, ya con los ajustes hechos. El programa buscará los documentos de ajuste y revisará producto por producto si quedó cuadrado.</td></tr>`; }
+    else if (!rows.length){ tb.innerHTML = `<tr><td colspan="${cols.length}" class="empty">No hay productos en esta vista.</td></tr>`; }
     else {
       const parts = [];
-      for (const r of rows){ parts.push(reg ? regRow(r) : zeroRow(r)); if (reg && state.open.has(r.key)) parts.push(detail(r)); }
+      for (const r of rows){ parts.push(reg ? regRow(r) : chk ? checkRow(r) : zeroRow(r)); if (!zer && state.open.has(r.key)) parts.push(detail(r)); }
       tb.innerHTML = parts.join('');
     }
 
-    $('foot').innerHTML = reg
+    $('foot').innerHTML = chk
+      ? '<b>Cómo se verifica.</b> “Debería tener Defontana” = Contado + ingresos − egresos registrados después del conteo, sin contar los documentos de ajuste. “Tiene Defontana” es el saldo del último documento del informe nuevo, ya con los ajustes. Si son iguales, quedó bien. “Posible doble ajuste” significa que cuadra en el cálculo, pero la diferencia del conteo calzaba con un documento registrado después del conteo: si esa mercadería ya había salido o entrado al contar, el ajuste la contó dos veces. Solo se listan los productos que estaban descuadrados o que tuvieron ajuste.'
+      : reg
       ? '<b>Cómo se calcula.</b> Diferencia = Contado − Defontana al conteo. “Defontana al conteo” es el Saldo Inventario del último documento anterior al conteo (es el saldo del producto en todas las bodegas). Si es positiva hay que <b>aumentar</b> (entrada por ajuste); si es negativa, <b>disminuir</b> (salida por ajuste). Como el ajuste se hace hoy, la cantidad también es igual a Stock real hoy − Defontana hoy. El PMP es Valor Inventario / Saldo Inventario del último documento con saldo; puedes corregirlo en la tabla. Los códigos se cruzan sin considerar mayúsculas, tildes, espacios, puntos, comas, guiones, guiones bajos ni ceros a la izquierda; si un artículo de Defontana no cruza por código, se cruza por nombre. Haz clic en un producto para ver sus documentos.'
       : '<b>Cómo se calcula.</b> Son los documentos cuyo “Valor Movimiento” es $0. El valor que debió tener = cantidad × PMP del producto antes del documento (si no hay, el primero que aparece después). Un egreso a $0 suele ocurrir cuando el producto no tenía saldo o su PMP era $0.';
   }
@@ -716,15 +869,22 @@ tr.detail td{background:var(--bg);padding:12px 16px 16px}
     'Código': z.code, 'Nombre': z.name, 'Tipo': z.m.kind === 'in' ? 'Ingreso' : 'Egreso', 'Cantidad': z.m.qty,
     'PMP': z.pmp != null ? Math.round(z.pmp * 100) / 100 : '', 'Origen PMP': z.pmpSrc, 'Valor que debió tener': z.valor != null ? Math.round(z.valor) : ''
   });
-  const exportRows = () => (state.visible || []).map(state.view === 'reg' ? regExport : zeroExport);
+  const checkExport = r => ({
+    'Código': r.code, 'Nombre': r.name, 'Resultado': CHECK[r.ck][1], 'Detalle': r.cobs.map(x => x.replace(/<[^>]+>/g, '')).join(' '),
+    'Contado': r.s ? r.s.stock : '', 'Fecha conteo': r.counted ? fmtDate(r.s.fecha, true) : '',
+    'Había que ajustar': r.diff ?? '', 'Se ajustó': r.aj, 'Valor ajuste': Math.round(r.ajVal),
+    'Documentos de ajuste': r.ajDocs.map(m => m.tipo + ' #' + m.folio).join(', '),
+    'Debería tener Defontana': r.expected ?? '', 'Tiene Defontana': r.sysNow ?? '', 'Diferencia que queda': r.gap ?? ''
+  });
+  const exportRows = () => (state.visible || []).map(state.view === 'reg' ? regExport : state.view === 'check' ? checkExport : zeroExport);
 
   let downloads = null;
   if (window.claude && typeof window.claude.use === 'function') window.claude.use('downloads').then(d => { downloads = d; }).catch(() => {});
   $('btnXlsx').addEventListener('click', async () => {
     const rows = exportRows(); if (!rows.length) return;
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), state.view === 'reg' ? 'Regularización' : 'Documentos a costo 0');
-    const name = (state.view === 'reg' ? 'regularizacion-inventario-' : 'documentos-costo-0-') + fmtDate(new Date()) + '.xlsx';
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), {reg:'Regularización', zero:'Documentos a costo 0', check:'Verificación de ajustes'}[state.view]);
+    const name = {reg:'regularizacion-inventario-', zero:'documentos-costo-0-', check:'verificacion-ajustes-'}[state.view] + fmtDate(new Date()) + '.xlsx';
     if (downloads){
       try { await downloads.save({filename:name, data:new Blob([XLSX.write(wb, {bookType:'xlsx', type:'array'})])}); $('copyNote').textContent = ''; }
       catch(e){ $('copyNote').textContent = e && e.code === 'declined' ? 'Descarga cancelada.' : 'No se pudo descargar aquí. Usa “Copiar” y pega en Excel.'; }
@@ -758,6 +918,7 @@ tr.detail td{background:var(--bg);padding:12px 16px 16px}
         st.textContent = file.name + ' · ' + fmt(data.length) + ' ' + label;
         state.open.clear();
         if (key === 'mov') fillBodegas();
+        if (key === 'mov2'){ state.ajSel = null; if (!state.mov || !state.mov.length) { state.mov = data; fillBodegas(); } }
         render();
       }).catch(e => { drop.classList.remove('ok'); drop.classList.add('err'); st.textContent = e.message || 'No se pudo leer el archivo.'; });
     };
@@ -768,6 +929,12 @@ tr.detail td{background:var(--bg);padding:12px 16px 16px}
   }
   setupLoader('fileStock', 'dropStock', 'stStock', parseStock, 'stock', 'códigos');
   setupLoader('fileMov', 'dropMov', 'stMov', parseMov, 'mov', 'líneas de documentos');
+  setupLoader('fileMov2', 'dropMov2', 'stMov2', parseMov, 'mov2', 'líneas de documentos');
+  $('ajDocs').addEventListener('change', e => {
+    const c = e.target.closest('input[data-doc]'); if (!c) return;
+    if (c.checked) state.ajSel.add(c.dataset.doc); else state.ajSel.delete(c.dataset.doc);
+    render();
+  });
 
   // ---------- Eventos ----------
   document.querySelector('.views').addEventListener('click', e => {
