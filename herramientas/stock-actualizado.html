@@ -53,6 +53,8 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
    Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
 /* Regularización de inventario (Inventario → Regularización).
    Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
+/* Regularización de inventario (Inventario → Regularización).
+   Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
 .regx{--bg:#F2F4F3; --surface:#FFFFFF; --surface2:#EDF1EF; --ink:#16201D; --muted:#5E6B66; --line:#DCE3E0;
   --accent:#245E8F; --accent-ink:#FFFFFF; --accent-soft:#E1EBF4;
   --in:#1B7446; --in-soft:#E0F2E7; --out:#B0362A; --out-soft:#FAE3E0; --warn:#8A5A00; --warn-soft:#FBEDCF; --gray-soft:#ECEFEE;
@@ -511,7 +513,9 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     }
     // 3. Unidad de medida: múltiplos exactos (caja, paquete) o conversiones conocidas (pies, pulgadas, libras).
     // Una conversión que calza pesa más que las demás explicaciones, salvo las de fecha de documento.
-    if (cause !== 'late' && cause !== 'sameday' && s.stock > EPS && sys > EPS){
+    // Si el conteo trae su unidad y es la misma de Defontana, no se supone ninguna conversión.
+    const umConteoIgual = s.um && docs.length && umGrupo(s.um) === umGrupo(docs[docs.length - 1].um);
+    if (!umConteoIgual && cause !== 'late' && cause !== 'sameday' && s.stock > EPS && sys > EPS){
       const um = docs.length ? String(docs[docs.length - 1].um || '').toUpperCase() : '';
       const r = s.stock / sys;
       // Solo se prueba la conversión que corresponde a la unidad del producto en Defontana

@@ -203,7 +203,9 @@
     }
     // 3. Unidad de medida: múltiplos exactos (caja, paquete) o conversiones conocidas (pies, pulgadas, libras).
     // Una conversión que calza pesa más que las demás explicaciones, salvo las de fecha de documento.
-    if (cause !== 'late' && cause !== 'sameday' && s.stock > EPS && sys > EPS){
+    // Si el conteo trae su unidad y es la misma de Defontana, no se supone ninguna conversión.
+    const umConteoIgual = s.um && docs.length && umGrupo(s.um) === umGrupo(docs[docs.length - 1].um);
+    if (!umConteoIgual && cause !== 'late' && cause !== 'sameday' && s.stock > EPS && sys > EPS){
       const um = docs.length ? String(docs[docs.length - 1].um || '').toUpperCase() : '';
       const r = s.stock / sys;
       // Solo se prueba la conversión que corresponde a la unidad del producto en Defontana
