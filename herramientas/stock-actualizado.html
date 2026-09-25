@@ -35,6 +35,8 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
    Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
 /* Regularización de inventario (Inventario → Regularización).
    Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
+/* Regularización de inventario (Inventario → Regularización).
+   Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
 .regx{--bg:#F2F4F3; --surface:#FFFFFF; --surface2:#EDF1EF; --ink:#16201D; --muted:#5E6B66; --line:#DCE3E0;
   --accent:#245E8F; --accent-ink:#FFFFFF; --accent-soft:#E1EBF4;
   --in:#1B7446; --in-soft:#E0F2E7; --out:#B0362A; --out-soft:#FAE3E0; --warn:#8A5A00; --warn-soft:#FBEDCF; --gray-soft:#ECEFEE;
@@ -716,6 +718,9 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     const corr = r.cost.corr ? `<div class="small wrapsmall">PMP correcto hoy: <b>${money(r.cost.corr.pmp)}</b></div>` : '';
     return items + corr;
   }
+  // Saldo de Defontana hoy (todos los documentos del informe) y lo que falta para llegar al stock real
+  const hoyDe = r => r.sysCalc ?? r.sysNow;
+  const ajusteHoy = r => r.counted && r.realNow != null && hoyDe(r) != null ? r.realNow - hoyDe(r) : null;
   const makeCell = list => list.length ? `<ul class="make">${list.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '';
 
   // ---------- Verificar ajustes ----------
@@ -855,16 +860,16 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
   const REG_COLS = [
     ['code', 'Producto', '', r => r.code],
     ['contado', 'Contado', 'num', r => r.s ? r.s.stock : null],
-    ['sys', 'Defontana al conteo', 'num', r => r.sysAtCount],
-    ['diff', 'Diferencia', 'num', r => r.diff],
+    ['movs', 'Movimientos desde el conteo', 'num', r => r.counted ? r.ins - r.outs : null],
+    ['real', 'Debería tener Defontana hoy', 'num', r => r.realNow],
+    ['now', 'Tiene Defontana hoy', 'num', r => hoyDe(r)],
+    ['diff', 'Ajuste a hacer hoy', 'num', r => ajusteHoy(r)],
     ['st', 'Qué hacer', '', r => r.st],
     ['obs', 'Por qué está descuadrado', '', r => r.cause ? CAUSES[r.cause] : null],
     ['make', 'Qué hacer, en orden', '', r => STEP[docSteps(r)[0].k].n],
     ['costo', 'Costo a usar ($0)', 'num', r => r.cost && r.cost.need && r.cost.costos.length && r.cost.costos[0].v != null ? r.cost.costos[0].v : null],
     ['pmp', 'PMP', 'num', r => r.pmp],
-    ['valor', 'Valor ajuste', 'num', r => r.valor],
-    ['real', 'Stock real hoy', 'num', r => r.realNow],
-    ['now', 'Defontana hoy', 'num', r => r.sysCalc ?? r.sysNow]
+    ['valor', 'Valor ajuste', 'num', r => r.valor]
   ];
   const ZERO_COLS = [
     ['fecha', 'Fecha', '', z => z.m.fecha],
@@ -890,7 +895,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     return bits.length ? `<div class="alias">${bits.join(' · ')}</div>` : '';
   }
   function regRow(r){
-    const [cls, label] = ACTION[r.st];
+    const [cls, label] = ACTION[r.st], aj = ajusteHoy(r);
     const d = r.diff;
     const qty = (r.st === 'up' || r.st === 'down') ? ' ' + fmt(Math.abs(d)) : '';
     const obsCell = r => {
@@ -906,16 +911,16 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     return `<tr class="rx-row s-${r.st}${state.open.has(r.key) ? ' open' : ''}" data-key="${esc(r.key)}" tabindex="0">
       <td><div class="code">${esc(r.code)}</div><div class="pname">${esc(r.name)}</div>${aliasNote(r)}</td>
       <td class="num">${r.counted ? fmt(r.s.stock) + '<div class="small">' + fmtDate(r.s.fecha) + '</div>' : '<span class="mut">—</span>'}</td>
-      <td class="num">${fmt(r.sysAtCount)}</td>
-      <td class="num diff ${d > EPS ? 'plus' : d < -EPS ? 'minus' : 'mut'}">${d == null ? '—' : sgn(d)}</td>
+      <td class="num">${r.counted ? (r.ins || r.outs ? (r.ins ? '<span class="plus">+' + fmt(r.ins) + '</span> ' : '') + (r.outs ? '<span class="minus">−' + fmt(r.outs) + '</span>' : '') : '<span class="mut">sin movimientos</span>') : '<span class="mut">—</span>'}</td>
+      <td class="num"><b>${fmt(r.realNow)}</b></td>
+      <td class="num">${fmt(hoyDe(r))}${r.sysAtCount != null && r.counted ? '<div class="small">al conteo: ' + fmt(r.sysAtCount) + '</div>' : ''}${r.sysCalc != null && r.sysNow != null && Math.abs(r.sysCalc - r.sysNow) > EPS ? '<div class="small">última fila del informe: ' + fmt(r.sysNow) + '</div>' : ''}</td>
+      <td class="num diff ${aj > EPS ? 'plus' : aj < -EPS ? 'minus' : 'mut'}">${aj == null ? '—' : Math.abs(aj) <= EPS ? '0' : sgn(aj)}</td>
       <td><span class="pill ${cls}">${label}${qty}</span>${r.sameDay && r.counted ? '<span class="flag" title="Hay documentos el mismo día del conteo">· mismo día</span>' : ''}</td>
       <td class="obs">${obsCell(r)}</td>
       <td class="tomake">${stepsCell(docSteps(r))}</td>
       <td class="num">${costCell(r)}</td>
       <td class="num">${r.st === 'up' || r.st === 'down' || r.st === 'check' ? pmpInput(r.key, r.pmp, r.edited, r.code) : '<span class="mut">' + (r.pmp != null ? money(r.pmp) : '—') + '</span>'}</td>
-      <td class="num diff ${r.valor > 0.5 ? 'plus' : r.valor < -0.5 ? 'minus' : 'mut'}">${r.st === 'up' || r.st === 'down' || r.st === 'check' ? money(r.valor) : '—'}</td>
-      <td class="num">${fmt(r.realNow)}${r.ins || r.outs ? '<div class="small">' + (r.ins ? '<span class="plus">+' + fmt(r.ins) + '</span> ' : '') + (r.outs ? '<span class="minus">−' + fmt(r.outs) + '</span>' : '') + ' desde el conteo</div>' : ''}</td>
-      <td class="num">${fmt(r.sysCalc ?? r.sysNow)}${r.sysCalc != null && r.sysNow != null && Math.abs(r.sysCalc - r.sysNow) > EPS ? '<div class="small">informe: ' + fmt(r.sysNow) + '</div>' : ''}</td></tr>`;
+      <td class="num diff ${r.valor > 0.5 ? 'plus' : r.valor < -0.5 ? 'minus' : 'mut'}">${r.st === 'up' || r.st === 'down' || r.st === 'check' ? money(r.valor) : '—'}</td></tr>`;
   }
   function zeroRow(z){
     return `<tr>
@@ -1008,6 +1013,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
       <div class="planhead"><span class="pnum">${num}</span><div><h3>${titulo} <span class="pcount">${fmt(L.length)} ${L.length === 1 ? 'línea' : 'líneas'}</span></h3><p class="pwhy">${porque}</p></div></div>
       ${L.length ? `<div class="tablebox"><table class="plantable"><thead><tr><th class="n">#</th>${head}</tr></thead><tbody>${L.map((x, i) => `<tr><td class="n">${i + 1}</td>${row(x)}</tr>`).join('')}</tbody>${foot ? `<tfoot><tr>${foot}</tr></tfoot>` : ''}</table></div>` : '<p class="note">Nada en este paso.</p>'}
     </section>`;
+    const hoyCells = x => /^Salió sin stock/.test(x.motivo) ? '<td class="num mut">—</td><td class="num mut">—</td>' : `<td class="num"><b>${fmt(x.r.realNow)}</b></td><td class="num">${fmt(hoyDe(x.r))}</td>`;
     const costo = x => x.v != null ? `<b>${money(x.v)}</b><div class="small wrapsmall">${esc(x.src || '')}</div>` : '<span class="small">Poner costo (factura)</span>';
     box.innerHTML = `
       <div class="planintro"><b>Hazlo en este orden.</b> Defontana valoriza cada entrada y salida al PMP del momento: si se corrige el costo después, las salidas ya quedaron mal valorizadas. Las entradas van antes que las salidas para que el saldo nunca quede negativo.
@@ -1020,13 +1026,13 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
         x => `${prod(x)}<td>${esc(x.doc)}</td><td class="num">${fmt(x.qty)}</td><td class="num">${costo(x)}</td><td class="num">${x.v != null ? money(x.v * x.qty) : '—'}</td><td class="num">${x.corr && Math.abs(x.corr.ajuste) > 0.5 ? money(x.corr.ajuste) + '<div class="small">PMP queda en ' + money(x.corr.pmp) + '</div>' : '—'}</td>`,
         `<td></td><td colspan="5"><b>Total</b></td><td class="num"><b>${money(tot(P.cost))}</b></td><td></td>`)}
       ${sec(3, 'Entradas (Parte de Entrada)', 'Una Parte de Entrada por ajuste de inventario con estas líneas.', P.in,
-        '<th>Producto</th><th class="num">Cantidad</th><th class="num">Costo c/u</th><th class="num">Total</th><th>Motivo</th>',
-        x => `${prod(x)}<td class="num diff plus">${fmt(x.qty)}</td><td class="num">${costo(x)}</td><td class="num">${x.v != null ? money(x.v * x.qty) : '—'}</td><td>${esc(x.motivo)}</td>`,
-        `<td></td><td colspan="3"><b>Total</b></td><td class="num"><b>${money(tot(P.in))}</b></td><td></td>`)}
+        '<th>Producto</th><th class="num">Debería tener hoy</th><th class="num">Tiene Defontana hoy</th><th class="num">Cantidad</th><th class="num">Costo c/u</th><th class="num">Total</th><th>Motivo</th>',
+        x => `${prod(x)}${hoyCells(x)}<td class="num diff plus">${fmt(x.qty)}</td><td class="num">${costo(x)}</td><td class="num">${x.v != null ? money(x.v * x.qty) : '—'}</td><td>${esc(x.motivo)}</td>`,
+        `<td></td><td colspan="5"><b>Total</b></td><td class="num"><b>${money(tot(P.in))}</b></td><td></td>`)}
       ${sec(4, 'Salidas (Parte de Salida)', 'Una Parte de Salida por ajuste de inventario / merma con estas líneas. Defontana pondrá el PMP del día; el valor es referencial.', P.out,
-        '<th>Producto</th><th class="num">Cantidad</th><th class="num">PMP c/u</th><th class="num">Total</th><th>Motivo</th>',
-        x => `${prod(x)}<td class="num diff minus">${fmt(x.qty)}</td><td class="num">${costo(x)}</td><td class="num">${x.v != null ? money(x.v * x.qty) : '—'}</td><td>${esc(x.motivo)}</td>`,
-        `<td></td><td colspan="3"><b>Total</b></td><td class="num"><b>${money(tot(P.out))}</b></td><td></td>`)}
+        '<th>Producto</th><th class="num">Debería tener hoy</th><th class="num">Tiene Defontana hoy</th><th class="num">Cantidad</th><th class="num">PMP c/u</th><th class="num">Total</th><th>Motivo</th>',
+        x => `${prod(x)}${hoyCells(x)}<td class="num diff minus">${fmt(x.qty)}</td><td class="num">${costo(x)}</td><td class="num">${x.v != null ? money(x.v * x.qty) : '—'}</td><td>${esc(x.motivo)}</td>`,
+        `<td></td><td colspan="5"><b>Total</b></td><td class="num"><b>${money(tot(P.out))}</b></td><td></td>`)}
       <section class="plansec"><div class="planhead"><span class="pnum">5</span><div><h3>Verificar</h3><p class="pwhy">Cuando termines, descarga de nuevo el Informe de Documentos de Defontana y revísalo en la vista “Verificar ajustes”.</p></div></div></section>`;
   }
   function planExcel(){
@@ -1035,8 +1041,8 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     const hoja = (nombre, filas) => XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filas.length ? filas : [{'': 'Nada en este paso'}]), nombre);
     hoja('1 Confirmar', P.verify.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Diferencia': x.qty, 'Motivo': x.motivo, 'Qué revisar': x.txt})));
     hoja('2 Costos', P.cost.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Qué corregir': x.doc, 'Cantidad': x.qty, 'Costo a usar c/u': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Origen del costo': x.src, 'Ajuste de valor (si no se puede corregir)': x.corr ? Math.round(x.corr.ajuste) : '', 'PMP correcto hoy': x.corr ? r2(x.corr.pmp) : ''})));
-    hoja('3 Entradas', P.in.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Cantidad': x.qty, 'Costo c/u': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Origen del costo': x.src, 'Motivo': x.motivo})));
-    hoja('4 Salidas', P.out.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Cantidad': x.qty, 'PMP c/u (referencial)': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Motivo': x.motivo})));
+    hoja('3 Entradas', P.in.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Debería tener hoy': x.r.realNow ?? '', 'Tiene Defontana hoy': hoyDe(x.r) ?? '', 'Cantidad': x.qty, 'Costo c/u': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Origen del costo': x.src, 'Motivo': x.motivo})));
+    hoja('4 Salidas', P.out.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Debería tener hoy': x.r.realNow ?? '', 'Tiene Defontana hoy': hoyDe(x.r) ?? '', 'Cantidad': x.qty, 'PMP c/u (referencial)': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Motivo': x.motivo})));
     XLSX.writeFile(wb, 'plan-de-ajustes-' + fmtDate(new Date()) + '.xlsx');
   }
 
@@ -1144,7 +1150,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     $('foot').innerHTML = chk
       ? '<b>Cómo se verifica.</b> “Debería tener Defontana” = Contado + ingresos − egresos registrados después del conteo, sin contar los documentos de ajuste. “Tiene Defontana” es el saldo de Defontana al conteo más todos los documentos posteriores, incluidos los ajustes (se calcula con los documentos para no depender del orden de las filas; si la última fila del informe muestra otro saldo, se avisa). Si son iguales, quedó bien. “Posible doble ajuste” significa que cuadra en el cálculo, pero la diferencia del conteo calzaba con un documento registrado después del conteo: si esa mercadería ya había salido o entrado al contar, el ajuste la contó dos veces. Solo se listan los productos que estaban descuadrados o que tuvieron ajuste.'
       : reg
-      ? '<b>Cómo se calcula.</b> Diferencia = Contado − Defontana al conteo. “Defontana al conteo” es el Saldo Inventario del último documento anterior al conteo (es el saldo del producto en todas las bodegas). Si es positiva hay que <b>aumentar</b> (entrada por ajuste); si es negativa, <b>disminuir</b> (salida por ajuste). Como el ajuste se hace hoy, la cantidad también es igual a Stock real hoy − Defontana hoy. El PMP es Valor Inventario / Saldo Inventario del último documento con saldo; puedes corregirlo en la tabla. Los códigos se cruzan sin considerar mayúsculas, tildes, espacios, puntos, comas, guiones, guiones bajos ni ceros a la izquierda; si un artículo de Defontana no cruza por código, se cruza por nombre. Haz clic en un producto para ver sus documentos.'
+      ? '<b>Cómo se calcula.</b> “Debería tener Defontana hoy” = lo contado + las entradas − las salidas registradas después del conteo: es lo que tendría Defontana si el ajuste se hubiera hecho al contar. “Tiene Defontana hoy” es el saldo con todos los documentos del informe (debajo, el saldo que tenía al momento del conteo). “Ajuste a hacer hoy” = Debería tener − Tiene: si es positivo, Parte de Entrada; si es negativo, Parte de Salida. El saldo de Defontana es el del producto en todas las bodegas. El PMP es Valor Inventario / Saldo Inventario del último documento con saldo; puedes corregirlo en la tabla. Los códigos se cruzan sin considerar mayúsculas, tildes, espacios, puntos, comas, guiones, guiones bajos ni ceros a la izquierda; si un artículo de Defontana no cruza por código, se cruza por nombre. Haz clic en un producto para ver sus documentos.'
       : '<b>Cómo se calcula.</b> Son los documentos cuyo “Valor Movimiento” es $0. El valor que debió tener = cantidad × PMP del producto antes del documento (si no hay, el primero que aparece después). Un egreso a $0 suele ocurrir cuando el producto no tenía saldo o su PMP era $0.';
   }
 
@@ -1158,10 +1164,11 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     'Ajuste de valor': r.cost && r.cost.corr ? Math.round(r.cost.corr.ajuste) : '',
     'Cantidad a ajustar': r.diff != null && Math.abs(r.diff) > EPS ? Math.abs(r.diff) : '',
     'Contado': r.s ? r.s.stock : '', 'Fecha conteo': r.counted ? fmtDate(r.s.fecha, true) : '',
-    'Defontana al conteo': r.sysAtCount ?? '', 'Diferencia': r.diff ?? '',
+    'Movimientos desde el conteo': r.counted ? r.ins - r.outs : '', 'Debería tener Defontana hoy': r.realNow ?? '', 'Tiene Defontana hoy': hoyDe(r) ?? '',
+    'Ajuste a hacer hoy': ajusteHoy(r) ?? '', 'Defontana al conteo': r.sysAtCount ?? '', 'Diferencia al conteo': r.diff ?? '',
     'PMP': r.pmp != null ? Math.round(r.pmp * 100) / 100 : '', 'Origen PMP': r.pmpSrc,
     'Valor ajuste': r.valor != null ? Math.round(r.valor) : '',
-    'Stock real hoy': r.realNow ?? '', 'Defontana hoy': r.sysCalc ?? r.sysNow ?? ''
+    'Saldo última fila del informe': r.sysNow ?? ''
   });
   const zeroExport = z => ({
     'Fecha': fmtDate(z.m.fecha), 'Documento': z.m.tipo, 'Folio': z.m.folio, 'Referencia': z.m.ref,
