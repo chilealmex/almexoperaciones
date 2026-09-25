@@ -133,3 +133,22 @@
 .regx .rx-btn.sm{padding:4px 10px;font-size:12px}
 .regx .warnline{color:var(--warn);font-weight:600}
 .regx .wrapsmall{white-space:normal;max-width:190px;margin-left:auto}
+.regx .steps{margin:0;padding-left:18px;font-size:12px}
+.regx .steps li{margin:0 0 4px}
+.regx .stepk{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:1px 6px;border-radius:4px;margin-right:2px}
+.regx .k-verify{background:var(--warn-soft);color:var(--warn)}
+.regx .k-cost{background:var(--accent-soft);color:var(--accent)}
+.regx .k-in{background:var(--in-soft);color:var(--in)}
+.regx .k-out{background:var(--out-soft);color:var(--out)}
+.regx .k-none{background:var(--gray-soft);color:var(--muted)}
+.regx .stepsbox{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.regx .stepsbox h3{margin:0 0 8px;font-size:13px;font-weight:700}
+.regx .pasos{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px}
+.regx .paso{display:flex;gap:10px;align-items:flex-start;text-align:left;font:inherit;color:inherit;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;cursor:pointer}
+.regx .paso:hover{border-color:var(--accent)}
+.regx .paso.on{border-color:var(--accent);background:var(--accent-soft)}
+.regx .pnum{flex:none;width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:12px;background:var(--accent);color:var(--accent-ink)}
+.regx .ptxt{display:flex;flex-direction:column;gap:2px;font-size:13px}
+.regx .pcount{font-size:12px;font-weight:600;color:var(--accent)}
+.regx .pwhy{font-size:11px;color:var(--muted)}
+.regx .tomake{min-width:280px;max-width:340px}

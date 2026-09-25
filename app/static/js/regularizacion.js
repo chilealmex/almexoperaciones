@@ -344,21 +344,21 @@
     const outsSinStock = zeros.filter(m => m.kind === 'out' && m.saldo != null && m.saldo + m.qty <= EPS);
     if (!zeros.length && !sinCostoHoy) return null;
     const txt = [], hacer = [];
-    if (sinCostoHoy){ txt.push(`Hoy tiene ${fmt(saldoHoy)} sin costo en Defontana (PMP $0).`); hacer.push(`Ajuste de valor: cargar el costo a las ${fmt(saldoHoy)} unidades`); }
+    if (sinCostoHoy){ txt.push(`Hoy tiene ${fmt(saldoHoy)} sin costo en Defontana (PMP $0).`); hacer.push({k:'cost', txt:`Ajuste de valor: cargar el costo a las ${fmt(saldoHoy)} unidades`}); }
     const costos = [];
     for (const m of ins0){
       const i = docs.indexOf(m), antes = pmpAt(docs[i - 1]), despues = pmpAt(m), r = refCost(docs, i);
       txt.push(`Entró ${fmt(m.qty)} a $0 con ${m.tipo} #${m.folio} del ${fmtDate(m.fecha)}` + (antes > EPS && despues != null ? `: el PMP bajó de ${money(antes)} a ${money(despues)}.` : '.'));
       costos.push({doc: `${m.tipo} #${m.folio}`, qty: m.qty, v: r ? r.v : null, src: r ? r.src : 'no hay compras con costo en el informe: usa el costo de la factura'});
-      hacer.push(r ? `Corregir ${m.tipo} #${m.folio}: ${fmt(m.qty)} a ${money(r.v)} c/u` : `Corregir ${m.tipo} #${m.folio} con el costo de la factura`);
+      hacer.push({k:'cost', txt: r ? `Corregir el costo de ${m.tipo} #${m.folio}: ${fmt(m.qty)} a ${money(r.v)} c/u` : `Corregir el costo de ${m.tipo} #${m.folio} con el valor de la factura`});
     }
     for (const m of outsSinStock){
       const i = docs.indexOf(m), r = refCost(docs, i);
       costos.push({doc: `entrada por ${m.tipo} #${m.folio}`, qty: m.qty, v: r ? r.v : null, src: r ? r.src : 'no hay compras con costo en el informe: usa el costo de la factura'});
     }
-    if (outsSinStock.length){ const r = refCost(docs, docs.indexOf(outsSinStock[0])); txt.push(`Salió ${fmt(outsSinStock.reduce((a, m) => a + m.qty, 0))} sin tener stock (${outsSinStock.map(m => m.tipo + ' #' + m.folio).join(', ')}): faltó registrar el ingreso con su costo.`); hacer.push(`Parte de Entrada por ${fmt(outsSinStock.reduce((a, m) => a + m.qty, 0))}` + (r ? ` a ${money(r.v)} c/u` : ' con el costo de la factura')); }
+    if (outsSinStock.length){ const r = refCost(docs, docs.indexOf(outsSinStock[0])); txt.push(`Salió ${fmt(outsSinStock.reduce((a, m) => a + m.qty, 0))} sin tener stock (${outsSinStock.map(m => m.tipo + ' #' + m.folio).join(', ')}): faltó registrar el ingreso con su costo.`); hacer.push({k:'in', txt:`Parte de Entrada por ${fmt(outsSinStock.reduce((a, m) => a + m.qty, 0))} (lo que salió sin stock)` + (r ? ` a ${money(r.v)} c/u` : ' con el costo de la factura')}); }
     const corr = ins0.length ? correctedToday(docs) : null;
-    if (corr && Math.abs(corr.ajuste) > 0.5) hacer.push(`Si no se puede corregir el ingreso: ajuste de valor por ${money(corr.ajuste)} (el PMP queda en ${money(corr.pmp)})`);
+    if (corr && Math.abs(corr.ajuste) > 0.5) hacer.push({k:'cost', txt:`Si no se puede corregir el ingreso: ajuste de valor por ${money(corr.ajuste)} (el PMP queda en ${money(corr.pmp)})`});
     if (sinCostoHoy && !ins0.length){ const r = refCost(docs, docs.length); costos.push({doc: 'stock actual', qty: saldoHoy, v: r ? r.v : null, src: r ? r.src : 'no hay compras con costo en el informe: usa el costo de la factura'}); }
     const need = sinCostoHoy || ins0.length > 0 || outsSinStock.length > 0;
     if (!need) txt.push(`Tuvo salidas a $0, pero hoy ya tiene costo (PMP ${money(pmpHoy)}). No hace falta corregir.`);
@@ -381,26 +381,41 @@
       : {need:true, costo, txt:'Sí. Salió a $0 porque el producto no tiene costo (PMP $0).', hacer: r ? `Ajuste de valor: cargar el costo del producto a ${money(r.v)} c/u` : 'Ajuste de valor: cargar el costo del producto con la factura'};
   }
 
-  // ---------- Qué documento generar ----------
-  function docToMake(r){
-    const d = r.diff, q = d != null ? fmt(Math.abs(d)) : '';
-    const out = [];
-    if (r.st === 'up'){
-      if (r.cause === 'egrnodesp') out.push(`Parte de Entrada por ${q} (devolución), o anular la salida que no se despachó`);
-      else if (r.cause === 'um') out.push('Revisar la unidad de medida antes de hacer una entrada');
-      else out.push(`Parte de Entrada por ${q}` + (r.pmp > 0 ? ` a ${money(r.pmp)} c/u` : ' (poner costo)'));
-    } else if (r.st === 'down'){
-      if (r.cause === 'dupin') out.push(`Anular el ingreso duplicado, o Parte de Salida por ${q}`);
-      else if (r.cause === 'um') out.push('Revisar la unidad de medida antes de hacer una salida');
-      else out.push(`Parte de Salida por ${q} (ajuste / merma)`);
-    } else if (r.st === 'check') out.push('Ninguno por ahora: volver a contar para confirmar');
-    else if (r.st === 'ok') out.push('Ninguno');
-    else if (r.st === 'nodata') out.push('Ver el saldo en Defontana');
-    else if (r.st === 'nocount') out.push('Contar el producto');
-    else if (r.st === 'nofile') out.push('Revisar por qué no está en el conteo');
-    if (r.cost && r.cost.need) out.push(...r.cost.hacer);
-    return out;
+  // ---------- Qué hacer, en orden ----------
+  // Orden recomendado: 1) confirmar lo dudoso, 2) corregir costos, 3) entradas, 4) salidas.
+  // Los costos van primero porque Defontana valoriza cada entrada y salida al PMP del momento:
+  // si se hace la salida con el PMP malo, la merma queda mal valorizada. Las entradas van antes
+  // que las salidas para que el saldo nunca quede negativo y las salidas salgan con costo.
+  const STEP = {
+    verify:{n:1, label:'Confirmar', cls:'k-verify'}, cost:{n:2, label:'Costo', cls:'k-cost'},
+    in:{n:3, label:'Entrada', cls:'k-in'}, out:{n:4, label:'Salida', cls:'k-out'}, none:{n:9, label:'—', cls:'k-none'}
+  };
+  function docSteps(r){
+    if (r._steps) return r._steps;
+    const d = r.diff, q = d != null ? fmt(Math.abs(d)) : '', steps = [];
+    const add = (k, txt) => steps.push({k, txt});
+    if (r.st === 'check') add('verify', 'Volver a contar: la diferencia puede deberse a un documento registrado después del conteo. Si se confirma, no ajustar');
+    if (r.cause === 'um' && (r.st === 'up' || r.st === 'down')) add('verify', 'Revisar la unidad de medida: el conteo parece estar en otra unidad. Recién después ajustar');
+    if (r.st === 'nodata') add('verify', 'Ver el saldo del producto en Defontana (no hay documentos en el informe)');
+    if (r.st === 'nocount') add('verify', 'Contar el producto');
+    if (r.st === 'nofile') add('verify', 'Revisar por qué no está en el conteo');
+    if (r.cost && r.cost.need) r.cost.hacer.forEach(h => add(h.k, h.txt));
+    if (r.st === 'up' && r.cause !== 'um'){
+      if (r.cause === 'egrnodesp') add('in', `Parte de Entrada por ${q} (devolución), o anular la salida que no se despachó`);
+      else add('in', `Parte de Entrada por ${q}` + (r.pmp > 0 ? ` a ${money(r.pmp)} c/u` : ' (poner costo)'));
+    }
+    if (r.st === 'down' && r.cause !== 'um'){
+      if (r.cause === 'dupin') add('out', `Anular el ingreso duplicado, o Parte de Salida por ${q}`);
+      else add('out', `Parte de Salida por ${q} (ajuste / merma)`);
+    }
+    if (!steps.length) add('none', 'Nada que hacer');
+    steps.sort((x, y) => STEP[x.k].n - STEP[y.k].n);
+    r._steps = steps;
+    return steps;
   }
+  const docToMake = r => docSteps(r).map(x => x.txt);
+  const stepsCell = steps => `<ol class="steps">${steps.map(x => `<li><span class="stepk ${STEP[x.k].cls}">${STEP[x.k].label}</span> ${esc(x.txt)}</li>`).join('')}</ol>`;
+  const stepsText = r => docSteps(r).map((x, i) => `${i + 1}. ${STEP[x.k].label}: ${x.txt}`).join(' · ');
   function checkToMake(r){
     const g = r.gap, q = g != null ? fmt(Math.abs(g)) : '';
     if (r.ck === 'ok') return ['Ninguno'];
@@ -496,7 +511,11 @@
     ['nocount', 'Sin contar', r => r.st === 'nocount', 'var(--muted)'],
     ['nofile', 'No están en el conteo', r => r.st === 'nofile', 'var(--warn)'],
     ['alias', 'Código escrito distinto', r => r.alias.length > 0 || r.viaName || r.nCounted > 1, 'var(--accent)'],
-    ['cost', 'Revisar costo ($0)', r => !!(r.cost && r.cost.need), 'var(--warn)']
+    ['cost', 'Revisar costo ($0)', r => !!(r.cost && r.cost.need), 'var(--warn)'],
+    ['p-verify', 'Paso 1: confirmar', r => r.st === 'check' || (r.cause === 'um' && (r.st === 'up' || r.st === 'down')), 'var(--warn)', true],
+    ['p-cost', 'Paso 2: corregir costos', r => docSteps(r).some(x => x.k === 'cost'), 'var(--warn)', true],
+    ['p-in', 'Paso 3: entradas', r => docSteps(r).some(x => x.k === 'in'), 'var(--in)', true],
+    ['p-out', 'Paso 4: salidas', r => docSteps(r).some(x => x.k === 'out'), 'var(--out)', true]
   ];
   const ZERO_FILTERS = [
     ['all', 'Todos', z => true, null],
@@ -554,7 +573,7 @@
     ['diff', 'Diferencia', 'num', r => r.diff],
     ['st', 'Qué hacer', '', r => r.st],
     ['obs', 'Por qué está descuadrado', '', r => r.cause ? CAUSES[r.cause] : null],
-    ['make', 'Documento a generar', '', r => docToMake(r)[0]],
+    ['make', 'Qué hacer, en orden', '', r => STEP[docSteps(r)[0].k].n],
     ['costo', 'Costo a usar ($0)', 'num', r => r.cost && r.cost.need && r.cost.costos.length && r.cost.costos[0].v != null ? r.cost.costos[0].v : null],
     ['pmp', 'PMP', 'num', r => r.pmp],
     ['valor', 'Valor ajuste', 'num', r => r.valor],
@@ -605,7 +624,7 @@
       <td class="num diff ${d > EPS ? 'plus' : d < -EPS ? 'minus' : 'mut'}">${d == null ? '—' : sgn(d)}</td>
       <td><span class="pill ${cls}">${label}${qty}</span>${r.sameDay && r.counted ? '<span class="flag" title="Hay documentos el mismo día del conteo">· mismo día</span>' : ''}</td>
       <td class="obs">${obsCell(r)}</td>
-      <td class="tomake">${makeCell(docToMake(r))}</td>
+      <td class="tomake">${stepsCell(docSteps(r))}</td>
       <td class="num">${costCell(r)}</td>
       <td class="num">${r.st === 'up' || r.st === 'down' || r.st === 'check' ? pmpInput(r.key, r.pmp, r.edited, r.code) : '<span class="mut">' + (r.pmp != null ? money(r.pmp) : '—') + '</span>'}</td>
       <td class="num diff ${r.valor > 0.5 ? 'plus' : r.valor < -0.5 ? 'minus' : 'mut'}">${r.st === 'up' || r.st === 'down' || r.st === 'check' ? money(r.valor) : '—'}</td>
@@ -674,6 +693,24 @@
       ${rest.length ? `<details${auto.length && !state.ajOpen ? '' : ' open'}><summary>Otros documentos posteriores al conteo (${fmt(rest.length)})</summary><div class="ajlist">${rest.map(item).join('')}</div></details>` : ''}</div>`;
   }
 
+  // Panel con el orden recomendado; cada paso filtra la tabla
+  function renderStepsPanel(show){
+    const box = $('stepsPanel');
+    box.hidden = !show || !state.mov.length;
+    if (box.hidden) return;
+    const F = k => REG_FILTERS.find(x => x[0] === k)[2];
+    const n = k => state.rows.filter(F(k)).length, cur = state.filter.reg;
+    const paso = (k, num, titulo, porque) => `<button type="button" class="paso${cur === k ? ' on' : ''}" data-go="${k}">
+      <span class="pnum">${num}</span><span class="ptxt"><b>${titulo}</b> <span class="pcount">${fmt(n(k))} productos</span><span class="pwhy">${porque}</span></span></button>`;
+    box.innerHTML = `<h3>Orden recomendado</h3><div class="pasos">
+      ${paso('p-verify', 1, 'Confirmar lo dudoso', 'Recontar o revisar antes de tocar Defontana: diferencias por fechas de documentos o por unidad de medida.')}
+      ${paso('p-cost', 2, 'Corregir costos', 'Primero los costos: Defontana valoriza cada entrada y salida al PMP del momento.')}
+      ${paso('p-in', 3, 'Entradas', 'Parte de Entrada por lo que sobra en bodega, antes de las salidas, para que el saldo no quede negativo.')}
+      ${paso('p-out', 4, 'Salidas', 'Parte de Salida por lo que falta en bodega, ya con el costo correcto.')}
+      <button type="button" class="paso" data-view-go="check"><span class="pnum">5</span><span class="ptxt"><b>Verificar</b> <span class="pwhy">Bajar de nuevo el informe de Defontana y revisarlo en “Verificar ajustes”.</span></span></button>
+    </div>`;
+  }
+
   function render(){
     const base = compute(state.mov);
     state.rows = base.rows; state.zero = base.zero; state.orphan = base.orphan;
@@ -681,6 +718,7 @@
     const reg = state.view === 'reg', chk = state.view === 'check';
     document.querySelectorAll('.view').forEach(b => b.setAttribute('aria-selected', b.dataset.view === state.view));
     $('checkPanel').hidden = !chk;
+    renderStepsPanel(reg);
     if (chk) renderAjDocs();
     const all = reg ? state.rows : chk ? state.checkRows : state.zero, F = reg ? REG_FILTERS : chk ? CHECK_FILTERS : ZERO_FILTERS, cols = reg ? REG_COLS : chk ? CHECK_COLS : ZERO_COLS;
 
@@ -719,7 +757,8 @@
 
     // Filtros
     const cur = state.filter[state.view];
-    $('chips').innerHTML = F.map(([k, label, f, color]) => {
+    $('chips').innerHTML = F.map(([k, label, f, color, hidden]) => {
+      if (hidden && k !== cur) return '';
       const n = all.filter(f).length;
       if (!n && k !== 'all' && k !== cur) return '';
       return `<button type="button" class="chip" data-f="${k}" aria-pressed="${cur === k}">${color ? `<span class="dot" style="background:${color}"></span>` : ''}${label}<span class="c">${fmt(n)}</span></button>`;
@@ -763,7 +802,7 @@
   const regExport = r => ({
     'Código': r.code, 'Nombre': r.name, 'Otras formas del código': r.alias.join(', ') + (r.viaName ? (r.alias.length ? ' · ' : '') + 'cruzado por nombre' : ''), 'Qué hacer': ACTION[r.st][1], 'Causa probable': r.cause ? CAUSES[r.cause] : '',
     'Observaciones': r.obs.map(x => x.replace(/<[^>]+>/g, '')).join(' '),
-    'Documento a generar': docToMake(r).join(' · '), 'Revisar costo': r.cost ? (r.cost.need ? 'Sí' : 'No') : '', 'Detalle costo': r.cost ? r.cost.txt.join(' ') : '',
+    'Qué hacer, en orden': stepsText(r), 'Revisar costo': r.cost ? (r.cost.need ? 'Sí' : 'No') : '', 'Detalle costo': r.cost ? r.cost.txt.join(' ') : '',
     'Costo a usar (c/u)': r.cost && r.cost.need ? r.cost.costos.map(c => (c.v != null ? Math.round(c.v * 100) / 100 : 'factura') + ' (' + c.doc + ')').join(' · ') : '',
     'PMP correcto hoy': r.cost && r.cost.corr ? Math.round(r.cost.corr.pmp * 100) / 100 : '',
     'Ajuste de valor': r.cost && r.cost.corr ? Math.round(r.cost.corr.ajuste) : '',
@@ -856,6 +895,12 @@
   document.querySelector('.views').addEventListener('click', e => {
     const b = e.target.closest('.view'); if (!b) return;
     state.view = b.dataset.view; state.open.clear(); render();
+  });
+  $('stepsPanel').addEventListener('click', e => {
+    const v = e.target.closest('[data-view-go]');
+    if (v){ state.view = v.dataset.viewGo; state.open.clear(); render(); return; }
+    const b = e.target.closest('[data-go]'); if (!b) return;
+    state.filter.reg = state.filter.reg === b.dataset.go ? 'all' : b.dataset.go; render();
   });
   $('summary').addEventListener('click', e => { const b = e.target.closest('[data-go]'); if (!b) return; state.filter[state.view] = b.dataset.go; render(); });
   $('chips').addEventListener('click', e => { const b = e.target.closest('.chip'); if (!b) return; state.filter[state.view] = b.dataset.f; render(); });
