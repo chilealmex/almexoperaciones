@@ -59,6 +59,8 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
    Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
 /* Regularización de inventario (Inventario → Regularización).
    Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
+/* Regularización de inventario (Inventario → Regularización).
+   Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
 .regx{--bg:#F2F4F3; --surface:#FFFFFF; --surface2:#EDF1EF; --ink:#16201D; --muted:#5E6B66; --line:#DCE3E0;
   --accent:#245E8F; --accent-ink:#FFFFFF; --accent-soft:#E1EBF4;
   --in:#1B7446; --in-soft:#E0F2E7; --out:#B0362A; --out-soft:#FAE3E0; --warn:#8A5A00; --warn-soft:#FBEDCF; --gray-soft:#ECEFEE;
@@ -394,15 +396,16 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     metro:['M','MT','MTS','METRO','METROS'], pie:['FT','PIE','PIES','FEET'], pulgada:['IN','PULG','PULGADA','PULGADAS'],
     centimetro:['CM','CMS'], milimetro:['MM'], litro:['L','LT','LTS','LITRO','LITROS'], galon:['GL','GAL','GALON','GALONES'],
     kilo:['KG','KGS','KILO','KILOS','KILOGRAMO','KILOGRAMOS'], libra:['LB','LBS','LIBRA','LIBRAS'], gramo:['G','GR','GRS','GRAMO','GRAMOS'],
-    unidad:['UN','UND','UNI','UD','UNIDAD','UNIDADES','CU'], pack:['PK','PACK','PACKS'], rollo:['RL','ROLLO','ROLLOS'], caja:['CJ','CAJA','CAJAS']
+    unidad:['UN','UND','UNI','UD','UNIDAD','UNIDADES','CU'], par:['PAR','PARES','PR'], docena:['DOC','DOCENA','DOCENAS','DZ'], pack:['PK','PACK','PACKS'], rollo:['RL','ROLLO','ROLLOS'], caja:['CJ','CAJA','CAJAS']
   };
-  const UM_NOMBRE = {metro:'metros', pie:'pies', pulgada:'pulgadas', centimetro:'centímetros', milimetro:'milímetros', litro:'litros', galon:'galones', kilo:'kilos', libra:'libras', gramo:'gramos', unidad:'unidades', pack:'packs', rollo:'rollos', caja:'cajas'};
+  const UM_NOMBRE = {metro:'metros', pie:'pies', pulgada:'pulgadas', centimetro:'centímetros', milimetro:'milímetros', litro:'litros', galon:'galones', kilo:'kilos', libra:'libras', gramo:'gramos', unidad:'unidades', par:'pares', docena:'docenas', pack:'packs', rollo:'rollos', caja:'cajas'};
   const UM_POR_FORMA = {};
   for (const [g, formas] of Object.entries(UM_GRUPOS)) for (const f of formas) UM_POR_FORMA[f] = g;
   const umGrupo = u => { const l = String(u || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]/g, ''); return UM_POR_FORMA[l] || l; };
   // Factor para pasar una cantidad de la unidad "de" a la unidad "a" (1 de = factor a)
   const UM_BASE = {metro:['L', 1], pie:['L', 0.3048], pulgada:['L', 0.0254], centimetro:['L', 0.01], milimetro:['L', 0.001],
-    litro:['V', 1], galon:['V', 3.78541], kilo:['P', 1], libra:['P', 0.453592], gramo:['P', 0.001]};
+    litro:['V', 1], galon:['V', 3.78541], kilo:['P', 1], libra:['P', 0.453592], gramo:['P', 0.001],
+    unidad:['C', 1], par:['C', 2], docena:['C', 12]};
   function umFactor(de, a){
     const x = UM_BASE[de], y = UM_BASE[a];
     return x && y && x[0] === y[0] ? x[1] / y[1] : null;
@@ -549,8 +552,8 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     // 3. Unidad de medida: múltiplos exactos (caja, paquete) o conversiones conocidas (pies, pulgadas, libras).
     // Una conversión que calza pesa más que las demás explicaciones, salvo las de fecha de documento.
     // Si el conteo trae su unidad y es la misma de Defontana, no se supone ninguna conversión.
-    const umConteoIgual = s.um && docs.length && umGrupo(s.um) === umGrupo(docs[docs.length - 1].um);
-    if (!umConteoIgual && cause !== 'late' && cause !== 'sameday' && s.stock > EPS && sys > EPS){
+    // Si el conteo declara su unidad, las diferencias de unidad ya se trataron (conversión explícita).
+    if (!s.um && cause !== 'late' && cause !== 'sameday' && s.stock > EPS && sys > EPS){
       const um = docs.length ? String(docs[docs.length - 1].um || '').toUpperCase() : '';
       const r = s.stock / sys;
       // Solo se prueba la conversión que corresponde a la unidad del producto en Defontana
@@ -625,13 +628,14 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     const inBod = m => bod === '*' || (m.kind === 'in' ? m.dest : m.orig) === bod;
     const build = (s, docs) => {
       // Si el conteo está en otra unidad que Defontana, se convierte cuando la conversión es conocida
+      // Lo contado (y su unidad) es la referencia. Si Defontana lleva el producto en otra unidad,
+      // antes de cruzar se pasan sus cantidades (saldos y movimientos) a la unidad del conteo.
       let umInfo = null;
       const umDef = docs.length ? umGrupo(docs[docs.length - 1].um) : '';
       if (s && s.stock != null && s.um && umDef && umGrupo(s.um) !== umDef){
-        const f = umFactor(umGrupo(s.um), umDef);
-        // Lo contado (y su unidad) es la referencia: no se convierte. Se guarda la equivalencia
-        // solo para mostrar cuánto sería el ajuste si Defontana de verdad lleva su unidad.
-        umInfo = {de: s.um, a: docs[docs.length - 1].um, f, original: s.stock};
+        const f = umFactor(umDef, umGrupo(s.um));   // 1 unidad de Defontana = f unidades del conteo
+        umInfo = {de: s.um, a: docs[docs.length - 1].um, f};
+        if (f) docs = docs.map(m => ({...m, qty: m.qty * f, saldo: m.saldo != null ? m.saldo * f : null}));
       }
       const counted = !!s && s.stock != null && s.fecha != null;
       const ck = counted ? dayKey(s.fecha) : null;
@@ -683,13 +687,15 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
       const cost = costReview(docs, sysCalc);
       const dx = counted ? diagnose(s, docs.filter(m => !m._aj), after, diff, sysAtCount, sameNet, zeros) : {cause:null, obs:[]};
       if (counted && umInfo && sysAtCount != null){
-        const de = esc(umInfo.de), a = esc(umInfo.a);
-        const alt = umInfo.f ? Math.round((s.stock * umInfo.f - sysAtCount) * 1000) / 1000 : null;
-        umInfo.alt = alt;
-        dx.cause = 'um'; dx.umMaster = true;
-        dx.obs.unshift(`Se contó en ${de}, pero en Defontana el producto está en ${a}: corregir la unidad en el maestro de Defontana. `
-          + (Math.abs(diff) > EPS ? `Si las cantidades de Defontana están en ${de} (solo la unidad está mal): ajuste de ${sgn(diff)} ${de}.` : `Si las cantidades de Defontana están en ${de} (solo la unidad está mal), está cuadrado.`)
-          + (alt != null ? ` Si Defontana de verdad lleva ${a}: ${fmt(s.stock)} ${de} = ${fmt(Math.round(s.stock * umInfo.f * 1000) / 1000)} ${a}, ajuste de ${Math.abs(alt) < umInfo.f ? '0 (la diferencia es redondeo)' : sgn(alt) + ' ' + a}.` : ` No hay una conversión conocida entre ${de} y ${a}.`));
+        const de = esc(umInfo.de), a = esc(umInfo.a), hoy = sysCalc ?? sysNow;
+        if (umInfo.f){
+          umInfo.hoyDef = hoy != null ? Math.round(hoy / umInfo.f * 1000) / 1000 : null;
+          umInfo.hoyConv = hoy != null ? Math.round(hoy * 1000) / 1000 : null;
+          dx.obs.push(`Defontana lleva este producto en ${a} y se contó en ${de}: sus cantidades se pasaron a ${de} (1 ${a} = ${fmt(Math.round(umInfo.f * 10000) / 10000)} ${de}) antes de cruzar. Primero cambia la unidad en Defontana: su saldo de ${fmt(umInfo.hoyDef)} ${a} queda en ${fmt(umInfo.hoyConv)} ${de}.`);
+        } else {
+          dx.cause = 'um'; dx.umMaster = true;
+          dx.obs.unshift(`Se contó en ${de}, pero en Defontana el producto está en ${a} y no hay una conversión conocida entre esas unidades: se compararon las cifras tal cual. Corrige la unidad en el maestro de Defontana y confirma en qué unidad se registraron sus movimientos antes de ajustar.`);
+        }
       }
       if (dx.cause === 'late' || dx.cause === 'sameday' || dx.cause === 'um') st = 'check';
       return {cause:dx.cause, obs:dx.obs, umRound: !!dx.umRound, umMaster: !!dx.umMaster, linea: s ? s.linea || '' : '', alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, umInfo, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs, sysCalc, toOther,
@@ -809,13 +815,14 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
   // si se hace la salida con el PMP malo, la merma queda mal valorizada. Las entradas van antes
   // que las salidas para que el saldo nunca quede negativo y las salidas salgan con costo.
   const STEP = {
-    verify:{n:1, label:'Confirmar', cls:'k-verify'}, cost:{n:2, label:'Costo', cls:'k-cost'},
+    verify:{n:1, label:'Confirmar', cls:'k-verify'}, unit:{n:1.5, label:'Unidad', cls:'k-verify'}, cost:{n:2, label:'Costo', cls:'k-cost'},
     in:{n:3, label:'Entrada', cls:'k-in'}, out:{n:4, label:'Salida', cls:'k-out'}, none:{n:9, label:'—', cls:'k-none'}
   };
   function docSteps(r){
     if (r._steps) return r._steps;
     const d = r.diff, q = d != null ? fmt(Math.abs(d)) : '', steps = [];
     const add = (k, txt) => steps.push({k, txt});
+    if (r.umInfo && r.umInfo.f && r.counted) add('unit', `Cambiar la unidad en Defontana de ${r.umInfo.a} a ${r.umInfo.de}: el saldo de ${fmt(r.umInfo.hoyDef)} ${r.umInfo.a} queda en ${fmt(r.umInfo.hoyConv)} ${r.umInfo.de}`);
     if (r.umMaster) add('verify', `Corregir la unidad en el maestro de Defontana (${r.umInfo.a} → ${r.umInfo.de}) y confirmar en qué unidad están sus cantidades antes de ajustar`);
     else if (r.umRound) add('none', 'Nada: la diferencia es solo el redondeo al convertir la unidad del conteo');
     else if (r.cause === 'um') add('verify', 'Revisar la unidad de medida: el conteo parece estar en otra unidad. Convertir y recién después ajustar');
@@ -1053,7 +1060,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     return `<tr class="rx-row s-${r.st}${state.open.has(r.key) ? ' open' : ''}" data-key="${esc(r.key)}" tabindex="0">
       <td><div class="code">${esc(r.code)}</div><div class="pname">${esc(r.name)}</div>${aliasNote(r)}</td>
       ${lineaCell(r.linea)}
-      <td class="num">${r.counted ? fmt(r.s.stock) + '<div class="small">' + fmtDate(r.s.fecha) + (r.s.recontado ? ' · recuento' : '') + '</div>' + (r.umInfo ? '<div class="small alias">en ' + esc(r.umInfo.de) + ' · Defontana: ' + esc(r.umInfo.a) + '</div>' : '') : '<span class="mut">—</span>'}${r.s && r.s.recontado && r.s.original && r.s.original.stock != null ? '<div class="small">antes: ' + fmt(r.s.original.stock) + ' el ' + fmtDate(r.s.original.fecha) + '</div>' : ''}${r.s ? `<input class="recount" type="number" step="any" min="0" inputmode="decimal" data-key="${esc(r.key)}" value="${r.s.recontado ? r.s.stock : ''}" placeholder="Recuento hoy" aria-label="Recuento de hoy de ${esc(r.code)}">` : ''}</td>
+      <td class="num">${r.counted ? fmt(r.s.stock) + '<div class="small">' + fmtDate(r.s.fecha) + (r.s.recontado ? ' · recuento' : '') + '</div>' + (r.umInfo ? '<div class="small alias">en ' + esc(r.umInfo.de) + ' · Defontana en ' + esc(r.umInfo.a) + (r.umInfo.f ? ' (convertido)' : '') + '</div>' : '') : '<span class="mut">—</span>'}${r.s && r.s.recontado && r.s.original && r.s.original.stock != null ? '<div class="small">antes: ' + fmt(r.s.original.stock) + ' el ' + fmtDate(r.s.original.fecha) + '</div>' : ''}${r.s ? `<input class="recount" type="number" step="any" min="0" inputmode="decimal" data-key="${esc(r.key)}" value="${r.s.recontado ? r.s.stock : ''}" placeholder="Recuento hoy" aria-label="Recuento de hoy de ${esc(r.code)}">` : ''}</td>
       <td class="num">${r.counted ? (r.ins || r.outs ? (r.ins ? '<span class="plus">+' + fmt(r.ins) + '</span> ' : '') + (r.outs ? '<span class="minus">−' + fmt(r.outs) + '</span>' : '') : '<span class="mut">sin movimientos</span>') : '<span class="mut">—</span>'}</td>
       <td class="num"><b>${fmt(r.realNow)}</b></td>
       <td class="num">${fmt(hoyDe(r))}${r.sysAtCount != null && r.counted ? '<div class="small">al conteo: ' + fmt(r.sysAtCount) + '</div>' : ''}${r.sysCalc != null && r.sysNow != null && Math.abs(r.sysCalc - r.sysNow) > EPS ? '<div class="small">última fila del informe: ' + fmt(r.sysNow) + '</div>' : ''}</td>
@@ -1168,9 +1175,9 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
       ${sec(1, 'Confirmar antes de ajustar', 'Recontar o revisar. No hagas ajustes de estos productos hasta confirmarlos.', P.verify,
         '<th>Producto</th><th>Línea</th><th class="num">Diferencia</th><th>Motivo</th><th>Qué revisar</th>',
         x => `${prod(x)}<td class="num diff ${x.qty > 0 ? 'plus' : 'minus'}">${sgn(x.qty)}</td><td>${esc(x.motivo)}</td><td class="wide">${esc(x.txt)}</td>`)}
-      ${P.um.length ? `<section class="plansec"><div class="planhead"><span class="pnum">1b</span><div><h3>Unidades a corregir en Defontana <span class="pcount">${fmt(P.um.length)} productos</span></h3><p class="pwhy">Se contaron en otra unidad que la del maestro de Defontana. Lo contado es la referencia: corrige la unidad en el maestro y confirma en qué unidad se registraron sus movimientos antes de ajustar.</p></div></div>
-        <div class="tablebox"><table class="plantable"><thead><tr><th class="n">#</th><th>Producto</th><th>Línea</th><th>Unidad del conteo</th><th>Unidad en Defontana</th><th class="num">Contado</th><th class="num">Tiene Defontana hoy</th><th class="num">Ajuste si solo está mal la unidad</th><th class="num">Ajuste si Defontana lleva su unidad</th></tr></thead>
-        <tbody>${P.um.map((x, i) => `<tr><td class="n">${i + 1}</td>${prod(x)}<td>${esc(x.r.umInfo.de)}</td><td>${esc(x.r.umInfo.a)}</td><td class="num">${fmt(x.r.s.stock)}</td><td class="num">${fmt(hoyDe(x.r))}</td><td class="num">${x.r.diff == null ? '—' : sgn(x.r.diff)}</td><td class="num">${x.r.umInfo.alt == null ? 'sin conversión' : sgn(x.r.umInfo.alt)}</td></tr>`).join('')}</tbody></table></div></section>` : ''}
+      ${P.um.length ? `<section class="plansec"><div class="planhead"><span class="pnum">1b</span><div><h3>Cambiar la unidad en Defontana <span class="pcount">${fmt(P.um.length)} productos</span></h3><p class="pwhy">Se contaron en otra unidad que la del maestro de Defontana. Lo contado es la referencia: primero cambia la unidad del producto en Defontana (con su saldo convertido) y después haz las entradas y salidas del plan, que ya están en la unidad del conteo.</p></div></div>
+        <div class="tablebox"><table class="plantable"><thead><tr><th class="n">#</th><th>Producto</th><th>Línea</th><th>Unidad en Defontana</th><th>Cambiar a</th><th class="num">Saldo Defontana</th><th class="num">Saldo convertido</th><th class="num">Contado</th><th class="num">Ajuste después</th></tr></thead>
+        <tbody>${P.um.map((x, i) => { const u = x.r.umInfo; return `<tr><td class="n">${i + 1}</td>${prod(x)}<td>${esc(u.a)}</td><td><b>${esc(u.de)}</b></td><td class="num">${u.f ? fmt(u.hoyDef) + ' ' + esc(u.a) : fmt(hoyDe(x.r)) + ' ' + esc(u.a)}</td><td class="num">${u.f ? '<b>' + fmt(u.hoyConv) + ' ' + esc(u.de) + '</b>' : '<span class="small">sin conversión conocida</span>'}</td><td class="num">${fmt(x.r.s.stock)} ${esc(u.de)}</td><td class="num">${x.r.diff == null ? '—' : (Math.abs(x.r.diff) <= EPS ? '0' : sgn(Math.round(x.r.diff * 1000) / 1000)) + ' ' + esc(u.de)}</td></tr>`; }).join('')}</tbody></table></div></section>` : ''}
       ${sec(2, 'Corregir costos', 'Corrige el costo del documento indicado. Si Defontana no deja modificarlo, haz el ajuste de valor.', P.cost,
         '<th>Producto</th><th>Línea</th><th>Qué corregir</th><th class="num">Cantidad</th><th class="num">Costo a usar c/u</th><th class="num">Total</th><th class="num">Si no se puede: ajuste de valor</th>',
         x => `${prod(x)}<td>${esc(x.doc)}</td><td class="num">${fmt(x.qty)}</td><td class="num">${costo(x)}</td><td class="num">${x.v != null ? money(x.v * x.qty) : '—'}</td><td class="num">${x.corr && Math.abs(x.corr.ajuste) > 0.5 ? money(x.corr.ajuste) + '<div class="small">PMP queda en ' + money(x.corr.pmp) + '</div>' : '—'}</td>`,
@@ -1190,7 +1197,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     const r2 = v => v != null ? Math.round(v * 100) / 100 : '';
     const hoja = (nombre, filas) => XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filas.length ? filas : [{'': 'Nada en este paso'}]), nombre);
     hoja('1 Confirmar', P.verify.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Diferencia': x.qty, 'Motivo': x.motivo, 'Qué revisar': x.txt})));
-    if (P.um.length) hoja('1b Unidades', P.um.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Unidad del conteo': x.r.umInfo.de, 'Unidad en Defontana': x.r.umInfo.a, 'Contado': x.r.s.stock, 'Tiene Defontana hoy': hoyDe(x.r) ?? '', 'Ajuste si solo está mal la unidad': x.r.diff ?? '', 'Ajuste si Defontana lleva su unidad': x.r.umInfo.alt ?? 'sin conversión'})));
+    if (P.um.length) hoja('1b Unidades', P.um.map((x, i) => { const u = x.r.umInfo; return {'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Unidad en Defontana': u.a, 'Cambiar a': u.de, 'Saldo Defontana (su unidad)': u.f ? u.hoyDef : hoyDe(x.r) ?? '', 'Saldo convertido': u.f ? u.hoyConv : 'sin conversión conocida', 'Contado': x.r.s.stock, 'Ajuste después': x.r.diff ?? ''}; }));
     hoja('2 Costos', P.cost.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Qué corregir': x.doc, 'Cantidad': x.qty, 'Costo a usar c/u': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Origen del costo': x.src, 'Ajuste de valor (si no se puede corregir)': x.corr ? Math.round(x.corr.ajuste) : '', 'PMP correcto hoy': x.corr ? r2(x.corr.pmp) : ''})));
     hoja('3 Entradas', P.in.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Debería tener hoy': x.r.realNow ?? '', 'Tiene Defontana hoy': hoyDe(x.r) ?? '', 'Cantidad': x.qty, 'Costo c/u': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Origen del costo': x.src, 'Motivo': x.motivo})));
     hoja('4 Salidas', P.out.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Debería tener hoy': x.r.realNow ?? '', 'Tiene Defontana hoy': hoyDe(x.r) ?? '', 'Cantidad': x.qty, 'PMP c/u (referencial)': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Motivo': x.motivo})));
