@@ -234,26 +234,24 @@
       // Defontana lleva un saldo por cada artículo: si el código existe escrito de varias formas, se suman
       const byArt = new Map();
       for (const m of docs){ const a = norm(m.art); if (!byArt.has(a)) byArt.set(a, []); byArt.get(a).push(m); }
-      let sysNow = null, sysAtCount = null;
+      // El saldo de cada fila del informe depende del orden en que Defontana procesó los documentos, que
+      // puede no ser el orden de las filas cuando hay varios el mismo día. Por eso se toma como saldo
+      // inicial el valor que más se repite de (saldo de la fila − movimientos acumulados hasta ella) y
+      // los saldos al conteo y final se calculan sumando los documentos.
+      const signed = m => m.kind === 'in' ? m.qty : -m.qty;
+      let sysNow = null, sysAtCount = null, sysCalc = null, toOther = 0;
       for (const list of byArt.values()){
+        let cum = 0; const votes = new Map();
+        for (const m of list){ cum += signed(m); if (m.saldo != null){ const v = Math.round((m.saldo - cum) * 1e6) / 1e6; votes.set(v, (votes.get(v) || 0) + 1); } }
+        if (!votes.size) continue;
+        let init = null, best = 0;
+        for (const [v, n] of votes) if (n > best){ init = v; best = n; }
         const last = list[list.length - 1];
         if (last.saldo != null) sysNow = (sysNow || 0) + last.saldo;
-        if (!counted) continue;
-        let li = null; list.forEach((m, j) => { if (m.fecha && !after(m)) li = j; });
-        let v = null;
-        if (li != null) v = list[li].saldo;
-        else { const f = list[0]; if (f.saldo != null) v = f.saldo - (f.kind === 'in' ? f.qty : -f.qty); }
-        if (v != null) sysAtCount = (sysAtCount || 0) + v;
+        sysCalc = (sysCalc || 0) + init + cum;
+        if (counted) sysAtCount = (sysAtCount || 0) + init + list.filter(m => m.fecha && !after(m)).reduce((a, m) => a + signed(m), 0);
       }
-      // Saldo final calculado con los documentos (no depende del orden de las filas del informe)
-      let sysCalc = null, toOther = 0;
-      if (counted && sysAtCount != null){
-        sysCalc = sysAtCount;
-        for (const m of docs) if (m.fecha && after(m)){
-          sysCalc += m.kind === 'in' ? m.qty : -m.qty;
-          if (!m._aj && !inBod(m) && m.kind === 'in') toOther += m.qty;
-        }
-      }
+      if (counted) for (const m of docs) if (m.fecha && after(m) && !m._aj && !inBod(m) && m.kind === 'in') toOther += m.qty;
       const own = s ? new Set(s.variants.map(norm)) : new Set();
       const alias = [...(s ? s.variants.filter(v => norm(v) !== norm(s.code)) : []), ...[...byArt.keys()].filter(a => !own.has(a) && (s || a !== norm(docs[0].art)))];
       const viaName = docs.some(m => m._byName);
@@ -269,11 +267,12 @@
       else if (diff == null) st = 'nodata';
       else st = diff > EPS ? 'up' : diff < -EPS ? 'down' : 'ok';
       const zeros = docs.filter(m => m.valor != null && Math.abs(m.valor) < EPS && m.qty > EPS).length;
+      const cost = costReview(docs, sysCalc);
       const dx = counted ? diagnose(s, docs.filter(m => !m._aj), after, diff, sysAtCount, sameNet, zeros) : {cause:null, obs:[]};
       if (dx.cause === 'late' || dx.cause === 'sameday') st = 'check';
       return {cause:dx.cause, obs:dx.obs, alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs, sysCalc, toOther,
         sysAtCount, sysNow, realNow, diff, st, pmp, edited, pmpSrc: edited ? 'Ingresado a mano' : pm ? pm.src : 'Sin costo en Defontana',
-        valor: diff != null && Math.abs(diff) > EPS && pmp != null ? diff * pmp : (st === 'ok' ? 0 : null), zeros};
+        valor: diff != null && Math.abs(diff) > EPS && pmp != null ? diff * pmp : (st === 'ok' ? 0 : null), zeros, cost};
     };
     const seen = new Set();
     const rows = [...groups.values()].map(list => { const s = mergeGroup(list); seen.add(s.key); return build(s, byKey.get(s.key) || []); });
@@ -287,10 +286,78 @@
       const edited = state.pmpEdit.has(k);
       const pmp = edited ? state.pmpEdit.get(k) : pm ? pm.v : null;
       zero.push({key:k, m, code:m.art, name:m.desc || names.get(k) || '', pmp, edited,
-        pmpSrc: edited ? 'Ingresado a mano' : pm ? pm.src : 'Sin costo en Defontana', valor: pmp != null ? pmp * m.qty : null});
+        pmpSrc: edited ? 'Ingresado a mano' : pm ? pm.src : 'Sin costo en Defontana', valor: pmp != null ? pmp * m.qty : null,
+        rev: zeroReview(m, docs, j, pmp)});
     });
     return {rows, zero, orphan: [...byKey.keys()].filter(k => !seen.has(k)).length};
   }
+
+  // ---------- Costo: productos que entraron o salieron a $0 ----------
+  const pmpAt = m => m && m.saldo > EPS && m.valorInv != null ? m.valorInv / m.saldo : null;
+  // ¿Hay que revisar el costo de este producto? Mira sus documentos a $0 y cómo está hoy.
+  function costReview(docs, saldoHoy){
+    const zeros = docs.filter(m => m.valor != null && Math.abs(m.valor) < EPS && m.qty > EPS);
+    const last = docs[docs.length - 1];
+    const pmpHoy = pmpAt(last);
+    const sinCostoHoy = saldoHoy > EPS && last && last.valorInv != null && last.valorInv <= EPS;
+    const ins0 = zeros.filter(m => m.kind === 'in');
+    const outsSinStock = zeros.filter(m => m.kind === 'out' && m.saldo != null && m.saldo + m.qty <= EPS);
+    if (!zeros.length && !sinCostoHoy) return null;
+    const txt = [], hacer = [];
+    if (sinCostoHoy){ txt.push(`Hoy tiene ${fmt(saldoHoy)} sin costo en Defontana (PMP $0).`); hacer.push(`Ajuste de valor: cargar el costo a las ${fmt(saldoHoy)} unidades`); }
+    for (const m of ins0){
+      const i = docs.indexOf(m), antes = pmpAt(docs[i - 1]), despues = pmpAt(m);
+      txt.push(`Entró ${fmt(m.qty)} a $0 con ${m.tipo} #${m.folio} del ${fmtDate(m.fecha)}` + (antes > EPS && despues != null ? `: el PMP bajó de ${money(antes)} a ${money(despues)}.` : '.'));
+    }
+    if (ins0.length) hacer.push('Corregir el costo de ' + (ins0.length === 1 ? 'ese ingreso' : 'esos ingresos') + ' (o ajuste de valor por la diferencia)');
+    if (outsSinStock.length){ txt.push(`Salió ${fmt(outsSinStock.reduce((a, m) => a + m.qty, 0))} sin tener stock (${outsSinStock.map(m => m.tipo + ' #' + m.folio).join(', ')}): faltó registrar el ingreso con su costo.`); hacer.push('Parte de Entrada con costo por lo que salió sin stock'); }
+    const need = sinCostoHoy || ins0.length > 0 || outsSinStock.length > 0;
+    if (!need) txt.push(`Tuvo salidas a $0, pero hoy ya tiene costo (PMP ${money(pmpHoy)}). No hace falta corregir.`);
+    return {need, txt, hacer};
+  }
+  function zeroReview(m, docs, j, pmp){
+    const antes = pmpAt(docs[j - 1]);
+    if (m.kind === 'in'){
+      return antes > EPS
+        ? {need:true, txt:`Sí. Entró a $0 y el PMP bajó de ${money(antes)} a ${money(pmpAt(m))}.`, hacer:`Corregir el costo del ingreso (${money(antes)} c/u) o ajuste de valor por ${money(antes * m.qty)}`}
+        : {need:true, txt:'Sí. El producto entró sin costo y no tenía costo antes.', hacer:'Ajuste de valor: cargar el costo real (factura o importación)'};
+    }
+    if (m.saldo != null && m.saldo + m.qty <= EPS) return {need:true, txt:'Sí. Salió sin tener stock en Defontana: faltó registrar el ingreso.', hacer:'Parte de Entrada con costo por lo que salió sin stock'};
+    const hoy = pmpAt(docs[docs.length - 1]);
+    return hoy > EPS
+      ? {need:false, txt:`No. Salió a $0 porque en ese momento no tenía costo, pero hoy su PMP es ${money(hoy)}.`, hacer:'Nada (solo la salida quedó sin costo)'}
+      : {need:true, txt:'Sí. Salió a $0 porque el producto no tiene costo (PMP $0).', hacer:'Ajuste de valor: cargar el costo del producto'};
+  }
+
+  // ---------- Qué documento generar ----------
+  function docToMake(r){
+    const d = r.diff, q = d != null ? fmt(Math.abs(d)) : '';
+    const out = [];
+    if (r.st === 'up'){
+      if (r.cause === 'egrnodesp') out.push(`Parte de Entrada por ${q} (devolución), o anular la salida que no se despachó`);
+      else if (r.cause === 'um') out.push('Revisar la unidad de medida antes de hacer una entrada');
+      else out.push(`Parte de Entrada por ${q}` + (r.pmp > 0 ? ` a ${money(r.pmp)} c/u` : ' (poner costo)'));
+    } else if (r.st === 'down'){
+      if (r.cause === 'dupin') out.push(`Anular el ingreso duplicado, o Parte de Salida por ${q}`);
+      else if (r.cause === 'um') out.push('Revisar la unidad de medida antes de hacer una salida');
+      else out.push(`Parte de Salida por ${q} (ajuste / merma)`);
+    } else if (r.st === 'check') out.push('Ninguno por ahora: volver a contar para confirmar');
+    else if (r.st === 'ok') out.push('Ninguno');
+    else if (r.st === 'nodata') out.push('Ver el saldo en Defontana');
+    else if (r.st === 'nocount') out.push('Contar el producto');
+    else if (r.st === 'nofile') out.push('Revisar por qué no está en el conteo');
+    if (r.cost && r.cost.need) out.push(...r.cost.hacer);
+    return out;
+  }
+  function checkToMake(r){
+    const g = r.gap, q = g != null ? fmt(Math.abs(g)) : '';
+    if (r.ck === 'ok') return ['Ninguno'];
+    if (r.ck === 'double') return [`Volver a contar; si hay ${fmt(Math.abs(r.diff))} más, Parte de ${r.diff < 0 ? 'Entrada' : 'Salida'} por ${fmt(Math.abs(r.diff))} para reversar`];
+    if (r.ck === 'review') return ['Volver a contar para decidir'];
+    if (r.ck === 'other') return ['Revisar el ajuste'];
+    return [g > 0 ? `Parte de Salida por ${q}` : `Parte de Entrada por ${q}`];
+  }
+  const makeCell = list => list.length ? `<ul class="make">${list.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '';
 
   // ---------- Verificar ajustes ----------
   const docId = m => [strip(m.tipo), m.folio, dayKey(m.fecha)].join('|');
@@ -370,12 +437,15 @@
     ['nodata', 'Sin saldo en Defontana', r => r.st === 'nodata', 'var(--warn)'],
     ['nocount', 'Sin contar', r => r.st === 'nocount', 'var(--muted)'],
     ['nofile', 'No están en el conteo', r => r.st === 'nofile', 'var(--warn)'],
-    ['alias', 'Código escrito distinto', r => r.alias.length > 0 || r.viaName || r.nCounted > 1, 'var(--accent)']
+    ['alias', 'Código escrito distinto', r => r.alias.length > 0 || r.viaName || r.nCounted > 1, 'var(--accent)'],
+    ['cost', 'Revisar costo ($0)', r => !!(r.cost && r.cost.need), 'var(--warn)']
   ];
   const ZERO_FILTERS = [
     ['all', 'Todos', z => true, null],
     ['in', 'Ingresos a $0', z => z.m.kind === 'in', 'var(--in)'],
     ['out', 'Egresos a $0', z => z.m.kind === 'out', 'var(--out)'],
+    ['need', 'Revisar costo', z => z.rev.need, 'var(--warn)'],
+    ['noneed', 'No hace falta', z => !z.rev.need, 'var(--muted)'],
     ['nopmp', 'Sin PMP', z => !(z.pmp > 0), 'var(--warn)']
   ];
   const CHECK = {
@@ -399,6 +469,7 @@
     ['aj', 'Se ajustó', 'num', r => r.aj],
     ['ck', 'Resultado', '', r => r.ck],
     ['obs', 'Detalle', '', r => r.ck],
+    ['make', 'Documento a generar', '', r => checkToMake(r)[0]],
     ['exp', 'Debería tener Defontana', 'num', r => r.expected],
     ['now', 'Tiene Defontana', 'num', r => r.sysCalc ?? r.sysNow],
     ['gap', 'Diferencia que queda', 'num', r => r.gap]
@@ -412,6 +483,7 @@
       <td class="num diff ${r.aj > EPS ? 'plus' : r.aj < -EPS ? 'minus' : 'mut'}">${Math.abs(r.aj) > EPS ? sgn(r.aj) + '<div class="small">' + money(r.ajVal) + '</div>' : '—'}</td>
       <td><span class="pill ${cls}">${label}</span></td>
       <td class="obs"><div class="why">${r.cobs[0]}</div>${r.cobs.length > 1 ? '<div class="more-obs">' + r.cobs.slice(1).join('<br>') + '</div>' : ''}</td>
+      <td class="tomake">${makeCell(checkToMake(r))}</td>
       <td class="num">${fmt(r.expected)}</td>
       <td class="num">${fmt(r.sysCalc ?? r.sysNow)}${r.sysCalc != null && r.sysNow != null && Math.abs(r.sysCalc - r.sysNow) > EPS ? '<div class="small">informe: ' + fmt(r.sysNow) + '</div>' : ''}</td>
       <td class="num diff ${r.gap == null || Math.abs(r.gap) <= EPS ? 'mut' : 'minus'}">${r.gap == null ? '—' : Math.abs(r.gap) <= EPS ? '0' : sgn(r.gap)}</td></tr>`;
@@ -424,10 +496,11 @@
     ['diff', 'Diferencia', 'num', r => r.diff],
     ['st', 'Qué hacer', '', r => r.st],
     ['obs', 'Por qué está descuadrado', '', r => r.cause ? CAUSES[r.cause] : null],
+    ['make', 'Documento a generar', '', r => docToMake(r)[0]],
     ['pmp', 'PMP', 'num', r => r.pmp],
     ['valor', 'Valor ajuste', 'num', r => r.valor],
     ['real', 'Stock real hoy', 'num', r => r.realNow],
-    ['now', 'Defontana hoy', 'num', r => r.sysNow]
+    ['now', 'Defontana hoy', 'num', r => r.sysCalc ?? r.sysNow]
   ];
   const ZERO_COLS = [
     ['fecha', 'Fecha', '', z => z.m.fecha],
@@ -436,7 +509,9 @@
     ['kind', 'Tipo', '', z => z.m.kind],
     ['qty', 'Cantidad', 'num', z => z.m.qty],
     ['pmp', 'PMP', 'num', z => z.pmp],
-    ['valor', 'Valor que debió tener', 'num', z => z.valor]
+    ['valor', 'Valor que debió tener', 'num', z => z.valor],
+    ['rev', '¿Revisar costo?', '', z => z.rev.need ? 0 : 1],
+    ['make', 'Documento a generar', '', z => z.rev.hacer]
   ];
 
   const pmpInput = (key, v, edited, code) =>
@@ -454,13 +529,14 @@
     const d = r.diff;
     const qty = (r.st === 'up' || r.st === 'down') ? ' ' + fmt(Math.abs(d)) : '';
     const obsCell = r => {
+      const costo = r.cost ? `<div class="costrev${r.cost.need ? '' : ' ok'}"><b>${r.cost.need ? 'Revisar costo:' : 'Costo:'}</b> ${esc(r.cost.txt.join(' '))}</div>` : '';
       if (!r.cause){
-        if (r.st === 'nodata') return '<span class="mut">Sin documentos en el informe: no se conoce el saldo de Defontana.</span>';
-        if (r.st === 'nofile') return '<span class="mut">Tiene documentos en Defontana pero no está en el archivo de conteo.</span>';
-        return '';
+        if (r.st === 'nodata') return '<span class="mut">Sin documentos en el informe: no se conoce el saldo de Defontana.</span>' + costo;
+        if (r.st === 'nofile') return '<span class="mut">Tiene documentos en Defontana pero no está en el archivo de conteo.</span>' + costo;
+        return costo;
       }
       const [main, ...rest] = r.obs;
-      return `<div class="cause">${CAUSES[r.cause]}</div><div class="why">${main}</div>${rest.length ? '<div class="more-obs">' + rest.join('<br>') + '</div>' : ''}`;
+      return `<div class="cause">${CAUSES[r.cause]}</div><div class="why">${main}</div>${rest.length ? '<div class="more-obs">' + rest.join('<br>') + '</div>' : ''}${costo}`;
     };
     return `<tr class="rx-row s-${r.st}${state.open.has(r.key) ? ' open' : ''}" data-key="${esc(r.key)}" tabindex="0">
       <td><div class="code">${esc(r.code)}</div><div class="pname">${esc(r.name)}</div>${aliasNote(r)}</td>
@@ -469,10 +545,11 @@
       <td class="num diff ${d > EPS ? 'plus' : d < -EPS ? 'minus' : 'mut'}">${d == null ? '—' : sgn(d)}</td>
       <td><span class="pill ${cls}">${label}${qty}</span>${r.sameDay && r.counted ? '<span class="flag" title="Hay documentos el mismo día del conteo">· mismo día</span>' : ''}</td>
       <td class="obs">${obsCell(r)}</td>
+      <td class="tomake">${makeCell(docToMake(r))}</td>
       <td class="num">${r.st === 'up' || r.st === 'down' || r.st === 'check' ? pmpInput(r.key, r.pmp, r.edited, r.code) : '<span class="mut">' + (r.pmp != null ? money(r.pmp) : '—') + '</span>'}</td>
       <td class="num diff ${r.valor > 0.5 ? 'plus' : r.valor < -0.5 ? 'minus' : 'mut'}">${r.st === 'up' || r.st === 'down' || r.st === 'check' ? money(r.valor) : '—'}</td>
       <td class="num">${fmt(r.realNow)}${r.ins || r.outs ? '<div class="small">' + (r.ins ? '<span class="plus">+' + fmt(r.ins) + '</span> ' : '') + (r.outs ? '<span class="minus">−' + fmt(r.outs) + '</span>' : '') + ' desde el conteo</div>' : ''}</td>
-      <td class="num">${fmt(r.sysNow)}</td></tr>`;
+      <td class="num">${fmt(r.sysCalc ?? r.sysNow)}${r.sysCalc != null && r.sysNow != null && Math.abs(r.sysCalc - r.sysNow) > EPS ? '<div class="small">informe: ' + fmt(r.sysNow) + '</div>' : ''}</td></tr>`;
   }
   function zeroRow(z){
     return `<tr>
@@ -482,11 +559,14 @@
       <td><span class="pill ${z.m.kind === 'in' ? 'a-up' : 'a-down'}">${z.m.kind === 'in' ? 'Ingreso' : 'Egreso'}</span></td>
       <td class="num">${fmt(z.m.qty)} <span class="small">${esc(z.m.um)}</span></td>
       <td class="num">${pmpInput(z.key, z.pmp, z.edited, z.code)}<div class="small">${esc(z.pmpSrc)}</div></td>
-      <td class="num diff">${money(z.valor)}</td></tr>`;
+      <td class="num diff">${money(z.valor)}</td>
+      <td class="obs"><span class="pill ${z.rev.need ? 'a-warn' : 'a-ok'}">${z.rev.need ? 'Sí' : 'No'}</span> <span class="why">${esc(z.rev.txt.replace(/^(Sí|No)\. /, ''))}</span></td>
+      <td class="tomake">${makeCell([z.rev.hacer])}</td></tr>`;
   }
 
   function detail(r){
-    if (!r.docs.length) return `<tr class="detail"><td colspan="9"><span class="note">Este código no tiene documentos en el informe de Defontana, así que no se conoce su saldo en el sistema. Revisa su stock directamente en Defontana.</span></td></tr>`;
+    const span = (state.view === 'check' ? CHECK_COLS : REG_COLS).length;
+    if (!r.docs.length) return `<tr class="detail"><td colspan="${span}"><span class="note">Este código no tiene documentos en el informe de Defontana, así que no se conoce su saldo en el sistema. Revisa su stock directamente en Defontana.</span></td></tr>`;
     const ck = r.counted ? dayKey(r.s.fecha) : null, sameAfter = $('optSame').value === 'after';
     const when = m => { if (m._aj) return 'Ajuste'; if (ck == null) return ''; const dk = dayKey(m.fecha); return dk < ck ? 'Antes' : dk > ck ? 'Después' : sameAfter ? 'Mismo día (después)' : 'Mismo día (antes)'; };
     const rows = r.docs.map(m => {
@@ -503,7 +583,7 @@
       <span>Contado el <b>${fmtDate(r.s.fecha, true)}</b>${r.s.por ? ' por ' + esc(r.s.por) : ''}: <b>${fmt(r.s.stock)}</b></span>
       <span>Defontana tenía: <b>${fmt(r.sysAtCount)}</b></span>
       <span>Origen del PMP: <b>${esc(r.pmpSrc)}</b></span></div>` : '';
-    return `<tr class="detail"><td colspan="9">${head}<table class="det"><thead><tr><th>Fecha</th><th>Documento</th><th>Referencia</th><th class="num">Cantidad</th><th class="num">Valor</th><th class="num">Saldo</th><th class="num">PMP</th><th>Respecto al conteo</th></tr></thead><tbody>${rows}</tbody></table></td></tr>`;
+    return `<tr class="detail"><td colspan="${span}">${head}<table class="det"><thead><tr><th>Fecha</th><th>Documento</th><th>Referencia</th><th class="num">Cantidad</th><th class="num">Valor</th><th class="num">Saldo</th><th class="num">PMP</th><th>Respecto al conteo</th></tr></thead><tbody>${rows}</tbody></table></td></tr>`;
   }
 
   // ---------- Pintar ----------
@@ -523,10 +603,13 @@
     if (!state.mov2){ box.innerHTML = ''; return; }
     const G = state.docGroups, auto = G.filter(g => g.auto), rest = G.filter(g => !g.auto);
     const item = g => `<label class="ajdoc"><input type="checkbox" data-doc="${esc(g.id)}"${state.ajSel.has(g.id) ? ' checked' : ''}> <span>${esc(g.tipo)} <b>#${esc(g.folio)}</b> del ${fmtDate(g.fecha)} · ${fmt(g.lines)} ${g.lines === 1 ? 'línea' : 'líneas'} · ${money(g.valor)}${g.auto ? ' · ' + fmt(g.match) + ' calzan con las diferencias' : ''}</span></label>`;
-    box.innerHTML = `<div class="ajbox"><h3>Documentos de ajuste</h3>
+    const nSel = G.filter(g => state.ajSel.has(g.id)).length;
+    box.innerHTML = `<div class="ajbox"><div class="ajhead"><h3>Documentos de ajuste <span class="note">(${fmt(nSel)} de ${fmt(G.length)} marcados)</span></h3>
+      <span class="ajbtns"><button type="button" class="rx-btn ghost sm" data-all="1">Marcar todos</button><button type="button" class="rx-btn ghost sm" data-all="0">Quitar todos</button><button type="button" class="rx-btn ghost sm" data-all="auto">Solo los sugeridos</button></span></div>
       <p class="note">${auto.length ? 'Encontré estos documentos que calzan con las diferencias del conteo. Marca o desmarca los que corresponden a ajustes de inventario.' : 'No encontré documentos que calcen con las diferencias. Marca abajo los documentos de ajuste.'}</p>
       ${auto.map(item).join('')}
-      ${rest.length ? `<details${auto.length ? '' : ' open'}><summary>Otros documentos posteriores al conteo (${fmt(rest.length)})</summary><div class="ajlist">${rest.map(item).join('')}</div></details>` : ''}</div>`;
+      ${nSel > auto.length + 5 ? '<p class="note warnline">Ojo: marcaste documentos que no son ajustes. Los movimientos normales (ventas, envíos a producción, compras) no deben marcarse, porque el programa los tomaría como ajustes y el resultado no sería correcto.</p>' : ''}
+      ${rest.length ? `<details${auto.length && !state.ajOpen ? '' : ' open'}><summary>Otros documentos posteriores al conteo (${fmt(rest.length)})</summary><div class="ajlist">${rest.map(item).join('')}</div></details>` : ''}</div>`;
   }
 
   function render(){
@@ -618,20 +701,23 @@
   const regExport = r => ({
     'Código': r.code, 'Nombre': r.name, 'Otras formas del código': r.alias.join(', ') + (r.viaName ? (r.alias.length ? ' · ' : '') + 'cruzado por nombre' : ''), 'Qué hacer': ACTION[r.st][1], 'Causa probable': r.cause ? CAUSES[r.cause] : '',
     'Observaciones': r.obs.map(x => x.replace(/<[^>]+>/g, '')).join(' '),
+    'Documento a generar': docToMake(r).join(' · '), 'Revisar costo': r.cost ? (r.cost.need ? 'Sí' : 'No') : '', 'Detalle costo': r.cost ? r.cost.txt.join(' ') : '',
     'Cantidad a ajustar': r.diff != null && Math.abs(r.diff) > EPS ? Math.abs(r.diff) : '',
     'Contado': r.s ? r.s.stock : '', 'Fecha conteo': r.counted ? fmtDate(r.s.fecha, true) : '',
     'Defontana al conteo': r.sysAtCount ?? '', 'Diferencia': r.diff ?? '',
     'PMP': r.pmp != null ? Math.round(r.pmp * 100) / 100 : '', 'Origen PMP': r.pmpSrc,
     'Valor ajuste': r.valor != null ? Math.round(r.valor) : '',
-    'Stock real hoy': r.realNow ?? '', 'Defontana hoy': r.sysNow ?? ''
+    'Stock real hoy': r.realNow ?? '', 'Defontana hoy': r.sysCalc ?? r.sysNow ?? ''
   });
   const zeroExport = z => ({
     'Fecha': fmtDate(z.m.fecha), 'Documento': z.m.tipo, 'Folio': z.m.folio, 'Referencia': z.m.ref,
     'Código': z.code, 'Nombre': z.name, 'Tipo': z.m.kind === 'in' ? 'Ingreso' : 'Egreso', 'Cantidad': z.m.qty,
-    'PMP': z.pmp != null ? Math.round(z.pmp * 100) / 100 : '', 'Origen PMP': z.pmpSrc, 'Valor que debió tener': z.valor != null ? Math.round(z.valor) : ''
+    'PMP': z.pmp != null ? Math.round(z.pmp * 100) / 100 : '', 'Origen PMP': z.pmpSrc, 'Valor que debió tener': z.valor != null ? Math.round(z.valor) : '',
+    '¿Revisar costo?': z.rev.need ? 'Sí' : 'No', 'Motivo': z.rev.txt, 'Documento a generar': z.rev.hacer
   });
   const checkExport = r => ({
     'Código': r.code, 'Nombre': r.name, 'Resultado': CHECK[r.ck][1], 'Detalle': r.cobs.map(x => x.replace(/<[^>]+>/g, '')).join(' '),
+    'Documento a generar': checkToMake(r).join(' · '),
     'Contado': r.s ? r.s.stock : '', 'Fecha conteo': r.counted ? fmtDate(r.s.fecha, true) : '',
     'Había que ajustar': r.diff ?? '', 'Se ajustó': r.aj, 'Valor ajuste': Math.round(r.ajVal),
     'Documentos de ajuste': r.ajDocs.map(m => m.tipo + ' #' + m.folio).join(', '),
@@ -685,6 +771,14 @@
   setupLoader('fileStock', 'dropStock', 'stStock', parseStock, 'stock', 'códigos');
   setupLoader('fileMov', 'dropMov', 'stMov', parseMov, 'mov', 'líneas de documentos');
   setupLoader('fileMov2', 'dropMov2', 'stMov2', parseMov, 'mov2', 'líneas de documentos');
+  $('ajDocs').addEventListener('click', e => {
+    const b = e.target.closest('[data-all]'); if (!b) return;
+    const v = b.dataset.all;
+    state.ajOpen = true;
+    state.ajSel = new Set(v === '1' ? state.docGroups.map(g => g.id) : v === 'auto' ? state.docGroups.filter(g => g.auto).map(g => g.id) : []);
+    render();
+  });
+  $('ajDocs').addEventListener('toggle', e => { if (e.target.tagName === 'DETAILS') state.ajOpen = e.target.open; }, true);
   $('ajDocs').addEventListener('change', e => {
     const c = e.target.closest('input[data-doc]'); if (!c) return;
     if (c.checked) state.ajSel.add(c.dataset.doc); else state.ajSel.delete(c.dataset.doc);

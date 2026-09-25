@@ -58,7 +58,7 @@
 .regx .opt label{font-size:12px;font-weight:600;color:var(--muted)}
 .regx .chk{display:flex;gap:8px;align-items:center;font-size:13px}
 .regx .tablebox{overflow:auto;max-height:72vh;background:var(--surface);border:1px solid var(--line);border-radius:10px}
-.regx table{border-collapse:separate;border-spacing:0;width:100%;min-width:1400px;font-size:13px}
+.regx table{border-collapse:separate;border-spacing:0;width:100%;min-width:1650px;font-size:13px}
 .regx th,.regx td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--line);vertical-align:middle}
 .regx thead th{position:sticky;top:0;z-index:1;background:var(--surface2);font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
 .regx th.sort{cursor:pointer;user-select:none}
@@ -123,3 +123,12 @@
 .regx input[type=search]{width:100%}
 .regx .right{width:100%}
 }
+.regx .tomake{min-width:210px;max-width:260px}
+.regx .make{margin:0;padding-left:16px;font-size:12px;font-weight:600;color:var(--accent)}
+.regx .make li+li{margin-top:3px;color:var(--warn)}
+.regx .costrev{margin-top:6px;padding:5px 8px;border-radius:6px;background:var(--warn-soft);color:var(--warn);font-size:11px}
+.regx .costrev.ok{background:var(--gray-soft);color:var(--muted)}
+.regx .ajhead{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}
+.regx .ajbtns{display:flex;flex-wrap:wrap;gap:6px}
+.regx .rx-btn.sm{padding:4px 10px;font-size:12px}
+.regx .warnline{color:var(--warn);font-weight:600}
