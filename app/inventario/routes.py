@@ -1006,6 +1006,8 @@ def regularizacion():
             "Contado" if i.contado else "Pendiente",
             i.contado_por.nombre_completo if i.contado_por else "",
             format_fecha_hora(i.contado_en),
+            # unidad en que se cuenta (la que muestra Stock y conteo); si difiere de la de Defontana se convierte
+            i.unidad_qms or i.unidad_defontana or "",
         ]
         for i in items
     ]

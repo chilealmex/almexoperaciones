@@ -39,6 +39,18 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
    Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
 /* Regularización de inventario (Inventario → Regularización).
    Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
+/* Regularización de inventario (Inventario → Regularización).
+   Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
+/* Regularización de inventario (Inventario → Regularización).
+   Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
+/* Regularización de inventario (Inventario → Regularización).
+   Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
+/* Regularización de inventario (Inventario → Regularización).
+   Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
+/* Regularización de inventario (Inventario → Regularización).
+   Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
+/* Regularización de inventario (Inventario → Regularización).
+   Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
 .regx{--bg:#F2F4F3; --surface:#FFFFFF; --surface2:#EDF1EF; --ink:#16201D; --muted:#5E6B66; --line:#DCE3E0;
   --accent:#245E8F; --accent-ink:#FFFFFF; --accent-soft:#E1EBF4;
   --in:#1B7446; --in-soft:#E0F2E7; --out:#B0362A; --out-soft:#FAE3E0; --warn:#8A5A00; --warn-soft:#FBEDCF; --gray-soft:#ECEFEE;
@@ -342,15 +354,37 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     const t = readTable(rows, ['CODIGO', 'STOCK FISICO']);
     if (!t) throw new Error('No encontré las columnas “Código” y “Stock físico”. ¿Es el archivo de Stock y conteo?');
     const c = {code:t.col('Código'), name:t.col('Nombre'), stock:t.col('Stock físico'), estado:t.col('Estado del conteo'),
-      por:t.col('Contado por'), fecha:t.col('Fecha y hora del conteo','Fecha del conteo','Fecha')};
+      por:t.col('Contado por'), fecha:t.col('Fecha y hora del conteo','Fecha del conteo','Fecha'),
+      um:t.col('Unidad', 'Unidad QMS', 'Unidad de medida', 'U. Medida', 'UM', 'Unidad Defontana')};
     const out = [];
     for (const r of t.rows){
       const code = String(r[c.code] ?? '').trim(); if (!code) continue;
       out.push({code, key:keyOf(code), name:r[c.name] ?? '', stock:num(r[c.stock]), estado:c.estado >= 0 ? r[c.estado] ?? '' : '',
-        por:c.por >= 0 ? r[c.por] ?? '' : '', fecha:c.fecha >= 0 ? parseDate(r[c.fecha]) : null});
+        por:c.por >= 0 ? r[c.por] ?? '' : '', fecha:c.fecha >= 0 ? parseDate(r[c.fecha]) : null, um:c.um >= 0 ? String(r[c.um] ?? '').trim() : ''});
     }
     return out;
   }
+
+  // ---------- Unidades de medida ----------
+  // Mismos grupos que app/utils/unidades.py (M = MT = MTS…), más las de conversión conocida.
+  const UM_GRUPOS = {
+    metro:['M','MT','MTS','METRO','METROS'], pie:['FT','PIE','PIES','FEET'], pulgada:['IN','PULG','PULGADA','PULGADAS'],
+    centimetro:['CM','CMS'], milimetro:['MM'], litro:['L','LT','LTS','LITRO','LITROS'], galon:['GL','GAL','GALON','GALONES'],
+    kilo:['KG','KGS','KILO','KILOS','KILOGRAMO','KILOGRAMOS'], libra:['LB','LBS','LIBRA','LIBRAS'], gramo:['G','GR','GRS','GRAMO','GRAMOS'],
+    unidad:['UN','UND','UNI','UD','UNIDAD','UNIDADES','CU'], pack:['PK','PACK','PACKS'], rollo:['RL','ROLLO','ROLLOS'], caja:['CJ','CAJA','CAJAS']
+  };
+  const UM_NOMBRE = {metro:'metros', pie:'pies', pulgada:'pulgadas', centimetro:'centímetros', milimetro:'milímetros', litro:'litros', galon:'galones', kilo:'kilos', libra:'libras', gramo:'gramos', unidad:'unidades', pack:'packs', rollo:'rollos', caja:'cajas'};
+  const UM_POR_FORMA = {};
+  for (const [g, formas] of Object.entries(UM_GRUPOS)) for (const f of formas) UM_POR_FORMA[f] = g;
+  const umGrupo = u => { const l = String(u || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]/g, ''); return UM_POR_FORMA[l] || l; };
+  // Factor para pasar una cantidad de la unidad "de" a la unidad "a" (1 de = factor a)
+  const UM_BASE = {metro:['L', 1], pie:['L', 0.3048], pulgada:['L', 0.0254], centimetro:['L', 0.01], milimetro:['L', 0.001],
+    litro:['V', 1], galon:['V', 3.78541], kilo:['P', 1], libra:['P', 0.453592], gramo:['P', 0.001]};
+  function umFactor(de, a){
+    const x = UM_BASE[de], y = UM_BASE[a];
+    return x && y && x[0] === y[0] ? x[1] / y[1] : null;
+  }
+
   function parseMov(rows){
     const t = readTable(rows, ['ARTICULO', 'MOVIMIENTO']);
     if (!t) throw new Error('No encontré las columnas “Artículo” y “Movimiento”. ¿Es el Informe de Documentos de Defontana?');
@@ -393,7 +427,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     const el = document.getElementById('regx-conteo');
     let data = [];
     try { data = JSON.parse(el ? el.textContent : '[]'); } catch(_){ data = []; }
-    return data.map(([code, name, stock, estado, por, fecha]) => ({code, key:keyOf(code), name, stock, estado, por, fecha:parseDate(fecha)}));
+    return data.map(([code, name, stock, estado, por, fecha, um]) => ({code, key:keyOf(code), name, stock, estado, por, fecha:parseDate(fecha), um: um || ''}));
   }
 
   // ---------- Estado ----------
@@ -470,11 +504,30 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
         if (eg.length){ const m = eg[eg.length - 1]; cause = 'egrnodesp'; obs.push(`Lo que sobra es igual a la salida ${docTxt(m)}: puede que no se haya despachado o que haya vuelto sin registrar la devolución.`); }
       }
     }
-    // 3. Unidad de medida
-    if (!cause && s.stock > EPS && sys > EPS){
-      const r = s.stock / sys, f = [10, 12, 20, 24, 25, 50, 100, 1000].find(x => near(r, x) || near(1 / r, x));
-      if (f){ const um = docs.length ? docs[docs.length - 1].um : ''; cause = 'um';
-        obs.push(`Lo contado es ${near(r, f) ? f + ' veces' : '1/' + f + ' de'} lo que tiene Defontana${um ? ' (en ' + esc(um) + ')' : ''}: posible conteo en otra unidad (caja, paquete, rollo, metro).`); }
+    // 3. Unidad de medida: múltiplos exactos (caja, paquete) o conversiones conocidas (pies, pulgadas, libras).
+    // Una conversión que calza pesa más que las demás explicaciones, salvo las de fecha de documento.
+    if (cause !== 'late' && cause !== 'sameday' && s.stock > EPS && sys > EPS){
+      const um = docs.length ? String(docs[docs.length - 1].um || '').toUpperCase() : '';
+      const r = s.stock / sys;
+      // Solo se prueba la conversión que corresponde a la unidad del producto en Defontana
+      const en = (...u) => u.map(umGrupo).includes(umGrupo(um));
+      const conv = [
+        {f:1 / 3.2808, ok: en('FT', 'PIE', 'PIES'), txt:'metros y Defontana lo tiene en pies'},
+        {f:3.2808, ok: en('M', 'MT', 'MTS', 'METRO', 'METROS'), txt:'pies y Defontana lo tiene en metros'},
+        {f:2.54, ok: en('IN', 'PULG', 'PULGADA', 'PULGADAS'), txt:'centímetros y Defontana lo tiene en pulgadas'},
+        {f:1 / 2.54, ok: en('CM'), txt:'pulgadas y Defontana lo tiene en centímetros'},
+        {f:0.4536, ok: en('LB', 'LBS', 'LIBRA', 'LIBRAS'), txt:'kilos y Defontana lo tiene en libras'},
+        {f:1 / 0.4536, ok: en('KG', 'KGS', 'KILO', 'KILOS'), txt:'libras y Defontana lo tiene en kilos'}
+      ].find(c => c.ok && Math.abs(r / c.f - 1) <= 0.03);
+      const f = [10, 12, 20, 24, 25, 50, 100, 1000].find(x => near(r, x) || near(1 / r, x));
+      if (conv){
+        cause = 'um'; obs.length = 0;
+        const factor = sys / s.stock;
+        obs.push(`Parece que se contó en ${conv.txt}${um ? ' (' + esc(um) + ')' : ''}: ${fmt(s.stock)} equivale a unos ${fmt(Math.round(s.stock * factor * 10) / 10)} en la unidad de Defontana, casi lo mismo que tiene (${fmt(sys)}). Convierte antes de ajustar.`);
+      } else if (f && !cause){
+        cause = 'um';
+        obs.push(`Lo contado es ${near(r, f) ? f + ' veces' : '1/' + f + ' de'} lo que tiene Defontana${um ? ' (en ' + esc(um) + ')' : ''}: posible conteo en otra unidad (caja, paquete, rollo, metro).`);
+      }
     }
     // 4. Genérico
     if (!cause){
@@ -516,7 +569,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     const mergeGroup = list => {
       const done = list.filter(x => x.stock != null && x.fecha != null);
       const main = done[0] || list[0];
-      const g = {code:main.code, key:main.key, name:main.name, por:main.por, estado:main.estado,
+      const g = {code:main.code, key:main.key, name:main.name, por:main.por, estado:main.estado, um:main.um || '',
         stock: done.length ? done.reduce((a, x) => a + x.stock, 0) : null,
         fecha: done.length ? new Date(Math.max(...done.map(x => +x.fecha))) : null,
         variants: list.map(x => x.code), nCounted: done.length};
@@ -527,6 +580,14 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     };
     const inBod = m => bod === '*' || (m.kind === 'in' ? m.dest : m.orig) === bod;
     const build = (s, docs) => {
+      // Si el conteo está en otra unidad que Defontana, se convierte cuando la conversión es conocida
+      let umInfo = null;
+      const umDef = docs.length ? umGrupo(docs[docs.length - 1].um) : '';
+      if (s && s.stock != null && s.um && umDef && umGrupo(s.um) !== umDef){
+        const f = umFactor(umGrupo(s.um), umDef);
+        umInfo = {de: s.um, a: docs[docs.length - 1].um, f, original: s.stock};
+        if (f) s = {...s, stock: Math.round(s.stock * f * 1000) / 1000};
+      }
       const counted = !!s && s.stock != null && s.fecha != null;
       const ck = counted ? dayKey(s.fecha) : null;
       const after = m => { const dk = dayKey(m.fecha); return dk > ck || (dk === ck && sameAfter); };
@@ -576,8 +637,17 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
       const zeros = docs.filter(m => m.valor != null && Math.abs(m.valor) < EPS && m.qty > EPS).length;
       const cost = costReview(docs, sysCalc);
       const dx = counted ? diagnose(s, docs.filter(m => !m._aj), after, diff, sysAtCount, sameNet, zeros) : {cause:null, obs:[]};
-      if (dx.cause === 'late' || dx.cause === 'sameday') st = 'check';
-      return {cause:dx.cause, obs:dx.obs, alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs, sysCalc, toOther,
+      if (counted && umInfo){
+        if (umInfo.f && diff != null && Math.abs(diff) > EPS && Math.abs(diff) < umInfo.f){
+          // menos de una unidad de conteo: es el redondeo del conteo (ej. 38 MT contados = 124,7 FT)
+          dx.cause = 'um'; dx.umRound = true;
+          dx.obs.length = 0;
+          dx.obs.push(`El conteo está en ${esc(umInfo.de)} y Defontana en ${esc(umInfo.a)}: ${fmt(umInfo.original)} ${esc(umInfo.de)} = ${fmt(s.stock)} ${esc(umInfo.a)}. La diferencia (${fmt(Math.abs(diff))} ${esc(umInfo.a)}) es menor que 1 ${esc(umInfo.de)}: es redondeo del conteo, no hace falta ajustar.`);
+        } else if (umInfo.f) dx.obs.push(`El conteo está en ${esc(umInfo.de)} y Defontana en ${esc(umInfo.a)}: se convirtió ${fmt(umInfo.original)} ${esc(umInfo.de)} = ${fmt(s.stock)} ${esc(umInfo.a)}.`);
+        else if (Math.abs(diff || 0) > EPS){ dx.cause = 'um'; dx.obs.unshift(`El conteo está en ${esc(umInfo.de)} y Defontana en ${esc(umInfo.a)}, y no hay una conversión conocida entre esas unidades. Convierte lo contado a ${esc(umInfo.a)} antes de ajustar.`); }
+      }
+      if (dx.cause === 'late' || dx.cause === 'sameday' || dx.cause === 'um') st = 'check';
+      return {cause:dx.cause, obs:dx.obs, umRound: !!dx.umRound, alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, umInfo, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs, sysCalc, toOther,
         sysAtCount, sysNow, realNow, diff, st, pmp, edited, pmpSrc: edited ? 'Ingresado a mano' : pm ? pm.src : 'Sin costo en Defontana',
         valor: diff != null && Math.abs(diff) > EPS && pmp != null ? diff * pmp : (st === 'ok' ? 0 : null), zeros, cost};
     };
@@ -701,8 +771,9 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     if (r._steps) return r._steps;
     const d = r.diff, q = d != null ? fmt(Math.abs(d)) : '', steps = [];
     const add = (k, txt) => steps.push({k, txt});
-    if (r.st === 'check') add('verify', 'Volver a contar: la diferencia puede deberse a un documento registrado después del conteo. Si se confirma, no ajustar');
-    if (r.cause === 'um' && (r.st === 'up' || r.st === 'down')) add('verify', 'Revisar la unidad de medida: el conteo parece estar en otra unidad. Recién después ajustar');
+    if (r.umRound) add('none', 'Nada: la diferencia es solo el redondeo al convertir la unidad del conteo');
+    else if (r.cause === 'um') add('verify', 'Revisar la unidad de medida: el conteo parece estar en otra unidad. Convertir y recién después ajustar');
+    else if (r.st === 'check') add('verify', 'Volver a contar: la diferencia puede deberse a un documento registrado después del conteo. Si se confirma, no ajustar');
     if (r.st === 'nodata') add('verify', 'Ver el saldo del producto en Defontana (no hay documentos en el informe)');
     if (r.st === 'nocount') add('verify', 'Contar el producto');
     if (r.st === 'nofile') add('verify', 'Revisar por qué no está en el conteo');
@@ -823,7 +894,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     ['alias', 'Código escrito distinto', r => r.alias.length > 0 || r.viaName || r.nCounted > 1, 'var(--accent)'],
     ['cost', 'Revisar costo ($0)', r => !!(r.cost && r.cost.need), 'var(--warn)'],
     ['recount', 'Recontados', r => !!(r.s && r.s.recontado), 'var(--accent)'],
-    ['p-verify', 'Paso 1: confirmar', r => r.st === 'check' || (r.cause === 'um' && (r.st === 'up' || r.st === 'down')), 'var(--warn)', true],
+    ['p-verify', 'Paso 1: confirmar', r => !r.umRound && r.st === 'check' || (r.cause === 'um' && (r.st === 'up' || r.st === 'down')), 'var(--warn)', true],
     ['p-cost', 'Paso 2: corregir costos', r => docSteps(r).some(x => x.k === 'cost'), 'var(--warn)', true],
     ['p-in', 'Paso 3: entradas', r => docSteps(r).some(x => x.k === 'in'), 'var(--in)', true],
     ['p-out', 'Paso 4: salidas', r => docSteps(r).some(x => x.k === 'out'), 'var(--out)', true]
@@ -930,7 +1001,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     };
     return `<tr class="rx-row s-${r.st}${state.open.has(r.key) ? ' open' : ''}" data-key="${esc(r.key)}" tabindex="0">
       <td><div class="code">${esc(r.code)}</div><div class="pname">${esc(r.name)}</div>${aliasNote(r)}</td>
-      <td class="num">${r.counted ? fmt(r.s.stock) + '<div class="small">' + fmtDate(r.s.fecha) + (r.s.recontado ? ' · recuento' : '') + '</div>' : '<span class="mut">—</span>'}${r.s && r.s.recontado && r.s.original && r.s.original.stock != null ? '<div class="small">antes: ' + fmt(r.s.original.stock) + ' el ' + fmtDate(r.s.original.fecha) + '</div>' : ''}${r.s ? `<input class="recount" type="number" step="any" min="0" inputmode="decimal" data-key="${esc(r.key)}" value="${r.s.recontado ? r.s.stock : ''}" placeholder="Recuento hoy" aria-label="Recuento de hoy de ${esc(r.code)}">` : ''}</td>
+      <td class="num">${r.counted ? fmt(r.s.stock) + '<div class="small">' + fmtDate(r.s.fecha) + (r.s.recontado ? ' · recuento' : '') + '</div>' + (r.umInfo && r.umInfo.f ? '<div class="small">' + fmt(r.umInfo.original) + ' ' + esc(r.umInfo.de) + ' → ' + esc(r.umInfo.a) + '</div>' : '') : '<span class="mut">—</span>'}${r.s && r.s.recontado && r.s.original && r.s.original.stock != null ? '<div class="small">antes: ' + fmt(r.s.original.stock) + ' el ' + fmtDate(r.s.original.fecha) + '</div>' : ''}${r.s ? `<input class="recount" type="number" step="any" min="0" inputmode="decimal" data-key="${esc(r.key)}" value="${r.s.recontado ? r.s.stock : ''}" placeholder="Recuento hoy" aria-label="Recuento de hoy de ${esc(r.code)}">` : ''}</td>
       <td class="num">${r.counted ? (r.ins || r.outs ? (r.ins ? '<span class="plus">+' + fmt(r.ins) + '</span> ' : '') + (r.outs ? '<span class="minus">−' + fmt(r.outs) + '</span>' : '') : '<span class="mut">sin movimientos</span>') : '<span class="mut">—</span>'}</td>
       <td class="num"><b>${fmt(r.realNow)}</b></td>
       <td class="num">${fmt(hoyDe(r))}${r.sysAtCount != null && r.counted ? '<div class="small">al conteo: ' + fmt(r.sysAtCount) + '</div>' : ''}${r.sysCalc != null && r.sysNow != null && Math.abs(r.sysCalc - r.sysNow) > EPS ? '<div class="small">última fila del informe: ' + fmt(r.sysNow) + '</div>' : ''}</td>
@@ -1007,7 +1078,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
   // ---------- Plan de ajustes: listado por paso ----------
   function buildPlan(){
     const R = state.rows, plan = {verify:[], cost:[], in:[], out:[]};
-    const dudoso = r => r.st === 'check' || (r.cause === 'um' && (r.st === 'up' || r.st === 'down'));
+    const dudoso = r => !r.umRound && (r.st === 'check' || (r.cause === 'um' && (r.st === 'up' || r.st === 'down')));
     for (const r of R){
       if (dudoso(r)){ plan.verify.push({r, qty:r.diff, txt: (r.obs[0] || docSteps(r).find(x => x.k === 'verify').txt).replace(/<[^>]+>/g, ''), motivo: r.cause ? CAUSES[r.cause] : ''}); continue; }
       if (r.cost && r.cost.need){
