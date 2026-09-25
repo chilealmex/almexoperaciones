@@ -693,6 +693,67 @@
       ${rest.length ? `<details${auto.length && !state.ajOpen ? '' : ' open'}><summary>Otros documentos posteriores al conteo (${fmt(rest.length)})</summary><div class="ajlist">${rest.map(item).join('')}</div></details>` : ''}</div>`;
   }
 
+  // ---------- Plan de ajustes: listado por paso ----------
+  function buildPlan(){
+    const R = state.rows, plan = {verify:[], cost:[], in:[], out:[]};
+    const dudoso = r => r.st === 'check' || (r.cause === 'um' && (r.st === 'up' || r.st === 'down'));
+    for (const r of R){
+      if (dudoso(r)){ plan.verify.push({r, qty:r.diff, txt: (r.obs[0] || docSteps(r).find(x => x.k === 'verify').txt).replace(/<[^>]+>/g, ''), motivo: r.cause ? CAUSES[r.cause] : ''}); continue; }
+      if (r.cost && r.cost.need){
+        for (const c of r.cost.costos){
+          if (/^entrada por /.test(c.doc)) plan.in.push({r, qty:c.qty, v:c.v, src:c.src, motivo:'Salió sin stock (' + c.doc.replace(/^entrada por /, '') + ')'});
+          else plan.cost.push({r, doc:c.doc, qty:c.qty, v:c.v, src:c.src, corr:r.cost.corr});
+        }
+      }
+      if (r.st === 'up') plan.in.push({r, qty:r.diff, v:r.pmp > 0 ? r.pmp : null, src:r.pmpSrc, motivo:r.cause ? CAUSES[r.cause] : 'Sobra en bodega'});
+      if (r.st === 'down') plan.out.push({r, qty:-r.diff, v:r.pmp > 0 ? r.pmp : null, src:r.pmpSrc, motivo:r.cause ? CAUSES[r.cause] : 'Falta en bodega'});
+    }
+    const byCode = (a, b) => String(a.r.code).localeCompare(String(b.r.code), 'es', {numeric:true});
+    Object.values(plan).forEach(L => L.sort(byCode));
+    return plan;
+  }
+  function renderPlan(){
+    const box = $('planBox');
+    if (!state.mov.length){ box.innerHTML = '<p class="empty">Sube el Informe de Documentos de Defontana (archivo 2) para armar el plan.</p>'; return; }
+    const P = state.plan = buildPlan();
+    const prod = x => `<td><div class="code">${esc(x.r.code)}</div><div class="pname">${esc(x.r.name)}</div></td>`;
+    const tot = L => L.reduce((a, x) => a + (x.v != null ? x.v * x.qty : 0), 0);
+    const sec = (num, titulo, porque, L, head, row, foot) => `<section class="plansec">
+      <div class="planhead"><span class="pnum">${num}</span><div><h3>${titulo} <span class="pcount">${fmt(L.length)} ${L.length === 1 ? 'línea' : 'líneas'}</span></h3><p class="pwhy">${porque}</p></div></div>
+      ${L.length ? `<div class="tablebox"><table class="plantable"><thead><tr><th class="n">#</th>${head}</tr></thead><tbody>${L.map((x, i) => `<tr><td class="n">${i + 1}</td>${row(x)}</tr>`).join('')}</tbody>${foot ? `<tfoot><tr>${foot}</tr></tfoot>` : ''}</table></div>` : '<p class="note">Nada en este paso.</p>'}
+    </section>`;
+    const costo = x => x.v != null ? `<b>${money(x.v)}</b><div class="small wrapsmall">${esc(x.src || '')}</div>` : '<span class="small">Poner costo (factura)</span>';
+    box.innerHTML = `
+      <div class="planintro"><b>Hazlo en este orden.</b> Defontana valoriza cada entrada y salida al PMP del momento: si se corrige el costo después, las salidas ya quedaron mal valorizadas. Las entradas van antes que las salidas para que el saldo nunca quede negativo.
+      <button type="button" class="rx-btn" id="btnPlanXlsx">Descargar plan en Excel</button></div>
+      ${sec(1, 'Confirmar antes de ajustar', 'Recontar o revisar. No hagas ajustes de estos productos hasta confirmarlos.', P.verify,
+        '<th>Producto</th><th class="num">Diferencia</th><th>Motivo</th><th>Qué revisar</th>',
+        x => `${prod(x)}<td class="num diff ${x.qty > 0 ? 'plus' : 'minus'}">${sgn(x.qty)}</td><td>${esc(x.motivo)}</td><td class="wide">${esc(x.txt)}</td>`)}
+      ${sec(2, 'Corregir costos', 'Corrige el costo del documento indicado. Si Defontana no deja modificarlo, haz el ajuste de valor.', P.cost,
+        '<th>Producto</th><th>Qué corregir</th><th class="num">Cantidad</th><th class="num">Costo a usar c/u</th><th class="num">Total</th><th class="num">Si no se puede: ajuste de valor</th>',
+        x => `${prod(x)}<td>${esc(x.doc)}</td><td class="num">${fmt(x.qty)}</td><td class="num">${costo(x)}</td><td class="num">${x.v != null ? money(x.v * x.qty) : '—'}</td><td class="num">${x.corr && Math.abs(x.corr.ajuste) > 0.5 ? money(x.corr.ajuste) + '<div class="small">PMP queda en ' + money(x.corr.pmp) + '</div>' : '—'}</td>`,
+        `<td></td><td colspan="5"><b>Total</b></td><td class="num"><b>${money(tot(P.cost))}</b></td><td></td>`)}
+      ${sec(3, 'Entradas (Parte de Entrada)', 'Una Parte de Entrada por ajuste de inventario con estas líneas.', P.in,
+        '<th>Producto</th><th class="num">Cantidad</th><th class="num">Costo c/u</th><th class="num">Total</th><th>Motivo</th>',
+        x => `${prod(x)}<td class="num diff plus">${fmt(x.qty)}</td><td class="num">${costo(x)}</td><td class="num">${x.v != null ? money(x.v * x.qty) : '—'}</td><td>${esc(x.motivo)}</td>`,
+        `<td></td><td colspan="3"><b>Total</b></td><td class="num"><b>${money(tot(P.in))}</b></td><td></td>`)}
+      ${sec(4, 'Salidas (Parte de Salida)', 'Una Parte de Salida por ajuste de inventario / merma con estas líneas. Defontana pondrá el PMP del día; el valor es referencial.', P.out,
+        '<th>Producto</th><th class="num">Cantidad</th><th class="num">PMP c/u</th><th class="num">Total</th><th>Motivo</th>',
+        x => `${prod(x)}<td class="num diff minus">${fmt(x.qty)}</td><td class="num">${costo(x)}</td><td class="num">${x.v != null ? money(x.v * x.qty) : '—'}</td><td>${esc(x.motivo)}</td>`,
+        `<td></td><td colspan="3"><b>Total</b></td><td class="num"><b>${money(tot(P.out))}</b></td><td></td>`)}
+      <section class="plansec"><div class="planhead"><span class="pnum">5</span><div><h3>Verificar</h3><p class="pwhy">Cuando termines, descarga de nuevo el Informe de Documentos de Defontana y revísalo en la vista “Verificar ajustes”.</p></div></div></section>`;
+  }
+  function planExcel(){
+    const P = state.plan || buildPlan(), wb = XLSX.utils.book_new();
+    const r2 = v => v != null ? Math.round(v * 100) / 100 : '';
+    const hoja = (nombre, filas) => XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filas.length ? filas : [{'': 'Nada en este paso'}]), nombre);
+    hoja('1 Confirmar', P.verify.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Diferencia': x.qty, 'Motivo': x.motivo, 'Qué revisar': x.txt})));
+    hoja('2 Costos', P.cost.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Qué corregir': x.doc, 'Cantidad': x.qty, 'Costo a usar c/u': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Origen del costo': x.src, 'Ajuste de valor (si no se puede corregir)': x.corr ? Math.round(x.corr.ajuste) : '', 'PMP correcto hoy': x.corr ? r2(x.corr.pmp) : ''})));
+    hoja('3 Entradas', P.in.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Cantidad': x.qty, 'Costo c/u': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Origen del costo': x.src, 'Motivo': x.motivo})));
+    hoja('4 Salidas', P.out.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Cantidad': x.qty, 'PMP c/u (referencial)': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Motivo': x.motivo})));
+    XLSX.writeFile(wb, 'plan-de-ajustes-' + fmtDate(new Date()) + '.xlsx');
+  }
+
   // Panel con el orden recomendado; cada paso filtra la tabla
   function renderStepsPanel(show){
     const box = $('stepsPanel');
@@ -702,7 +763,7 @@
     const n = k => state.rows.filter(F(k)).length, cur = state.filter.reg;
     const paso = (k, num, titulo, porque) => `<button type="button" class="paso${cur === k ? ' on' : ''}" data-go="${k}">
       <span class="pnum">${num}</span><span class="ptxt"><b>${titulo}</b> <span class="pcount">${fmt(n(k))} productos</span><span class="pwhy">${porque}</span></span></button>`;
-    box.innerHTML = `<h3>Orden recomendado</h3><div class="pasos">
+    box.innerHTML = `<div class="ajhead"><h3>Orden recomendado</h3><button type="button" class="rx-btn sm" data-view-go="plan">Ver el plan completo por paso →</button></div><div class="pasos">
       ${paso('p-verify', 1, 'Confirmar lo dudoso', 'Recontar o revisar antes de tocar Defontana: diferencias por fechas de documentos o por unidad de medida.')}
       ${paso('p-cost', 2, 'Corregir costos', 'Primero los costos: Defontana valoriza cada entrada y salida al PMP del momento.')}
       ${paso('p-in', 3, 'Entradas', 'Parte de Entrada por lo que sobra en bodega, antes de las salidas, para que el saldo no quede negativo.')}
@@ -719,6 +780,9 @@
     document.querySelectorAll('.view').forEach(b => b.setAttribute('aria-selected', b.dataset.view === state.view));
     $('checkPanel').hidden = !chk;
     renderStepsPanel(reg);
+    const plan = state.view === 'plan';
+    $('planBox').hidden = !plan; $('filtersBar').hidden = plan; $('tablebox').hidden = plan; $('summary').hidden = plan; $('copyNote').hidden = plan;
+    if (plan){ renderPlan(); $('foot').innerHTML = ''; return; }
     if (chk) renderAjDocs();
     const all = reg ? state.rows : chk ? state.checkRows : state.zero, F = reg ? REG_FILTERS : chk ? CHECK_FILTERS : ZERO_FILTERS, cols = reg ? REG_COLS : chk ? CHECK_COLS : ZERO_COLS;
 
@@ -896,6 +960,7 @@
     const b = e.target.closest('.view'); if (!b) return;
     state.view = b.dataset.view; state.open.clear(); render();
   });
+  $('planBox').addEventListener('click', e => { if (e.target.closest('#btnPlanXlsx')) planExcel(); });
   $('stepsPanel').addEventListener('click', e => {
     const v = e.target.closest('[data-view-go]');
     if (v){ state.view = v.dataset.viewGo; state.open.clear(); render(); return; }
