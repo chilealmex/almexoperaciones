@@ -294,6 +294,46 @@
 
   // ---------- Costo: productos que entraron o salieron a $0 ----------
   const pmpAt = m => m && m.saldo > EPS && m.valorInv != null ? m.valorInv / m.saldo : null;
+  // Costo unitario para corregir un documento a $0: el de la compra con costo más cercana (la última
+  // anterior; si no hay, la primera posterior); si no hay compras con costo, el PMP que tenía antes.
+  function refCost(docs, j){
+    const costed = [];
+    docs.forEach((m, i) => { if (m.kind === 'in' && m.valor > EPS && m.qty > EPS) costed.push([m, i]); });
+    const src = (m, extra) => `costo de ${m.tipo} #${m.folio} del ${fmtDate(m.fecha)}${extra}`;
+    let prev = null;
+    for (const c of costed) if (c[1] < j) prev = c;
+    if (prev) return {v: prev[0].valor / prev[0].qty, src: src(prev[0], '')};
+    const next = costed.find(c => c[1] > j);
+    if (next) return {v: next[0].valor / next[0].qty, src: src(next[0], ' (posterior)')};
+    const p = pmpAt(docs[j - 1]);
+    return p > EPS ? {v: p, src: 'PMP que tenía antes'} : null;
+  }
+  // Valor y PMP que tendría hoy el producto si los ingresos a $0 se hubieran registrado con su costo.
+  // Se recalcula el promedio ponderado documento por documento, con las salidas al PMP de cada momento.
+  function correctedToday(docs){
+    const f = docs[0];
+    if (!f || f.saldo == null || f.valorInv == null) return null;
+    let cambio = false;
+    const run = corregir => {
+      let saldo = f.saldo - (f.kind === 'in' ? f.qty : -f.qty);
+      let valor = f.valorInv - (f.kind === 'in' ? 1 : -1) * (f.valor || 0);
+      docs.forEach((m, j) => {
+        if (m.kind === 'in'){
+          let v = m.valor || 0;
+          if (corregir && Math.abs(v) < EPS && m.qty > EPS){ const r = refCost(docs, j); if (r){ v = r.v * m.qty; cambio = true; } }
+          valor += v; saldo += m.qty;
+        } else {
+          valor -= (saldo > EPS ? valor / saldo : 0) * m.qty; saldo -= m.qty;
+        }
+      });
+      return {saldo, valor};
+    };
+    const bien = run(true), asi = run(false);
+    if (!cambio || bien.saldo <= EPS) return null;
+    // el ajuste es lo que le falta al valor del inventario de hoy por haber entrado a $0
+    return {pmp: bien.valor / bien.saldo, ajuste: bien.valor - asi.valor};
+  }
+
   // ¿Hay que revisar el costo de este producto? Mira sus documentos a $0 y cómo está hoy.
   function costReview(docs, saldoHoy){
     const zeros = docs.filter(m => m.valor != null && Math.abs(m.valor) < EPS && m.qty > EPS);
@@ -305,28 +345,40 @@
     if (!zeros.length && !sinCostoHoy) return null;
     const txt = [], hacer = [];
     if (sinCostoHoy){ txt.push(`Hoy tiene ${fmt(saldoHoy)} sin costo en Defontana (PMP $0).`); hacer.push(`Ajuste de valor: cargar el costo a las ${fmt(saldoHoy)} unidades`); }
+    const costos = [];
     for (const m of ins0){
-      const i = docs.indexOf(m), antes = pmpAt(docs[i - 1]), despues = pmpAt(m);
+      const i = docs.indexOf(m), antes = pmpAt(docs[i - 1]), despues = pmpAt(m), r = refCost(docs, i);
       txt.push(`Entró ${fmt(m.qty)} a $0 con ${m.tipo} #${m.folio} del ${fmtDate(m.fecha)}` + (antes > EPS && despues != null ? `: el PMP bajó de ${money(antes)} a ${money(despues)}.` : '.'));
+      costos.push({doc: `${m.tipo} #${m.folio}`, qty: m.qty, v: r ? r.v : null, src: r ? r.src : 'no hay compras con costo en el informe: usa el costo de la factura'});
+      hacer.push(r ? `Corregir ${m.tipo} #${m.folio}: ${fmt(m.qty)} a ${money(r.v)} c/u` : `Corregir ${m.tipo} #${m.folio} con el costo de la factura`);
     }
-    if (ins0.length) hacer.push('Corregir el costo de ' + (ins0.length === 1 ? 'ese ingreso' : 'esos ingresos') + ' (o ajuste de valor por la diferencia)');
-    if (outsSinStock.length){ txt.push(`Salió ${fmt(outsSinStock.reduce((a, m) => a + m.qty, 0))} sin tener stock (${outsSinStock.map(m => m.tipo + ' #' + m.folio).join(', ')}): faltó registrar el ingreso con su costo.`); hacer.push('Parte de Entrada con costo por lo que salió sin stock'); }
+    for (const m of outsSinStock){
+      const i = docs.indexOf(m), r = refCost(docs, i);
+      costos.push({doc: `entrada por ${m.tipo} #${m.folio}`, qty: m.qty, v: r ? r.v : null, src: r ? r.src : 'no hay compras con costo en el informe: usa el costo de la factura'});
+    }
+    if (outsSinStock.length){ const r = refCost(docs, docs.indexOf(outsSinStock[0])); txt.push(`Salió ${fmt(outsSinStock.reduce((a, m) => a + m.qty, 0))} sin tener stock (${outsSinStock.map(m => m.tipo + ' #' + m.folio).join(', ')}): faltó registrar el ingreso con su costo.`); hacer.push(`Parte de Entrada por ${fmt(outsSinStock.reduce((a, m) => a + m.qty, 0))}` + (r ? ` a ${money(r.v)} c/u` : ' con el costo de la factura')); }
+    const corr = ins0.length ? correctedToday(docs) : null;
+    if (corr && Math.abs(corr.ajuste) > 0.5) hacer.push(`Si no se puede corregir el ingreso: ajuste de valor por ${money(corr.ajuste)} (el PMP queda en ${money(corr.pmp)})`);
+    if (sinCostoHoy && !ins0.length){ const r = refCost(docs, docs.length); costos.push({doc: 'stock actual', qty: saldoHoy, v: r ? r.v : null, src: r ? r.src : 'no hay compras con costo en el informe: usa el costo de la factura'}); }
     const need = sinCostoHoy || ins0.length > 0 || outsSinStock.length > 0;
     if (!need) txt.push(`Tuvo salidas a $0, pero hoy ya tiene costo (PMP ${money(pmpHoy)}). No hace falta corregir.`);
-    return {need, txt, hacer};
+    return {need, txt, hacer, costos, corr};
   }
   function zeroReview(m, docs, j, pmp){
-    const antes = pmpAt(docs[j - 1]);
+    const antes = pmpAt(docs[j - 1]), r = refCost(docs, j);
+    const costo = r ? {v: r.v, src: r.src} : null;
     if (m.kind === 'in'){
+      const corr = correctedToday(docs);
+      const extra = corr && Math.abs(corr.ajuste) > 0.5 ? ` Si no se puede corregir: ajuste de valor por ${money(corr.ajuste)} (PMP queda en ${money(corr.pmp)})` : '';
       return antes > EPS
-        ? {need:true, txt:`Sí. Entró a $0 y el PMP bajó de ${money(antes)} a ${money(pmpAt(m))}.`, hacer:`Corregir el costo del ingreso (${money(antes)} c/u) o ajuste de valor por ${money(antes * m.qty)}`}
-        : {need:true, txt:'Sí. El producto entró sin costo y no tenía costo antes.', hacer:'Ajuste de valor: cargar el costo real (factura o importación)'};
+        ? {need:true, costo, corr, txt:`Sí. Entró a $0 y el PMP bajó de ${money(antes)} a ${money(pmpAt(m))}.`, hacer: (r ? `Corregir el costo del ingreso a ${money(r.v)} c/u (${money(r.v * m.qty)} en total).` : 'Corregir el costo del ingreso con la factura.') + extra}
+        : {need:true, costo, corr, txt:'Sí. El producto entró sin costo y no tenía costo antes.', hacer: (r ? `Corregir el costo del ingreso a ${money(r.v)} c/u (${money(r.v * m.qty)} en total).` : 'Cargar el costo real (factura o importación).') + extra};
     }
-    if (m.saldo != null && m.saldo + m.qty <= EPS) return {need:true, txt:'Sí. Salió sin tener stock en Defontana: faltó registrar el ingreso.', hacer:'Parte de Entrada con costo por lo que salió sin stock'};
+    if (m.saldo != null && m.saldo + m.qty <= EPS) return {need:true, costo, txt:'Sí. Salió sin tener stock en Defontana: faltó registrar el ingreso.', hacer: r ? `Parte de Entrada por ${fmt(m.qty)} a ${money(r.v)} c/u` : 'Parte de Entrada con el costo de la factura'};
     const hoy = pmpAt(docs[docs.length - 1]);
     return hoy > EPS
       ? {need:false, txt:`No. Salió a $0 porque en ese momento no tenía costo, pero hoy su PMP es ${money(hoy)}.`, hacer:'Nada (solo la salida quedó sin costo)'}
-      : {need:true, txt:'Sí. Salió a $0 porque el producto no tiene costo (PMP $0).', hacer:'Ajuste de valor: cargar el costo del producto'};
+      : {need:true, costo, txt:'Sí. Salió a $0 porque el producto no tiene costo (PMP $0).', hacer: r ? `Ajuste de valor: cargar el costo del producto a ${money(r.v)} c/u` : 'Ajuste de valor: cargar el costo del producto con la factura'};
   }
 
   // ---------- Qué documento generar ----------
@@ -356,6 +408,12 @@
     if (r.ck === 'review') return ['Volver a contar para decidir'];
     if (r.ck === 'other') return ['Revisar el ajuste'];
     return [g > 0 ? `Parte de Salida por ${q}` : `Parte de Entrada por ${q}`];
+  }
+  function costCell(r){
+    if (!r.cost || !r.cost.need || !r.cost.costos.length) return '<span class="mut">—</span>';
+    const items = r.cost.costos.map(c => `<div>${c.v != null ? '<b>' + money(c.v) + '</b> <span class="small">c/u</span>' : '<span class="small">costo de la factura</span>'}<div class="small wrapsmall">${esc(c.doc)} · ${esc(c.src)}</div></div>`).join('');
+    const corr = r.cost.corr ? `<div class="small wrapsmall">PMP correcto hoy: <b>${money(r.cost.corr.pmp)}</b></div>` : '';
+    return items + corr;
   }
   const makeCell = list => list.length ? `<ul class="make">${list.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '';
 
@@ -497,6 +555,7 @@
     ['st', 'Qué hacer', '', r => r.st],
     ['obs', 'Por qué está descuadrado', '', r => r.cause ? CAUSES[r.cause] : null],
     ['make', 'Documento a generar', '', r => docToMake(r)[0]],
+    ['costo', 'Costo a usar ($0)', 'num', r => r.cost && r.cost.need && r.cost.costos.length && r.cost.costos[0].v != null ? r.cost.costos[0].v : null],
     ['pmp', 'PMP', 'num', r => r.pmp],
     ['valor', 'Valor ajuste', 'num', r => r.valor],
     ['real', 'Stock real hoy', 'num', r => r.realNow],
@@ -511,6 +570,7 @@
     ['pmp', 'PMP', 'num', z => z.pmp],
     ['valor', 'Valor que debió tener', 'num', z => z.valor],
     ['rev', '¿Revisar costo?', '', z => z.rev.need ? 0 : 1],
+    ['costo', 'Costo a usar', 'num', z => z.rev.costo && z.rev.need ? z.rev.costo.v : null],
     ['make', 'Documento a generar', '', z => z.rev.hacer]
   ];
 
@@ -546,6 +606,7 @@
       <td><span class="pill ${cls}">${label}${qty}</span>${r.sameDay && r.counted ? '<span class="flag" title="Hay documentos el mismo día del conteo">· mismo día</span>' : ''}</td>
       <td class="obs">${obsCell(r)}</td>
       <td class="tomake">${makeCell(docToMake(r))}</td>
+      <td class="num">${costCell(r)}</td>
       <td class="num">${r.st === 'up' || r.st === 'down' || r.st === 'check' ? pmpInput(r.key, r.pmp, r.edited, r.code) : '<span class="mut">' + (r.pmp != null ? money(r.pmp) : '—') + '</span>'}</td>
       <td class="num diff ${r.valor > 0.5 ? 'plus' : r.valor < -0.5 ? 'minus' : 'mut'}">${r.st === 'up' || r.st === 'down' || r.st === 'check' ? money(r.valor) : '—'}</td>
       <td class="num">${fmt(r.realNow)}${r.ins || r.outs ? '<div class="small">' + (r.ins ? '<span class="plus">+' + fmt(r.ins) + '</span> ' : '') + (r.outs ? '<span class="minus">−' + fmt(r.outs) + '</span>' : '') + ' desde el conteo</div>' : ''}</td>
@@ -560,6 +621,7 @@
       <td class="num">${fmt(z.m.qty)} <span class="small">${esc(z.m.um)}</span></td>
       <td class="num">${pmpInput(z.key, z.pmp, z.edited, z.code)}<div class="small">${esc(z.pmpSrc)}</div></td>
       <td class="num diff">${money(z.valor)}</td>
+      <td class="num">${z.rev.need && z.rev.costo ? '<b>' + money(z.rev.costo.v) + '</b> <span class="small">c/u</span><div class="small wrapsmall">' + esc(z.rev.costo.src) + '</div>' : z.rev.need ? '<span class="small">Usa el costo de la factura</span>' : '—'}</td>
       <td class="obs"><span class="pill ${z.rev.need ? 'a-warn' : 'a-ok'}">${z.rev.need ? 'Sí' : 'No'}</span> <span class="why">${esc(z.rev.txt.replace(/^(Sí|No)\. /, ''))}</span></td>
       <td class="tomake">${makeCell([z.rev.hacer])}</td></tr>`;
   }
@@ -702,6 +764,9 @@
     'Código': r.code, 'Nombre': r.name, 'Otras formas del código': r.alias.join(', ') + (r.viaName ? (r.alias.length ? ' · ' : '') + 'cruzado por nombre' : ''), 'Qué hacer': ACTION[r.st][1], 'Causa probable': r.cause ? CAUSES[r.cause] : '',
     'Observaciones': r.obs.map(x => x.replace(/<[^>]+>/g, '')).join(' '),
     'Documento a generar': docToMake(r).join(' · '), 'Revisar costo': r.cost ? (r.cost.need ? 'Sí' : 'No') : '', 'Detalle costo': r.cost ? r.cost.txt.join(' ') : '',
+    'Costo a usar (c/u)': r.cost && r.cost.need ? r.cost.costos.map(c => (c.v != null ? Math.round(c.v * 100) / 100 : 'factura') + ' (' + c.doc + ')').join(' · ') : '',
+    'PMP correcto hoy': r.cost && r.cost.corr ? Math.round(r.cost.corr.pmp * 100) / 100 : '',
+    'Ajuste de valor': r.cost && r.cost.corr ? Math.round(r.cost.corr.ajuste) : '',
     'Cantidad a ajustar': r.diff != null && Math.abs(r.diff) > EPS ? Math.abs(r.diff) : '',
     'Contado': r.s ? r.s.stock : '', 'Fecha conteo': r.counted ? fmtDate(r.s.fecha, true) : '',
     'Defontana al conteo': r.sysAtCount ?? '', 'Diferencia': r.diff ?? '',
@@ -713,7 +778,9 @@
     'Fecha': fmtDate(z.m.fecha), 'Documento': z.m.tipo, 'Folio': z.m.folio, 'Referencia': z.m.ref,
     'Código': z.code, 'Nombre': z.name, 'Tipo': z.m.kind === 'in' ? 'Ingreso' : 'Egreso', 'Cantidad': z.m.qty,
     'PMP': z.pmp != null ? Math.round(z.pmp * 100) / 100 : '', 'Origen PMP': z.pmpSrc, 'Valor que debió tener': z.valor != null ? Math.round(z.valor) : '',
-    '¿Revisar costo?': z.rev.need ? 'Sí' : 'No', 'Motivo': z.rev.txt, 'Documento a generar': z.rev.hacer
+    '¿Revisar costo?': z.rev.need ? 'Sí' : 'No', 'Motivo': z.rev.txt,
+    'Costo a usar (c/u)': z.rev.need && z.rev.costo ? Math.round(z.rev.costo.v * 100) / 100 : '', 'Origen del costo': z.rev.need && z.rev.costo ? z.rev.costo.src : '',
+    'PMP correcto hoy': z.rev.corr ? Math.round(z.rev.corr.pmp * 100) / 100 : '', 'Ajuste de valor': z.rev.corr ? Math.round(z.rev.corr.ajuste) : '', 'Documento a generar': z.rev.hacer
   });
   const checkExport = r => ({
     'Código': r.code, 'Nombre': r.name, 'Resultado': CHECK[r.ck][1], 'Detalle': r.cobs.map(x => x.replace(/<[^>]+>/g, '')).join(' '),
