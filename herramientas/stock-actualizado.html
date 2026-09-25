@@ -496,6 +496,15 @@ tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:v
         else { const f = list[0]; if (f.saldo != null) v = f.saldo - (f.kind === 'in' ? f.qty : -f.qty); }
         if (v != null) sysAtCount = (sysAtCount || 0) + v;
       }
+      // Saldo final calculado con los documentos (no depende del orden de las filas del informe)
+      let sysCalc = null, toOther = 0;
+      if (counted && sysAtCount != null){
+        sysCalc = sysAtCount;
+        for (const m of docs) if (m.fecha && after(m)){
+          sysCalc += m.kind === 'in' ? m.qty : -m.qty;
+          if (!m._aj && !inBod(m) && m.kind === 'in') toOther += m.qty;
+        }
+      }
       const own = s ? new Set(s.variants.map(norm)) : new Set();
       const alias = [...(s ? s.variants.filter(v => norm(v) !== norm(s.code)) : []), ...[...byArt.keys()].filter(a => !own.has(a) && (s || a !== norm(docs[0].art)))];
       const viaName = docs.some(m => m._byName);
@@ -513,7 +522,7 @@ tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:v
       const zeros = docs.filter(m => m.valor != null && Math.abs(m.valor) < EPS && m.qty > EPS).length;
       const dx = counted ? diagnose(s, docs.filter(m => !m._aj), after, diff, sysAtCount, sameNet, zeros) : {cause:null, obs:[]};
       if (dx.cause === 'late' || dx.cause === 'sameday') st = 'check';
-      return {cause:dx.cause, obs:dx.obs, alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs,
+      return {cause:dx.cause, obs:dx.obs, alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs, sysCalc, toOther,
         sysAtCount, sysNow, realNow, diff, st, pmp, edited, pmpSrc: edited ? 'Ingresado a mano' : pm ? pm.src : 'Sin costo en Defontana',
         valor: diff != null && Math.abs(diff) > EPS && pmp != null ? diff * pmp : (st === 'ok' ? 0 : null), zeros};
     };
@@ -567,7 +576,7 @@ tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:v
     for (const r of res){
       const hasAj = Math.abs(r.aj) > EPS;
       if (!r.counted || r.diff == null){ if (hasAj) state.checkRows.push({...r, ck:'other', expected:null, gap:null, cobs:[!r.counted ? 'Se ajustó, pero este producto no está contado.' : 'Se ajustó, pero no hay saldo de Defontana al momento del conteo para comparar.']}); continue; }
-      const expected = r.realNow, actual = r.sysNow, gap = actual - expected;
+      const expected = r.realNow, actual = r.sysCalc != null ? r.sysCalc : r.sysNow, gap = actual - expected;
       const late = r.cause === 'late' || r.cause === 'sameday';   // la causa se calcula sin los documentos de ajuste
       const need = r.diff, cobs = [];
       const dirTxt = g => g > 0 ? `Defontana tiene ${fmt(g)} de más: falta una salida de ${fmt(g)}.` : `Defontana tiene ${fmt(-g)} de menos: falta una entrada de ${fmt(-g)}.`;
@@ -586,6 +595,8 @@ tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:v
         ck = 'wrong';
         cobs.push(`Se ajustó ${sgn(r.aj)} con ${ajTxt}, pero había que ajustar ${sgn(need)}. ${dirTxt(gap)}`);
       }
+      if (r.sysNow != null && Math.abs(r.sysNow - actual) > EPS) cobs.push(`Ojo: la última fila del informe muestra saldo ${fmt(r.sysNow)}, pero sumando los documentos da ${fmt(actual)}. Pasa cuando el informe trae documentos del mismo día en otro orden, o documentos no aprobados. Confirma el saldo del producto en Defontana.`);
+      if (r.toOther > EPS) cobs.push(`${fmt(r.toOther)} se traspasaron a otra bodega después del conteo: siguen en el saldo de Defontana, pero no en esta bodega.`);
       if (r.ins || r.outs) cobs.push(`Movimientos después del conteo (sin contar ajustes): ${r.ins ? '+' + fmt(r.ins) : ''}${r.ins && r.outs ? ' ' : ''}${r.outs ? '−' + fmt(r.outs) : ''}.`);
       const aj0 = r.ajDocs.filter(m => m.valor != null && Math.abs(m.valor) < EPS && m.qty > EPS);
       if (aj0.length) cobs.push('El ajuste quedó a costo $0: el producto no tenía costo en Defontana.');
@@ -640,7 +651,7 @@ tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:v
     ['ck', 'Resultado', '', r => r.ck],
     ['obs', 'Detalle', '', r => r.ck],
     ['exp', 'Debería tener Defontana', 'num', r => r.expected],
-    ['now', 'Tiene Defontana', 'num', r => r.sysNow],
+    ['now', 'Tiene Defontana', 'num', r => r.sysCalc ?? r.sysNow],
     ['gap', 'Diferencia que queda', 'num', r => r.gap]
   ];
   function checkRow(r){
@@ -653,7 +664,7 @@ tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:v
       <td><span class="pill ${cls}">${label}</span></td>
       <td class="obs"><div class="why">${r.cobs[0]}</div>${r.cobs.length > 1 ? '<div class="more-obs">' + r.cobs.slice(1).join('<br>') + '</div>' : ''}</td>
       <td class="num">${fmt(r.expected)}</td>
-      <td class="num">${fmt(r.sysNow)}</td>
+      <td class="num">${fmt(r.sysCalc ?? r.sysNow)}${r.sysCalc != null && r.sysNow != null && Math.abs(r.sysCalc - r.sysNow) > EPS ? '<div class="small">informe: ' + fmt(r.sysNow) + '</div>' : ''}</td>
       <td class="num diff ${r.gap == null || Math.abs(r.gap) <= EPS ? 'mut' : 'minus'}">${r.gap == null ? '—' : Math.abs(r.gap) <= EPS ? '0' : sgn(r.gap)}</td></tr>`;
   }
 
@@ -732,7 +743,7 @@ tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:v
     const rows = r.docs.map(m => {
       const w = when(m), zero = m.valor != null && Math.abs(m.valor) < EPS && m.qty > EPS;
       return `<tr class="${zero ? 'zero' : w.startsWith('Antes') || w === 'Mismo día (antes)' ? 'pre' : 'after'}">
-        <td>${fmtDate(m.fecha)}</td><td>${esc(m.tipo)} <span class="small">#${esc(m.folio)}${norm(m.art) !== norm(r.code) ? ' · ' + esc(m.art) : ''}</span></td><td>${esc(m.ref)}</td>
+        <td>${fmtDate(m.fecha)}</td><td>${esc(m.tipo)} <span class="small">#${esc(m.folio)}${(m.kind === 'in' ? m.dest : m.orig) && !/CENTRAL/i.test(m.kind === 'in' ? m.dest : m.orig) ? ' · ' + esc(m.kind === 'in' ? m.dest : m.orig) : ''}${norm(m.art) !== norm(r.code) ? ' · ' + esc(m.art) : ''}</span></td><td>${esc(m.ref)}</td>
         <td class="num ${m.kind === 'in' ? 'plus' : 'minus'}">${m.kind === 'in' ? '+' : '−'}${fmt(m.qty)}</td>
         <td class="num">${money(m.valor)}${zero ? ' <span class="flag">$0</span>' : ''}</td>
         <td class="num">${fmt(m.saldo)}</td>
@@ -847,7 +858,7 @@ tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:v
     }
 
     $('foot').innerHTML = chk
-      ? '<b>Cómo se verifica.</b> “Debería tener Defontana” = Contado + ingresos − egresos registrados después del conteo, sin contar los documentos de ajuste. “Tiene Defontana” es el saldo del último documento del informe nuevo, ya con los ajustes. Si son iguales, quedó bien. “Posible doble ajuste” significa que cuadra en el cálculo, pero la diferencia del conteo calzaba con un documento registrado después del conteo: si esa mercadería ya había salido o entrado al contar, el ajuste la contó dos veces. Solo se listan los productos que estaban descuadrados o que tuvieron ajuste.'
+      ? '<b>Cómo se verifica.</b> “Debería tener Defontana” = Contado + ingresos − egresos registrados después del conteo, sin contar los documentos de ajuste. “Tiene Defontana” es el saldo de Defontana al conteo más todos los documentos posteriores, incluidos los ajustes (se calcula con los documentos para no depender del orden de las filas; si la última fila del informe muestra otro saldo, se avisa). Si son iguales, quedó bien. “Posible doble ajuste” significa que cuadra en el cálculo, pero la diferencia del conteo calzaba con un documento registrado después del conteo: si esa mercadería ya había salido o entrado al contar, el ajuste la contó dos veces. Solo se listan los productos que estaban descuadrados o que tuvieron ajuste.'
       : reg
       ? '<b>Cómo se calcula.</b> Diferencia = Contado − Defontana al conteo. “Defontana al conteo” es el Saldo Inventario del último documento anterior al conteo (es el saldo del producto en todas las bodegas). Si es positiva hay que <b>aumentar</b> (entrada por ajuste); si es negativa, <b>disminuir</b> (salida por ajuste). Como el ajuste se hace hoy, la cantidad también es igual a Stock real hoy − Defontana hoy. El PMP es Valor Inventario / Saldo Inventario del último documento con saldo; puedes corregirlo en la tabla. Los códigos se cruzan sin considerar mayúsculas, tildes, espacios, puntos, comas, guiones, guiones bajos ni ceros a la izquierda; si un artículo de Defontana no cruza por código, se cruza por nombre. Haz clic en un producto para ver sus documentos.'
       : '<b>Cómo se calcula.</b> Son los documentos cuyo “Valor Movimiento” es $0. El valor que debió tener = cantidad × PMP del producto antes del documento (si no hay, el primero que aparece después). Un egreso a $0 suele ocurrir cuando el producto no tenía saldo o su PMP era $0.';
@@ -874,7 +885,7 @@ tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:v
     'Contado': r.s ? r.s.stock : '', 'Fecha conteo': r.counted ? fmtDate(r.s.fecha, true) : '',
     'Había que ajustar': r.diff ?? '', 'Se ajustó': r.aj, 'Valor ajuste': Math.round(r.ajVal),
     'Documentos de ajuste': r.ajDocs.map(m => m.tipo + ' #' + m.folio).join(', '),
-    'Debería tener Defontana': r.expected ?? '', 'Tiene Defontana': r.sysNow ?? '', 'Diferencia que queda': r.gap ?? ''
+    'Debería tener Defontana': r.expected ?? '', 'Tiene Defontana': r.sysCalc ?? r.sysNow ?? '', 'Saldo última fila del informe': r.sysNow ?? '', 'Diferencia que queda': r.gap ?? ''
   });
   const exportRows = () => (state.visible || []).map(state.view === 'reg' ? regExport : state.view === 'check' ? checkExport : zeroExport);
 
