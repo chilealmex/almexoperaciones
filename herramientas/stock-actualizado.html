@@ -1,161 +1,168 @@
 <title>Stock post-conteo</title>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+// En la página publicada en claude.ai las descargas pasan por la capacidad "downloads".
+(function(){
+  if (!window.XLSX) return;
+  var original = XLSX.writeFile, dl = null;
+  if (window.claude && typeof window.claude.use === 'function') window.claude.use('downloads').then(function(d){ dl = d; }).catch(function(){});
+  XLSX.writeFile = function(wb, name){
+    if (!dl) return original.apply(this, arguments);
+    dl.save({filename:name, data:new Blob([XLSX.write(wb, {bookType:'xlsx', type:'array'})])}).catch(function(){});
+  };
+})();
+</script>
+<!-- Versión suelta de Inventario → Regularización (app/static/js/regularizacion.js).
+     Aquí el conteo se sube como Excel; en el sistema sale directo de Stock y conteo. -->
 <style>
-:root{
-  --bg:#F2F4F3; --surface:#FFFFFF; --surface2:#EDF1EF; --ink:#16201D; --muted:#5E6B66; --line:#DCE3E0;
+body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.suelta{max-width:1500px;margin:0 auto;padding-inline:20px;padding-block:22px 48px}
+.suelta h1{margin:0 0 4px;font-size:22px;font-weight:700;color:#16201D}
+.suelta .page-sub{margin:0 0 16px;color:#5E6B66;font-size:13px}
+/* Regularización de inventario (Inventario → Regularización).
+   Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
+.regx{--bg:#F2F4F3; --surface:#FFFFFF; --surface2:#EDF1EF; --ink:#16201D; --muted:#5E6B66; --line:#DCE3E0;
   --accent:#245E8F; --accent-ink:#FFFFFF; --accent-soft:#E1EBF4;
   --in:#1B7446; --in-soft:#E0F2E7; --out:#B0362A; --out-soft:#FAE3E0; --warn:#8A5A00; --warn-soft:#FBEDCF; --gray-soft:#ECEFEE;
-  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
-  --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Consolas,monospace;
+  --mono:ui-monospace,"SFMono-Regular",Consolas,monospace;}
+.regx [hidden]{display:none!important}
+.regx{color:var(--ink);font-size:14px;line-height:1.45}
+.regx .wrap{display:flex;flex-direction:column;gap:16px}
+.regx .sub{margin:2px 0 0;color:var(--muted);font-size:13px}
+.regx .top{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;justify-content:space-between}
+.regx .loaders{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
+.regx .drop{position:relative;display:flex;align-items:center;gap:12px;padding:12px 14px;border:1.5px dashed var(--line);border-radius:10px;background:var(--surface);cursor:pointer}
+.regx .drop:hover,.regx .drop.over{border-color:var(--accent)}
+.regx .drop:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+.regx .drop input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.regx .drop .num{flex:none;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:13px;background:var(--surface2);color:var(--muted)}
+.regx .drop .txt{display:flex;flex-direction:column;min-width:0}
+.regx .drop .t{font-weight:600}
+.regx .drop .s{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.regx .drop.ok{border-style:solid;border-color:var(--in)}
+.regx .drop.ok .num{background:var(--in);color:var(--surface)}
+.regx .drop.ok .s{color:var(--in)}
+.regx .drop.err{border-style:solid;border-color:var(--out)}
+.regx .drop.err .s{color:var(--out)}
+.regx .sample{padding:9px 14px;border-radius:8px;background:var(--warn-soft);color:var(--warn);font-size:13px;font-weight:500}
+.regx .views{display:inline-flex;background:var(--surface2);border-radius:10px;padding:3px;gap:2px;flex-wrap:wrap}
+.regx .view{font:inherit;font-size:13px;font-weight:600;padding:7px 14px;border:0;border-radius:8px;background:transparent;color:var(--muted);cursor:pointer}
+.regx .view[aria-selected=true]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.regx .summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+.regx .rx-card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:2px;text-align:left;font:inherit;color:inherit}
+.regx button.rx-card{cursor:pointer}
+.regx button.rx-card:hover{border-color:var(--accent)}
+.regx .rx-card .lbl{font-size:12px;font-weight:600;color:var(--muted);letter-spacing:.02em}
+.regx .rx-card .big{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.2}
+.regx .rx-card .val{font-size:14px;font-weight:600;font-variant-numeric:tabular-nums}
+.regx .rx-card.up .big,.regx .rx-card.up .val{color:var(--in)}
+.regx .rx-card.down .big,.regx .rx-card.down .val{color:var(--out)}
+.regx .rx-card.bad .big{color:var(--warn)}
+.regx .filters{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.regx .chips{display:flex;flex-wrap:wrap;gap:6px}
+.regx .chip{font:inherit;font-size:13px;font-weight:500;padding:5px 11px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer;display:inline-flex;gap:6px;align-items:center}
+.regx .chip .c{font-variant-numeric:tabular-nums;color:var(--muted);font-size:12px}
+.regx .chip .dot{width:8px;height:8px;border-radius:50%}
+.regx .chip[aria-pressed=true]{background:var(--ink);border-color:var(--ink);color:var(--surface)}
+.regx .chip[aria-pressed=true] .c{color:inherit;opacity:.75}
+.regx .right{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.regx input[type=search],.regx select{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:7px 10px;max-width:100%}
+.regx input[type=search]{width:240px}
+.regx select:focus,.regx input:focus,.regx button:focus-visible,.regx summary:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.regx .rx-btn{font:inherit;font-size:13px;font-weight:600;padding:7px 14px;border-radius:8px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);cursor:pointer;white-space:nowrap}
+.regx .rx-btn.ghost{background:transparent;color:var(--accent)}
+.regx .note{font-size:12px;color:var(--muted)}
+.regx details.opts{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:0 14px}
+.regx details.opts summary{cursor:pointer;padding:10px 0;font-size:13px;font-weight:600;color:var(--muted)}
+.regx .optgrid{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:end;padding-bottom:14px}
+.regx .opt{display:flex;flex-direction:column;gap:4px}
+.regx .opt label{font-size:12px;font-weight:600;color:var(--muted)}
+.regx .chk{display:flex;gap:8px;align-items:center;font-size:13px}
+.regx .tablebox{overflow:auto;max-height:72vh;background:var(--surface);border:1px solid var(--line);border-radius:10px}
+.regx table{border-collapse:separate;border-spacing:0;width:100%;min-width:1650px;font-size:13px}
+.regx th,.regx td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--line);vertical-align:middle}
+.regx thead th{position:sticky;top:0;z-index:1;background:var(--surface2);font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
+.regx th.sort{cursor:pointer;user-select:none}
+.regx th.sort:hover{color:var(--ink)}
+.regx th .arr{opacity:.6}
+.regx .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.regx .code{font-family:var(--mono);font-size:12px;font-weight:500}
+.regx .pname{color:var(--muted);font-size:12px;margin-top:1px;min-width:220px;max-width:340px}
+.regx .small{font-size:11px;color:var(--muted)}
+.regx .obs{min-width:300px;max-width:420px}
+.regx .cause{font-weight:700;font-size:12px}
+.regx .why{font-size:12px;margin-top:2px}
+.regx .more-obs{font-size:11px;color:var(--muted);margin-top:4px}
+.regx tr.s-check{--stripe:var(--warn)}
+.regx .alias{font-size:11px;font-weight:600;color:var(--warn);margin-top:2px;max-width:340px}
+.regx tr.rx-row{cursor:pointer}
+.regx tr.rx-row td:first-child{box-shadow:inset 4px 0 0 var(--stripe, transparent)}
+.regx tr.rx-row:hover td{background:var(--surface2)}
+.regx tr.rx-row.open td{background:var(--accent-soft)}
+.regx tr.s-up{--stripe:var(--in)}
+.regx tr.s-down{--stripe:var(--out)}
+.regx tr.s-nodata,.regx tr.s-nofile{--stripe:var(--warn)}
+.regx .diff{font-size:15px;font-weight:700}
+.regx .plus{color:var(--in)}
+.regx .minus{color:var(--out)}
+.regx .mut{color:var(--muted)}
+.regx .pill{display:inline-block;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;white-space:nowrap}
+.regx .a-up{background:var(--in-soft);color:var(--in)}
+.regx .a-down{background:var(--out-soft);color:var(--out)}
+.regx .a-ok{background:var(--gray-soft);color:var(--muted)}
+.regx .a-warn{background:var(--warn-soft);color:var(--warn)}
+.regx .flag{display:inline-block;margin-left:4px;font-size:11px;font-weight:600;color:var(--warn)}
+.regx .pmp{width:110px;text-align:right;font:inherit;font-variant-numeric:tabular-nums;padding:5px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink)}
+.regx .pmp.edited{border-color:var(--accent);background:var(--accent-soft)}
+.regx .pmp.missing{border-color:var(--warn);background:var(--warn-soft)}
+.regx tr.detail td{background:var(--bg);padding:12px 16px 16px}
+.regx .dethead{display:flex;flex-wrap:wrap;gap:6px 20px;font-size:12px;color:var(--muted);margin-bottom:8px}
+.regx .dethead b{color:var(--ink);font-variant-numeric:tabular-nums}
+.regx .det{width:100%;min-width:0;font-size:12px;border-collapse:collapse}
+.regx .det th{position:static;background:transparent;padding:5px 8px;border-bottom:1px solid var(--line)}
+.regx .det td{padding:5px 8px}
+.regx .det tr.pre td{color:var(--muted)}
+.regx .det tr.after td{font-weight:600}
+.regx .det tr.zero td{background:var(--warn-soft)}
+.regx .checkpanel{display:flex;flex-direction:column;gap:10px}
+.regx .ajbox{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
+.regx .ajbox h3{margin:0;font-size:13px;font-weight:700}
+.regx .ajbox .note{margin:0}
+.regx .ajdoc{display:flex;gap:8px;align-items:center;font-size:13px}
+.regx .ajdoc b{font-variant-numeric:tabular-nums}
+.regx .ajbox details summary{cursor:pointer;font-size:12px;color:var(--muted);padding:4px 0}
+.regx .ajlist{display:flex;flex-direction:column;gap:4px;max-height:220px;overflow:auto;padding:4px 0}
+.regx .a-good{background:var(--in-soft);color:var(--in)}
+.regx tr.s-good{--stripe:var(--in)}
+.regx tr.s-bad{--stripe:var(--out)}
+.regx tr.s-warn{--stripe:var(--warn)}
+.regx .empty{padding:32px;text-align:center;color:var(--muted)}
+.regx .foot{font-size:12px;color:var(--muted);max-width:110ch;margin:0}
+.regx .foot b{color:var(--ink)}
+@media (max-width:640px){
+.regx .wrap{display:flex;flex-direction:column;gap:16px}
+.regx input[type=search]{width:100%}
+.regx .right{width:100%}
 }
-@media (prefers-color-scheme: dark){
-  :root:not([data-theme="light"]){
-    color-scheme:dark;
-    --bg:#101614; --surface:#171F1C; --surface2:#1D2724; --ink:#E4ECE8; --muted:#97A7A1; --line:#2C3834;
-    --accent:#83B5E2; --accent-ink:#0D1A26; --accent-soft:#1B2D3D;
-    --in:#72D69F; --in-soft:#15301F; --out:#F28C80; --out-soft:#3A1D1A; --warn:#EAB95A; --warn-soft:#342711; --gray-soft:#222C29;
-  }
-}
-:root[data-theme="dark"]{
-  color-scheme:dark;
-  --bg:#101614; --surface:#171F1C; --surface2:#1D2724; --ink:#E4ECE8; --muted:#97A7A1; --line:#2C3834;
-  --accent:#83B5E2; --accent-ink:#0D1A26; --accent-soft:#1B2D3D;
-  --in:#72D69F; --in-soft:#15301F; --out:#F28C80; --out-soft:#3A1D1A; --warn:#EAB95A; --warn-soft:#342711; --gray-soft:#222C29;
-}
-*{box-sizing:border-box}
-[hidden]{display:none!important}
-body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.45}
-.wrap{max-width:1360px;margin:0 auto;padding-inline:20px;padding-block:22px 48px;display:flex;flex-direction:column;gap:16px}
-h1{margin:0;font-size:22px;font-weight:700;letter-spacing:-.01em}
-.sub{margin:2px 0 0;color:var(--muted);font-size:13px}
-.top{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;justify-content:space-between}
+.regx .tomake{min-width:210px;max-width:260px}
+.regx .make{margin:0;padding-left:16px;font-size:12px;font-weight:600;color:var(--accent)}
+.regx .make li+li{margin-top:3px;color:var(--warn)}
+.regx .costrev{margin-top:6px;padding:5px 8px;border-radius:6px;background:var(--warn-soft);color:var(--warn);font-size:11px}
+.regx .costrev.ok{background:var(--gray-soft);color:var(--muted)}
+.regx .ajhead{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}
+.regx .ajbtns{display:flex;flex-wrap:wrap;gap:6px}
+.regx .rx-btn.sm{padding:4px 10px;font-size:12px}
+.regx .warnline{color:var(--warn);font-weight:600}
 
-/* Carga de archivos */
-.loaders{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
-.drop{position:relative;display:flex;align-items:center;gap:12px;padding:12px 14px;border:1.5px dashed var(--line);border-radius:10px;background:var(--surface);cursor:pointer}
-.drop:hover,.drop.over{border-color:var(--accent)}
-.drop:focus-within{outline:2px solid var(--accent);outline-offset:2px}
-.drop input{position:absolute;inset:0;opacity:0;cursor:pointer}
-.drop .num{flex:none;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:13px;background:var(--surface2);color:var(--muted)}
-.drop .txt{display:flex;flex-direction:column;min-width:0}
-.drop .t{font-weight:600}
-.drop .s{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
-.drop.ok{border-style:solid;border-color:var(--in)}
-.drop.ok .num{background:var(--in);color:var(--surface)}
-.drop.ok .s{color:var(--in)}
-.drop.err{border-style:solid;border-color:var(--out)}
-.drop.err .s{color:var(--out)}
-.sample{padding:9px 14px;border-radius:8px;background:var(--warn-soft);color:var(--warn);font-size:13px;font-weight:500}
-
-/* Vistas */
-.views{display:inline-flex;background:var(--surface2);border-radius:10px;padding:3px;gap:2px;flex-wrap:wrap}
-.view{font:inherit;font-size:13px;font-weight:600;padding:7px 14px;border:0;border-radius:8px;background:transparent;color:var(--muted);cursor:pointer}
-.view[aria-selected=true]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
-
-/* Resumen */
-.summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
-.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:2px;text-align:left;font:inherit;color:inherit}
-button.card{cursor:pointer}
-button.card:hover{border-color:var(--accent)}
-.card .lbl{font-size:12px;font-weight:600;color:var(--muted);letter-spacing:.02em}
-.card .big{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.2}
-.card .val{font-size:14px;font-weight:600;font-variant-numeric:tabular-nums}
-.card.up .big,.card.up .val{color:var(--in)}
-.card.down .big,.card.down .val{color:var(--out)}
-.card.bad .big{color:var(--warn)}
-
-/* Barra de filtros */
-.filters{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
-.chips{display:flex;flex-wrap:wrap;gap:6px}
-.chip{font:inherit;font-size:13px;font-weight:500;padding:5px 11px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer;display:inline-flex;gap:6px;align-items:center}
-.chip .c{font-variant-numeric:tabular-nums;color:var(--muted);font-size:12px}
-.chip .dot{width:8px;height:8px;border-radius:50%}
-.chip[aria-pressed=true]{background:var(--ink);border-color:var(--ink);color:var(--surface)}
-.chip[aria-pressed=true] .c{color:inherit;opacity:.75}
-.right{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-input[type=search],select{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:7px 10px;max-width:100%}
-input[type=search]{width:240px}
-select:focus,input:focus,button:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
-.btn{font:inherit;font-size:13px;font-weight:600;padding:7px 14px;border-radius:8px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);cursor:pointer;white-space:nowrap}
-.btn.ghost{background:transparent;color:var(--accent)}
-.note{font-size:12px;color:var(--muted)}
-
-details.opts{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:0 14px}
-details.opts summary{cursor:pointer;padding:10px 0;font-size:13px;font-weight:600;color:var(--muted)}
-.optgrid{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:end;padding-bottom:14px}
-.opt{display:flex;flex-direction:column;gap:4px}
-.opt label{font-size:12px;font-weight:600;color:var(--muted)}
-.chk{display:flex;gap:8px;align-items:center;font-size:13px}
-
-/* Tabla */
-.tablebox{overflow:auto;max-height:72vh;background:var(--surface);border:1px solid var(--line);border-radius:10px}
-table{border-collapse:separate;border-spacing:0;width:100%;min-width:1400px;font-size:13px}
-th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--line);vertical-align:middle}
-thead th{position:sticky;top:0;z-index:1;background:var(--surface2);font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
-th.sort{cursor:pointer;user-select:none}
-th.sort:hover{color:var(--ink)}
-th .arr{opacity:.6}
-.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-.code{font-family:var(--mono);font-size:12px;font-weight:500}
-.pname{color:var(--muted);font-size:12px;margin-top:1px;min-width:220px;max-width:340px}
-.small{font-size:11px;color:var(--muted)}
-.obs{min-width:300px;max-width:420px}
-.cause{font-weight:700;font-size:12px}
-.why{font-size:12px;margin-top:2px}
-.more-obs{font-size:11px;color:var(--muted);margin-top:4px}
-tr.s-check{--stripe:var(--warn)}
-.alias{font-size:11px;font-weight:600;color:var(--warn);margin-top:2px;max-width:340px}
-tr.row{cursor:pointer}
-tr.row td:first-child{box-shadow:inset 4px 0 0 var(--stripe, transparent)}
-tr.row:hover td{background:var(--surface2)}
-tr.row.open td{background:var(--accent-soft)}
-tr.s-up{--stripe:var(--in)} tr.s-down{--stripe:var(--out)} tr.s-nodata,tr.s-nofile{--stripe:var(--warn)}
-.diff{font-size:15px;font-weight:700}
-.plus{color:var(--in)} .minus{color:var(--out)} .mut{color:var(--muted)}
-.pill{display:inline-block;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;white-space:nowrap}
-.a-up{background:var(--in-soft);color:var(--in)}
-.a-down{background:var(--out-soft);color:var(--out)}
-.a-ok{background:var(--gray-soft);color:var(--muted)}
-.a-warn{background:var(--warn-soft);color:var(--warn)}
-.flag{display:inline-block;margin-left:4px;font-size:11px;font-weight:600;color:var(--warn)}
-.pmp{width:110px;text-align:right;font:inherit;font-variant-numeric:tabular-nums;padding:5px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink)}
-.pmp.edited{border-color:var(--accent);background:var(--accent-soft)}
-.pmp.missing{border-color:var(--warn);background:var(--warn-soft)}
-tr.detail td{background:var(--bg);padding:12px 16px 16px}
-.dethead{display:flex;flex-wrap:wrap;gap:6px 20px;font-size:12px;color:var(--muted);margin-bottom:8px}
-.dethead b{color:var(--ink);font-variant-numeric:tabular-nums}
-.det{width:100%;min-width:0;font-size:12px;border-collapse:collapse}
-.det th{position:static;background:transparent;padding:5px 8px;border-bottom:1px solid var(--line)}
-.det td{padding:5px 8px}
-.det tr.pre td{color:var(--muted)}
-.det tr.after td{font-weight:600}
-.det tr.zero td{background:var(--warn-soft)}
-.checkpanel{display:flex;flex-direction:column;gap:10px}
-.ajbox{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
-.ajbox h3{margin:0;font-size:13px;font-weight:700}
-.ajbox .note{margin:0}
-.ajdoc{display:flex;gap:8px;align-items:center;font-size:13px}
-.ajdoc b{font-variant-numeric:tabular-nums}
-.ajbox details summary{cursor:pointer;font-size:12px;color:var(--muted);padding:4px 0}
-.ajlist{display:flex;flex-direction:column;gap:4px;max-height:220px;overflow:auto;padding:4px 0}
-.a-good{background:var(--in-soft);color:var(--in)}
-tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:var(--warn)}
-.empty{padding:32px;text-align:center;color:var(--muted)}
-.foot{font-size:12px;color:var(--muted);max-width:110ch;margin:0}
-.foot b{color:var(--ink)}
-@media (max-width:640px){ h1{font-size:19px} .wrap{padding-inline:16px} input[type=search]{width:100%} .right{width:100%} }
 </style>
-
+<div class="suelta">
+<h1>Regularización de inventario</h1>
+<p class="page-sub">Cruza el conteo físico con el Informe de Documentos de Defontana: qué productos aumentar o disminuir, a qué PMP, por qué están descuadrados y si los ajustes quedaron bien.</p>
+<div class="regx">
 <div class="wrap">
   <div class="top">
-    <div>
-      <h1>Regularización de inventario</h1>
-      <p class="sub">Compara lo contado en bodega con el saldo de Defontana y te dice qué ajustar, en cuánto y a qué valor.</p>
-    </div>
     <div class="views" role="tablist" aria-label="Vista">
       <button class="view" role="tab" data-view="reg" aria-selected="true" type="button">Productos</button>
       <button class="view" role="tab" data-view="zero" aria-selected="false" type="button">Documentos a costo $0</button>
@@ -165,9 +172,9 @@ tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:v
 
   <section class="loaders">
     <div class="drop" id="dropStock">
-      <input type="file" id="fileStock" accept=".xlsx,.xls,.csv" aria-label="Archivo de stock y conteo">
+      <input type="file" id="fileStock" accept=".xlsx,.xls,.csv" aria-label="Archivo de Stock y conteo">
       <span class="num">1</span>
-      <span class="txt"><span class="t">Stock y conteo</span><span class="s" id="stStock">Elige o arrastra el Excel del conteo</span></span>
+      <span class="txt"><span class="t">Stock y conteo</span><span class="s" id="stStock">Elige o arrastra el Excel de Stock y conteo (se descarga desde Inventario → Stock y conteo)</span></span>
     </div>
     <div class="drop" id="dropMov">
       <input type="file" id="fileMov" accept=".xlsx,.xls,.csv" aria-label="Informe de documentos de Defontana">
@@ -175,8 +182,6 @@ tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:v
       <span class="txt"><span class="t">Informe de Documentos de Defontana</span><span class="s" id="stMov">Elige o arrastra el informe de ingresos y egresos</span></span>
     </div>
   </section>
-
-  <div class="sample" id="sampleNote">Estos son datos de ejemplo inventados. Carga tus dos archivos arriba para ver tu inventario.</div>
 
   <section class="checkpanel" id="checkPanel" hidden>
     <div class="drop" id="dropMov2">
@@ -194,8 +199,8 @@ tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:v
     <div class="right">
       <select id="optCause" aria-label="Causa probable"></select>
       <input type="search" id="optSearch" placeholder="Buscar código o nombre" aria-label="Buscar">
-      <button class="btn ghost" id="btnCopy" type="button">Copiar</button>
-      <button class="btn" id="btnXlsx" type="button">Descargar Excel</button>
+      <button class="rx-btn ghost" id="btnCopy" type="button">Copiar</button>
+      <button class="rx-btn" id="btnXlsx" type="button">Descargar Excel</button>
     </div>
   </section>
   <span class="note" id="copyNote" aria-live="polite"></span>
@@ -227,8 +232,15 @@ tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:v
 
   <p class="foot" id="foot"></p>
 </div>
+</div>
 
+</div>
+<script type="application/json" id="regx-conteo">[]</script>
 <script>
+/* Regularización de inventario: cruza el conteo físico con el Informe de Documentos
+   de Defontana, propone los ajustes a PMP, lista los documentos a costo $0 y
+   verifica los ajustes con el informe descargado de nuevo. Todo corre en el
+   navegador: los archivos de Defontana no se suben al servidor. */
 (function(){
   const $ = s => document.getElementById(s);
   const EPS = 1e-9;
@@ -311,41 +323,17 @@ tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:v
     return out;
   }
 
-  // ---------- Ejemplo (inventado) ----------
-  function sample(){
-    const S = [
-      ['EJ-PERNO-M16','Perno ejemplo M16 x 40',50,'05-08-2026 10:15'],
-      ['EJ-GUANTE-01','Guante ejemplo de cabritilla',48,'12-08-2026 16:40'],
-      ['EJ-CAJA-500','Caja ejemplo 500x400x400',112,'19-08-2026 09:05'],
-      ['EJ-CABLE-45','Cable ejemplo de alimentación 4,5 m',6,'20-08-2026 11:30'],
-      ['EJ-REMACHE','Remache ejemplo 4,0 x 8',230,'10-08-2026 15:00'],
-      ['EJ-KIT-HT','Kit ejemplo de herramientas',3,'18-08-2026 12:00'],
-      ['EJ-TUERCA','Tuerca ejemplo 3/8',14,'19-08-2026 17:33'],
-      ['EJ-RELE-6A','Relé ejemplo 6A 24VDC',null,'']
-    ].map(r => ({code:r[0], key:keyOf(r[0]), name:r[1], stock:r[2], estado:r[2]==null?'Pendiente':'Contado', por:'', fecha:parseDate(r[3])}));
-    const M = [
-      ['EJ-PERNO-M16','in',60,'05-01-2026','PARTE DE ENTRADA','Compra',118500,60,118500],
-      ['EJ-PERNO-M16','out',8,'14-08-2026','PARTE DE SALIDA','OT 812',15800,52,102700],
-      ['EJ-PERNO-M16','in',30,'22-08-2026','PARTE DE ENTRADA','Compra',60000,82,162700],
-      ['EJ-GUANTE-01','in',50,'10-03-2026','PARTE DE ENTRADA','Compra',64150,50,64150],
-      ['EJ-GUANTE-01','out',6,'25-08-2026','PARTE DE SALIDA','OT 901',7698,44,56452],
-      ['EJ-CAJA-500','in',120,'15-04-2026','PARTE DE ENTRADA','Compra',156000,120,156000],
-      ['EJ-CAJA-500','out',15,'02-09-2026','ENVÍO A PRODUCCIÓN','OT 950',19500,105,136500],
-      ['EJ-CABLE-45','in',6,'02-05-2026','PARTE ENTRADA IMPORTACION','Importación',3321960,6,3321960],
-      ['EJ-CABLE-45','out',8,'28-08-2026','52 Guia de Despacho Electronica','GDVELECT 24010',0,-2,0],
-      ['EJ-REMACHE','in',200,'04-06-2026','PARTE DE ENTRADA','Compra',2600,200,2600],
-      ['EJ-KIT-HT','in',2,'06-01-2026','PARTE ENTRADA IMPORTACION','Importación',5239044,2,5239044],
-      ['EJ-KIT-HT','in',1,'18-07-2026','NO OCUPAR2','Entrada sin costo',0,3,5239044],
-      ['EJ-SELLO-20','Sello ejemplo 20"','in',10,'03-03-2026','PARTE DE ENTRADA','Compra',45000,10,45000]
-    ].map((r, i) => { if (r.length === 10) r = [r[0], ...r.slice(2)]; return {i, art:r[0], key:keyOf(r[0]), kind:r[1], qty:r[2], fecha:parseDate(r[3]), tipo:r[4],
-      estado:'Aprobado', folio:i+1, orig:r[1]==='out'?'BODEGA CENTRAL':'', dest:r[1]==='in'?'BODEGA CENTRAL':'', ref:r[5],
-      desc: r[0]==='EJ-SELLO-20' ? 'Sello ejemplo 20"' : '', um:'UN', valor:r[6], saldo:r[7], valorInv:r[8]}; });
-    return {S, M};
+  // ---------- Conteo del sistema ----------
+  // La página trae el conteo de "Stock y conteo" como JSON: [código, nombre, stock físico, estado, contado por, fecha y hora]
+  function conteoDelSistema(){
+    const el = document.getElementById('regx-conteo');
+    let data = [];
+    try { data = JSON.parse(el ? el.textContent : '[]'); } catch(_){ data = []; }
+    return data.map(([code, name, stock, estado, por, fecha]) => ({code, key:keyOf(code), name, stock, estado, por, fecha:parseDate(fecha)}));
   }
 
   // ---------- Estado ----------
-  const ex = sample();
-  const state = {stock:ex.S, mov:ex.M, isSample:true, view:'reg', filter:{reg:'all', zero:'all', check:'all'}, mov2:null, ajSel:null, checkRows:[], docGroups:[],
+  const state = {stock:conteoDelSistema(), mov:[], view:'reg', filter:{reg:'all', zero:'all', check:'all'}, mov2:null, ajSel:null, checkRows:[], docGroups:[],
     sort:{reg:{k:'code', d:1}, zero:{k:'fecha', d:1}, check:{k:'code', d:1}}, open:new Set(), pmpEdit:new Map(), rows:[], zero:[]};
 
   function fillBodegas(){
@@ -485,26 +473,24 @@ tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:v
       // Defontana lleva un saldo por cada artículo: si el código existe escrito de varias formas, se suman
       const byArt = new Map();
       for (const m of docs){ const a = norm(m.art); if (!byArt.has(a)) byArt.set(a, []); byArt.get(a).push(m); }
-      let sysNow = null, sysAtCount = null;
+      // El saldo de cada fila del informe depende del orden en que Defontana procesó los documentos, que
+      // puede no ser el orden de las filas cuando hay varios el mismo día. Por eso se toma como saldo
+      // inicial el valor que más se repite de (saldo de la fila − movimientos acumulados hasta ella) y
+      // los saldos al conteo y final se calculan sumando los documentos.
+      const signed = m => m.kind === 'in' ? m.qty : -m.qty;
+      let sysNow = null, sysAtCount = null, sysCalc = null, toOther = 0;
       for (const list of byArt.values()){
+        let cum = 0; const votes = new Map();
+        for (const m of list){ cum += signed(m); if (m.saldo != null){ const v = Math.round((m.saldo - cum) * 1e6) / 1e6; votes.set(v, (votes.get(v) || 0) + 1); } }
+        if (!votes.size) continue;
+        let init = null, best = 0;
+        for (const [v, n] of votes) if (n > best){ init = v; best = n; }
         const last = list[list.length - 1];
         if (last.saldo != null) sysNow = (sysNow || 0) + last.saldo;
-        if (!counted) continue;
-        let li = null; list.forEach((m, j) => { if (m.fecha && !after(m)) li = j; });
-        let v = null;
-        if (li != null) v = list[li].saldo;
-        else { const f = list[0]; if (f.saldo != null) v = f.saldo - (f.kind === 'in' ? f.qty : -f.qty); }
-        if (v != null) sysAtCount = (sysAtCount || 0) + v;
+        sysCalc = (sysCalc || 0) + init + cum;
+        if (counted) sysAtCount = (sysAtCount || 0) + init + list.filter(m => m.fecha && !after(m)).reduce((a, m) => a + signed(m), 0);
       }
-      // Saldo final calculado con los documentos (no depende del orden de las filas del informe)
-      let sysCalc = null, toOther = 0;
-      if (counted && sysAtCount != null){
-        sysCalc = sysAtCount;
-        for (const m of docs) if (m.fecha && after(m)){
-          sysCalc += m.kind === 'in' ? m.qty : -m.qty;
-          if (!m._aj && !inBod(m) && m.kind === 'in') toOther += m.qty;
-        }
-      }
+      if (counted) for (const m of docs) if (m.fecha && after(m) && !m._aj && !inBod(m) && m.kind === 'in') toOther += m.qty;
       const own = s ? new Set(s.variants.map(norm)) : new Set();
       const alias = [...(s ? s.variants.filter(v => norm(v) !== norm(s.code)) : []), ...[...byArt.keys()].filter(a => !own.has(a) && (s || a !== norm(docs[0].art)))];
       const viaName = docs.some(m => m._byName);
@@ -520,11 +506,12 @@ tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:v
       else if (diff == null) st = 'nodata';
       else st = diff > EPS ? 'up' : diff < -EPS ? 'down' : 'ok';
       const zeros = docs.filter(m => m.valor != null && Math.abs(m.valor) < EPS && m.qty > EPS).length;
+      const cost = costReview(docs, sysCalc);
       const dx = counted ? diagnose(s, docs.filter(m => !m._aj), after, diff, sysAtCount, sameNet, zeros) : {cause:null, obs:[]};
       if (dx.cause === 'late' || dx.cause === 'sameday') st = 'check';
       return {cause:dx.cause, obs:dx.obs, alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs, sysCalc, toOther,
         sysAtCount, sysNow, realNow, diff, st, pmp, edited, pmpSrc: edited ? 'Ingresado a mano' : pm ? pm.src : 'Sin costo en Defontana',
-        valor: diff != null && Math.abs(diff) > EPS && pmp != null ? diff * pmp : (st === 'ok' ? 0 : null), zeros};
+        valor: diff != null && Math.abs(diff) > EPS && pmp != null ? diff * pmp : (st === 'ok' ? 0 : null), zeros, cost};
     };
     const seen = new Set();
     const rows = [...groups.values()].map(list => { const s = mergeGroup(list); seen.add(s.key); return build(s, byKey.get(s.key) || []); });
@@ -538,10 +525,78 @@ tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:v
       const edited = state.pmpEdit.has(k);
       const pmp = edited ? state.pmpEdit.get(k) : pm ? pm.v : null;
       zero.push({key:k, m, code:m.art, name:m.desc || names.get(k) || '', pmp, edited,
-        pmpSrc: edited ? 'Ingresado a mano' : pm ? pm.src : 'Sin costo en Defontana', valor: pmp != null ? pmp * m.qty : null});
+        pmpSrc: edited ? 'Ingresado a mano' : pm ? pm.src : 'Sin costo en Defontana', valor: pmp != null ? pmp * m.qty : null,
+        rev: zeroReview(m, docs, j, pmp)});
     });
     return {rows, zero, orphan: [...byKey.keys()].filter(k => !seen.has(k)).length};
   }
+
+  // ---------- Costo: productos que entraron o salieron a $0 ----------
+  const pmpAt = m => m && m.saldo > EPS && m.valorInv != null ? m.valorInv / m.saldo : null;
+  // ¿Hay que revisar el costo de este producto? Mira sus documentos a $0 y cómo está hoy.
+  function costReview(docs, saldoHoy){
+    const zeros = docs.filter(m => m.valor != null && Math.abs(m.valor) < EPS && m.qty > EPS);
+    const last = docs[docs.length - 1];
+    const pmpHoy = pmpAt(last);
+    const sinCostoHoy = saldoHoy > EPS && last && last.valorInv != null && last.valorInv <= EPS;
+    const ins0 = zeros.filter(m => m.kind === 'in');
+    const outsSinStock = zeros.filter(m => m.kind === 'out' && m.saldo != null && m.saldo + m.qty <= EPS);
+    if (!zeros.length && !sinCostoHoy) return null;
+    const txt = [], hacer = [];
+    if (sinCostoHoy){ txt.push(`Hoy tiene ${fmt(saldoHoy)} sin costo en Defontana (PMP $0).`); hacer.push(`Ajuste de valor: cargar el costo a las ${fmt(saldoHoy)} unidades`); }
+    for (const m of ins0){
+      const i = docs.indexOf(m), antes = pmpAt(docs[i - 1]), despues = pmpAt(m);
+      txt.push(`Entró ${fmt(m.qty)} a $0 con ${m.tipo} #${m.folio} del ${fmtDate(m.fecha)}` + (antes > EPS && despues != null ? `: el PMP bajó de ${money(antes)} a ${money(despues)}.` : '.'));
+    }
+    if (ins0.length) hacer.push('Corregir el costo de ' + (ins0.length === 1 ? 'ese ingreso' : 'esos ingresos') + ' (o ajuste de valor por la diferencia)');
+    if (outsSinStock.length){ txt.push(`Salió ${fmt(outsSinStock.reduce((a, m) => a + m.qty, 0))} sin tener stock (${outsSinStock.map(m => m.tipo + ' #' + m.folio).join(', ')}): faltó registrar el ingreso con su costo.`); hacer.push('Parte de Entrada con costo por lo que salió sin stock'); }
+    const need = sinCostoHoy || ins0.length > 0 || outsSinStock.length > 0;
+    if (!need) txt.push(`Tuvo salidas a $0, pero hoy ya tiene costo (PMP ${money(pmpHoy)}). No hace falta corregir.`);
+    return {need, txt, hacer};
+  }
+  function zeroReview(m, docs, j, pmp){
+    const antes = pmpAt(docs[j - 1]);
+    if (m.kind === 'in'){
+      return antes > EPS
+        ? {need:true, txt:`Sí. Entró a $0 y el PMP bajó de ${money(antes)} a ${money(pmpAt(m))}.`, hacer:`Corregir el costo del ingreso (${money(antes)} c/u) o ajuste de valor por ${money(antes * m.qty)}`}
+        : {need:true, txt:'Sí. El producto entró sin costo y no tenía costo antes.', hacer:'Ajuste de valor: cargar el costo real (factura o importación)'};
+    }
+    if (m.saldo != null && m.saldo + m.qty <= EPS) return {need:true, txt:'Sí. Salió sin tener stock en Defontana: faltó registrar el ingreso.', hacer:'Parte de Entrada con costo por lo que salió sin stock'};
+    const hoy = pmpAt(docs[docs.length - 1]);
+    return hoy > EPS
+      ? {need:false, txt:`No. Salió a $0 porque en ese momento no tenía costo, pero hoy su PMP es ${money(hoy)}.`, hacer:'Nada (solo la salida quedó sin costo)'}
+      : {need:true, txt:'Sí. Salió a $0 porque el producto no tiene costo (PMP $0).', hacer:'Ajuste de valor: cargar el costo del producto'};
+  }
+
+  // ---------- Qué documento generar ----------
+  function docToMake(r){
+    const d = r.diff, q = d != null ? fmt(Math.abs(d)) : '';
+    const out = [];
+    if (r.st === 'up'){
+      if (r.cause === 'egrnodesp') out.push(`Parte de Entrada por ${q} (devolución), o anular la salida que no se despachó`);
+      else if (r.cause === 'um') out.push('Revisar la unidad de medida antes de hacer una entrada');
+      else out.push(`Parte de Entrada por ${q}` + (r.pmp > 0 ? ` a ${money(r.pmp)} c/u` : ' (poner costo)'));
+    } else if (r.st === 'down'){
+      if (r.cause === 'dupin') out.push(`Anular el ingreso duplicado, o Parte de Salida por ${q}`);
+      else if (r.cause === 'um') out.push('Revisar la unidad de medida antes de hacer una salida');
+      else out.push(`Parte de Salida por ${q} (ajuste / merma)`);
+    } else if (r.st === 'check') out.push('Ninguno por ahora: volver a contar para confirmar');
+    else if (r.st === 'ok') out.push('Ninguno');
+    else if (r.st === 'nodata') out.push('Ver el saldo en Defontana');
+    else if (r.st === 'nocount') out.push('Contar el producto');
+    else if (r.st === 'nofile') out.push('Revisar por qué no está en el conteo');
+    if (r.cost && r.cost.need) out.push(...r.cost.hacer);
+    return out;
+  }
+  function checkToMake(r){
+    const g = r.gap, q = g != null ? fmt(Math.abs(g)) : '';
+    if (r.ck === 'ok') return ['Ninguno'];
+    if (r.ck === 'double') return [`Volver a contar; si hay ${fmt(Math.abs(r.diff))} más, Parte de ${r.diff < 0 ? 'Entrada' : 'Salida'} por ${fmt(Math.abs(r.diff))} para reversar`];
+    if (r.ck === 'review') return ['Volver a contar para decidir'];
+    if (r.ck === 'other') return ['Revisar el ajuste'];
+    return [g > 0 ? `Parte de Salida por ${q}` : `Parte de Entrada por ${q}`];
+  }
+  const makeCell = list => list.length ? `<ul class="make">${list.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '';
 
   // ---------- Verificar ajustes ----------
   const docId = m => [strip(m.tipo), m.folio, dayKey(m.fecha)].join('|');
@@ -621,12 +676,15 @@ tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:v
     ['nodata', 'Sin saldo en Defontana', r => r.st === 'nodata', 'var(--warn)'],
     ['nocount', 'Sin contar', r => r.st === 'nocount', 'var(--muted)'],
     ['nofile', 'No están en el conteo', r => r.st === 'nofile', 'var(--warn)'],
-    ['alias', 'Código escrito distinto', r => r.alias.length > 0 || r.viaName || r.nCounted > 1, 'var(--accent)']
+    ['alias', 'Código escrito distinto', r => r.alias.length > 0 || r.viaName || r.nCounted > 1, 'var(--accent)'],
+    ['cost', 'Revisar costo ($0)', r => !!(r.cost && r.cost.need), 'var(--warn)']
   ];
   const ZERO_FILTERS = [
     ['all', 'Todos', z => true, null],
     ['in', 'Ingresos a $0', z => z.m.kind === 'in', 'var(--in)'],
     ['out', 'Egresos a $0', z => z.m.kind === 'out', 'var(--out)'],
+    ['need', 'Revisar costo', z => z.rev.need, 'var(--warn)'],
+    ['noneed', 'No hace falta', z => !z.rev.need, 'var(--muted)'],
     ['nopmp', 'Sin PMP', z => !(z.pmp > 0), 'var(--warn)']
   ];
   const CHECK = {
@@ -650,19 +708,21 @@ tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:v
     ['aj', 'Se ajustó', 'num', r => r.aj],
     ['ck', 'Resultado', '', r => r.ck],
     ['obs', 'Detalle', '', r => r.ck],
+    ['make', 'Documento a generar', '', r => checkToMake(r)[0]],
     ['exp', 'Debería tener Defontana', 'num', r => r.expected],
     ['now', 'Tiene Defontana', 'num', r => r.sysCalc ?? r.sysNow],
     ['gap', 'Diferencia que queda', 'num', r => r.gap]
   ];
   function checkRow(r){
     const [cls, label, stripe] = CHECK[r.ck];
-    return `<tr class="row s-${stripe}${state.open.has(r.key) ? ' open' : ''}" data-key="${esc(r.key)}" tabindex="0">
+    return `<tr class="rx-row s-${stripe}${state.open.has(r.key) ? ' open' : ''}" data-key="${esc(r.key)}" tabindex="0">
       <td><div class="code">${esc(r.code)}</div><div class="pname">${esc(r.name)}</div>${aliasNote(r)}</td>
       <td class="num">${r.counted ? fmt(r.s.stock) + '<div class="small">' + fmtDate(r.s.fecha) + '</div>' : '—'}</td>
       <td class="num diff ${r.diff > EPS ? 'plus' : r.diff < -EPS ? 'minus' : 'mut'}">${r.diff == null ? '—' : sgn(r.diff)}</td>
       <td class="num diff ${r.aj > EPS ? 'plus' : r.aj < -EPS ? 'minus' : 'mut'}">${Math.abs(r.aj) > EPS ? sgn(r.aj) + '<div class="small">' + money(r.ajVal) + '</div>' : '—'}</td>
       <td><span class="pill ${cls}">${label}</span></td>
       <td class="obs"><div class="why">${r.cobs[0]}</div>${r.cobs.length > 1 ? '<div class="more-obs">' + r.cobs.slice(1).join('<br>') + '</div>' : ''}</td>
+      <td class="tomake">${makeCell(checkToMake(r))}</td>
       <td class="num">${fmt(r.expected)}</td>
       <td class="num">${fmt(r.sysCalc ?? r.sysNow)}${r.sysCalc != null && r.sysNow != null && Math.abs(r.sysCalc - r.sysNow) > EPS ? '<div class="small">informe: ' + fmt(r.sysNow) + '</div>' : ''}</td>
       <td class="num diff ${r.gap == null || Math.abs(r.gap) <= EPS ? 'mut' : 'minus'}">${r.gap == null ? '—' : Math.abs(r.gap) <= EPS ? '0' : sgn(r.gap)}</td></tr>`;
@@ -675,10 +735,11 @@ tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:v
     ['diff', 'Diferencia', 'num', r => r.diff],
     ['st', 'Qué hacer', '', r => r.st],
     ['obs', 'Por qué está descuadrado', '', r => r.cause ? CAUSES[r.cause] : null],
+    ['make', 'Documento a generar', '', r => docToMake(r)[0]],
     ['pmp', 'PMP', 'num', r => r.pmp],
     ['valor', 'Valor ajuste', 'num', r => r.valor],
     ['real', 'Stock real hoy', 'num', r => r.realNow],
-    ['now', 'Defontana hoy', 'num', r => r.sysNow]
+    ['now', 'Defontana hoy', 'num', r => r.sysCalc ?? r.sysNow]
   ];
   const ZERO_COLS = [
     ['fecha', 'Fecha', '', z => z.m.fecha],
@@ -687,7 +748,9 @@ tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:v
     ['kind', 'Tipo', '', z => z.m.kind],
     ['qty', 'Cantidad', 'num', z => z.m.qty],
     ['pmp', 'PMP', 'num', z => z.pmp],
-    ['valor', 'Valor que debió tener', 'num', z => z.valor]
+    ['valor', 'Valor que debió tener', 'num', z => z.valor],
+    ['rev', '¿Revisar costo?', '', z => z.rev.need ? 0 : 1],
+    ['make', 'Documento a generar', '', z => z.rev.hacer]
   ];
 
   const pmpInput = (key, v, edited, code) =>
@@ -705,25 +768,27 @@ tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:v
     const d = r.diff;
     const qty = (r.st === 'up' || r.st === 'down') ? ' ' + fmt(Math.abs(d)) : '';
     const obsCell = r => {
+      const costo = r.cost ? `<div class="costrev${r.cost.need ? '' : ' ok'}"><b>${r.cost.need ? 'Revisar costo:' : 'Costo:'}</b> ${esc(r.cost.txt.join(' '))}</div>` : '';
       if (!r.cause){
-        if (r.st === 'nodata') return '<span class="mut">Sin documentos en el informe: no se conoce el saldo de Defontana.</span>';
-        if (r.st === 'nofile') return '<span class="mut">Tiene documentos en Defontana pero no está en el archivo de conteo.</span>';
-        return '';
+        if (r.st === 'nodata') return '<span class="mut">Sin documentos en el informe: no se conoce el saldo de Defontana.</span>' + costo;
+        if (r.st === 'nofile') return '<span class="mut">Tiene documentos en Defontana pero no está en el archivo de conteo.</span>' + costo;
+        return costo;
       }
       const [main, ...rest] = r.obs;
-      return `<div class="cause">${CAUSES[r.cause]}</div><div class="why">${main}</div>${rest.length ? '<div class="more-obs">' + rest.join('<br>') + '</div>' : ''}`;
+      return `<div class="cause">${CAUSES[r.cause]}</div><div class="why">${main}</div>${rest.length ? '<div class="more-obs">' + rest.join('<br>') + '</div>' : ''}${costo}`;
     };
-    return `<tr class="row s-${r.st}${state.open.has(r.key) ? ' open' : ''}" data-key="${esc(r.key)}" tabindex="0">
+    return `<tr class="rx-row s-${r.st}${state.open.has(r.key) ? ' open' : ''}" data-key="${esc(r.key)}" tabindex="0">
       <td><div class="code">${esc(r.code)}</div><div class="pname">${esc(r.name)}</div>${aliasNote(r)}</td>
       <td class="num">${r.counted ? fmt(r.s.stock) + '<div class="small">' + fmtDate(r.s.fecha) + '</div>' : '<span class="mut">—</span>'}</td>
       <td class="num">${fmt(r.sysAtCount)}</td>
       <td class="num diff ${d > EPS ? 'plus' : d < -EPS ? 'minus' : 'mut'}">${d == null ? '—' : sgn(d)}</td>
       <td><span class="pill ${cls}">${label}${qty}</span>${r.sameDay && r.counted ? '<span class="flag" title="Hay documentos el mismo día del conteo">· mismo día</span>' : ''}</td>
       <td class="obs">${obsCell(r)}</td>
+      <td class="tomake">${makeCell(docToMake(r))}</td>
       <td class="num">${r.st === 'up' || r.st === 'down' || r.st === 'check' ? pmpInput(r.key, r.pmp, r.edited, r.code) : '<span class="mut">' + (r.pmp != null ? money(r.pmp) : '—') + '</span>'}</td>
       <td class="num diff ${r.valor > 0.5 ? 'plus' : r.valor < -0.5 ? 'minus' : 'mut'}">${r.st === 'up' || r.st === 'down' || r.st === 'check' ? money(r.valor) : '—'}</td>
       <td class="num">${fmt(r.realNow)}${r.ins || r.outs ? '<div class="small">' + (r.ins ? '<span class="plus">+' + fmt(r.ins) + '</span> ' : '') + (r.outs ? '<span class="minus">−' + fmt(r.outs) + '</span>' : '') + ' desde el conteo</div>' : ''}</td>
-      <td class="num">${fmt(r.sysNow)}</td></tr>`;
+      <td class="num">${fmt(r.sysCalc ?? r.sysNow)}${r.sysCalc != null && r.sysNow != null && Math.abs(r.sysCalc - r.sysNow) > EPS ? '<div class="small">informe: ' + fmt(r.sysNow) + '</div>' : ''}</td></tr>`;
   }
   function zeroRow(z){
     return `<tr>
@@ -733,11 +798,14 @@ tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:v
       <td><span class="pill ${z.m.kind === 'in' ? 'a-up' : 'a-down'}">${z.m.kind === 'in' ? 'Ingreso' : 'Egreso'}</span></td>
       <td class="num">${fmt(z.m.qty)} <span class="small">${esc(z.m.um)}</span></td>
       <td class="num">${pmpInput(z.key, z.pmp, z.edited, z.code)}<div class="small">${esc(z.pmpSrc)}</div></td>
-      <td class="num diff">${money(z.valor)}</td></tr>`;
+      <td class="num diff">${money(z.valor)}</td>
+      <td class="obs"><span class="pill ${z.rev.need ? 'a-warn' : 'a-ok'}">${z.rev.need ? 'Sí' : 'No'}</span> <span class="why">${esc(z.rev.txt.replace(/^(Sí|No)\. /, ''))}</span></td>
+      <td class="tomake">${makeCell([z.rev.hacer])}</td></tr>`;
   }
 
   function detail(r){
-    if (!r.docs.length) return `<tr class="detail"><td colspan="9"><span class="note">Este código no tiene documentos en el informe de Defontana, así que no se conoce su saldo en el sistema. Revisa su stock directamente en Defontana.</span></td></tr>`;
+    const span = (state.view === 'check' ? CHECK_COLS : REG_COLS).length;
+    if (!r.docs.length) return `<tr class="detail"><td colspan="${span}"><span class="note">Este código no tiene documentos en el informe de Defontana, así que no se conoce su saldo en el sistema. Revisa su stock directamente en Defontana.</span></td></tr>`;
     const ck = r.counted ? dayKey(r.s.fecha) : null, sameAfter = $('optSame').value === 'after';
     const when = m => { if (m._aj) return 'Ajuste'; if (ck == null) return ''; const dk = dayKey(m.fecha); return dk < ck ? 'Antes' : dk > ck ? 'Después' : sameAfter ? 'Mismo día (después)' : 'Mismo día (antes)'; };
     const rows = r.docs.map(m => {
@@ -754,7 +822,7 @@ tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:v
       <span>Contado el <b>${fmtDate(r.s.fecha, true)}</b>${r.s.por ? ' por ' + esc(r.s.por) : ''}: <b>${fmt(r.s.stock)}</b></span>
       <span>Defontana tenía: <b>${fmt(r.sysAtCount)}</b></span>
       <span>Origen del PMP: <b>${esc(r.pmpSrc)}</b></span></div>` : '';
-    return `<tr class="detail"><td colspan="9">${head}<table class="det"><thead><tr><th>Fecha</th><th>Documento</th><th>Referencia</th><th class="num">Cantidad</th><th class="num">Valor</th><th class="num">Saldo</th><th class="num">PMP</th><th>Respecto al conteo</th></tr></thead><tbody>${rows}</tbody></table></td></tr>`;
+    return `<tr class="detail"><td colspan="${span}">${head}<table class="det"><thead><tr><th>Fecha</th><th>Documento</th><th>Referencia</th><th class="num">Cantidad</th><th class="num">Valor</th><th class="num">Saldo</th><th class="num">PMP</th><th>Respecto al conteo</th></tr></thead><tbody>${rows}</tbody></table></td></tr>`;
   }
 
   // ---------- Pintar ----------
@@ -774,10 +842,13 @@ tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:v
     if (!state.mov2){ box.innerHTML = ''; return; }
     const G = state.docGroups, auto = G.filter(g => g.auto), rest = G.filter(g => !g.auto);
     const item = g => `<label class="ajdoc"><input type="checkbox" data-doc="${esc(g.id)}"${state.ajSel.has(g.id) ? ' checked' : ''}> <span>${esc(g.tipo)} <b>#${esc(g.folio)}</b> del ${fmtDate(g.fecha)} · ${fmt(g.lines)} ${g.lines === 1 ? 'línea' : 'líneas'} · ${money(g.valor)}${g.auto ? ' · ' + fmt(g.match) + ' calzan con las diferencias' : ''}</span></label>`;
-    box.innerHTML = `<div class="ajbox"><h3>Documentos de ajuste</h3>
+    const nSel = G.filter(g => state.ajSel.has(g.id)).length;
+    box.innerHTML = `<div class="ajbox"><div class="ajhead"><h3>Documentos de ajuste <span class="note">(${fmt(nSel)} de ${fmt(G.length)} marcados)</span></h3>
+      <span class="ajbtns"><button type="button" class="rx-btn ghost sm" data-all="1">Marcar todos</button><button type="button" class="rx-btn ghost sm" data-all="0">Quitar todos</button><button type="button" class="rx-btn ghost sm" data-all="auto">Solo los sugeridos</button></span></div>
       <p class="note">${auto.length ? 'Encontré estos documentos que calzan con las diferencias del conteo. Marca o desmarca los que corresponden a ajustes de inventario.' : 'No encontré documentos que calcen con las diferencias. Marca abajo los documentos de ajuste.'}</p>
       ${auto.map(item).join('')}
-      ${rest.length ? `<details${auto.length ? '' : ' open'}><summary>Otros documentos posteriores al conteo (${fmt(rest.length)})</summary><div class="ajlist">${rest.map(item).join('')}</div></details>` : ''}</div>`;
+      ${nSel > auto.length + 5 ? '<p class="note warnline">Ojo: marcaste documentos que no son ajustes. Los movimientos normales (ventas, envíos a producción, compras) no deben marcarse, porque el programa los tomaría como ajustes y el resultado no sería correcto.</p>' : ''}
+      ${rest.length ? `<details${auto.length && !state.ajOpen ? '' : ' open'}><summary>Otros documentos posteriores al conteo (${fmt(rest.length)})</summary><div class="ajlist">${rest.map(item).join('')}</div></details>` : ''}</div>`;
   }
 
   function render(){
@@ -797,30 +868,30 @@ tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:v
         const n = k => all.filter(r => r.ck === k).length;
         const ajDocs = state.docGroups.filter(g => state.ajSel.has(g.id));
         $('summary').innerHTML = `
-        <button class="card up" type="button" data-go="ok"><span class="lbl">Quedaron bien</span><span class="big">${fmt(n('ok'))}</span><span class="note">de ${fmt(all.length)} productos revisados</span></button>
-        <button class="card down" type="button" data-go="wrong"><span class="lbl">Ajuste con diferencia</span><span class="big">${fmt(n('wrong'))}</span><span class="note">se ajustó una cantidad distinta</span></button>
-        <button class="card down" type="button" data-go="pending"><span class="lbl">Falta ajustar</span><span class="big">${fmt(n('pending'))}</span><span class="note">siguen descuadrados</span></button>
-        <button class="card bad" type="button" data-go="double"><span class="lbl">Posible doble ajuste</span><span class="big">${fmt(n('double'))}</span><span class="note">contar de nuevo para confirmar</span></button>
-        <div class="card"><span class="lbl">Ajustes en Defontana</span><span class="big">${money(ajDocs.reduce((a, g) => a + g.valor, 0))}</span><span class="note">${fmt(ajDocs.length)} ${ajDocs.length === 1 ? 'documento' : 'documentos'}</span></div>`;
+        <button class="rx-card up" type="button" data-go="ok"><span class="lbl">Quedaron bien</span><span class="big">${fmt(n('ok'))}</span><span class="note">de ${fmt(all.length)} productos revisados</span></button>
+        <button class="rx-card down" type="button" data-go="wrong"><span class="lbl">Ajuste con diferencia</span><span class="big">${fmt(n('wrong'))}</span><span class="note">se ajustó una cantidad distinta</span></button>
+        <button class="rx-card down" type="button" data-go="pending"><span class="lbl">Falta ajustar</span><span class="big">${fmt(n('pending'))}</span><span class="note">siguen descuadrados</span></button>
+        <button class="rx-card bad" type="button" data-go="double"><span class="lbl">Posible doble ajuste</span><span class="big">${fmt(n('double'))}</span><span class="note">contar de nuevo para confirmar</span></button>
+        <div class="rx-card"><span class="lbl">Ajustes en Defontana</span><span class="big">${money(ajDocs.reduce((a, g) => a + g.valor, 0))}</span><span class="note">${fmt(ajDocs.length)} ${ajDocs.length === 1 ? 'documento' : 'documentos'}</span></div>`;
       }
     } else if (reg){
       const bad = all.filter(r => r.st === 'up' || r.st === 'down' || r.st === 'check'), up = bad.filter(r => r.st === 'up'), down = bad.filter(r => r.st === 'down'), chk = bad.filter(r => r.st === 'check');
       const sum = L => L.reduce((a, r) => a + (r.valor || 0), 0);
       const counted = all.filter(r => r.counted).length;
       $('summary').innerHTML = `
-        <button class="card bad" type="button" data-go="bad"><span class="lbl">Descuadrados</span><span class="big">${fmt(bad.length)}</span><span class="note">de ${fmt(counted)} productos contados</span></button>
-        <button class="card up" type="button" data-go="up"><span class="lbl">Aumentar en Defontana</span><span class="big">${fmt(up.length)}</span><span class="val">${money(sum(up))}</span></button>
-        <button class="card down" type="button" data-go="down"><span class="lbl">Disminuir en Defontana</span><span class="big">${fmt(down.length)}</span><span class="val">${money(sum(down))}</span></button>
-        <div class="card"><span class="lbl">Efecto neto del ajuste</span><span class="big">${money(sum(up) + sum(down))}</span><span class="note">${fmt(bad.filter(r => !(r.pmp > 0)).length)} sin PMP (poner costo)</span></div>
-        <button class="card bad" type="button" data-go="check"><span class="lbl">Revisar antes de ajustar</span><span class="big">${fmt(chk.length)}</span><span class="note">la diferencia se explica por la fecha de un documento</span></button>`;
+        <button class="rx-card bad" type="button" data-go="bad"><span class="lbl">Descuadrados</span><span class="big">${fmt(bad.length)}</span><span class="note">de ${fmt(counted)} productos contados</span></button>
+        <button class="rx-card up" type="button" data-go="up"><span class="lbl">Aumentar en Defontana</span><span class="big">${fmt(up.length)}</span><span class="val">${money(sum(up))}</span></button>
+        <button class="rx-card down" type="button" data-go="down"><span class="lbl">Disminuir en Defontana</span><span class="big">${fmt(down.length)}</span><span class="val">${money(sum(down))}</span></button>
+        <div class="rx-card"><span class="lbl">Efecto neto del ajuste</span><span class="big">${money(sum(up) + sum(down))}</span><span class="note">${fmt(bad.filter(r => !(r.pmp > 0)).length)} sin PMP (poner costo)</span></div>
+        <button class="rx-card bad" type="button" data-go="check"><span class="lbl">Revisar antes de ajustar</span><span class="big">${fmt(chk.length)}</span><span class="note">la diferencia se explica por la fecha de un documento</span></button>`;
     } else {
       const ins = all.filter(z => z.m.kind === 'in'), outs = all.filter(z => z.m.kind === 'out');
       const sum = L => L.reduce((a, z) => a + (z.valor || 0), 0);
       $('summary').innerHTML = `
-        <div class="card"><span class="lbl">Documentos a $0</span><span class="big">${fmt(all.length)}</span><span class="note">${fmt(new Set(all.map(z => z.key)).size)} productos distintos</span></div>
-        <button class="card up" type="button" data-go="in"><span class="lbl">Ingresos sin costo</span><span class="big">${fmt(ins.length)}</span><span class="val">${money(sum(ins))} a PMP</span></button>
-        <button class="card down" type="button" data-go="out"><span class="lbl">Egresos sin costo</span><span class="big">${fmt(outs.length)}</span><span class="val">${money(sum(outs))} a PMP</span></button>
-        <button class="card bad" type="button" data-go="nopmp"><span class="lbl">Sin PMP para proponer</span><span class="big">${fmt(all.filter(z => !(z.pmp > 0)).length)}</span><span class="note">el producto nunca tuvo costo</span></button>`;
+        <div class="rx-card"><span class="lbl">Documentos a $0</span><span class="big">${fmt(all.length)}</span><span class="note">${fmt(new Set(all.map(z => z.key)).size)} productos distintos</span></div>
+        <button class="rx-card up" type="button" data-go="in"><span class="lbl">Ingresos sin costo</span><span class="big">${fmt(ins.length)}</span><span class="val">${money(sum(ins))} a PMP</span></button>
+        <button class="rx-card down" type="button" data-go="out"><span class="lbl">Egresos sin costo</span><span class="big">${fmt(outs.length)}</span><span class="val">${money(sum(outs))} a PMP</span></button>
+        <button class="rx-card bad" type="button" data-go="nopmp"><span class="lbl">Sin PMP para proponer</span><span class="big">${fmt(all.filter(z => !(z.pmp > 0)).length)}</span><span class="note">el producto nunca tuvo costo</span></button>`;
     }
 
     // Filtros
@@ -849,7 +920,8 @@ tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:v
     const rows = sorted(all.filter(r => f(r) && (!q || strip(r.code).includes(q) || strip(r.name).includes(q) || (zer && strip(r.m.tipo + ' ' + r.m.ref + ' ' + r.m.folio).includes(q)))), cols);
     state.visible = rows;
     const tb = $('tbody');
-    if (chk && !state.mov2){ tb.innerHTML = `<tr><td colspan="${cols.length}" class="empty">Sube arriba el Informe de Documentos de Defontana descargado de nuevo, ya con los ajustes hechos. El programa buscará los documentos de ajuste y revisará producto por producto si quedó cuadrado.</td></tr>`; }
+    if (!chk && !state.mov.length){ tb.innerHTML = `<tr><td colspan="${cols.length}" class="empty">Sube arriba el Informe de Documentos de Defontana (archivo 2) para cruzarlo con el conteo.</td></tr>`; }
+    else if (chk && !state.mov2){ tb.innerHTML = `<tr><td colspan="${cols.length}" class="empty">Sube arriba el Informe de Documentos de Defontana descargado de nuevo, ya con los ajustes hechos. El programa buscará los documentos de ajuste y revisará producto por producto si quedó cuadrado.</td></tr>`; }
     else if (!rows.length){ tb.innerHTML = `<tr><td colspan="${cols.length}" class="empty">No hay productos en esta vista.</td></tr>`; }
     else {
       const parts = [];
@@ -868,20 +940,23 @@ tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:v
   const regExport = r => ({
     'Código': r.code, 'Nombre': r.name, 'Otras formas del código': r.alias.join(', ') + (r.viaName ? (r.alias.length ? ' · ' : '') + 'cruzado por nombre' : ''), 'Qué hacer': ACTION[r.st][1], 'Causa probable': r.cause ? CAUSES[r.cause] : '',
     'Observaciones': r.obs.map(x => x.replace(/<[^>]+>/g, '')).join(' '),
+    'Documento a generar': docToMake(r).join(' · '), 'Revisar costo': r.cost ? (r.cost.need ? 'Sí' : 'No') : '', 'Detalle costo': r.cost ? r.cost.txt.join(' ') : '',
     'Cantidad a ajustar': r.diff != null && Math.abs(r.diff) > EPS ? Math.abs(r.diff) : '',
     'Contado': r.s ? r.s.stock : '', 'Fecha conteo': r.counted ? fmtDate(r.s.fecha, true) : '',
     'Defontana al conteo': r.sysAtCount ?? '', 'Diferencia': r.diff ?? '',
     'PMP': r.pmp != null ? Math.round(r.pmp * 100) / 100 : '', 'Origen PMP': r.pmpSrc,
     'Valor ajuste': r.valor != null ? Math.round(r.valor) : '',
-    'Stock real hoy': r.realNow ?? '', 'Defontana hoy': r.sysNow ?? ''
+    'Stock real hoy': r.realNow ?? '', 'Defontana hoy': r.sysCalc ?? r.sysNow ?? ''
   });
   const zeroExport = z => ({
     'Fecha': fmtDate(z.m.fecha), 'Documento': z.m.tipo, 'Folio': z.m.folio, 'Referencia': z.m.ref,
     'Código': z.code, 'Nombre': z.name, 'Tipo': z.m.kind === 'in' ? 'Ingreso' : 'Egreso', 'Cantidad': z.m.qty,
-    'PMP': z.pmp != null ? Math.round(z.pmp * 100) / 100 : '', 'Origen PMP': z.pmpSrc, 'Valor que debió tener': z.valor != null ? Math.round(z.valor) : ''
+    'PMP': z.pmp != null ? Math.round(z.pmp * 100) / 100 : '', 'Origen PMP': z.pmpSrc, 'Valor que debió tener': z.valor != null ? Math.round(z.valor) : '',
+    '¿Revisar costo?': z.rev.need ? 'Sí' : 'No', 'Motivo': z.rev.txt, 'Documento a generar': z.rev.hacer
   });
   const checkExport = r => ({
     'Código': r.code, 'Nombre': r.name, 'Resultado': CHECK[r.ck][1], 'Detalle': r.cobs.map(x => x.replace(/<[^>]+>/g, '')).join(' '),
+    'Documento a generar': checkToMake(r).join(' · '),
     'Contado': r.s ? r.s.stock : '', 'Fecha conteo': r.counted ? fmtDate(r.s.fecha, true) : '',
     'Había que ajustar': r.diff ?? '', 'Se ajustó': r.aj, 'Valor ajuste': Math.round(r.ajVal),
     'Documentos de ajuste': r.ajDocs.map(m => m.tipo + ' #' + m.folio).join(', '),
@@ -889,17 +964,12 @@ tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:v
   });
   const exportRows = () => (state.visible || []).map(state.view === 'reg' ? regExport : state.view === 'check' ? checkExport : zeroExport);
 
-  let downloads = null;
-  if (window.claude && typeof window.claude.use === 'function') window.claude.use('downloads').then(d => { downloads = d; }).catch(() => {});
-  $('btnXlsx').addEventListener('click', async () => {
+  $('btnXlsx').addEventListener('click', () => {
     const rows = exportRows(); if (!rows.length) return;
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), {reg:'Regularización', zero:'Documentos a costo 0', check:'Verificación de ajustes'}[state.view]);
     const name = {reg:'regularizacion-inventario-', zero:'documentos-costo-0-', check:'verificacion-ajustes-'}[state.view] + fmtDate(new Date()) + '.xlsx';
-    if (downloads){
-      try { await downloads.save({filename:name, data:new Blob([XLSX.write(wb, {bookType:'xlsx', type:'array'})])}); $('copyNote').textContent = ''; }
-      catch(e){ $('copyNote').textContent = e && e.code === 'declined' ? 'Descarga cancelada.' : 'No se pudo descargar aquí. Usa “Copiar” y pega en Excel.'; }
-    } else XLSX.writeFile(wb, name);
+    XLSX.writeFile(wb, name);
   });
   $('btnCopy').addEventListener('click', () => {
     const rows = exportRows(); if (!rows.length) return;
@@ -923,7 +993,6 @@ tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:v
         const wb = XLSX.read(buf, {type:'array'});
         const data = parser(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header:1, raw:true, defval:null, blankrows:false}));
         if (!data.length) throw new Error('El archivo no tiene filas con datos.');
-        if (state.isSample){ state.isSample = false; state.stock = []; state.mov = []; state.pmpEdit.clear(); $('sampleNote').hidden = true; }
         state[key] = data;
         drop.classList.remove('err'); drop.classList.add('ok');
         st.textContent = file.name + ' · ' + fmt(data.length) + ' ' + label;
@@ -941,6 +1010,14 @@ tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:v
   setupLoader('fileStock', 'dropStock', 'stStock', parseStock, 'stock', 'códigos');
   setupLoader('fileMov', 'dropMov', 'stMov', parseMov, 'mov', 'líneas de documentos');
   setupLoader('fileMov2', 'dropMov2', 'stMov2', parseMov, 'mov2', 'líneas de documentos');
+  $('ajDocs').addEventListener('click', e => {
+    const b = e.target.closest('[data-all]'); if (!b) return;
+    const v = b.dataset.all;
+    state.ajOpen = true;
+    state.ajSel = new Set(v === '1' ? state.docGroups.map(g => g.id) : v === 'auto' ? state.docGroups.filter(g => g.auto).map(g => g.id) : []);
+    render();
+  });
+  $('ajDocs').addEventListener('toggle', e => { if (e.target.tagName === 'DETAILS') state.ajOpen = e.target.open; }, true);
   $('ajDocs').addEventListener('change', e => {
     const c = e.target.closest('input[data-doc]'); if (!c) return;
     if (c.checked) state.ajSel.add(c.dataset.doc); else state.ajSel.delete(c.dataset.doc);
@@ -964,8 +1041,8 @@ tr.s-good{--stripe:var(--in)} tr.s-bad{--stripe:var(--out)} tr.s-warn{--stripe:v
   $('optCause').addEventListener('change', () => { state.cause = $('optCause').value; render(); });
   let t; $('optSearch').addEventListener('input', () => { clearTimeout(t); t = setTimeout(render, 150); });
   const toggle = tr => { const k = tr.dataset.key; state.open.has(k) ? state.open.delete(k) : state.open.add(k); render(); };
-  $('tbody').addEventListener('click', e => { if (e.target.closest('input')) return; const tr = e.target.closest('tr.row'); if (tr) toggle(tr); });
-  $('tbody').addEventListener('keydown', e => { if (e.target.closest('input')) return; const tr = e.target.closest('tr.row'); if (tr && (e.key === 'Enter' || e.key === ' ')){ e.preventDefault(); toggle(tr); } });
+  $('tbody').addEventListener('click', e => { if (e.target.closest('input')) return; const tr = e.target.closest('tr.rx-row'); if (tr) toggle(tr); });
+  $('tbody').addEventListener('keydown', e => { if (e.target.closest('input')) return; const tr = e.target.closest('tr.rx-row'); if (tr && (e.key === 'Enter' || e.key === ' ')){ e.preventDefault(); toggle(tr); } });
   $('tbody').addEventListener('change', e => {
     const inp = e.target.closest('input.pmp'); if (!inp) return;
     const v = num(inp.value);
