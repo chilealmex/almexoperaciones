@@ -163,3 +163,5 @@
 .regx .plantable .n{width:36px;color:var(--muted);text-align:right}
 .regx .plantable tfoot td{background:var(--surface2)}
 .regx .plansec .tablebox{max-height:none}
+.regx .recount{width:96px;margin-top:4px;text-align:right;font:inherit;font-size:12px;padding:3px 6px;border:1px dashed var(--line);border-radius:6px;background:var(--surface);color:var(--ink)}
+.regx .recount:not(:placeholder-shown){border-style:solid;border-color:var(--accent);background:var(--accent-soft)}

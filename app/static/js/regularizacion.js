@@ -84,6 +84,17 @@
     return out;
   }
 
+  // ---------- Recuentos hechos hoy (se guardan en este navegador) ----------
+  function leerRecuentos(){
+    try {
+      const raw = JSON.parse(localStorage.getItem('regx-recuentos') || '{}');
+      return new Map(Object.entries(raw).map(([k, v]) => [k, {qty: v.qty, fecha: new Date(v.fecha)}]));
+    } catch(_){ return new Map(); }
+  }
+  function guardarRecuentos(){
+    try { localStorage.setItem('regx-recuentos', JSON.stringify(Object.fromEntries([...state.recount].map(([k, v]) => [k, {qty: v.qty, fecha: +v.fecha}])))); } catch(_){}
+  }
+
   // ---------- Conteo del sistema ----------
   // La página trae el conteo de "Stock y conteo" como JSON: [código, nombre, stock físico, estado, contado por, fecha y hora]
   function conteoDelSistema(){
@@ -95,7 +106,7 @@
 
   // ---------- Estado ----------
   const state = {stock:conteoDelSistema(), mov:[], view:'reg', filter:{reg:'all', zero:'all', check:'all'}, mov2:null, ajSel:null, checkRows:[], docGroups:[],
-    sort:{reg:{k:'code', d:1}, zero:{k:'fecha', d:1}, check:{k:'code', d:1}}, open:new Set(), pmpEdit:new Map(), rows:[], zero:[]};
+    sort:{reg:{k:'code', d:1}, zero:{k:'fecha', d:1}, check:{k:'code', d:1}}, open:new Set(), pmpEdit:new Map(), recount:leerRecuentos(), rows:[], zero:[]};
 
   function fillBodegas(){
     const sel = $('optBodega'), prev = sel.value, count = new Map();
@@ -213,10 +224,14 @@
     const mergeGroup = list => {
       const done = list.filter(x => x.stock != null && x.fecha != null);
       const main = done[0] || list[0];
-      return {code:main.code, key:main.key, name:main.name, por:main.por, estado:main.estado,
+      const g = {code:main.code, key:main.key, name:main.name, por:main.por, estado:main.estado,
         stock: done.length ? done.reduce((a, x) => a + x.stock, 0) : null,
         fecha: done.length ? new Date(Math.max(...done.map(x => +x.fecha))) : null,
         variants: list.map(x => x.code), nCounted: done.length};
+      // Un recuento ingresado en la tabla reemplaza al conteo original
+      const rc = state.recount.get(main.key);
+      if (rc){ g.original = {stock: g.stock, fecha: g.fecha}; g.stock = rc.qty; g.fecha = rc.fecha; g.por = 'Recuento'; g.recontado = true; g.nCounted = Math.max(1, g.nCounted); }
+      return g;
     };
     const inBod = m => bod === '*' || (m.kind === 'in' ? m.dest : m.orig) === bod;
     const build = (s, docs) => {
@@ -515,6 +530,7 @@
     ['nofile', 'No están en el conteo', r => r.st === 'nofile', 'var(--warn)'],
     ['alias', 'Código escrito distinto', r => r.alias.length > 0 || r.viaName || r.nCounted > 1, 'var(--accent)'],
     ['cost', 'Revisar costo ($0)', r => !!(r.cost && r.cost.need), 'var(--warn)'],
+    ['recount', 'Recontados', r => !!(r.s && r.s.recontado), 'var(--accent)'],
     ['p-verify', 'Paso 1: confirmar', r => r.st === 'check' || (r.cause === 'um' && (r.st === 'up' || r.st === 'down')), 'var(--warn)', true],
     ['p-cost', 'Paso 2: corregir costos', r => docSteps(r).some(x => x.k === 'cost'), 'var(--warn)', true],
     ['p-in', 'Paso 3: entradas', r => docSteps(r).some(x => x.k === 'in'), 'var(--in)', true],
@@ -622,7 +638,7 @@
     };
     return `<tr class="rx-row s-${r.st}${state.open.has(r.key) ? ' open' : ''}" data-key="${esc(r.key)}" tabindex="0">
       <td><div class="code">${esc(r.code)}</div><div class="pname">${esc(r.name)}</div>${aliasNote(r)}</td>
-      <td class="num">${r.counted ? fmt(r.s.stock) + '<div class="small">' + fmtDate(r.s.fecha) + '</div>' : '<span class="mut">—</span>'}</td>
+      <td class="num">${r.counted ? fmt(r.s.stock) + '<div class="small">' + fmtDate(r.s.fecha) + (r.s.recontado ? ' · recuento' : '') + '</div>' : '<span class="mut">—</span>'}${r.s && r.s.recontado && r.s.original && r.s.original.stock != null ? '<div class="small">antes: ' + fmt(r.s.original.stock) + ' el ' + fmtDate(r.s.original.fecha) + '</div>' : ''}${r.s ? `<input class="recount" type="number" step="any" min="0" inputmode="decimal" data-key="${esc(r.key)}" value="${r.s.recontado ? r.s.stock : ''}" placeholder="Recuento hoy" aria-label="Recuento de hoy de ${esc(r.code)}">` : ''}</td>
       <td class="num">${r.counted ? (r.ins || r.outs ? (r.ins ? '<span class="plus">+' + fmt(r.ins) + '</span> ' : '') + (r.outs ? '<span class="minus">−' + fmt(r.outs) + '</span>' : '') : '<span class="mut">sin movimientos</span>') : '<span class="mut">—</span>'}</td>
       <td class="num"><b>${fmt(r.realNow)}</b></td>
       <td class="num">${fmt(hoyDe(r))}${r.sysAtCount != null && r.counted ? '<div class="small">al conteo: ' + fmt(r.sysAtCount) + '</div>' : ''}${r.sysCalc != null && r.sysNow != null && Math.abs(r.sysCalc - r.sysNow) > EPS ? '<div class="small">última fila del informe: ' + fmt(r.sysNow) + '</div>' : ''}</td>
@@ -875,7 +891,7 @@
     'PMP correcto hoy': r.cost && r.cost.corr ? Math.round(r.cost.corr.pmp * 100) / 100 : '',
     'Ajuste de valor': r.cost && r.cost.corr ? Math.round(r.cost.corr.ajuste) : '',
     'Cantidad a ajustar': r.diff != null && Math.abs(r.diff) > EPS ? Math.abs(r.diff) : '',
-    'Contado': r.s ? r.s.stock : '', 'Fecha conteo': r.counted ? fmtDate(r.s.fecha, true) : '',
+    'Contado': r.s ? r.s.stock : '', 'Fecha conteo': r.counted ? fmtDate(r.s.fecha, true) : '', 'Recuento': r.s && r.s.recontado ? 'Sí' : '',
     'Movimientos desde el conteo': r.counted ? r.ins - r.outs : '', 'Debería tener Defontana hoy': r.realNow ?? '', 'Tiene Defontana hoy': hoyDe(r) ?? '',
     'Ajuste a hacer hoy': ajusteHoy(r) ?? '', 'Defontana al conteo': r.sysAtCount ?? '', 'Diferencia al conteo': r.diff ?? '',
     'PMP': r.pmp != null ? Math.round(r.pmp * 100) / 100 : '', 'Origen PMP': r.pmpSrc,
@@ -987,6 +1003,12 @@
   $('tbody').addEventListener('click', e => { if (e.target.closest('input')) return; const tr = e.target.closest('tr.rx-row'); if (tr) toggle(tr); });
   $('tbody').addEventListener('keydown', e => { if (e.target.closest('input')) return; const tr = e.target.closest('tr.rx-row'); if (tr && (e.key === 'Enter' || e.key === ' ')){ e.preventDefault(); toggle(tr); } });
   $('tbody').addEventListener('change', e => {
+    const rc = e.target.closest('input.recount');
+    if (rc){
+      const v = num(rc.value);
+      if (v == null) state.recount.delete(rc.dataset.key); else state.recount.set(rc.dataset.key, {qty: v, fecha: new Date()});
+      guardarRecuentos(); render(); return;
+    }
     const inp = e.target.closest('input.pmp'); if (!inp) return;
     const v = num(inp.value);
     if (v == null) state.pmpEdit.delete(inp.dataset.key); else state.pmpEdit.set(inp.dataset.key, v);
