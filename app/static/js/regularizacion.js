@@ -284,8 +284,9 @@
       const umDef = docs.length ? umGrupo(docs[docs.length - 1].um) : '';
       if (s && s.stock != null && s.um && umDef && umGrupo(s.um) !== umDef){
         const f = umFactor(umGrupo(s.um), umDef);
+        // Lo contado (y su unidad) es la referencia: no se convierte. Se guarda la equivalencia
+        // solo para mostrar cuánto sería el ajuste si Defontana de verdad lleva su unidad.
         umInfo = {de: s.um, a: docs[docs.length - 1].um, f, original: s.stock};
-        if (f) s = {...s, stock: Math.round(s.stock * f * 1000) / 1000};
       }
       const counted = !!s && s.stock != null && s.fecha != null;
       const ck = counted ? dayKey(s.fecha) : null;
@@ -336,17 +337,17 @@
       const zeros = docs.filter(m => m.valor != null && Math.abs(m.valor) < EPS && m.qty > EPS).length;
       const cost = costReview(docs, sysCalc);
       const dx = counted ? diagnose(s, docs.filter(m => !m._aj), after, diff, sysAtCount, sameNet, zeros) : {cause:null, obs:[]};
-      if (counted && umInfo){
-        if (umInfo.f && diff != null && Math.abs(diff) > EPS && Math.abs(diff) < umInfo.f){
-          // menos de una unidad de conteo: es el redondeo del conteo (ej. 38 MT contados = 124,7 FT)
-          dx.cause = 'um'; dx.umRound = true;
-          dx.obs.length = 0;
-          dx.obs.push(`El conteo está en ${esc(umInfo.de)} y Defontana en ${esc(umInfo.a)}: ${fmt(umInfo.original)} ${esc(umInfo.de)} = ${fmt(s.stock)} ${esc(umInfo.a)}. La diferencia (${fmt(Math.abs(diff))} ${esc(umInfo.a)}) es menor que 1 ${esc(umInfo.de)}: es redondeo del conteo, no hace falta ajustar.`);
-        } else if (umInfo.f) dx.obs.push(`El conteo está en ${esc(umInfo.de)} y Defontana en ${esc(umInfo.a)}: se convirtió ${fmt(umInfo.original)} ${esc(umInfo.de)} = ${fmt(s.stock)} ${esc(umInfo.a)}.`);
-        else if (Math.abs(diff || 0) > EPS){ dx.cause = 'um'; dx.obs.unshift(`El conteo está en ${esc(umInfo.de)} y Defontana en ${esc(umInfo.a)}, y no hay una conversión conocida entre esas unidades. Convierte lo contado a ${esc(umInfo.a)} antes de ajustar.`); }
+      if (counted && umInfo && sysAtCount != null){
+        const de = esc(umInfo.de), a = esc(umInfo.a);
+        const alt = umInfo.f ? Math.round((s.stock * umInfo.f - sysAtCount) * 1000) / 1000 : null;
+        umInfo.alt = alt;
+        dx.cause = 'um'; dx.umMaster = true;
+        dx.obs.unshift(`Se contó en ${de}, pero en Defontana el producto está en ${a}: corregir la unidad en el maestro de Defontana. `
+          + (Math.abs(diff) > EPS ? `Si las cantidades de Defontana están en ${de} (solo la unidad está mal): ajuste de ${sgn(diff)} ${de}.` : `Si las cantidades de Defontana están en ${de} (solo la unidad está mal), está cuadrado.`)
+          + (alt != null ? ` Si Defontana de verdad lleva ${a}: ${fmt(s.stock)} ${de} = ${fmt(Math.round(s.stock * umInfo.f * 1000) / 1000)} ${a}, ajuste de ${Math.abs(alt) < umInfo.f ? '0 (la diferencia es redondeo)' : sgn(alt) + ' ' + a}.` : ` No hay una conversión conocida entre ${de} y ${a}.`));
       }
       if (dx.cause === 'late' || dx.cause === 'sameday' || dx.cause === 'um') st = 'check';
-      return {cause:dx.cause, obs:dx.obs, umRound: !!dx.umRound, linea: s ? s.linea || '' : '', alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, umInfo, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs, sysCalc, toOther,
+      return {cause:dx.cause, obs:dx.obs, umRound: !!dx.umRound, umMaster: !!dx.umMaster, linea: s ? s.linea || '' : '', alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, umInfo, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs, sysCalc, toOther,
         sysAtCount, sysNow, realNow, diff, st, pmp, edited, pmpSrc: edited ? 'Ingresado a mano' : pm ? pm.src : 'Sin costo en Defontana',
         valor: diff != null && Math.abs(diff) > EPS && pmp != null ? diff * pmp : (st === 'ok' ? 0 : null), zeros, cost};
     };
@@ -470,7 +471,8 @@
     if (r._steps) return r._steps;
     const d = r.diff, q = d != null ? fmt(Math.abs(d)) : '', steps = [];
     const add = (k, txt) => steps.push({k, txt});
-    if (r.umRound) add('none', 'Nada: la diferencia es solo el redondeo al convertir la unidad del conteo');
+    if (r.umMaster) add('verify', `Corregir la unidad en el maestro de Defontana (${r.umInfo.a} → ${r.umInfo.de}) y confirmar en qué unidad están sus cantidades antes de ajustar`);
+    else if (r.umRound) add('none', 'Nada: la diferencia es solo el redondeo al convertir la unidad del conteo');
     else if (r.cause === 'um') add('verify', 'Revisar la unidad de medida: el conteo parece estar en otra unidad. Convertir y recién después ajustar');
     else if (r.st === 'check') add('verify', 'Volver a contar: la diferencia puede deberse a un documento registrado después del conteo. Si se confirma, no ajustar');
     if (r.st === 'nodata') add('verify', 'Ver el saldo del producto en Defontana (no hay documentos en el informe)');
@@ -706,7 +708,7 @@
     return `<tr class="rx-row s-${r.st}${state.open.has(r.key) ? ' open' : ''}" data-key="${esc(r.key)}" tabindex="0">
       <td><div class="code">${esc(r.code)}</div><div class="pname">${esc(r.name)}</div>${aliasNote(r)}</td>
       ${lineaCell(r.linea)}
-      <td class="num">${r.counted ? fmt(r.s.stock) + '<div class="small">' + fmtDate(r.s.fecha) + (r.s.recontado ? ' · recuento' : '') + '</div>' + (r.umInfo && r.umInfo.f ? '<div class="small">' + fmt(r.umInfo.original) + ' ' + esc(r.umInfo.de) + ' → ' + esc(r.umInfo.a) + '</div>' : '') : '<span class="mut">—</span>'}${r.s && r.s.recontado && r.s.original && r.s.original.stock != null ? '<div class="small">antes: ' + fmt(r.s.original.stock) + ' el ' + fmtDate(r.s.original.fecha) + '</div>' : ''}${r.s ? `<input class="recount" type="number" step="any" min="0" inputmode="decimal" data-key="${esc(r.key)}" value="${r.s.recontado ? r.s.stock : ''}" placeholder="Recuento hoy" aria-label="Recuento de hoy de ${esc(r.code)}">` : ''}</td>
+      <td class="num">${r.counted ? fmt(r.s.stock) + '<div class="small">' + fmtDate(r.s.fecha) + (r.s.recontado ? ' · recuento' : '') + '</div>' + (r.umInfo ? '<div class="small alias">en ' + esc(r.umInfo.de) + ' · Defontana: ' + esc(r.umInfo.a) + '</div>' : '') : '<span class="mut">—</span>'}${r.s && r.s.recontado && r.s.original && r.s.original.stock != null ? '<div class="small">antes: ' + fmt(r.s.original.stock) + ' el ' + fmtDate(r.s.original.fecha) + '</div>' : ''}${r.s ? `<input class="recount" type="number" step="any" min="0" inputmode="decimal" data-key="${esc(r.key)}" value="${r.s.recontado ? r.s.stock : ''}" placeholder="Recuento hoy" aria-label="Recuento de hoy de ${esc(r.code)}">` : ''}</td>
       <td class="num">${r.counted ? (r.ins || r.outs ? (r.ins ? '<span class="plus">+' + fmt(r.ins) + '</span> ' : '') + (r.outs ? '<span class="minus">−' + fmt(r.outs) + '</span>' : '') : '<span class="mut">sin movimientos</span>') : '<span class="mut">—</span>'}</td>
       <td class="num"><b>${fmt(r.realNow)}</b></td>
       <td class="num">${fmt(hoyDe(r))}${r.sysAtCount != null && r.counted ? '<div class="small">al conteo: ' + fmt(r.sysAtCount) + '</div>' : ''}${r.sysCalc != null && r.sysNow != null && Math.abs(r.sysCalc - r.sysNow) > EPS ? '<div class="small">última fila del informe: ' + fmt(r.sysNow) + '</div>' : ''}</td>
@@ -798,6 +800,7 @@
       if (r.st === 'up') plan.in.push({r, qty:r.diff, v:r.pmp > 0 ? r.pmp : null, src:r.pmpSrc, motivo:r.cause ? CAUSES[r.cause] : 'Sobra en bodega'});
       if (r.st === 'down') plan.out.push({r, qty:-r.diff, v:r.pmp > 0 ? r.pmp : null, src:r.pmpSrc, motivo:r.cause ? CAUSES[r.cause] : 'Falta en bodega'});
     }
+    plan.um = R.filter(r => r.umInfo && (!lin || (r.linea || '') === lin)).map(r => ({r}));
     const byCode = (a, b) => String(a.r.code).localeCompare(String(b.r.code), 'es', {numeric:true});
     Object.values(plan).forEach(L => L.sort(byCode));
     return plan;
@@ -820,6 +823,9 @@
       ${sec(1, 'Confirmar antes de ajustar', 'Recontar o revisar. No hagas ajustes de estos productos hasta confirmarlos.', P.verify,
         '<th>Producto</th><th>Línea</th><th class="num">Diferencia</th><th>Motivo</th><th>Qué revisar</th>',
         x => `${prod(x)}<td class="num diff ${x.qty > 0 ? 'plus' : 'minus'}">${sgn(x.qty)}</td><td>${esc(x.motivo)}</td><td class="wide">${esc(x.txt)}</td>`)}
+      ${P.um.length ? `<section class="plansec"><div class="planhead"><span class="pnum">1b</span><div><h3>Unidades a corregir en Defontana <span class="pcount">${fmt(P.um.length)} productos</span></h3><p class="pwhy">Se contaron en otra unidad que la del maestro de Defontana. Lo contado es la referencia: corrige la unidad en el maestro y confirma en qué unidad se registraron sus movimientos antes de ajustar.</p></div></div>
+        <div class="tablebox"><table class="plantable"><thead><tr><th class="n">#</th><th>Producto</th><th>Línea</th><th>Unidad del conteo</th><th>Unidad en Defontana</th><th class="num">Contado</th><th class="num">Tiene Defontana hoy</th><th class="num">Ajuste si solo está mal la unidad</th><th class="num">Ajuste si Defontana lleva su unidad</th></tr></thead>
+        <tbody>${P.um.map((x, i) => `<tr><td class="n">${i + 1}</td>${prod(x)}<td>${esc(x.r.umInfo.de)}</td><td>${esc(x.r.umInfo.a)}</td><td class="num">${fmt(x.r.s.stock)}</td><td class="num">${fmt(hoyDe(x.r))}</td><td class="num">${x.r.diff == null ? '—' : sgn(x.r.diff)}</td><td class="num">${x.r.umInfo.alt == null ? 'sin conversión' : sgn(x.r.umInfo.alt)}</td></tr>`).join('')}</tbody></table></div></section>` : ''}
       ${sec(2, 'Corregir costos', 'Corrige el costo del documento indicado. Si Defontana no deja modificarlo, haz el ajuste de valor.', P.cost,
         '<th>Producto</th><th>Línea</th><th>Qué corregir</th><th class="num">Cantidad</th><th class="num">Costo a usar c/u</th><th class="num">Total</th><th class="num">Si no se puede: ajuste de valor</th>',
         x => `${prod(x)}<td>${esc(x.doc)}</td><td class="num">${fmt(x.qty)}</td><td class="num">${costo(x)}</td><td class="num">${x.v != null ? money(x.v * x.qty) : '—'}</td><td class="num">${x.corr && Math.abs(x.corr.ajuste) > 0.5 ? money(x.corr.ajuste) + '<div class="small">PMP queda en ' + money(x.corr.pmp) + '</div>' : '—'}</td>`,
@@ -839,6 +845,7 @@
     const r2 = v => v != null ? Math.round(v * 100) / 100 : '';
     const hoja = (nombre, filas) => XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filas.length ? filas : [{'': 'Nada en este paso'}]), nombre);
     hoja('1 Confirmar', P.verify.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Diferencia': x.qty, 'Motivo': x.motivo, 'Qué revisar': x.txt})));
+    if (P.um.length) hoja('1b Unidades', P.um.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Unidad del conteo': x.r.umInfo.de, 'Unidad en Defontana': x.r.umInfo.a, 'Contado': x.r.s.stock, 'Tiene Defontana hoy': hoyDe(x.r) ?? '', 'Ajuste si solo está mal la unidad': x.r.diff ?? '', 'Ajuste si Defontana lleva su unidad': x.r.umInfo.alt ?? 'sin conversión'})));
     hoja('2 Costos', P.cost.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Qué corregir': x.doc, 'Cantidad': x.qty, 'Costo a usar c/u': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Origen del costo': x.src, 'Ajuste de valor (si no se puede corregir)': x.corr ? Math.round(x.corr.ajuste) : '', 'PMP correcto hoy': x.corr ? r2(x.corr.pmp) : ''})));
     hoja('3 Entradas', P.in.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Debería tener hoy': x.r.realNow ?? '', 'Tiene Defontana hoy': hoyDe(x.r) ?? '', 'Cantidad': x.qty, 'Costo c/u': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Origen del costo': x.src, 'Motivo': x.motivo})));
     hoja('4 Salidas', P.out.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Debería tener hoy': x.r.realNow ?? '', 'Tiene Defontana hoy': hoyDe(x.r) ?? '', 'Cantidad': x.qty, 'PMP c/u (referencial)': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Motivo': x.motivo})));
