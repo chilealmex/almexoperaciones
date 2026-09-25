@@ -20,7 +20,7 @@ def _items(db, empresa, usuario):
             empresa_id=empresa.id, codigo="COD-001", nombre="PRODUCTO UNO",
             cantidad_fisica=12.5, contado_por_id=usuario.id,
             contado_en=datetime(2026, 8, 19, 21, 33),  # UTC → 17:33 en Chile
-            unidad_qms="M", unidad_defontana="FT",
+            unidad_qms="M", unidad_defontana="FT", linea_negocio="PRENSAS",
         ),
         ItemConteoInventario(empresa_id=empresa.id, codigo="COD-002", nombre="PRODUCTO DOS"),
     ])
@@ -36,8 +36,8 @@ def test_la_pagina_trae_el_conteo_con_fecha_y_hora_local(client, db, empresa, us
     cuerpo = respuesta.get_data(as_text=True)
 
     conteo = {fila[0]: fila for fila in _conteo_de_la_pagina(cuerpo)}
-    assert conteo["COD-001"] == ["COD-001", "PRODUCTO UNO", 12.5, "Contado", "Bodega de Prueba", "19-08-2026 17:33", "M"]
-    assert conteo["COD-002"] == ["COD-002", "PRODUCTO DOS", None, "Pendiente", "", "", ""]
+    assert conteo["COD-001"] == ["COD-001", "PRODUCTO UNO", 12.5, "Contado", "Bodega de Prueba", "19-08-2026 17:33", "M", "PRENSAS"]
+    assert conteo["COD-002"] == ["COD-002", "PRODUCTO DOS", None, "Pendiente", "", "", "", ""]
     assert "2 códigos · 1 contados" in cuerpo
 
 

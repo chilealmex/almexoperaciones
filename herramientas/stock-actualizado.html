@@ -51,6 +51,8 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
    Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
 /* Regularización de inventario (Inventario → Regularización).
    Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
+/* Regularización de inventario (Inventario → Regularización).
+   Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
 .regx{--bg:#F2F4F3; --surface:#FFFFFF; --surface2:#EDF1EF; --ink:#16201D; --muted:#5E6B66; --line:#DCE3E0;
   --accent:#245E8F; --accent-ink:#FFFFFF; --accent-soft:#E1EBF4;
   --in:#1B7446; --in-soft:#E0F2E7; --out:#B0362A; --out-soft:#FAE3E0; --warn:#8A5A00; --warn-soft:#FBEDCF; --gray-soft:#ECEFEE;
@@ -216,6 +218,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
 .regx .plansec .tablebox{max-height:none}
 .regx .recount{width:96px;margin-top:4px;text-align:right;font:inherit;font-size:12px;padding:3px 6px;border:1px dashed var(--line);border-radius:6px;background:var(--surface);color:var(--ink)}
 .regx .recount:not(:placeholder-shown){border-style:solid;border-color:var(--accent);background:var(--accent-soft)}
+.regx .linea{font-size:12px;white-space:nowrap}
 </style>
 <div class="suelta">
 <h1>Regularización de inventario</h1>
@@ -262,6 +265,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
   <section class="filters" id="filtersBar">
     <div class="chips" id="chips" role="group" aria-label="Filtro"></div>
     <div class="right">
+      <select id="optLinea" aria-label="Línea de negocio" hidden></select>
       <select id="optCause" aria-label="Causa probable"></select>
       <input type="search" id="optSearch" placeholder="Buscar código o nombre" aria-label="Buscar">
       <button class="rx-btn ghost" id="btnCopy" type="button">Copiar</button>
@@ -355,12 +359,13 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     if (!t) throw new Error('No encontré las columnas “Código” y “Stock físico”. ¿Es el archivo de Stock y conteo?');
     const c = {code:t.col('Código'), name:t.col('Nombre'), stock:t.col('Stock físico'), estado:t.col('Estado del conteo'),
       por:t.col('Contado por'), fecha:t.col('Fecha y hora del conteo','Fecha del conteo','Fecha'),
-      um:t.col('Unidad', 'Unidad QMS', 'Unidad de medida', 'U. Medida', 'UM', 'Unidad Defontana')};
+      um:t.col('Unidad', 'Unidad Medida', 'Unidad de medida', 'Unidad QMS', 'U. Medida', 'UM', 'Unidad Defontana'),
+      linea:t.col('Línea de negocio', 'Linea de negocio', 'Linea Negocio', 'Línea', 'Linea')};
     const out = [];
     for (const r of t.rows){
       const code = String(r[c.code] ?? '').trim(); if (!code) continue;
       out.push({code, key:keyOf(code), name:r[c.name] ?? '', stock:num(r[c.stock]), estado:c.estado >= 0 ? r[c.estado] ?? '' : '',
-        por:c.por >= 0 ? r[c.por] ?? '' : '', fecha:c.fecha >= 0 ? parseDate(r[c.fecha]) : null, um:c.um >= 0 ? String(r[c.um] ?? '').trim() : ''});
+        por:c.por >= 0 ? r[c.por] ?? '' : '', fecha:c.fecha >= 0 ? parseDate(r[c.fecha]) : null, um:c.um >= 0 ? String(r[c.um] ?? '').trim() : '', linea:c.linea >= 0 ? String(r[c.linea] ?? '').trim() : ''});
     }
     return out;
   }
@@ -427,7 +432,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     const el = document.getElementById('regx-conteo');
     let data = [];
     try { data = JSON.parse(el ? el.textContent : '[]'); } catch(_){ data = []; }
-    return data.map(([code, name, stock, estado, por, fecha, um]) => ({code, key:keyOf(code), name, stock, estado, por, fecha:parseDate(fecha), um: um || ''}));
+    return data.map(([code, name, stock, estado, por, fecha, um, linea]) => ({code, key:keyOf(code), name, stock, estado, por, fecha:parseDate(fecha), um: um || '', linea: linea || ''}));
   }
 
   // ---------- Estado ----------
@@ -569,7 +574,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     const mergeGroup = list => {
       const done = list.filter(x => x.stock != null && x.fecha != null);
       const main = done[0] || list[0];
-      const g = {code:main.code, key:main.key, name:main.name, por:main.por, estado:main.estado, um:main.um || '',
+      const g = {code:main.code, key:main.key, name:main.name, por:main.por, estado:main.estado, um:main.um || '', linea:(list.find(x => x.linea) || main).linea || '',
         stock: done.length ? done.reduce((a, x) => a + x.stock, 0) : null,
         fecha: done.length ? new Date(Math.max(...done.map(x => +x.fecha))) : null,
         variants: list.map(x => x.code), nCounted: done.length};
@@ -647,7 +652,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
         else if (Math.abs(diff || 0) > EPS){ dx.cause = 'um'; dx.obs.unshift(`El conteo está en ${esc(umInfo.de)} y Defontana en ${esc(umInfo.a)}, y no hay una conversión conocida entre esas unidades. Convierte lo contado a ${esc(umInfo.a)} antes de ajustar.`); }
       }
       if (dx.cause === 'late' || dx.cause === 'sameday' || dx.cause === 'um') st = 'check';
-      return {cause:dx.cause, obs:dx.obs, umRound: !!dx.umRound, alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, umInfo, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs, sysCalc, toOther,
+      return {cause:dx.cause, obs:dx.obs, umRound: !!dx.umRound, linea: s ? s.linea || '' : '', alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, umInfo, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs, sysCalc, toOther,
         sysAtCount, sysNow, realNow, diff, st, pmp, edited, pmpSrc: edited ? 'Ingresado a mano' : pm ? pm.src : 'Sin costo en Defontana',
         valor: diff != null && Math.abs(diff) > EPS && pmp != null ? diff * pmp : (st === 'ok' ? 0 : null), zeros, cost};
     };
@@ -655,14 +660,14 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     const rows = [...groups.values()].map(list => { const s = mergeGroup(list); seen.add(s.key); return build(s, byKey.get(s.key) || []); });
     for (const [k, docs] of byKey) if (!seen.has(k) && docs.some(inBod)) rows.push(build(null, docs));
 
-    const names = new Map(rows.map(r => [r.key, r.name]));
+    const names = new Map(rows.map(r => [r.key, r.name])), lineas = new Map(rows.map(r => [r.key, r.linea]));
     const zero = [];
     for (const [k, docs] of byKey) docs.forEach((m, j) => {
       if (!inBod(m) || m.valor == null || Math.abs(m.valor) > EPS || m.qty <= EPS) return;
       const pm = pmpOf(docs, j - 1 >= 0 ? j - 1 : null);
       const edited = state.pmpEdit.has(k);
       const pmp = edited ? state.pmpEdit.get(k) : pm ? pm.v : null;
-      zero.push({key:k, m, code:m.art, name:m.desc || names.get(k) || '', pmp, edited,
+      zero.push({key:k, m, code:m.art, name:m.desc || names.get(k) || '', linea: lineas.get(k) || '', pmp, edited,
         pmpSrc: edited ? 'Ingresado a mano' : pm ? pm.src : 'Sin costo en Defontana', valor: pmp != null ? pmp * m.qty : null,
         rev: zeroReview(m, docs, j, pmp)});
     });
@@ -923,6 +928,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
   ];
   const CHECK_COLS = [
     ['code', 'Producto', '', r => r.code],
+    ['linea', 'Línea', '', r => r.linea || null],
     ['contado', 'Contado', 'num', r => r.s ? r.s.stock : null],
     ['need', 'Había que ajustar', 'num', r => r.diff],
     ['aj', 'Se ajustó', 'num', r => r.aj],
@@ -937,6 +943,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     const [cls, label, stripe] = CHECK[r.ck];
     return `<tr class="rx-row s-${stripe}${state.open.has(r.key) ? ' open' : ''}" data-key="${esc(r.key)}" tabindex="0">
       <td><div class="code">${esc(r.code)}</div><div class="pname">${esc(r.name)}</div>${aliasNote(r)}</td>
+      ${lineaCell(r.linea)}
       <td class="num">${r.counted ? fmt(r.s.stock) + '<div class="small">' + fmtDate(r.s.fecha) + '</div>' : '—'}</td>
       <td class="num diff ${r.diff > EPS ? 'plus' : r.diff < -EPS ? 'minus' : 'mut'}">${r.diff == null ? '—' : sgn(r.diff)}</td>
       <td class="num diff ${r.aj > EPS ? 'plus' : r.aj < -EPS ? 'minus' : 'mut'}">${Math.abs(r.aj) > EPS ? sgn(r.aj) + '<div class="small">' + money(r.ajVal) + '</div>' : '—'}</td>
@@ -948,8 +955,10 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
       <td class="num diff ${r.gap == null || Math.abs(r.gap) <= EPS ? 'mut' : 'minus'}">${r.gap == null ? '—' : Math.abs(r.gap) <= EPS ? '0' : sgn(r.gap)}</td></tr>`;
   }
 
+  const lineaCell = l => `<td class="linea">${l ? esc(l) : '<span class="mut">—</span>'}</td>`;
   const REG_COLS = [
     ['code', 'Producto', '', r => r.code],
+    ['linea', 'Línea', '', r => r.linea || null],
     ['contado', 'Contado', 'num', r => r.s ? r.s.stock : null],
     ['movs', 'Movimientos desde el conteo', 'num', r => r.counted ? r.ins - r.outs : null],
     ['real', 'Debería tener Defontana hoy', 'num', r => r.realNow],
@@ -966,6 +975,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     ['fecha', 'Fecha', '', z => z.m.fecha],
     ['doc', 'Documento', '', z => z.m.tipo],
     ['code', 'Producto', '', z => z.code],
+    ['linea', 'Línea', '', z => z.linea || null],
     ['kind', 'Tipo', '', z => z.m.kind],
     ['qty', 'Cantidad', 'num', z => z.m.qty],
     ['pmp', 'PMP', 'num', z => z.pmp],
@@ -1001,6 +1011,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     };
     return `<tr class="rx-row s-${r.st}${state.open.has(r.key) ? ' open' : ''}" data-key="${esc(r.key)}" tabindex="0">
       <td><div class="code">${esc(r.code)}</div><div class="pname">${esc(r.name)}</div>${aliasNote(r)}</td>
+      ${lineaCell(r.linea)}
       <td class="num">${r.counted ? fmt(r.s.stock) + '<div class="small">' + fmtDate(r.s.fecha) + (r.s.recontado ? ' · recuento' : '') + '</div>' + (r.umInfo && r.umInfo.f ? '<div class="small">' + fmt(r.umInfo.original) + ' ' + esc(r.umInfo.de) + ' → ' + esc(r.umInfo.a) + '</div>' : '') : '<span class="mut">—</span>'}${r.s && r.s.recontado && r.s.original && r.s.original.stock != null ? '<div class="small">antes: ' + fmt(r.s.original.stock) + ' el ' + fmtDate(r.s.original.fecha) + '</div>' : ''}${r.s ? `<input class="recount" type="number" step="any" min="0" inputmode="decimal" data-key="${esc(r.key)}" value="${r.s.recontado ? r.s.stock : ''}" placeholder="Recuento hoy" aria-label="Recuento de hoy de ${esc(r.code)}">` : ''}</td>
       <td class="num">${r.counted ? (r.ins || r.outs ? (r.ins ? '<span class="plus">+' + fmt(r.ins) + '</span> ' : '') + (r.outs ? '<span class="minus">−' + fmt(r.outs) + '</span>' : '') : '<span class="mut">sin movimientos</span>') : '<span class="mut">—</span>'}</td>
       <td class="num"><b>${fmt(r.realNow)}</b></td>
@@ -1018,6 +1029,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
       <td class="num" style="text-align:left">${fmtDate(z.m.fecha)}</td>
       <td>${esc(z.m.tipo)}<div class="small">Folio ${esc(z.m.folio)}${z.m.ref ? ' · ' + esc(z.m.ref) : ''}</div></td>
       <td><div class="code">${esc(z.code)}</div><div class="pname">${esc(z.name)}</div></td>
+      ${lineaCell(z.linea)}
       <td><span class="pill ${z.m.kind === 'in' ? 'a-up' : 'a-down'}">${z.m.kind === 'in' ? 'Ingreso' : 'Egreso'}</span></td>
       <td class="num">${fmt(z.m.qty)} <span class="small">${esc(z.m.um)}</span></td>
       <td class="num">${pmpInput(z.key, z.pmp, z.edited, z.code)}<div class="small">${esc(z.pmpSrc)}</div></td>
@@ -1079,7 +1091,9 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
   function buildPlan(){
     const R = state.rows, plan = {verify:[], cost:[], in:[], out:[]};
     const dudoso = r => !r.umRound && (r.st === 'check' || (r.cause === 'um' && (r.st === 'up' || r.st === 'down')));
+    const lin = $('optLinea').value;
     for (const r of R){
+      if (lin && (r.linea || '') !== lin) continue;
       if (dudoso(r)){ plan.verify.push({r, qty:r.diff, txt: (r.obs[0] || docSteps(r).find(x => x.k === 'verify').txt).replace(/<[^>]+>/g, ''), motivo: r.cause ? CAUSES[r.cause] : ''}); continue; }
       if (r.cost && r.cost.need){
         for (const c of r.cost.costos){
@@ -1098,7 +1112,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     const box = $('planBox');
     if (!state.mov.length){ box.innerHTML = '<p class="empty">Sube el Informe de Documentos de Defontana (archivo 2) para armar el plan.</p>'; return; }
     const P = state.plan = buildPlan();
-    const prod = x => `<td><div class="code">${esc(x.r.code)}</div><div class="pname">${esc(x.r.name)}</div></td>`;
+    const prod = x => `<td><div class="code">${esc(x.r.code)}</div><div class="pname">${esc(x.r.name)}</div></td>${lineaCell(x.r.linea)}`;
     const tot = L => L.reduce((a, x) => a + (x.v != null ? x.v * x.qty : 0), 0);
     const sec = (num, titulo, porque, L, head, row, foot) => `<section class="plansec">
       <div class="planhead"><span class="pnum">${num}</span><div><h3>${titulo} <span class="pcount">${fmt(L.length)} ${L.length === 1 ? 'línea' : 'líneas'}</span></h3><p class="pwhy">${porque}</p></div></div>
@@ -1110,30 +1124,30 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
       <div class="planintro"><b>Hazlo en este orden.</b> Defontana valoriza cada entrada y salida al PMP del momento: si se corrige el costo después, las salidas ya quedaron mal valorizadas. Las entradas van antes que las salidas para que el saldo nunca quede negativo.
       <button type="button" class="rx-btn" id="btnPlanXlsx">Descargar plan en Excel</button></div>
       ${sec(1, 'Confirmar antes de ajustar', 'Recontar o revisar. No hagas ajustes de estos productos hasta confirmarlos.', P.verify,
-        '<th>Producto</th><th class="num">Diferencia</th><th>Motivo</th><th>Qué revisar</th>',
+        '<th>Producto</th><th>Línea</th><th class="num">Diferencia</th><th>Motivo</th><th>Qué revisar</th>',
         x => `${prod(x)}<td class="num diff ${x.qty > 0 ? 'plus' : 'minus'}">${sgn(x.qty)}</td><td>${esc(x.motivo)}</td><td class="wide">${esc(x.txt)}</td>`)}
       ${sec(2, 'Corregir costos', 'Corrige el costo del documento indicado. Si Defontana no deja modificarlo, haz el ajuste de valor.', P.cost,
-        '<th>Producto</th><th>Qué corregir</th><th class="num">Cantidad</th><th class="num">Costo a usar c/u</th><th class="num">Total</th><th class="num">Si no se puede: ajuste de valor</th>',
+        '<th>Producto</th><th>Línea</th><th>Qué corregir</th><th class="num">Cantidad</th><th class="num">Costo a usar c/u</th><th class="num">Total</th><th class="num">Si no se puede: ajuste de valor</th>',
         x => `${prod(x)}<td>${esc(x.doc)}</td><td class="num">${fmt(x.qty)}</td><td class="num">${costo(x)}</td><td class="num">${x.v != null ? money(x.v * x.qty) : '—'}</td><td class="num">${x.corr && Math.abs(x.corr.ajuste) > 0.5 ? money(x.corr.ajuste) + '<div class="small">PMP queda en ' + money(x.corr.pmp) + '</div>' : '—'}</td>`,
-        `<td></td><td colspan="5"><b>Total</b></td><td class="num"><b>${money(tot(P.cost))}</b></td><td></td>`)}
+        `<td></td><td colspan="6"><b>Total</b></td><td class="num"><b>${money(tot(P.cost))}</b></td><td></td>`)}
       ${sec(3, 'Entradas (Parte de Entrada)', 'Una Parte de Entrada por ajuste de inventario con estas líneas.', P.in,
-        '<th>Producto</th><th class="num">Debería tener hoy</th><th class="num">Tiene Defontana hoy</th><th class="num">Cantidad</th><th class="num">Costo c/u</th><th class="num">Total</th><th>Motivo</th>',
+        '<th>Producto</th><th>Línea</th><th class="num">Debería tener hoy</th><th class="num">Tiene Defontana hoy</th><th class="num">Cantidad</th><th class="num">Costo c/u</th><th class="num">Total</th><th>Motivo</th>',
         x => `${prod(x)}${hoyCells(x)}<td class="num diff plus">${fmt(x.qty)}</td><td class="num">${costo(x)}</td><td class="num">${x.v != null ? money(x.v * x.qty) : '—'}</td><td>${esc(x.motivo)}</td>`,
-        `<td></td><td colspan="5"><b>Total</b></td><td class="num"><b>${money(tot(P.in))}</b></td><td></td>`)}
+        `<td></td><td colspan="6"><b>Total</b></td><td class="num"><b>${money(tot(P.in))}</b></td><td></td>`)}
       ${sec(4, 'Salidas (Parte de Salida)', 'Una Parte de Salida por ajuste de inventario / merma con estas líneas. Defontana pondrá el PMP del día; el valor es referencial.', P.out,
-        '<th>Producto</th><th class="num">Debería tener hoy</th><th class="num">Tiene Defontana hoy</th><th class="num">Cantidad</th><th class="num">PMP c/u</th><th class="num">Total</th><th>Motivo</th>',
+        '<th>Producto</th><th>Línea</th><th class="num">Debería tener hoy</th><th class="num">Tiene Defontana hoy</th><th class="num">Cantidad</th><th class="num">PMP c/u</th><th class="num">Total</th><th>Motivo</th>',
         x => `${prod(x)}${hoyCells(x)}<td class="num diff minus">${fmt(x.qty)}</td><td class="num">${costo(x)}</td><td class="num">${x.v != null ? money(x.v * x.qty) : '—'}</td><td>${esc(x.motivo)}</td>`,
-        `<td></td><td colspan="5"><b>Total</b></td><td class="num"><b>${money(tot(P.out))}</b></td><td></td>`)}
+        `<td></td><td colspan="6"><b>Total</b></td><td class="num"><b>${money(tot(P.out))}</b></td><td></td>`)}
       <section class="plansec"><div class="planhead"><span class="pnum">5</span><div><h3>Verificar</h3><p class="pwhy">Cuando termines, descarga de nuevo el Informe de Documentos de Defontana y revísalo en la vista “Verificar ajustes”.</p></div></div></section>`;
   }
   function planExcel(){
     const P = state.plan || buildPlan(), wb = XLSX.utils.book_new();
     const r2 = v => v != null ? Math.round(v * 100) / 100 : '';
     const hoja = (nombre, filas) => XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filas.length ? filas : [{'': 'Nada en este paso'}]), nombre);
-    hoja('1 Confirmar', P.verify.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Diferencia': x.qty, 'Motivo': x.motivo, 'Qué revisar': x.txt})));
-    hoja('2 Costos', P.cost.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Qué corregir': x.doc, 'Cantidad': x.qty, 'Costo a usar c/u': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Origen del costo': x.src, 'Ajuste de valor (si no se puede corregir)': x.corr ? Math.round(x.corr.ajuste) : '', 'PMP correcto hoy': x.corr ? r2(x.corr.pmp) : ''})));
-    hoja('3 Entradas', P.in.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Debería tener hoy': x.r.realNow ?? '', 'Tiene Defontana hoy': hoyDe(x.r) ?? '', 'Cantidad': x.qty, 'Costo c/u': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Origen del costo': x.src, 'Motivo': x.motivo})));
-    hoja('4 Salidas', P.out.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Debería tener hoy': x.r.realNow ?? '', 'Tiene Defontana hoy': hoyDe(x.r) ?? '', 'Cantidad': x.qty, 'PMP c/u (referencial)': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Motivo': x.motivo})));
+    hoja('1 Confirmar', P.verify.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Diferencia': x.qty, 'Motivo': x.motivo, 'Qué revisar': x.txt})));
+    hoja('2 Costos', P.cost.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Qué corregir': x.doc, 'Cantidad': x.qty, 'Costo a usar c/u': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Origen del costo': x.src, 'Ajuste de valor (si no se puede corregir)': x.corr ? Math.round(x.corr.ajuste) : '', 'PMP correcto hoy': x.corr ? r2(x.corr.pmp) : ''})));
+    hoja('3 Entradas', P.in.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Debería tener hoy': x.r.realNow ?? '', 'Tiene Defontana hoy': hoyDe(x.r) ?? '', 'Cantidad': x.qty, 'Costo c/u': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Origen del costo': x.src, 'Motivo': x.motivo})));
+    hoja('4 Salidas', P.out.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Debería tener hoy': x.r.realNow ?? '', 'Tiene Defontana hoy': hoyDe(x.r) ?? '', 'Cantidad': x.qty, 'PMP c/u (referencial)': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Motivo': x.motivo})));
     XLSX.writeFile(wb, 'plan-de-ajustes-' + fmtDate(new Date()) + '.xlsx');
   }
 
@@ -1153,6 +1167,16 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
       ${paso('p-out', 4, 'Salidas', 'Parte de Salida por lo que falta en bodega, ya con el costo correcto.')}
       <button type="button" class="paso" data-view-go="check"><span class="pnum">5</span><span class="ptxt"><b>Verificar</b> <span class="pwhy">Bajar de nuevo el informe de Defontana y revisarlo en “Verificar ajustes”.</span></span></button>
     </div>`;
+  }
+
+  function fillLineas(){
+    const sel = $('optLinea'), prev = sel.value;
+    const cnt = new Map();
+    for (const s of state.stock) if (s.linea) cnt.set(s.linea, (cnt.get(s.linea) || 0) + 1);
+    const list = [...cnt.keys()].sort((a, b) => a.localeCompare(b, 'es'));
+    sel.hidden = !list.length;
+    sel.innerHTML = '<option value="">Todas las líneas</option>' + list.map(l => `<option value="${esc(l)}">${esc(l)}</option>`).join('');
+    sel.value = list.includes(prev) ? prev : '';
   }
 
   function render(){
@@ -1226,7 +1250,8 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     }
     const q = strip($('optSearch').value);
     const zer = state.view === 'zero';
-    const rows = sorted(all.filter(r => f(r) && (!q || strip(r.code).includes(q) || strip(r.name).includes(q) || (zer && strip(r.m.tipo + ' ' + r.m.ref + ' ' + r.m.folio).includes(q)))), cols);
+    const lin = $('optLinea').value;
+    const rows = sorted(all.filter(r => f(r) && (!lin || (r.linea || '') === lin) && (!q || strip(r.code).includes(q) || strip(r.name).includes(q) || (zer && strip(r.m.tipo + ' ' + r.m.ref + ' ' + r.m.folio).includes(q)))), cols);
     state.visible = rows;
     const tb = $('tbody');
     if (!chk && !state.mov.length){ tb.innerHTML = `<tr><td colspan="${cols.length}" class="empty">Sube arriba el Informe de Documentos de Defontana (archivo 2) para cruzarlo con el conteo.</td></tr>`; }
@@ -1247,7 +1272,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
 
   // ---------- Exportar ----------
   const regExport = r => ({
-    'Código': r.code, 'Nombre': r.name, 'Otras formas del código': r.alias.join(', ') + (r.viaName ? (r.alias.length ? ' · ' : '') + 'cruzado por nombre' : ''), 'Qué hacer': ACTION[r.st][1], 'Causa probable': r.cause ? CAUSES[r.cause] : '',
+    'Código': r.code, 'Nombre': r.name, 'Línea': r.linea || '', 'Otras formas del código': r.alias.join(', ') + (r.viaName ? (r.alias.length ? ' · ' : '') + 'cruzado por nombre' : ''), 'Qué hacer': ACTION[r.st][1], 'Causa probable': r.cause ? CAUSES[r.cause] : '',
     'Observaciones': r.obs.map(x => x.replace(/<[^>]+>/g, '')).join(' '),
     'Qué hacer, en orden': stepsText(r), 'Revisar costo': r.cost ? (r.cost.need ? 'Sí' : 'No') : '', 'Detalle costo': r.cost ? r.cost.txt.join(' ') : '',
     'Costo a usar (c/u)': r.cost && r.cost.need ? r.cost.costos.map(c => (c.v != null ? Math.round(c.v * 100) / 100 : 'factura') + ' (' + c.doc + ')').join(' · ') : '',
@@ -1263,14 +1288,14 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
   });
   const zeroExport = z => ({
     'Fecha': fmtDate(z.m.fecha), 'Documento': z.m.tipo, 'Folio': z.m.folio, 'Referencia': z.m.ref,
-    'Código': z.code, 'Nombre': z.name, 'Tipo': z.m.kind === 'in' ? 'Ingreso' : 'Egreso', 'Cantidad': z.m.qty,
+    'Código': z.code, 'Nombre': z.name, 'Línea': z.linea || '', 'Tipo': z.m.kind === 'in' ? 'Ingreso' : 'Egreso', 'Cantidad': z.m.qty,
     'PMP': z.pmp != null ? Math.round(z.pmp * 100) / 100 : '', 'Origen PMP': z.pmpSrc, 'Valor que debió tener': z.valor != null ? Math.round(z.valor) : '',
     '¿Revisar costo?': z.rev.need ? 'Sí' : 'No', 'Motivo': z.rev.txt,
     'Costo a usar (c/u)': z.rev.need && z.rev.costo ? Math.round(z.rev.costo.v * 100) / 100 : '', 'Origen del costo': z.rev.need && z.rev.costo ? z.rev.costo.src : '',
     'PMP correcto hoy': z.rev.corr ? Math.round(z.rev.corr.pmp * 100) / 100 : '', 'Ajuste de valor': z.rev.corr ? Math.round(z.rev.corr.ajuste) : '', 'Documento a generar': z.rev.hacer
   });
   const checkExport = r => ({
-    'Código': r.code, 'Nombre': r.name, 'Resultado': CHECK[r.ck][1], 'Detalle': r.cobs.map(x => x.replace(/<[^>]+>/g, '')).join(' '),
+    'Código': r.code, 'Nombre': r.name, 'Línea': r.linea || '', 'Resultado': CHECK[r.ck][1], 'Detalle': r.cobs.map(x => x.replace(/<[^>]+>/g, '')).join(' '),
     'Documento a generar': checkToMake(r).join(' · '),
     'Contado': r.s ? r.s.stock : '', 'Fecha conteo': r.counted ? fmtDate(r.s.fecha, true) : '',
     'Había que ajustar': r.diff ?? '', 'Se ajustó': r.aj, 'Valor ajuste': Math.round(r.ajVal),
@@ -1313,6 +1338,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
         st.textContent = file.name + ' · ' + fmt(data.length) + ' ' + label;
         state.open.clear();
         if (key === 'mov') fillBodegas();
+        if (key === 'stock') fillLineas();
         if (key === 'mov2'){ state.ajSel = null; if (!state.mov || !state.mov.length) { state.mov = data; fillBodegas(); } }
         render();
       }).catch(e => { drop.classList.remove('ok'); drop.classList.add('err'); st.textContent = e.message || 'No se pudo leer el archivo.'; });
@@ -1359,7 +1385,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     if (s.k === th.dataset.sort) s.d = -s.d; else { s.k = th.dataset.sort; s.d = 1; }
     render();
   });
-  ['optBodega','optSame','optAprob'].forEach(id => $(id).addEventListener('change', render));
+  ['optBodega','optSame','optAprob','optLinea'].forEach(id => $(id).addEventListener('change', render));
   $('optCause').addEventListener('change', () => { state.cause = $('optCause').value; render(); });
   let t; $('optSearch').addEventListener('input', () => { clearTimeout(t); t = setTimeout(render, 150); });
   const toggle = tr => { const k = tr.dataset.key; state.open.has(k) ? state.open.delete(k) : state.open.add(k); render(); };
@@ -1379,6 +1405,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
   });
 
   fillBodegas();
+  fillLineas();
   render();
 })();
 </script>
