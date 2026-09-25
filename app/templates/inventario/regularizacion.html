@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Regularización{% endblock %}
+{% block main_class %}container-fluid{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/regularizacion.css', v=version_estatica) }}">
+{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <h1>Regularización</h1>
+    <p class="page-sub">Cruza el conteo físico con el Informe de Documentos de Defontana: qué productos aumentar o disminuir, a qué PMP, por qué están descuadrados y si los ajustes quedaron bien.</p>
+  </div>
+</div>
+
+{% if contados == 0 %}
+<div class="alert alert-info">
+  Aún no hay productos contados. Registra el conteo en <a href="{{ url_for('inventario.stock') }}">Stock y conteo</a> o sube un Excel de conteo en el recuadro 1.
+</div>
+{% endif %}
+
+<div class="regx">
+<div class="wrap">
+  <div class="top">
+    <div class="views" role="tablist" aria-label="Vista">
+      <button class="view" role="tab" data-view="reg" aria-selected="true" type="button">Productos</button>
+      <button class="view" role="tab" data-view="zero" aria-selected="false" type="button">Documentos a costo $0</button>
+      <button class="view" role="tab" data-view="check" aria-selected="false" type="button">Verificar ajustes</button>
+    </div>
+  </div>
+
+  <section class="loaders">
+    <div class="drop ok" id="dropStock">
+      <input type="file" id="fileStock" accept=".xlsx,.xls,.csv" aria-label="Usar otro Excel de conteo">
+      <span class="num">1</span>
+      <span class="txt"><span class="t">Conteo físico</span><span class="s" id="stStock">De Stock y conteo: {{ total|cantidad }} códigos · {{ contados|cantidad }} contados. Para usar otro Excel de conteo, arrástralo aquí.</span></span>
+    </div>
+    <div class="drop" id="dropMov">
+      <input type="file" id="fileMov" accept=".xlsx,.xls,.csv" aria-label="Informe de documentos de Defontana">
+      <span class="num">2</span>
+      <span class="txt"><span class="t">Informe de Documentos de Defontana</span><span class="s" id="stMov">Elige o arrastra el informe de ingresos y egresos</span></span>
+    </div>
+  </section>
+
+  <section class="checkpanel" id="checkPanel" hidden>
+    <div class="drop" id="dropMov2">
+      <input type="file" id="fileMov2" accept=".xlsx,.xls,.csv" aria-label="Informe de Defontana actualizado">
+      <span class="num">3</span>
+      <span class="txt"><span class="t">Informe de Documentos de Defontana actualizado (con los ajustes)</span><span class="s" id="stMov2">Descárgalo de nuevo desde Defontana, ya con los ajustes hechos, y súbelo aquí</span></span>
+    </div>
+    <div id="ajDocs"></div>
+  </section>
+
+  <section class="summary" id="summary"></section>
+
+  <section class="filters">
+    <div class="chips" id="chips" role="group" aria-label="Filtro"></div>
+    <div class="right">
+      <select id="optCause" aria-label="Causa probable"></select>
+      <input type="search" id="optSearch" placeholder="Buscar código o nombre" aria-label="Buscar">
+      <button class="rx-btn ghost" id="btnCopy" type="button">Copiar</button>
+      <button class="rx-btn" id="btnXlsx" type="button">Descargar Excel</button>
+    </div>
+  </section>
+  <span class="note" id="copyNote" aria-live="polite"></span>
+
+  <div class="tablebox" id="tablebox">
+    <table>
+      <thead id="thead"></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <details class="opts">
+    <summary>Opciones de cálculo</summary>
+    <div class="optgrid">
+      <div class="opt">
+        <label for="optBodega">Bodega contada</label>
+        <select id="optBodega"></select>
+      </div>
+      <div class="opt">
+        <label for="optSame">Documentos del mismo día del conteo</label>
+        <select id="optSame">
+          <option value="before">Ocurrieron antes de contar (ya están en el conteo)</option>
+          <option value="after">Ocurrieron después de contar</option>
+        </select>
+      </div>
+      <label class="chk"><input type="checkbox" id="optAprob" checked> Solo documentos aprobados</label>
+    </div>
+  </details>
+
+  <p class="foot" id="foot"></p>
+</div>
+</div>
+
+<script type="application/json" id="regx-conteo">{{ conteo|tojson }}</script>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='vendor/xlsx/xlsx.full.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/regularizacion.js', v=version_estatica) }}"></script>
+{% endblock %}

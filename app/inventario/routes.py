@@ -7,6 +7,7 @@ from flask import render_template, redirect, url_for, flash, request, abort, jso
 from flask_login import current_user
 from sqlalchemy import or_, and_
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import joinedload
 
 from app.inventario import bp
 from app.inventario.forms import AccionForm, ImportarCsvForm
@@ -976,6 +977,43 @@ def cruce_datos_excel():
         columnas,
         filas,
         _descripcion_filtros(q, filtro, filtros_columna, ETIQUETAS_CRUCE),
+    )
+
+
+# --- Regularización: conteo físico contra el Informe de Documentos de Defontana ---
+
+
+@bp.route("/regularizacion")
+@require_permission("inventario", "ver")
+def regularizacion():
+    """Cruce del conteo físico con el Informe de Documentos de Defontana.
+
+    El cálculo corre en el navegador (static/js/regularizacion.js): el informe de
+    Defontana se lee ahí y no se sube al servidor. Esta vista solo entrega el
+    conteo de "Stock y conteo" con la fecha y hora de cada toma.
+    """
+    items = (
+        ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id)
+        .options(joinedload(ItemConteoInventario.contado_por))
+        .order_by(ItemConteoInventario.codigo)
+        .all()
+    )
+    conteo = [
+        [
+            i.codigo,
+            i.nombre or "",
+            float(i.cantidad_fisica) if i.contado else None,
+            "Contado" if i.contado else "Pendiente",
+            i.contado_por.nombre_completo if i.contado_por else "",
+            format_fecha_hora(i.contado_en),
+        ]
+        for i in items
+    ]
+    return render_template(
+        "inventario/regularizacion.html",
+        conteo=conteo,
+        total=len(items),
+        contados=sum(1 for i in items if i.contado),
     )
 
 
