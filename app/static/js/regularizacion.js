@@ -360,6 +360,7 @@
       // los saldos al conteo y final se calculan sumando los documentos.
       const signed = m => m.kind === 'in' ? m.qty : -m.qty;
       let sysNow = null, sysAtCount = null, sysCalc = null, toOther = 0;
+      const porArt = [];
       for (const list of byArt.values()){
         let cum = 0; const votes = new Map();
         for (const m of list){ cum += signed(m); if (m.saldo != null){ const v = Math.round((m.saldo - cum) * 1e6) / 1e6; votes.set(v, (votes.get(v) || 0) + 1); } }
@@ -369,6 +370,7 @@
         const last = list[list.length - 1];
         if (last.saldo != null) sysNow = (sysNow || 0) + last.saldo;
         sysCalc = (sysCalc || 0) + init + cum;
+        porArt.push({art: list[0].art, hoy: Math.round((init + cum) * 1e6) / 1e6, list});
         if (counted) sysAtCount = (sysAtCount || 0) + init + list.filter(m => m.fecha && !after(m)).reduce((a, m) => a + signed(m), 0);
       }
       if (counted) for (const m of docs) if (m.fecha && after(m) && !m._aj && !inBod(m) && m.kind === 'in') toOther += m.qty;
@@ -378,7 +380,11 @@
       const realNow = counted ? s.stock + ins - outs : null;
       const diff = counted && sysAtCount != null ? s.stock - sysAtCount : null;
       const key = s ? s.key : docs[0].key;
-      const pm = docs.length ? pmpOf(docs, idx) : null;
+      // Con varios códigos en Defontana, el PMP es el del código que tiene el saldo
+      const base = porArt.length > 1 ? porArt.reduce((a, x) => x.hoy > a.hoy ? x : a) : null;
+      let pm = null;
+      if (base){ const bi = idx == null ? -1 : base.list.reduce((a, m, i) => docs.indexOf(m) <= idx ? i : a, -1); pm = pmpOf(base.list, bi >= 0 ? bi : null); }
+      else if (docs.length) pm = pmpOf(docs, idx);
       const edited = state.pmpEdit.has(key);
       const pmp = edited ? state.pmpEdit.get(key) : pm ? pm.v : null;
       let st;
@@ -387,7 +393,7 @@
       else if (diff == null) st = 'nodata';
       else st = diff > EPS ? 'up' : diff < -EPS ? 'down' : 'ok';
       const zeros = docs.filter(m => m.valor != null && Math.abs(m.valor) < EPS && m.qty > EPS).length;
-      const cost = costReview(docs, sysCalc);
+      const cost = porArt.length > 1 ? costReviewArts(porArt) : costReview(docs, sysCalc);
       const dx = counted ? diagnose(s, docs.filter(m => !m._aj), after, diff, sysAtCount, sameNet, zeros) : {cause:null, obs:[]};
       if (counted && umInfo && sysAtCount != null){
         const de = esc(umInfo.de), a = esc(umInfo.a), hoy = sysCalc ?? sysNow;
@@ -400,8 +406,18 @@
           dx.obs.unshift(`Se contó en ${de}, pero en Defontana el producto está en ${a} y no hay una conversión conocida entre esas unidades: se compararon las cifras tal cual. Corrige la unidad en el maestro de Defontana y confirma en qué unidad se registraron sus movimientos antes de ajustar.`);
         }
       }
+      // Defontana tiene el producto con más de un código: cada uno lleva su propio saldo
+      const arts = porArt.length > 1 ? porArt.map(x => ({art: x.art, hoy: x.hoy})) : null;
+      let artAjuste = null;
+      if (arts){
+        const conSaldo = arts.filter(x => Math.abs(x.hoy) > EPS);
+        // código donde hacer los ajustes: el que tiene el saldo; si ninguno tiene, el último que se usó
+        artAjuste = conSaldo.length === 1 ? conSaldo[0].art : conSaldo.length ? null : docs[docs.length - 1].art;
+        dx.obs.push(`En Defontana este producto está con ${arts.length} códigos: ${arts.map(x => esc(x.art) + ' (' + fmt(x.hoy) + ')').join(', ')}. Lo que "tiene Defontana hoy" es la suma.` +
+          (conSaldo.length === 1 ? ` El saldo está en ${esc(conSaldo[0].art)}: los ajustes van en ese código.` : conSaldo.length > 1 ? ' Hay saldo en más de un código: déjalo en uno solo antes de ajustar.' : ''));
+      }
       if (dx.cause === 'late' || dx.cause === 'sameday' || dx.cause === 'um') st = 'check';
-      return {cause:dx.cause, obs:dx.obs, umRound: !!dx.umRound, umMaster: !!dx.umMaster, linea: s ? s.linea || '' : '', alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, umInfo, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs, sysCalc, toOther,
+      return {cause:dx.cause, obs:dx.obs, umRound: !!dx.umRound, umMaster: !!dx.umMaster, linea: s ? s.linea || '' : '', alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, umInfo, arts, artAjuste, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs, sysCalc, toOther,
         sysAtCount, sysNow, realNow, diff, st, pmp, edited, pmpSrc: edited ? 'Ingresado a mano' : pm ? pm.src : 'Sin costo en Defontana',
         valor: diff != null && Math.abs(diff) > EPS && pmp != null ? diff * pmp : (st === 'ok' ? 0 : null), zeros, cost};
     };
@@ -411,8 +427,10 @@
 
     const names = new Map(rows.map(r => [r.key, r.name])), lineas = new Map(rows.map(r => [r.key, r.linea]));
     const zero = [];
-    for (const [k, docs] of byKey) docs.forEach((m, j) => {
+    for (const [k, all] of byKey) all.forEach(m => {
       if (!inBod(m) || m.valor == null || Math.abs(m.valor) > EPS || m.qty <= EPS) return;
+      // cada código de Defontana lleva su propio saldo y PMP
+      const docs = all.filter(x => norm(x.art) === norm(m.art)), j = docs.indexOf(m);
       const pm = pmpOf(docs, j - 1 >= 0 ? j - 1 : null);
       const edited = state.pmpEdit.has(k);
       const pmp = edited ? state.pmpEdit.get(k) : pm ? pm.v : null;
@@ -517,6 +535,21 @@
     else if (!need) txt.push('No hace falta corregir nada más.');
     return {need, txt, hacer, costos, corr};
   }
+  // Mismo producto con varios códigos en Defontana: se revisa cada código con su propio saldo y PMP
+  function costReviewArts(porArt){
+    const res = porArt.map(x => ({x, c: costReview(x.list, x.hoy)})).filter(o => o.c);
+    if (!res.length) return null;
+    if (res.length === 1 && porArt.length === 1) return res[0].c;
+    const out = {need: false, txt: [], hacer: [], costos: [], corr: null};
+    for (const {x, c} of res){
+      out.need = out.need || c.need;
+      out.txt.push(`${x.art}: ${c.txt.join(' ')}`);
+      c.hacer.forEach(h => out.hacer.push({k: h.k, txt: `${h.txt} (código ${x.art})`}));
+      c.costos.forEach(o => out.costos.push({...o, doc: `${o.doc} (${x.art})`}));
+      if (!out.corr && c.corr) out.corr = c.corr;
+    }
+    return out;
+  }
   function zeroReview(m, docs, j, pmp){
     const antes = pmpAt(docs[j - 1]), r = refCost(docs, j);
     const costo = r ? {v: r.v, src: r.src} : null;
@@ -560,13 +593,14 @@
     if (r.st === 'nocount') add('verify', 'Contar el producto');
     if (r.st === 'nofile') add('verify', 'Revisar por qué no está en el conteo');
     if (r.cost && r.cost.need) r.cost.hacer.forEach(h => add(h.k, h.txt));
+    const enCod = !r.arts ? '' : r.artAjuste ? ` en el código ${r.artAjuste}` : ' (antes deja el saldo en un solo código)';
     if (r.st === 'up' && r.cause !== 'um'){
-      if (r.cause === 'egrnodesp') add('in', `Parte de Entrada por ${q} (devolución), o anular la salida que no se despachó`);
-      else add('in', `Parte de Entrada por ${q}` + (r.pmp > 0 ? ` a ${money(r.pmp)} c/u` : ' (poner costo)'));
+      if (r.cause === 'egrnodesp') add('in', `Parte de Entrada por ${q}${enCod} (devolución), o anular la salida que no se despachó`);
+      else add('in', `Parte de Entrada por ${q}${enCod}` + (r.pmp > 0 ? ` a ${money(r.pmp)} c/u` : ' (poner costo)'));
     }
     if (r.st === 'down' && r.cause !== 'um'){
       if (r.cause === 'dupin') add('out', `Anular el ingreso duplicado, o Parte de Salida por ${q}`);
-      else add('out', `Parte de Salida por ${q} (ajuste / merma)`);
+      else add('out', `Parte de Salida por ${q}${enCod} (ajuste / merma)`);
     }
     if (!steps.length) add('none', 'Nada que hacer');
     steps.sort((x, y) => STEP[x.k].n - STEP[y.k].n);
@@ -728,7 +762,7 @@
       <td class="obs"><div class="why">${r.cobs[0]}</div>${r.cobs.length > 1 ? '<div class="more-obs">' + r.cobs.slice(1).join('<br>') + '</div>' : ''}</td>
       <td class="tomake">${makeCell(checkToMake(r))}</td>
       <td class="num">${fmt(r.expected)}</td>
-      <td class="num">${fmt(r.sysCalc ?? r.sysNow)}${r.sysCalc != null && r.sysNow != null && Math.abs(r.sysCalc - r.sysNow) > EPS ? '<div class="small">informe: ' + fmt(r.sysNow) + '</div>' : ''}</td>
+      <td class="num">${fmt(r.sysCalc ?? r.sysNow)}${r.arts ? '<div class="small">' + r.arts.map(x => esc(x.art) + ': ' + fmt(x.hoy)).join('<br>') + '</div>' : ''}${r.sysCalc != null && r.sysNow != null && Math.abs(r.sysCalc - r.sysNow) > EPS ? '<div class="small">informe: ' + fmt(r.sysNow) + '</div>' : ''}</td>
       <td class="num diff ${r.gap == null || Math.abs(r.gap) <= EPS ? 'mut' : 'minus'}">${r.gap == null ? '—' : Math.abs(r.gap) <= EPS ? '0' : sgn(r.gap)}</td></tr>`;
   }
 
@@ -779,9 +813,10 @@
     const obsCell = r => {
       const costo = r.cost ? `<div class="costrev${r.cost.need ? '' : ' ok'}"><b>${r.cost.need ? 'Revisar costo:' : 'Costo:'}</b> ${esc(r.cost.txt.join(' '))}</div>` : '';
       if (!r.cause){
-        if (r.st === 'nodata') return '<span class="mut">Sin documentos en el informe: no se conoce el saldo de Defontana.</span>' + costo;
-        if (r.st === 'nofile') return '<span class="mut">Tiene documentos en Defontana pero no está en el archivo de conteo.</span>' + costo;
-        return costo;
+        const obs = r.obs.length ? `<div class="why">${r.obs.join('<br>')}</div>` : '';
+        if (r.st === 'nodata') return '<span class="mut">Sin documentos en el informe: no se conoce el saldo de Defontana.</span>' + obs + costo;
+        if (r.st === 'nofile') return '<span class="mut">Tiene documentos en Defontana pero no está en el archivo de conteo.</span>' + obs + costo;
+        return obs + costo;
       }
       const [main, ...rest] = r.obs;
       return `<div class="cause">${CAUSES[r.cause]}</div><div class="why">${main}</div>${rest.length ? '<div class="more-obs">' + rest.join('<br>') + '</div>' : ''}${costo}`;
@@ -792,7 +827,7 @@
       <td class="num">${r.counted ? fmt(r.s.stock) + '<div class="small">' + fmtDate(r.s.fecha) + (r.s.recontado ? ' · recuento' : '') + '</div>' + (r.umInfo ? '<div class="small alias">en ' + esc(r.umInfo.de) + ' · Defontana en ' + esc(r.umInfo.a) + (r.umInfo.f ? ' (convertido)' : '') + '</div>' : '') : '<span class="mut">—</span>'}${r.s && r.s.recontado && r.s.original && r.s.original.stock != null ? '<div class="small">antes: ' + fmt(r.s.original.stock) + ' el ' + fmtDate(r.s.original.fecha) + '</div>' : ''}${r.s ? `<input class="recount" type="number" step="any" min="0" inputmode="decimal" data-key="${esc(r.key)}" value="${r.s.recontado ? r.s.stock : ''}" placeholder="Recuento" title="Recuento de hoy" aria-label="Recuento de hoy de ${esc(r.code)}">` : ''}</td>
       <td class="num">${r.counted ? (r.ins || r.outs ? (r.ins ? '<span class="plus">+' + fmt(r.ins) + '</span> ' : '') + (r.outs ? '<span class="minus">−' + fmt(r.outs) + '</span>' : '') : '<span class="mut">sin movimientos</span>') : '<span class="mut">—</span>'}</td>
       <td class="num"><b>${fmt(r.realNow)}</b></td>
-      <td class="num">${fmt(hoyDe(r))}${r.sysAtCount != null && r.counted ? '<div class="small">al conteo: ' + fmt(r.sysAtCount) + '</div>' : ''}${r.sysCalc != null && r.sysNow != null && Math.abs(r.sysCalc - r.sysNow) > EPS ? '<div class="small">última fila del informe: ' + fmt(r.sysNow) + '</div>' : ''}</td>
+      <td class="num">${fmt(hoyDe(r))}${r.arts ? '<div class="small">' + r.arts.map(x => esc(x.art) + ': ' + fmt(x.hoy)).join('<br>') + '</div>' : ''}${r.sysAtCount != null && r.counted ? '<div class="small">al conteo: ' + fmt(r.sysAtCount) + '</div>' : ''}${r.sysCalc != null && r.sysNow != null && Math.abs(r.sysCalc - r.sysNow) > EPS ? '<div class="small">última fila del informe: ' + fmt(r.sysNow) + '</div>' : ''}</td>
       <td class="num diff ${r.st === 'check' ? 'mut' : aj > EPS ? 'plus' : aj < -EPS ? 'minus' : 'mut'}">${aj == null ? '—' : Math.abs(aj) <= EPS ? '0' : r.st === 'check' ? '<span class="small">a confirmar</span><div class="small">(' + sgn(aj) + ' si no se explica)</div>' : sgn(aj)}</td>
       <td><span class="pill ${cls}">${label}${qty}</span>${r.sameDay && r.counted ? '<span class="flag" title="Hay documentos el mismo día del conteo">· mismo día</span>' : ''}</td>
       <td class="obs">${obsCell(r)}</td>
