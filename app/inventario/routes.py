@@ -73,6 +73,39 @@ def filtro_stock(args, por_defecto="todos") -> str:
     return filtro if filtro in FILTROS_STOCK else por_defecto
 
 
+# Qué cuenta como "tiene stock". Además de lo que declaran los dos sistemas,
+# entra lo que ya se contó físicamente: un artículo en cero en QMS y Defontana
+# del que aparecieron unidades en bodega es justamente un hallazgo, y esconderlo
+# sería esconder trabajo hecho.
+_TIENE_STOCK = or_(
+    ItemConteoInventario.cantidad_qms != 0,
+    ItemConteoInventario.cantidad_defontana != 0,
+    ItemConteoInventario.cantidad_fisica.isnot(None),
+)
+
+
+def _tiene_stock(item) -> bool:
+    """La misma regla que _TIENE_STOCK, para contar sin volver a la base."""
+    return bool(item.cantidad_qms or item.cantidad_defontana or item.contado)
+
+
+def esconder_vacios(args, por_defecto=True) -> bool:
+    """Si se dejan fuera los artículos que están en cero en los dos sistemas.
+
+    El maestro trae miles de artículos y la mayoría no tiene existencias en
+    ninguno de los dos sistemas: no hay nada que contar en ellos y empujan
+    fuera de la pantalla a los que sí importan.
+
+    Es una decisión aparte de los filtros de arriba, no una más de la fila: se
+    combina con todos ellos. Durante una toma lo útil es ver lo que falta por
+    contar *y* tiene existencias, y eso con un solo filtro no se puede pedir.
+    """
+    elegido = (args.get("vacios") or "").strip()
+    if elegido in ("si", "no"):
+        return elegido == "no"
+    return por_defecto
+
+
 COLUMNAS_STOCK = {
     "codigo": ItemConteoInventario.codigo,
     "nombre": ItemConteoInventario.nombre,
@@ -87,7 +120,7 @@ COLUMNAS_STOCK = {
 }
 
 
-def _consulta_stock(args, filtro_por_defecto="todos"):
+def _consulta_stock(args, filtro_por_defecto="todos", esconder_vacios_por_defecto=False):
     """Consulta del cruce de stock con búsqueda, filtros por columna y orden aplicados.
 
     La comparte el listado en pantalla y la exportación a Excel, para que el
@@ -95,6 +128,7 @@ def _consulta_stock(args, filtro_por_defecto="todos"):
     """
     q = (args.get("q") or "").strip()
     filtro = filtro_stock(args, filtro_por_defecto)
+    sin_vacios = esconder_vacios(args, esconder_vacios_por_defecto)
 
     base = ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id)
     if q:
@@ -102,6 +136,14 @@ def _consulta_stock(args, filtro_por_defecto="todos"):
         base = base.filter(
             or_(ItemConteoInventario.codigo.ilike(patron), ItemConteoInventario.nombre.ilike(patron))
         )
+        # Buscar un artículo tiene que encontrarlo aunque esté en cero: si no, la
+        # pantalla contestaría "no hay resultados" por un artículo que sí existe,
+        # sólo porque venía escondido. Pedirlo a mano con "vacios=no" sí manda.
+        if (args.get("vacios") or "").strip() != "no":
+            sin_vacios = False
+
+    if sin_vacios:
+        base = base.filter(_TIENE_STOCK)
 
     base, filtros_columna = _filtros_de_columna(base, args)
 
@@ -125,14 +167,14 @@ def _consulta_stock(args, filtro_por_defecto="todos"):
         )
 
     base, orden, direccion = _ordenar(base, args, COLUMNAS_STOCK, "codigo")
-    return base, q, filtro, filtros_columna, orden, direccion
+    return base, q, filtro, filtros_columna, orden, direccion, sin_vacios
 
 
 @bp.route("/stock")
 @require_permission("inventario", "ver")
 def stock():
-    consulta, q, filtro, filtros_columna, orden, direccion = _consulta_stock(
-        request.args, filtro_por_defecto="sin_contar"
+    consulta, q, filtro, filtros_columna, orden, direccion, sin_vacios = _consulta_stock(
+        request.args, filtro_por_defecto="sin_contar", esconder_vacios_por_defecto=True
     )
     pagina = request.args.get("pagina", 1, type=int)
     paginacion = consulta.paginate(page=max(1, pagina), per_page=100, error_out=False)
@@ -143,6 +185,7 @@ def stock():
         "con_diferencia": sum(1 for i in todos if i.tiene_diferencia),
         "sin_contar": sum(1 for i in todos if not i.contado),
         "contados": sum(1 for i in todos if i.contado),
+        "vacios": sum(1 for i in todos if not _tiene_stock(i)),
     }
     return render_template(
         "inventario/stock.html",
@@ -154,6 +197,7 @@ def stock():
         filtros_columna=filtros_columna,
         orden=orden,
         direccion=direccion,
+        sin_vacios=sin_vacios,
         puede_cerrar_toma=current_user.es_admin_o_superior,
     )
 
@@ -421,11 +465,17 @@ def historial_excel(toma_id):
     )
 
 
-def _descripcion_filtros(q, filtro, filtros_columna, etiquetas):
-    """Texto legible con los filtros aplicados, para dejarlo escrito en el informe."""
+def _descripcion_filtros(q, filtro, filtros_columna, etiquetas, sin_vacios=False):
+    """Texto legible con los filtros aplicados, para dejarlo escrito en el informe.
+
+    Un informe que dejó fuera parte del maestro tiene que decirlo en su
+    encabezado: si no, se lee como el total y cuadra contra nada.
+    """
     partes = []
     if filtro and filtro != "todos":
         partes.append(etiquetas.get(filtro, filtro))
+    if sin_vacios:
+        partes.append("sin los artículos en cero en los dos sistemas")
     if q:
         partes.append(f'búsqueda "{q}"')
     for parametro, texto in (filtros_columna or {}).items():
@@ -451,7 +501,11 @@ ETIQUETAS_STOCK = {
 @require_permission("inventario", "ver")
 def stock_excel():
     """Informe en Excel del cruce de stock, con los mismos filtros de la pantalla."""
-    consulta, q, filtro, filtros_columna, _orden, _dir = _consulta_stock(request.args)
+    # El archivo descargado se entiende como el registro completo, así que no
+    # esconde nada por su cuenta: sólo recorta si se lo pidieron a mano.
+    consulta, q, filtro, filtros_columna, _orden, _dir, _sin_vacios = _consulta_stock(
+        request.args, esconder_vacios_por_defecto=False
+    )
     items = consulta.all()
 
     columnas = [
@@ -505,7 +559,7 @@ def stock_excel():
         "Stock y conteo",
         columnas,
         filas,
-        _descripcion_filtros(q, filtro, filtros_columna, ETIQUETAS_STOCK),
+        _descripcion_filtros(q, filtro, filtros_columna, ETIQUETAS_STOCK, _sin_vacios),
     )
 
 
