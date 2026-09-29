@@ -169,3 +169,8 @@
 .regx .recountbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
 .regx .recountbar .drop{flex:1 1 320px;padding:8px 12px}
 .regx .recountbar .num{width:24px;height:24px}
+.regx #ajDocsMain{margin:0 0 10px}
+.regx #ajDocsMain:empty{display:none}
+.regx details.ajbox{display:block}
+.regx details.ajbox > summary{cursor:pointer;font-size:13px;color:var(--ink)}
+.regx details.ajbox[open] > summary{margin-bottom:6px}
