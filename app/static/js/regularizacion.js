@@ -88,7 +88,7 @@
     if (!t) throw new Error('No encontré las columnas “Artículo” y “Movimiento”. ¿Es el Informe de Documentos de Defontana?');
     const g = t.col;
     const c = {tipo:g('Tipo Documento'), estado:g('Estado'), folio:g('Folio'), fecha:g('Fecha'), orig:g('Bod. Origen','Bodega Origen'),
-      dest:g('Bod. Destino','Bodega Destino'), mov:g('Movimiento'), ref:g('Referencia'), prov:g('Proveedor'), cli:g('Cliente'),
+      dest:g('Bod. Destino','Bodega Destino'), mov:g('Movimiento'), motivo:g('Motivo'), ref:g('Referencia'), prov:g('Proveedor'), cli:g('Cliente'),
       art:g('Artículo'), desc:g('Descripción'), cant:g('Cant. Movimiento','Cantidad'), um:g('U. Medida'), valor:g('Valor Movimiento'),
       saldo:g('Saldo Inventario'), valorInv:g('Valor Inventario')};
     if (c.cant < 0 || c.fecha < 0) throw new Error('No encontré las columnas “Fecha” y “Cant. Movimiento”.');
@@ -100,8 +100,8 @@
       const kind = mv.startsWith('ING') ? 'in' : mv.startsWith('EGR') ? 'out' : null;
       if (!kind) return;
       out.push({i, art, key:keyOf(art), kind, qty:Math.abs(num(at(r,'cant')) || 0), fecha:parseDate(at(r,'fecha')),
-        tipo:at(r,'tipo'), estado:at(r,'estado'), folio:at(r,'folio'), orig:String(at(r,'orig')).trim(), dest:String(at(r,'dest')).trim(),
-        ref:at(r,'ref') || at(r,'cli') || at(r,'prov'), desc:at(r,'desc'), nameKey:keyOf(at(r,'desc')), um:at(r,'um'),
+        tipo:at(r,'tipo'), motivo:String(at(r,'motivo')).trim(), estado:at(r,'estado'), folio:at(r,'folio'), orig:String(at(r,'orig')).trim(), dest:String(at(r,'dest')).trim(),
+        ref:at(r,'ref') || at(r,'cli') || at(r,'prov'), tercero:String(at(r,'prov') || at(r,'cli')).trim(), desc:at(r,'desc'), nameKey:keyOf(at(r,'desc')), um:at(r,'um'),
         valor:c.valor >= 0 ? num(at(r,'valor')) : null, saldo:num(at(r,'saldo')), valorInv:c.valorInv >= 0 ? num(at(r,'valorInv')) : null});
     });
     out.sort((a,b) => (a.fecha||0) - (b.fecha||0) || a.i - b.i);
@@ -139,7 +139,7 @@
       const body = JSON.stringify({
         recount: Object.fromEntries([...state.recount].map(([k, v]) => [k, {qty: v.qty, fecha: +v.fecha}])),
         pmp: Object.fromEntries(state.pmpEdit),
-        ajSel: state.ajSel ? [...state.ajSel] : null
+        ajSi: [...state.ajSi], ajNo: [...state.ajNo]
       });
       fetch(urlDe('estado'), {method:'POST', body, headers:{'Content-Type':'application/json', 'X-CSRFToken': CFG.csrf}, credentials:'same-origin'}).catch(() => {});
     }, 800);
@@ -179,7 +179,7 @@
   }
 
   // ---------- Estado ----------
-  const state = {stock:conteoDelSistema(), mov:[], view:'reg', filter:{reg:'all', zero:'all', check:'all'}, mov2:null, ajSel:null, checkRows:[], docGroups:[],
+  const state = {stock:conteoDelSistema(), mov:[], view:'reg', filter:{reg:'all', zero:'all', check:'all'}, mov2:null, ajSi:new Set(), ajNo:new Set(), docGroupsMain:[], checkRows:[], docGroups:[],
     sort:{reg:{k:'code', d:1}, zero:{k:'fecha', d:1}, check:{k:'code', d:1}}, open:new Set(), pmpEdit:new Map(), recount:leerRecuentos(), rows:[], zero:[]};
 
   function fillBodegas(){
@@ -348,7 +348,7 @@
       for (const m of ajDocs){ aj += m.kind === 'in' ? m.qty : -m.qty; ajVal += (m.kind === 'in' ? 1 : -1) * (m.valor || 0); }
       docs.forEach((m, j) => {
         if (!counted || !m.fecha) return;
-        if (after(m)){ if (!m._aj && inBod(m)){ if (m.kind === 'in') ins += m.qty; else outs += m.qty; } }
+        if (after(m)){ if (!m._aj && !m._ajc && inBod(m)){ if (m.kind === 'in') ins += m.qty; else outs += m.qty; } }
         else { idx = j; if (dayKey(m.fecha) === ck){ sameDay++; sameNet += m.kind === 'in' ? m.qty : -m.qty; } }
       });
       // Defontana lleva un saldo por cada artículo: si el código existe escrito de varias formas, se suman
@@ -373,7 +373,8 @@
         porArt.push({art: list[0].art, hoy: Math.round((init + cum) * 1e6) / 1e6, list});
         if (counted) sysAtCount = (sysAtCount || 0) + init + list.filter(m => m.fecha && !after(m)).reduce((a, m) => a + signed(m), 0);
       }
-      if (counted) for (const m of docs) if (m.fecha && after(m) && !m._aj && !inBod(m) && m.kind === 'in') toOther += m.qty;
+      if (counted) for (const m of docs) if (m.fecha && after(m) && !m._aj && !m._ajc && !inBod(m) && m.kind === 'in') toOther += m.qty;
+      const costDocs = docs.filter(m => m._ajc);
       const own = s ? new Set(s.variants.map(norm)) : new Set();
       const alias = [...(s ? s.variants.filter(v => norm(v) !== norm(s.code)) : []), ...[...byArt.keys()].filter(a => !own.has(a) && (s || a !== norm(docs[0].art)))];
       const viaName = docs.some(m => m._byName);
@@ -383,6 +384,8 @@
       // Con varios códigos en Defontana, el PMP es el del código que tiene el saldo
       const base = porArt.length > 1 ? porArt.reduce((a, x) => x.hoy > a.hoy ? x : a) : null;
       let pm = null;
+      // Si ya se corrigió el costo, el PMP que vale es el de hoy (después del ajuste de costo)
+      if (costDocs.length) idx = null;
       if (base){ const bi = idx == null ? -1 : base.list.reduce((a, m, i) => docs.indexOf(m) <= idx ? i : a, -1); pm = pmpOf(base.list, bi >= 0 ? bi : null); }
       else if (docs.length) pm = pmpOf(docs, idx);
       const edited = state.pmpEdit.has(key);
@@ -392,9 +395,9 @@
       else if (!counted) st = 'nocount';
       else if (diff == null) st = 'nodata';
       else st = diff > EPS ? 'up' : diff < -EPS ? 'down' : 'ok';
-      const zeros = docs.filter(m => m.valor != null && Math.abs(m.valor) < EPS && m.qty > EPS).length;
+      const zeros = docs.filter(m => !m._ajc && m.valor != null && Math.abs(m.valor) < EPS && m.qty > EPS).length;
       const cost = porArt.length > 1 ? costReviewArts(porArt) : costReview(docs, sysCalc);
-      const dx = counted ? diagnose(s, docs.filter(m => !m._aj), after, diff, sysAtCount, sameNet, zeros) : {cause:null, obs:[]};
+      const dx = counted ? diagnose(s, docs.filter(m => !m._aj && !m._ajc), after, diff, sysAtCount, sameNet, zeros) : {cause:null, obs:[]};
       if (counted && umInfo && sysAtCount != null){
         const de = esc(umInfo.de), a = esc(umInfo.a), hoy = sysCalc ?? sysNow;
         if (umInfo.f){
@@ -417,9 +420,20 @@
           (conSaldo.length === 1 ? ` El saldo está en ${esc(conSaldo[0].art)}: los ajustes van en ese código.` : conSaldo.length > 1 ? ' Hay saldo en más de un código: déjalo en uno solo antes de ajustar.' : ''));
       }
       if (dx.cause === 'late' || dx.cause === 'sameday' || dx.cause === 'um') st = 'check';
-      return {cause:dx.cause, obs:dx.obs, umRound: !!dx.umRound, umMaster: !!dx.umMaster, linea: s ? s.linea || '' : '', alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, umInfo, arts, artAjuste, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs, sysCalc, toOther,
+      // Ya se hicieron comprobantes de ajuste: lo que queda por ajustar es lo que falta para llegar al stock real hoy
+      let pend = null;
+      const docTxtAj = L => L.map(m => `${m.tipo} #${m.folio} (${m.kind === 'in' ? '+' : '−'}${fmt(m.qty)})`).join(', ');
+      if (costDocs.length) dx.obs.unshift(`Ajuste de costo ya hecho: ${esc(docTxtAj(costDocs))}.` + (pm ? ` PMP hoy: ${money(pm.v)}.` : ''));
+      if (counted && ajDocs.length && diff != null){
+        const hoy = sysCalc ?? sysNow;
+        pend = hoy != null && realNow != null ? realNow - hoy : null;
+        dx.obs.unshift(`Ajuste de cantidad ya hecho: ${esc(docTxtAj(ajDocs))}.` + (pend == null ? '' : Math.abs(pend) <= EPS ? ' Quedó cuadrado.' : ` Aún falta ${sgn(pend)}.`));
+        if (pend != null) st = Math.abs(pend) <= EPS ? 'done' : pend > 0 ? 'up' : 'down';
+        if (st === 'done'){ dx.cause = null; dx.obs = dx.obs.filter(x => /^Ajuste de (cantidad|costo) ya hecho/.test(x)); }
+      }
+      return {cause:dx.cause, obs:dx.obs, umRound: !!dx.umRound, umMaster: !!dx.umMaster, linea: s ? s.linea || '' : '', alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, umInfo, arts, artAjuste, pend, costDocs, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs, sysCalc, toOther,
         sysAtCount, sysNow, realNow, diff, st, pmp, edited, pmpSrc: edited ? 'Ingresado a mano' : pm ? pm.src : 'Sin costo en Defontana',
-        valor: diff != null && Math.abs(diff) > EPS && pmp != null ? diff * pmp : (st === 'ok' ? 0 : null), zeros, cost};
+        valor: st === 'done' ? 0 : pend != null && pmp != null ? pend * pmp : diff != null && Math.abs(diff) > EPS && pmp != null ? diff * pmp : (st === 'ok' ? 0 : null), zeros, cost};
     };
     const seen = new Set();
     const rows = [...groups.values()].map(list => { const s = mergeGroup(list); seen.add(s.key); return build(s, byKey.get(s.key) || []); });
@@ -428,7 +442,7 @@
     const names = new Map(rows.map(r => [r.key, r.name])), lineas = new Map(rows.map(r => [r.key, r.linea]));
     const zero = [];
     for (const [k, all] of byKey) all.forEach(m => {
-      if (!inBod(m) || m.valor == null || Math.abs(m.valor) > EPS || m.qty <= EPS) return;
+      if (m._ajc || !inBod(m) || m.valor == null || Math.abs(m.valor) > EPS || m.qty <= EPS) return;
       // cada código de Defontana lleva su propio saldo y PMP
       const docs = all.filter(x => norm(x.art) === norm(m.art)), j = docs.indexOf(m);
       const pm = pmpOf(docs, j - 1 >= 0 ? j - 1 : null);
@@ -486,6 +500,8 @@
   // ¿El costo de un ingreso a $0 ya se corrigió? Sí, si después hubo un documento que solo cambia el
   // valor (cantidad 0) o si el PMP de hoy ya es el correcto (2% de tolerancia).
   function costFixed(docs, j, corr){
+    const aj = docs.slice(j + 1).find(m => m._ajc);
+    if (aj) return `se hizo el ajuste de costo (${aj.tipo} #${aj.folio} del ${fmtDate(aj.fecha)})`;
     const adj = docs.slice(j + 1).find(m => m.qty <= EPS && Math.abs(m.valor || 0) > EPS);
     if (adj) return `se registró un ajuste de valor (${adj.tipo} #${adj.folio} del ${fmtDate(adj.fecha)} por ${money(adj.valor)})`;
     const hoy = pmpAt(docs[docs.length - 1]);
@@ -495,7 +511,7 @@
 
   // ¿Hay que revisar el costo de este producto? Mira sus documentos a $0 y cómo está hoy.
   function costReview(docs, saldoHoy){
-    const zeros = docs.filter(m => m.valor != null && Math.abs(m.valor) < EPS && m.qty > EPS);
+    const zeros = docs.filter(m => !m._ajc && m.valor != null && Math.abs(m.valor) < EPS && m.qty > EPS);
     const last = docs[docs.length - 1];
     const pmpHoy = pmpAt(last);
     const sinCostoHoy = saldoHoy > EPS && last && last.valorInv != null && last.valorInv <= EPS;
@@ -582,7 +598,7 @@
   };
   function docSteps(r){
     if (r._steps) return r._steps;
-    const d = r.diff, q = d != null ? fmt(Math.abs(d)) : '', steps = [];
+    const d = r.pend ?? r.diff, q = d != null ? fmt(Math.abs(d)) : '', steps = [];
     const add = (k, txt) => steps.push({k, txt});
     if (r.umInfo && r.umInfo.f && r.counted) add('unit', `Cambiar la unidad en Defontana de ${r.umInfo.a} a ${r.umInfo.de}: el saldo de ${fmt(r.umInfo.hoyDef)} ${r.umInfo.a} queda en ${fmt(r.umInfo.hoyConv)} ${r.umInfo.de}`);
     if (r.umMaster) add('verify', `Corregir la unidad en el maestro de Defontana (${r.umInfo.a} → ${r.umInfo.de}) y confirmar en qué unidad están sus cantidades antes de ajustar`);
@@ -591,6 +607,7 @@
     else if (r.st === 'check') add('verify', 'Volver a contar: la diferencia puede deberse a un documento registrado después del conteo. Si se confirma, no ajustar');
     if (r.st === 'nodata') add('verify', 'Ver el saldo del producto en Defontana (no hay documentos en el informe)');
     if (r.st === 'nocount') add('verify', 'Contar el producto');
+    if (r.st === 'done') add('none', 'Nada: ya se ajustó la cantidad');
     if (r.st === 'nofile') add('verify', 'Revisar por qué no está en el conteo');
     if (r.cost && r.cost.need) r.cost.hacer.forEach(h => add(h.k, h.txt));
     const enCod = !r.arts ? '' : r.artAjuste ? ` en el código ${r.artAjuste}` : ' (antes deja el saldo en un solo código)';
@@ -629,35 +646,65 @@
   const ajusteHoy = r => r.counted && r.realNow != null && hoyDe(r) != null ? r.realNow - hoyDe(r) : null;
   const makeCell = list => list.length ? `<ul class="make">${list.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '';
 
-  // ---------- Verificar ajustes ----------
+  // ---------- Comprobantes de ajuste ----------
   const docId = m => [strip(m.tipo), m.folio, dayKey(m.fecha)].join('|');
-  function computeCheck(){
-    state.checkRows = []; state.docGroups = [];
-    if (!state.mov2) return;
-    state.mov2.forEach(m => { m._aj = false; });
-    const pre = compute(state.mov2).rows;
-    // Documentos posteriores al conteo; se proponen como ajuste los que calzan con las diferencias
+  // Un comprobante se toma como ajuste si lo marcó la usuaria, o si se sugiere y no lo desmarcó
+  const ajMarcado = g => state.ajSi.has(g.id) || (g.auto && !state.ajNo.has(g.id));
+  // Busca en los documentos posteriores al conteo los comprobantes de regularización y los separa:
+  // - ajuste de cantidad (entrada o salida por la diferencia del conteo): m._aj
+  // - ajuste de costo (solo valor, o salida y reingreso de las mismas unidades a otro costo): m._ajc
+  // Se hacen en comprobantes distintos, así que cada línea se clasifica por separado.
+  function detectarAjustes(movList){
+    if (!movList || !movList.length) return [];
+    movList.forEach(m => { m._aj = false; m._ajc = false; m._par = false; });
+    const pre = compute(movList).rows;
     const groups = new Map();
+    const unit = m => m.qty > EPS && m.valor != null ? m.valor / m.qty : null;
     for (const r of pre){
       if (!r.counted) continue;
       const ck = dayKey(r.s.fecha);
-      for (const m of r.docs){
-        if (!m.fecha || dayKey(m.fecha) <= ck) continue;
+      const post = r.docs.filter(m => m.fecha && dayKey(m.fecha) > ck);
+      // Revalorización: sale y vuelve a entrar la misma cantidad del mismo código, a otro costo, en pocos días
+      for (const o of post){
+        if (o.kind !== 'out' || o._par) continue;
+        const i = post.find(m => m.kind === 'in' && !m._par && norm(m.art) === norm(o.art) && near(m.qty, o.qty) && Math.abs(m.fecha - o.fecha) <= 3 * 864e5);
+        if (!i) continue;
+        const uo = unit(o), ui = unit(i);
+        if (uo == null || ui == null || Math.abs(uo - ui) <= Math.max(1, 0.02 * Math.max(uo, ui))) continue;
+        o._par = i._par = true;
+      }
+      for (const m of post){
         const id = docId(m);
         let g = groups.get(id);
-        if (!g){ g = {id, tipo:m.tipo, folio:m.folio, fecha:m.fecha, lines:0, match:0, valor:0}; groups.set(id, g); }
-        g.lines++; g.valor += (m.kind === 'in' ? 1 : -1) * (m.valor || 0);
-        if (r.diff != null && near(m.qty, Math.abs(r.diff)) && ((r.diff < 0 && m.kind === 'out') || (r.diff > 0 && m.kind === 'in'))) g.match++;
+        if (!g){ g = {id, tipo:m.tipo, folio:m.folio, fecha:m.fecha, motivo:m.motivo || '', tercero:false, lines:0, match:0, cost:0, valor:0}; groups.set(id, g); }
+        if (m.tercero) g.tercero = true;
+        if (m._par || (m.qty <= EPS && Math.abs(m.valor || 0) > EPS)) g.cost++;
+        else if (r.diff != null && near(m.qty, Math.abs(r.diff)) && ((r.diff < 0 && m.kind === 'out') || (r.diff > 0 && m.kind === 'in'))) g.match++;
       }
     }
     const list = [...groups.values()];
     const tot = new Map();
-    for (const m of state.mov2){ const t = tot.get(docId(m)) || {lines:0, valor:0}; t.lines++; t.valor += (m.kind === 'in' ? 1 : -1) * (m.valor || 0); tot.set(docId(m), t); }
-    list.forEach(g => { const t = tot.get(g.id); if (t){ g.lines = t.lines; g.valor = t.valor; } g.auto = g.lines >= 5 && g.match / g.lines >= 0.6; });
+    for (const m of movList){ const t = tot.get(docId(m)) || {lines:0, valor:0}; t.lines++; t.valor += (m.kind === 'in' ? 1 : -1) * (m.valor || 0); tot.set(docId(m), t); }
+    list.forEach(g => {
+      const t = tot.get(g.id); if (t){ g.lines = t.lines; g.valor = t.valor; }
+      g.kind = g.cost > 0 && g.cost >= g.match ? 'costo' : 'cantidad';
+      // Una compra, venta o despacho (con proveedor o cliente) no es un ajuste, aunque calce: es un documento atrasado
+      g.auto = /AJUST/.test(strip(g.tipo + ' ' + g.motivo)) || (!g.tercero && ((g.lines >= 3 && g.match / g.lines >= 0.6) || g.cost / g.lines >= 0.6));
+    });
     list.sort((a, b) => (b.auto - a.auto) || (b.fecha - a.fecha));
-    state.docGroups = list;
-    if (!state.ajSel) state.ajSel = new Set(list.filter(g => g.auto).map(g => g.id));
-    state.mov2.forEach(m => { m._aj = state.ajSel.has(docId(m)); });
+    const marcados = new Set(list.filter(ajMarcado).map(g => g.id));
+    movList.forEach(m => {
+      if (!marcados.has(docId(m))) return;
+      if (m._par || (m.qty <= EPS && Math.abs(m.valor || 0) > EPS)) m._ajc = true; else m._aj = true;
+    });
+    return list;
+  }
+
+  // ---------- Verificar ajustes ----------
+  function computeCheck(){
+    state.checkRows = []; state.docGroups = [];
+    if (!state.mov2) return;
+    state.docGroups = detectarAjustes(state.mov2);
     const res = compute(state.mov2).rows;
     for (const r of res){
       const hasAj = Math.abs(r.aj) > EPS;
@@ -694,7 +741,7 @@
   // ---------- Configuración de las vistas ----------
   const ACTION = {
     up:['a-up','Aumentar'], down:['a-down','Disminuir'], ok:['a-ok','Cuadrado'], check:['a-warn','Revisar antes de ajustar'],
-    nodata:['a-warn','Sin saldo en Defontana'], nocount:['a-ok','Sin contar'], nofile:['a-warn','No está en el conteo']
+    done:['a-ok','Ya ajustado'], nodata:['a-warn','Sin saldo en Defontana'], nocount:['a-ok','Sin contar'], nofile:['a-warn','No está en el conteo']
   };
   const REG_FILTERS = [
     ['all', 'Todos', r => true, null],
@@ -703,6 +750,7 @@
     ['down', 'Disminuir', r => r.st === 'down', 'var(--out)'],
     ['check', 'Revisar antes de ajustar', r => r.st === 'check', 'var(--warn)'],
     ['ok', 'Cuadrados', r => r.st === 'ok', 'var(--muted)'],
+    ['done', 'Ya ajustados', r => r.st === 'done' || !!(r.costDocs && r.costDocs.length), 'var(--in)'],
     ['nopmp', 'Falta PMP', r => (r.st === 'up' || r.st === 'down') && !(r.pmp > 0), 'var(--warn)'],
     ['nodata', 'Sin saldo en Defontana', r => r.st === 'nodata', 'var(--warn)'],
     ['nocount', 'Sin contar', r => r.st === 'nocount', 'var(--muted)'],
@@ -809,7 +857,7 @@
   function regRow(r){
     const [cls, label] = ACTION[r.st], aj = ajusteHoy(r);
     const d = r.diff;
-    const qty = (r.st === 'up' || r.st === 'down') ? ' ' + fmt(Math.abs(d)) : '';
+    const qty = (r.st === 'up' || r.st === 'down') ? ' ' + fmt(Math.abs(r.pend ?? d)) : '';
     const obsCell = r => {
       const costo = r.cost ? `<div class="costrev${r.cost.need ? '' : ' ok'}"><b>${r.cost.need ? 'Revisar costo:' : 'Costo:'}</b> ${esc(r.cost.txt.join(' '))}</div>` : '';
       if (!r.cause){
@@ -825,7 +873,7 @@
       <td><div class="code">${esc(r.code)}</div><div class="pname">${esc(r.name)}</div>${aliasNote(r)}</td>
       ${lineaCell(r.linea)}
       <td class="num">${r.counted ? fmt(r.s.stock) + '<div class="small">' + fmtDate(r.s.fecha) + (r.s.recontado ? ' · recuento' : '') + '</div>' + (r.umInfo ? '<div class="small alias">en ' + esc(r.umInfo.de) + ' · Defontana en ' + esc(r.umInfo.a) + (r.umInfo.f ? ' (convertido)' : '') + '</div>' : '') : '<span class="mut">—</span>'}${r.s && r.s.recontado && r.s.original && r.s.original.stock != null ? '<div class="small">antes: ' + fmt(r.s.original.stock) + ' el ' + fmtDate(r.s.original.fecha) + '</div>' : ''}${r.s ? `<input class="recount" type="number" step="any" min="0" inputmode="decimal" data-key="${esc(r.key)}" value="${r.s.recontado ? r.s.stock : ''}" placeholder="Recuento" title="Recuento de hoy" aria-label="Recuento de hoy de ${esc(r.code)}">` : ''}</td>
-      <td class="num">${r.counted ? (r.ins || r.outs ? (r.ins ? '<span class="plus">+' + fmt(r.ins) + '</span> ' : '') + (r.outs ? '<span class="minus">−' + fmt(r.outs) + '</span>' : '') : '<span class="mut">sin movimientos</span>') : '<span class="mut">—</span>'}</td>
+      <td class="num">${r.counted ? (r.ins || r.outs ? (r.ins ? '<span class="plus">+' + fmt(r.ins) + '</span> ' : '') + (r.outs ? '<span class="minus">−' + fmt(r.outs) + '</span>' : '') : '<span class="mut">sin movimientos</span>') + (r.ajDocs.length ? '<div class="small">ajuste ya hecho: ' + sgn(r.aj) + '</div>' : '') : '<span class="mut">—</span>'}</td>
       <td class="num"><b>${fmt(r.realNow)}</b></td>
       <td class="num">${fmt(hoyDe(r))}${r.arts ? '<div class="small">' + r.arts.map(x => esc(x.art) + ': ' + fmt(x.hoy)).join('<br>') + '</div>' : ''}${r.sysAtCount != null && r.counted ? '<div class="small">al conteo: ' + fmt(r.sysAtCount) + '</div>' : ''}${r.sysCalc != null && r.sysNow != null && Math.abs(r.sysCalc - r.sysNow) > EPS ? '<div class="small">última fila del informe: ' + fmt(r.sysNow) + '</div>' : ''}</td>
       <td class="num diff ${r.st === 'check' ? 'mut' : aj > EPS ? 'plus' : aj < -EPS ? 'minus' : 'mut'}">${aj == null ? '—' : Math.abs(aj) <= EPS ? '0' : r.st === 'check' ? '<span class="small">a confirmar</span><div class="small">(' + sgn(aj) + ' si no se explica)</div>' : sgn(aj)}</td>
@@ -885,18 +933,25 @@
     });
   }
 
-  function renderAjDocs(){
-    const box = $('ajDocs');
-    if (!state.mov2){ box.innerHTML = ''; return; }
-    const G = state.docGroups, auto = G.filter(g => g.auto), rest = G.filter(g => !g.auto);
-    const item = g => `<label class="ajdoc"><input type="checkbox" data-doc="${esc(g.id)}"${state.ajSel.has(g.id) ? ' checked' : ''}> <span>${esc(g.tipo)} <b>#${esc(g.folio)}</b> del ${fmtDate(g.fecha)} · ${fmt(g.lines)} ${g.lines === 1 ? 'línea' : 'líneas'} · ${money(g.valor)}${g.auto ? ' · ' + fmt(g.match) + ' calzan con las diferencias' : ''}</span></label>`;
-    const nSel = G.filter(g => state.ajSel.has(g.id)).length;
-    box.innerHTML = `<div class="ajbox"><div class="ajhead"><h3>Documentos de ajuste <span class="note">(${fmt(nSel)} de ${fmt(G.length)} marcados)</span></h3>
-      <span class="ajbtns"><button type="button" class="rx-btn ghost sm" data-all="1">Marcar todos</button><button type="button" class="rx-btn ghost sm" data-all="0">Quitar todos</button><button type="button" class="rx-btn ghost sm" data-all="auto">Solo los sugeridos</button></span></div>
-      <p class="note">${auto.length ? 'Encontré estos documentos que calzan con las diferencias del conteo. Marca o desmarca los que corresponden a ajustes de inventario.' : 'No encontré documentos que calcen con las diferencias. Marca abajo los documentos de ajuste.'}</p>
-      ${auto.map(item).join('')}
+  function renderAjDocs(boxId, G, principal){
+    const box = $(boxId);
+    if (!G.length){ box.innerHTML = ''; return; }
+    const auto = G.filter(g => g.auto), rest = G.filter(g => !g.auto);
+    const tipo = g => g.kind === 'costo' ? '<span class="stepk k-cost">Costo</span>' : '<span class="stepk k-in">Cantidad</span>';
+    const item = g => `<label class="ajdoc"><input type="checkbox" data-doc="${esc(g.id)}"${ajMarcado(g) ? ' checked' : ''}> <span>${tipo(g)} ${esc(g.tipo)} <b>#${esc(g.folio)}</b> del ${fmtDate(g.fecha)} · ${fmt(g.lines)} ${g.lines === 1 ? 'línea' : 'líneas'} · ${money(g.valor)}${g.kind === 'costo' && g.cost ? ' · ' + fmt(g.cost) + ' con cambio de costo' : g.match ? ' · ' + fmt(g.match) + ' calzan con las diferencias' : ''}</span></label>`;
+    const nSel = G.filter(ajMarcado).length;
+    const intro = principal
+      ? 'Los comprobantes marcados se toman como regularización: los de <b>cantidad</b> (entrada o salida por la diferencia del conteo) no cuentan como movimientos, y los de <b>costo</b> dan el costo por corregido. Así no se pide ajustar dos veces.'
+      : auto.length ? 'Encontré estos documentos que calzan con las diferencias del conteo o cambian el costo. Marca o desmarca los que corresponden a ajustes de inventario.' : 'No encontré documentos que calcen con las diferencias. Marca abajo los documentos de ajuste.';
+    const lista = `${auto.map(item).join('')}
       ${nSel > auto.length + 5 ? '<p class="note warnline">Ojo: marcaste documentos que no son ajustes. Los movimientos normales (ventas, envíos a producción, compras) no deben marcarse, porque el programa los tomaría como ajustes y el resultado no sería correcto.</p>' : ''}
-      ${rest.length ? `<details${auto.length && !state.ajOpen ? '' : ' open'}><summary>Otros documentos posteriores al conteo (${fmt(rest.length)})</summary><div class="ajlist">${rest.map(item).join('')}</div></details>` : ''}</div>`;
+      ${rest.length ? `<details${auto.length && !state.ajOpen ? '' : ' open'}><summary>Otros documentos posteriores al conteo (${fmt(rest.length)})</summary><div class="ajlist">${rest.map(item).join('')}</div></details>` : ''}`;
+    const head = `<div class="ajhead"><h3>Comprobantes de ajuste ya hechos <span class="note">(${fmt(nSel)} de ${fmt(G.length)} marcados)</span></h3>
+      <span class="ajbtns"><button type="button" class="rx-btn ghost sm" data-all="1">Marcar todos</button><button type="button" class="rx-btn ghost sm" data-all="0">Quitar todos</button><button type="button" class="rx-btn ghost sm" data-all="auto">Solo los sugeridos</button></span></div>
+      <p class="note">${intro}</p>`;
+    box.innerHTML = principal
+      ? `<details class="ajbox"${state.ajMainOpen ? ' open' : ''}><summary><b>Comprobantes de ajuste ya hechos:</b> ${fmt(nSel)} marcados${nSel ? ' (' + G.filter(ajMarcado).slice(0, 4).map(g => esc(g.tipo) + ' #' + esc(g.folio)).join(', ') + (nSel > 4 ? '…' : '') + ')' : ''}</summary>${head}${lista}</details>`
+      : `<div class="ajbox">${head}${lista}</div>`;
   }
 
   // ---------- Plan de ajustes: listado por paso ----------
@@ -913,8 +968,8 @@
           else plan.cost.push({r, doc:c.doc, qty:c.qty, v:c.v, src:c.src, corr:r.cost.corr});
         }
       }
-      if (r.st === 'up') plan.in.push({r, qty:r.diff, v:r.pmp > 0 ? r.pmp : null, src:r.pmpSrc, motivo:r.cause ? CAUSES[r.cause] : 'Sobra en bodega'});
-      if (r.st === 'down') plan.out.push({r, qty:-r.diff, v:r.pmp > 0 ? r.pmp : null, src:r.pmpSrc, motivo:r.cause ? CAUSES[r.cause] : 'Falta en bodega'});
+      if (r.st === 'up') plan.in.push({r, qty:r.pend ?? r.diff, v:r.pmp > 0 ? r.pmp : null, src:r.pmpSrc, motivo:r.cause ? CAUSES[r.cause] : 'Sobra en bodega'});
+      if (r.st === 'down') plan.out.push({r, qty:-(r.pend ?? r.diff), v:r.pmp > 0 ? r.pmp : null, src:r.pmpSrc, motivo:r.cause ? CAUSES[r.cause] : 'Falta en bodega'});
     }
     plan.um = R.filter(r => r.umInfo && (!lin || (r.linea || '') === lin)).map(r => ({r}));
     const byCode = (a, b) => String(a.r.code).localeCompare(String(b.r.code), 'es', {numeric:true});
@@ -997,6 +1052,7 @@
   }
 
   function render(){
+    state.docGroupsMain = detectarAjustes(state.mov);
     const base = compute(state.mov);
     state.rows = base.rows; state.zero = base.zero; state.orphan = base.orphan;
     computeCheck();
@@ -1006,8 +1062,10 @@
     renderStepsPanel(reg);
     const plan = state.view === 'plan';
     $('planBox').hidden = !plan; $('filtersBar').hidden = plan; $('tablebox').hidden = plan; $('summary').hidden = plan; $('copyNote').hidden = plan;
+    const boxMain = $('ajDocsMain');
+    if (boxMain){ boxMain.hidden = chk; if (!chk) renderAjDocs('ajDocsMain', state.docGroupsMain, true); }
     if (plan){ renderPlan(); $('foot').innerHTML = ''; return; }
-    if (chk) renderAjDocs();
+    if (chk) renderAjDocs('ajDocs', state.mov2 ? state.docGroups : [], false);
     const all = reg ? state.rows : chk ? state.checkRows : state.zero, F = reg ? REG_FILTERS : chk ? CHECK_FILTERS : ZERO_FILTERS, cols = reg ? REG_COLS : chk ? CHECK_COLS : ZERO_COLS;
 
     // Resumen
@@ -1015,7 +1073,7 @@
       if (!state.mov2) $('summary').innerHTML = '';
       else {
         const n = k => all.filter(r => r.ck === k).length;
-        const ajDocs = state.docGroups.filter(g => state.ajSel.has(g.id));
+        const ajDocs = state.docGroups.filter(ajMarcado);
         $('summary').innerHTML = `
         <button class="rx-card up" type="button" data-go="ok"><span class="lbl">Quedaron bien</span><span class="big">${fmt(n('ok'))}</span><span class="note">de ${fmt(all.length)} productos revisados</span></button>
         <button class="rx-card down" type="button" data-go="wrong"><span class="lbl">Ajuste con diferencia</span><span class="big">${fmt(n('wrong'))}</span><span class="note">se ajustó una cantidad distinta</span></button>
@@ -1095,7 +1153,7 @@
     'Costo a usar (c/u)': r.cost && r.cost.need ? r.cost.costos.map(c => (c.v != null ? Math.round(c.v * 100) / 100 : 'factura') + ' (' + c.doc + ')').join(' · ') : '',
     'PMP correcto hoy': r.cost && r.cost.corr ? Math.round(r.cost.corr.pmp * 100) / 100 : '',
     'Ajuste de valor': r.cost && r.cost.corr ? Math.round(r.cost.corr.ajuste) : '',
-    'Cantidad a ajustar': r.diff != null && Math.abs(r.diff) > EPS ? Math.abs(r.diff) : '',
+    'Cantidad a ajustar': r.st === 'done' ? 0 : (r.pend ?? r.diff) != null && Math.abs(r.pend ?? r.diff) > EPS ? Math.abs(r.pend ?? r.diff) : '',
     'Contado': r.s ? r.s.stock : '', 'Fecha conteo': r.counted ? fmtDate(r.s.fecha, true) : '', 'Recuento': r.s && r.s.recontado ? 'Sí' : '',
     'Movimientos desde el conteo': r.counted ? r.ins - r.outs : '', 'Debería tener Defontana hoy': r.realNow ?? '', 'Tiene Defontana hoy': hoyDe(r) ?? '',
     'Ajuste a hacer hoy': ajusteHoy(r) ?? '', 'Defontana al conteo': r.sysAtCount ?? '', 'Diferencia al conteo': r.diff ?? '',
@@ -1156,7 +1214,7 @@
         state.open.clear();
         if (key === 'mov') fillBodegas();
         if (key === 'stock') fillLineas();
-        if (key === 'mov2'){ state.ajSel = null; if (!state.mov || !state.mov.length) { state.mov = data; fillBodegas(); } }
+        if (key === 'mov2'){ if (!state.mov || !state.mov.length) { state.mov = data; fillBodegas(); } }
         render();
         if (key === 'mov' || key === 'mov2'){ avisoGuardado(st, guardarArchivo(key === 'mov' ? 'informe' : 'informe_ajustes', file)); if (key === 'mov2') guardarEstado(); }
       }).catch(e => { drop.classList.remove('ok'); drop.classList.add('err'); st.textContent = e.message || 'No se pudo leer el archivo.'; });
@@ -1191,18 +1249,30 @@
     $('stRecount').textContent = 'Excel con el código y el físico contado hoy: reemplaza el conteo de esos productos';
     render(); refreshRecountStatus();
   });
-  $('ajDocs').addEventListener('click', e => {
-    const b = e.target.closest('[data-all]'); if (!b) return;
-    const v = b.dataset.all;
-    state.ajOpen = true;
-    state.ajSel = new Set(v === '1' ? state.docGroups.map(g => g.id) : v === 'auto' ? state.docGroups.filter(g => g.auto).map(g => g.id) : []);
-    render(); guardarEstado();
-  });
-  $('ajDocs').addEventListener('toggle', e => { if (e.target.tagName === 'DETAILS') state.ajOpen = e.target.open; }, true);
-  $('ajDocs').addEventListener('change', e => {
-    const c = e.target.closest('input[data-doc]'); if (!c) return;
-    if (c.checked) state.ajSel.add(c.dataset.doc); else state.ajSel.delete(c.dataset.doc);
-    render(); guardarEstado();
+  ['ajDocs', 'ajDocsMain'].forEach(id => {
+    const box = $(id); if (!box) return;
+    const grupos = () => id === 'ajDocs' ? state.docGroups : state.docGroupsMain;
+    box.addEventListener('click', e => {
+      const b = e.target.closest('[data-all]'); if (!b) return;
+      const v = b.dataset.all, ids = grupos().map(g => g.id);
+      state.ajOpen = true;
+      ids.forEach(x => { state.ajSi.delete(x); state.ajNo.delete(x); });
+      if (v === '1') ids.forEach(x => state.ajSi.add(x));
+      if (v === '0') ids.forEach(x => state.ajNo.add(x));
+      render(); guardarEstado();
+    });
+    box.addEventListener('toggle', e => {
+      if (e.target.tagName !== 'DETAILS') return;
+      if (e.target.classList.contains('ajbox')) state.ajMainOpen = e.target.open; else state.ajOpen = e.target.open;
+    }, true);
+    box.addEventListener('change', e => {
+      const c = e.target.closest('input[data-doc]'); if (!c) return;
+      const id = c.dataset.doc, g = grupos().find(x => x.id === id);
+      state.ajSi.delete(id); state.ajNo.delete(id);
+      if (c.checked && !(g && g.auto)) state.ajSi.add(id);
+      if (!c.checked && g && g.auto) state.ajNo.add(id);
+      render(); guardarEstado();
+    });
   });
 
   // ---------- Eventos ----------
@@ -1271,7 +1341,9 @@
         const e = await (await fetch(urlDe('estado'), {credentials:'same-origin'})).json();
         if (e.recount){ state.recount = new Map(Object.entries(e.recount).map(([k, v]) => [k, {qty: v.qty, fecha: new Date(v.fecha)}])); }
         if (e.pmp) state.pmpEdit = new Map(Object.entries(e.pmp));
-        if (e.ajSel && state.mov2) state.ajSel = new Set(e.ajSel);
+        if (e.ajSi) state.ajSi = new Set(e.ajSi);
+        if (e.ajNo) state.ajNo = new Set(e.ajNo);
+        if (e.ajSel && !e.ajSi) state.ajSi = new Set(e.ajSel);   // formato anterior
       } catch(_){}
     }
     state.cargando = false;
