@@ -179,7 +179,7 @@
   }
 
   // ---------- Estado ----------
-  const state = {stock:conteoDelSistema(), mov:[], view:'reg', filter:{reg:'all', zero:'all', check:'all'}, mov2:null, ajSi:new Set(), ajNo:new Set(), docGroupsMain:[], checkRows:[], docGroups:[],
+  const state = {stock:conteoDelSistema(), mov:[], view:'reg', filter:{reg:'all', zero:'all', check:'all'}, mov2:null, ajustes:null, ajSi:new Set(), ajNo:new Set(), docGroupsMain:[], checkRows:[], docGroups:[],
     sort:{reg:{k:'code', d:1}, zero:{k:'fecha', d:1}, check:{k:'code', d:1}}, open:new Set(), pmpEdit:new Map(), recount:leerRecuentos(), rows:[], zero:[]};
 
   function fillBodegas(){
@@ -363,11 +363,14 @@
       const porArt = [];
       for (const list of byArt.values()){
         let cum = 0; const votes = new Map();
-        for (const m of list){ cum += signed(m); if (m.saldo != null){ const v = Math.round((m.saldo - cum) * 1e6) / 1e6; votes.set(v, (votes.get(v) || 0) + 1); } }
-        if (!votes.size) continue;
+        // Las líneas agregadas desde el archivo de ajustes traen el saldo de otro informe: solo votan si no hay otras
+        const votesExt = new Map();
+        for (const m of list){ cum += signed(m); if (m.saldo != null){ const v = Math.round((m.saldo - cum) * 1e6) / 1e6, V = m._ext ? votesExt : votes; V.set(v, (V.get(v) || 0) + 1); } }
+        const usar = votes.size ? votes : votesExt;
+        if (!usar.size) continue;
         let init = null, best = 0;
-        for (const [v, n] of votes) if (n > best){ init = v; best = n; }
-        const last = list[list.length - 1];
+        for (const [v, n] of usar) if (n > best){ init = v; best = n; }
+        const last = [...list].reverse().find(m => !m._ext && m.saldo != null) || list[list.length - 1];
         if (last.saldo != null) sysNow = (sysNow || 0) + last.saldo;
         sysCalc = (sysCalc || 0) + init + cum;
         porArt.push({art: list[0].art, hoy: Math.round((init + cum) * 1e6) / 1e6, list});
@@ -396,7 +399,8 @@
       else if (diff == null) st = 'nodata';
       else st = diff > EPS ? 'up' : diff < -EPS ? 'down' : 'ok';
       const zeros = docs.filter(m => !m._ajc && m.valor != null && Math.abs(m.valor) < EPS && m.qty > EPS).length;
-      const cost = porArt.length > 1 ? costReviewArts(porArt) : costReview(docs, sysCalc);
+      let cost = porArt.length > 1 ? costReviewArts(porArt) : costReview(docs, sysCalc);
+      if (cost && !cost.need && costDocs.length) cost = null;   // el costo ya se ajustó: no hace falta otro aviso
       const dx = counted ? diagnose(s, docs.filter(m => !m._aj && !m._ajc), after, diff, sysAtCount, sameNet, zeros) : {cause:null, obs:[]};
       if (counted && umInfo && sysAtCount != null){
         const de = esc(umInfo.de), a = esc(umInfo.a), hoy = sysCalc ?? sysNow;
@@ -423,7 +427,8 @@
       // Ya se hicieron comprobantes de ajuste: lo que queda por ajustar es lo que falta para llegar al stock real hoy
       let pend = null;
       const docTxtAj = L => L.map(m => `${m.tipo} #${m.folio} (${m.kind === 'in' ? '+' : '−'}${fmt(m.qty)})`).join(', ');
-      if (costDocs.length) dx.obs.unshift(`Ajuste de costo ya hecho: ${esc(docTxtAj(costDocs))}.` + (pm ? ` PMP hoy: ${money(pm.v)}.` : ''));
+      const costTxt = costDocs.map(m => `${m.tipo} #${m.folio} (${m.qty > EPS ? (m.kind === 'in' ? '+' : '−') + fmt(m.qty) + ' · ' : ''}${money((m.kind === 'in' ? 1 : -1) * (m.valor || 0))})`).join(', ');
+      if (costDocs.length) dx.obs.unshift(`Ajuste de costo ya hecho: ${esc(costTxt)}.` + (pm ? ` PMP hoy: ${money(pm.v)}.` : ''));
       if (counted && ajDocs.length && diff != null){
         const hoy = sysCalc ?? sysNow;
         pend = hoy != null && realNow != null ? realNow - hoy : null;
@@ -648,6 +653,22 @@
 
   // ---------- Comprobantes de ajuste ----------
   const docId = m => [strip(m.tipo), m.folio, dayKey(m.fecha)].join('|');
+  // Archivo "Ajustes hechos en Defontana": sus comprobantes son la regularización ya hecha. Si el
+  // informe principal no los trae (se descargó antes), se agregan a sus documentos.
+  const ajFileIds = () => new Set((state.ajustes || []).map(docId));
+  const lineSig = m => [docId(m), norm(m.art), m.kind, m.qty].join('|');
+  const mezclas = new WeakMap();
+  function conAjustes(mov){
+    const aj = state.ajustes;
+    if (!aj || !aj.length) return mov || [];
+    const memo = mov && mezclas.get(mov);
+    if (memo && memo.aj === aj) return memo.list;
+    const base = mov || [], have = new Set(base.map(lineSig));
+    const extra = aj.filter(m => !have.has(lineSig(m))).map(m => ({...m, i: 1e7 + m.i, _ext: true}));
+    const list = extra.length ? [...base, ...extra].sort((a, b) => (a.fecha || 0) - (b.fecha || 0) || a.i - b.i) : base;
+    if (mov) mezclas.set(mov, {aj, list});
+    return list;
+  }
   // Un comprobante se toma como ajuste si lo marcó la usuaria, o si se sugiere y no lo desmarcó
   const ajMarcado = g => state.ajSi.has(g.id) || (g.auto && !state.ajNo.has(g.id));
   // Busca en los documentos posteriores al conteo los comprobantes de regularización y los separa:
@@ -676,20 +697,27 @@
       for (const m of post){
         const id = docId(m);
         let g = groups.get(id);
-        if (!g){ g = {id, tipo:m.tipo, folio:m.folio, fecha:m.fecha, motivo:m.motivo || '', tercero:false, lines:0, match:0, cost:0, valor:0}; groups.set(id, g); }
+          if (!g){ g = {id, tipo:m.tipo, folio:m.folio, fecha:m.fecha, motivo:m.motivo || '', tercero:false, lines:0, match:0, cost:0, valor:0}; groups.set(id, g); }
         if (m.tercero) g.tercero = true;
         if (m._par || (m.qty <= EPS && Math.abs(m.valor || 0) > EPS)) g.cost++;
         else if (r.diff != null && near(m.qty, Math.abs(r.diff)) && ((r.diff < 0 && m.kind === 'out') || (r.diff > 0 && m.kind === 'in'))) g.match++;
       }
     }
+    // Los comprobantes del archivo de ajustes aparecen siempre, aunque sean de productos sin contar
+    const delArchivo = ajFileIds();
+    for (const m of movList){
+      const id = docId(m);
+      if (delArchivo.has(id) && !groups.has(id)) groups.set(id, {id, tipo:m.tipo, folio:m.folio, fecha:m.fecha, motivo:m.motivo || '', tercero:false, lines:0, match:0, cost:0, valor:0});
+    }
     const list = [...groups.values()];
     const tot = new Map();
-    for (const m of movList){ const t = tot.get(docId(m)) || {lines:0, valor:0}; t.lines++; t.valor += (m.kind === 'in' ? 1 : -1) * (m.valor || 0); tot.set(docId(m), t); }
+    for (const m of movList){ const t = tot.get(docId(m)) || {lines:0, valor:0, q0:0}; t.lines++; if (m.qty <= EPS) t.q0++; t.valor += (m.kind === 'in' ? 1 : -1) * (m.valor || 0); tot.set(docId(m), t); }
     list.forEach(g => {
       const t = tot.get(g.id); if (t){ g.lines = t.lines; g.valor = t.valor; }
-      g.kind = g.cost > 0 && g.cost >= g.match ? 'costo' : 'cantidad';
+      g.kind = (g.cost > 0 && g.cost >= g.match) || (t && t.q0 / t.lines >= 0.6) ? 'costo' : 'cantidad';
+      g.archivo = delArchivo.has(g.id);
       // Una compra, venta o despacho (con proveedor o cliente) no es un ajuste, aunque calce: es un documento atrasado
-      g.auto = /AJUST/.test(strip(g.tipo + ' ' + g.motivo)) || (!g.tercero && ((g.lines >= 3 && g.match / g.lines >= 0.6) || g.cost / g.lines >= 0.6));
+      g.auto = g.archivo || /AJUST/.test(strip(g.tipo + ' ' + g.motivo)) || (!g.tercero && ((g.lines >= 3 && g.match / g.lines >= 0.6) || g.cost / g.lines >= 0.6));
     });
     list.sort((a, b) => (b.auto - a.auto) || (b.fecha - a.fecha));
     const marcados = new Set(list.filter(ajMarcado).map(g => g.id));
@@ -704,8 +732,9 @@
   function computeCheck(){
     state.checkRows = []; state.docGroups = [];
     if (!state.mov2) return;
-    state.docGroups = detectarAjustes(state.mov2);
-    const res = compute(state.mov2).rows;
+    const mov2 = conAjustes(state.mov2);
+    state.docGroups = detectarAjustes(mov2);
+    const res = compute(mov2).rows;
     for (const r of res){
       const hasAj = Math.abs(r.aj) > EPS;
       if (!r.counted || r.diff == null){ if (hasAj) state.checkRows.push({...r, ck:'other', expected:null, gap:null, cobs:[!r.counted ? 'Se ajustó, pero este producto no está contado.' : 'Se ajustó, pero no hay saldo de Defontana al momento del conteo para comparar.']}); continue; }
@@ -1052,8 +1081,9 @@
   }
 
   function render(){
-    state.docGroupsMain = detectarAjustes(state.mov);
-    const base = compute(state.mov);
+    const mov = conAjustes(state.mov);
+    state.docGroupsMain = detectarAjustes(mov);
+    const base = compute(mov);
     state.rows = base.rows; state.zero = base.zero; state.orphan = base.orphan;
     computeCheck();
     const reg = state.view === 'reg', chk = state.view === 'check';
@@ -1216,17 +1246,26 @@
         if (key === 'stock') fillLineas();
         if (key === 'mov2'){ if (!state.mov || !state.mov.length) { state.mov = data; fillBodegas(); } }
         render();
-        if (key === 'mov' || key === 'mov2'){ avisoGuardado(st, guardarArchivo(key === 'mov' ? 'informe' : 'informe_ajustes', file)); if (key === 'mov2') guardarEstado(); }
+        if (key === 'ajustes') $('btnClearAjustes').hidden = false;
+        if (key === 'mov' || key === 'mov2' || key === 'ajustes'){ avisoGuardado(st, guardarArchivo({mov:'informe', mov2:'informe_ajustes', ajustes:'ajustes'}[key], file)); if (key === 'mov2') guardarEstado(); }
       }).catch(e => { drop.classList.remove('ok'); drop.classList.add('err'); st.textContent = e.message || 'No se pudo leer el archivo.'; });
     };
     input.addEventListener('change', () => { handle(input.files[0]); input.value = ''; });
     ['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
     ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, () => drop.classList.remove('over')));
     drop.addEventListener('drop', e => { e.preventDefault(); handle(e.dataTransfer.files[0]); });
+    return handle;
   }
   setupLoader('fileStock', 'dropStock', 'stStock', parseStock, 'stock', 'códigos');
   setupLoader('fileMov', 'dropMov', 'stMov', parseMov, 'mov', 'líneas de documentos');
   setupLoader('fileMov2', 'dropMov2', 'stMov2', parseMov, 'mov2', 'líneas de documentos');
+  const cargarAjustes = setupLoader('fileAjustes', 'dropAjustes', 'stAjustes', parseMov, 'ajustes', 'líneas de ajuste (se toman como regularización ya hecha)');
+  $('btnClearAjustes').addEventListener('click', () => {
+    state.ajustes = null; $('btnClearAjustes').hidden = true; $('dropAjustes').classList.remove('ok');
+    $('stAjustes').textContent = 'Informe de Documentos solo con los comprobantes de ajuste (costo, entradas y salidas): se toman como la regularización ya hecha';
+    if (CFG && CFG.guardar){ const fd = new FormData(); fd.append('borrar', '1'); fetch(urlDe('ajustes'), {method:'POST', body:fd, headers:{'X-CSRFToken': CFG.csrf}, credentials:'same-origin'}).catch(() => {}); }
+    render();
+  });
   function refreshRecountStatus(){
     const n = state.recount.size;
     $('btnClearRecount').hidden = !n;
@@ -1236,7 +1275,10 @@
     const file = $('fileRecount').files[0]; $('fileRecount').value = ''; if (!file) return;
     file.arrayBuffer().then(buf => {
       const wb = XLSX.read(buf, {type:'array'});
-      const data = parseRecount(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header:1, raw:true, defval:null, blankrows:false}));
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header:1, raw:true, defval:null, blankrows:false});
+      // Si es un Informe de Documentos (con ajustes), va al espacio de ajustes hechos
+      if (readTable(rows, ['ARTICULO', 'MOVIMIENTO'])){ $('stRecount').textContent = 'Ese archivo es un Informe de Documentos: se cargó como “Ajustes hechos en Defontana”.'; cargarAjustes(file); return; }
+      const data = parseRecount(rows);
       if (!data.length) throw new Error('El archivo no tiene recuentos.');
       for (const d of data) state.recount.set(d.key, {qty: d.qty, fecha: d.fecha});
       guardarRecuentos(); $('dropRecount').classList.remove('err'); $('dropRecount').classList.add('ok');
@@ -1273,6 +1315,37 @@
       if (!c.checked && g && g.auto) state.ajNo.add(id);
       render(); guardarEstado();
     });
+  });
+
+  // ---------- Plantillas de ejemplo ----------
+  // Un Excel por cada archivo que se sube, con las columnas que el programa lee y filas de ejemplo.
+  // La primera hoja es la que se lee; la segunda explica qué va en cada columna.
+  const COLS_INFORME = ['Tipo Documento', 'Estado', 'Folio', 'Fecha', 'Bod. Origen', 'Bod. Destino', 'Motivo', 'Movimiento', 'Proveedor', 'Referencia', 'Cliente', 'Artículo', 'Descripción', 'Cant. Movimiento', 'U. Medida', 'Valor Movimiento', 'Saldo Inventario', 'Valor Inventario'];
+  const CABECERA_INFORME = [['Informe de Documentos de Inventario'], ['Empresa: (tu empresa)'], ['Fecha de generación: ' + fmtDate(new Date())], COLS_INFORME];
+  const PLANTILLAS = {
+    conteo: {archivo: 'ejemplo-conteo-fisico.xlsx', filas: [
+      ['Código', 'Nombre', 'Unidad Medida', 'Stock físico', 'Fecha y hora del conteo', 'Línea de negocio'],
+      ['INS-001', 'Producto de ejemplo', 'UN', 12, '19-08-2026 17:42', 'INSUMOS PRODUCCION'],
+      ['20006-220-1-1', 'Cable de ejemplo', 'FT', 38, '06-08-2026 11:45', 'INSUMOS PRODUCCION']],
+      ayuda: [['Columna', 'Qué va'], ['Código', 'Código del producto (obligatorio)'], ['Stock físico', 'Lo que se contó (obligatorio)'], ['Fecha y hora del conteo', 'Cuándo se contó: los documentos posteriores se toman como movimientos después del conteo'], ['Unidad Medida', 'Unidad en que se contó (opcional)'], ['Línea de negocio', 'Opcional, para filtrar'], ['', 'Dentro del ERP el conteo se toma solo desde Stock y conteo: no hace falta subirlo.']]},
+    informe: {archivo: 'ejemplo-informe-de-documentos.xlsx', filas: [...CABECERA_INFORME,
+      ['PARTE DE ENTRADA', 'Aprobado', 55, '16-02-2026', '', 'BODEGA CENTRAL', 'COMPRA', 'Ingreso', '77.458.590-7 - PROVEEDOR', '', '', 'INS-001', 'Producto de ejemplo', 20, 'UN', 21600, 20, 21600],
+      ['PARTE DE SALIDA', 'Aprobado', 27, '08-06-2026', 'BODEGA CENTRAL', '', 'SALIDA', 'Egreso', '', 'OT 6230', '', 'INS-001', 'Producto de ejemplo', 8, 'UN', 8640, 12, 12960]],
+      ayuda: [['', 'Es el Informe de Documentos de Inventario de Defontana, tal cual se descarga (ingresos y egresos, todas las bodegas).'], ['', 'Descárgalo desde el inicio del año o del período, hasta hoy: el programa calcula el saldo al conteo y el de hoy.'], ['Columnas que se leen', 'Tipo Documento, Estado, Folio, Fecha, Bodegas, Motivo, Movimiento (Ingreso/Egreso), Artículo, Descripción, Cant. Movimiento, U. Medida, Valor Movimiento, Saldo Inventario y Valor Inventario']]},
+    ajustes: {archivo: 'ejemplo-ajustes-hechos.xlsx', filas: [...CABECERA_INFORME,
+      ['AJUSTE COSTO ENTRADA', 'Aprobado', 1, '29-09-2026', '', 'BODEGA CENTRAL', 'ENTRADA', 'Ingreso', '', '', '', 'INS-001', 'Producto de ejemplo', 0, 'UN', 71028, 12, 71028],
+      ['PARTE DE ENTRADA', 'Aprobado', 465, '29-09-2026', '', 'BODEGA CENTRAL', 'ENTRADA', 'Ingreso', '', '', '', '00-FSR-SCW-07', 'Otro producto', 1, 'UN', 427, 20, 8540],
+      ['PARTE DE SALIDA', 'Aprobado', 292, '29-09-2026', 'BODEGA CENTRAL', '', 'SALIDA', 'Egreso', '', '', '', 'EM-05', 'Otro producto', 1, 'UN', 0, 0, 0]],
+      ayuda: [['', 'Es el mismo Informe de Documentos de Defontana, filtrado solo a los comprobantes de ajuste que hiciste después del conteo.'], ['Ajuste de costo', 'Líneas con cantidad 0 y valor (p. ej. AJUSTE COSTO ENTRADA / SALIDA): se dan por corregido el costo.'], ['Ajuste de cantidad', 'Entradas o salidas por la diferencia del conteo (p. ej. PARTE DE ENTRADA / PARTE DE SALIDA): no se cuentan como movimientos y el producto queda “Ya ajustado”.'], ['', 'Todos los comprobantes de este archivo se toman como ajustes. Puedes desmarcar alguno en “Comprobantes de ajuste ya hechos”.']]},
+    recuentos: {archivo: 'ejemplo-recuentos.xlsx', filas: [['Código', 'Físico', 'Fecha'], ['INS-001', 11, fmtDate(new Date())], ['20006-220-1-1', 38, fmtDate(new Date())]],
+      ayuda: [['Columna', 'Qué va'], ['Código', 'Código del producto'], ['Físico', 'Lo que se volvió a contar hoy: reemplaza el conteo original'], ['Fecha', 'Opcional; si no va, se usa hoy']]}
+  };
+  $('plantillas').addEventListener('click', e => {
+    const b = e.target.closest('[data-plantilla]'); if (!b) return;
+    const p = PLANTILLAS[b.dataset.plantilla], wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(p.filas), 'Datos');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(p.ayuda), 'Instrucciones');
+    XLSX.writeFile(wb, p.archivo);
   });
 
   // ---------- Eventos ----------
@@ -1335,6 +1408,8 @@
     };
     await leerInforme('informe', 'mov', 'dropMov', 'stMov');
     await leerInforme('informe_ajustes', 'mov2', 'dropMov2', 'stMov2');
+    await leerInforme('ajustes', 'ajustes', 'dropAjustes', 'stAjustes');
+    if (state.ajustes) $('btnClearAjustes').hidden = false;
     if (!state.mov.length && state.mov2) state.mov = state.mov2;
     if (g.estado){
       try {
