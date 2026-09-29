@@ -1,5 +1,6 @@
 import csv
 import io
+import json
 from collections import Counter
 from datetime import date, datetime, timezone
 
@@ -13,6 +14,7 @@ from app.inventario import bp
 from app.inventario.forms import AccionForm, ImportarCsvForm
 from app.extensions import db
 from app.models.conteo_inventario import ItemConteoInventario, TomaInventario, TomaInventarioDetalle
+from app.models.regularizacion import RegularizacionArchivo
 from app.utils.decorators import require_permission
 from app.utils.importar_conteo import (
     articulos_fuera_de_ambas_planillas,
@@ -983,41 +985,141 @@ def cruce_datos_excel():
 # --- Regularización: conteo físico contra el Informe de Documentos de Defontana ---
 
 
+def _fila_conteo(i):
+    """Una fila del conteo para la página: vale para el cruce vivo y para una toma cerrada."""
+    return [
+        i.codigo,
+        i.nombre or "",
+        float(i.cantidad_fisica) if i.cantidad_fisica is not None else None,
+        "Contado" if i.cantidad_fisica is not None else "Pendiente",
+        i.contado_por.nombre_completo if i.contado_por else "",
+        format_fecha_hora(i.contado_en),
+        # unidad en que se cuenta (la que muestra Stock y conteo); si difiere de la de Defontana se convierte
+        i.unidad_qms or i.unidad_defontana or "",
+        i.linea_negocio or "",
+    ]
+
+
 @bp.route("/regularizacion")
 @require_permission("inventario", "ver")
 def regularizacion():
     """Cruce del conteo físico con el Informe de Documentos de Defontana.
 
-    El cálculo corre en el navegador (static/js/regularizacion.js): el informe de
-    Defontana se lee ahí y no se sube al servidor. Esta vista solo entrega el
-    conteo de "Stock y conteo" con la fecha y hora de cada toma.
+    El cálculo corre en el navegador (static/js/regularizacion.js). Esta vista
+    entrega el conteo con la fecha y hora de cada toma: el conteo en curso de
+    "Stock y conteo" o, si se elige (o si el conteo en curso está vacío porque se
+    cerró la toma), una toma cerrada del historial. También entrega lo guardado
+    de la última vez (informes y estado) para no tener que volver a subirlo.
     """
+    empresa_id = current_user.empresa_id
     items = (
-        ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id)
+        ItemConteoInventario.query.filter_by(empresa_id=empresa_id)
         .options(joinedload(ItemConteoInventario.contado_por))
         .order_by(ItemConteoInventario.codigo)
         .all()
     )
-    conteo = [
-        [
-            i.codigo,
-            i.nombre or "",
-            float(i.cantidad_fisica) if i.contado else None,
-            "Contado" if i.contado else "Pendiente",
-            i.contado_por.nombre_completo if i.contado_por else "",
-            format_fecha_hora(i.contado_en),
-            # unidad en que se cuenta (la que muestra Stock y conteo); si difiere de la de Defontana se convierte
-            i.unidad_qms or i.unidad_defontana or "",
-            i.linea_negocio or "",
-        ]
-        for i in items
-    ]
+    contados_vivo = sum(1 for i in items if i.contado)
+    tomas = (
+        TomaInventario.query.filter_by(empresa_id=empresa_id)
+        .order_by(TomaInventario.fecha_fin.desc())
+        .limit(12)
+        .all()
+    )
+
+    fuente = request.args.get("conteo")
+    if fuente is None:
+        # Sin elegir: el conteo en curso; si está vacío (se cerró la toma), la última toma cerrada
+        fuente = "actual" if contados_vivo or not tomas else str(tomas[0].id)
+
+    toma = None
+    if fuente != "actual" and fuente.isdigit():
+        toma = TomaInventario.query.filter_by(empresa_id=empresa_id, id=int(fuente)).first()
+    if toma is not None:
+        filas = (
+            TomaInventarioDetalle.query.filter_by(toma_id=toma.id)
+            .options(joinedload(TomaInventarioDetalle.contado_por))
+            .order_by(TomaInventarioDetalle.codigo)
+            .all()
+        )
+        fuente = str(toma.id)
+    else:
+        filas, fuente = items, "actual"
+
+    conteo = [_fila_conteo(i) for i in filas]
+    guardados = {
+        g.clave: {
+            "nombre": g.nombre or "",
+            "fecha": format_fecha_hora(g.actualizado_en),
+            "por": g.actualizado_por.nombre_completo if g.actualizado_por else "",
+            "url": url_for("inventario.regularizacion_guardado", clave=g.clave),
+        }
+        for g in RegularizacionArchivo.query.filter_by(empresa_id=empresa_id).all()
+    }
     return render_template(
         "inventario/regularizacion.html",
         conteo=conteo,
-        total=len(items),
-        contados=sum(1 for i in items if i.contado),
+        total=len(filas),
+        contados=sum(1 for f in conteo if f[2] is not None),
+        fuente=fuente,
+        toma=toma,
+        tomas=tomas,
+        contados_vivo=contados_vivo,
+        guardados=guardados,
+        puede_guardar=current_user.tiene_permiso("inventario", "editar", submodulo="regularizacion"),
     )
+
+
+@bp.route("/regularizacion/guardado/<clave>", methods=["GET", "POST"])
+@require_permission("inventario", "ver")
+def regularizacion_guardado(clave):
+    """Lee (GET) o guarda (POST) un informe o el estado del submódulo Regularización.
+
+    Guardar reemplaza lo anterior y exige permiso de edición: lo guardado lo ven
+    todos los que entran al submódulo.
+    """
+    if clave not in RegularizacionArchivo.CLAVES:
+        abort(404)
+    registro = RegularizacionArchivo.query.filter_by(empresa_id=current_user.empresa_id, clave=clave).first()
+
+    if request.method == "GET":
+        if registro is None:
+            abort(404)
+        respuesta = make_response(registro.contenido)
+        respuesta.headers["Content-Type"] = "application/json" if clave == "estado" else "application/octet-stream"
+        respuesta.headers["Cache-Control"] = "no-store"
+        return respuesta
+
+    if not current_user.tiene_permiso("inventario", "editar", submodulo="regularizacion"):
+        abort(403)
+    if request.form.get("borrar"):
+        if registro is not None:
+            db.session.delete(registro)
+            db.session.commit()
+        return jsonify(ok=True)
+
+    if clave == "estado":
+        contenido, nombre = request.get_data(), None
+        try:
+            json.loads(contenido or b"{}")
+        except ValueError:
+            abort(400)
+    else:
+        archivo = request.files.get("archivo")
+        if archivo is None or not archivo.filename:
+            abort(400)
+        contenido, nombre = archivo.read(), archivo.filename[:255]
+    if not contenido:
+        abort(400)
+
+    if registro is None:
+        registro = RegularizacionArchivo(empresa_id=current_user.empresa_id, clave=clave)
+        db.session.add(registro)
+    registro.contenido = contenido
+    registro.nombre = nombre
+    registro.actualizado_en = datetime.now(timezone.utc)
+    registro.actualizado_por_id = current_user.id
+    db.session.commit()
+    return jsonify(ok=True, nombre=registro.nombre or "", fecha=format_fecha_hora(registro.actualizado_en), por=current_user.nombre_completo)
 
 
 @bp.route("/conteo/importar", methods=["GET", "POST"])

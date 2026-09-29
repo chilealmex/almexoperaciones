@@ -65,6 +65,10 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
    Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
 /* Regularización de inventario (Inventario → Regularización).
    Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
+/* Regularización de inventario (Inventario → Regularización).
+   Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
+/* Regularización de inventario (Inventario → Regularización).
+   Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
 .regx{--bg:#F2F4F3; --surface:#FFFFFF; --surface2:#EDF1EF; --ink:#16201D; --muted:#5E6B66; --line:#DCE3E0;
   --accent:#245E8F; --accent-ink:#FFFFFF; --accent-soft:#E1EBF4;
   --in:#1B7446; --in-soft:#E0F2E7; --out:#B0362A; --out-soft:#FAE3E0; --warn:#8A5A00; --warn-soft:#FBEDCF; --gray-soft:#ECEFEE;
@@ -449,7 +453,38 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
   }
   function guardarRecuentos(){
     try { localStorage.setItem('regx-recuentos', JSON.stringify(Object.fromEntries([...state.recount].map(([k, v]) => [k, {qty: v.qty, fecha: +v.fecha}])))); } catch(_){}
+    guardarEstado();
   }
+
+  // ---------- Guardado en el ERP ----------
+  // Dentro del sistema la página trae #regx-config: lo subido y el estado se guardan en la base
+  // para no tener que volver a subirlos. En la versión suelta no existe y todo queda en el navegador.
+  const CFG = (() => { try { const el = document.getElementById('regx-config'); return el ? JSON.parse(el.textContent) : null; } catch(_){ return null; } })();
+  const urlDe = clave => CFG.url.replace('__CLAVE__', clave);
+  function guardarArchivo(clave, file){
+    if (!CFG || !CFG.guardar) return Promise.resolve(null);
+    const fd = new FormData(); fd.append('archivo', file, file.name);
+    return fetch(urlDe(clave), {method:'POST', body:fd, headers:{'X-CSRFToken': CFG.csrf}, credentials:'same-origin'})
+      .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
+  }
+  let estadoTimer = null;
+  function guardarEstado(){
+    if (!CFG || !CFG.guardar || state.cargando) return;
+    clearTimeout(estadoTimer);
+    estadoTimer = setTimeout(() => {
+      const body = JSON.stringify({
+        recount: Object.fromEntries([...state.recount].map(([k, v]) => [k, {qty: v.qty, fecha: +v.fecha}])),
+        pmp: Object.fromEntries(state.pmpEdit),
+        ajSel: state.ajSel ? [...state.ajSel] : null
+      });
+      fetch(urlDe('estado'), {method:'POST', body, headers:{'Content-Type':'application/json', 'X-CSRFToken': CFG.csrf}, credentials:'same-origin'}).catch(() => {});
+    }, 800);
+  }
+  const avisoGuardado = (st, p) => {
+    if (!CFG) return;
+    if (!CFG.guardar){ st.textContent += ' · no se guarda (sin permiso de edición)'; return; }
+    p.then(r => { if (r) st.textContent += ' · guardado en el sistema'; }).catch(() => { st.textContent += ' · no se pudo guardar'; });
+  };
 
   // Excel de recuentos: una fila por producto con el código y la cantidad contada hoy
   function parseRecount(rows){
@@ -766,16 +801,39 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     return {pmp: bien.valor / bien.saldo, ajuste: bien.valor - asi.valor};
   }
 
+  // ¿El costo de un ingreso a $0 ya se corrigió? Sí, si después hubo un documento que solo cambia el
+  // valor (cantidad 0) o si el PMP de hoy ya es el correcto (2% de tolerancia).
+  function costFixed(docs, j, corr){
+    const adj = docs.slice(j + 1).find(m => m.qty <= EPS && Math.abs(m.valor || 0) > EPS);
+    if (adj) return `se registró un ajuste de valor (${adj.tipo} #${adj.folio} del ${fmtDate(adj.fecha)} por ${money(adj.valor)})`;
+    const hoy = pmpAt(docs[docs.length - 1]);
+    if (corr && hoy > EPS && corr.pmp > EPS && Math.abs(hoy - corr.pmp) / corr.pmp <= 0.02) return `el PMP de hoy (${money(hoy)}) ya coincide con el correcto (${money(corr.pmp)})`;
+    return null;
+  }
+
   // ¿Hay que revisar el costo de este producto? Mira sus documentos a $0 y cómo está hoy.
   function costReview(docs, saldoHoy){
     const zeros = docs.filter(m => m.valor != null && Math.abs(m.valor) < EPS && m.qty > EPS);
     const last = docs[docs.length - 1];
     const pmpHoy = pmpAt(last);
     const sinCostoHoy = saldoHoy > EPS && last && last.valorInv != null && last.valorInv <= EPS;
-    const ins0 = zeros.filter(m => m.kind === 'in');
+    let ins0 = zeros.filter(m => m.kind === 'in');
+    // Ingresos a $0 cuyo costo ya se corrigió: se informan, pero no se piden de nuevo
+    const corr0 = ins0.length ? correctedToday(docs) : null;
+    const yaCorregidos = [];
+    ins0 = ins0.filter(m => { const f = costFixed(docs, docs.indexOf(m), corr0); if (f){ yaCorregidos.push({m, f}); return false; } return true; });
     const outsSinStock = zeros.filter(m => m.kind === 'out' && m.saldo != null && m.saldo + m.qty <= EPS);
     if (!zeros.length && !sinCostoHoy) return null;
     const txt = [], hacer = [];
+    // Sin unidades hoy en Defontana no hay stock sobre el cual cargar un ajuste de valor:
+    // el costo de esos ingresos ya salió en las salidas. Se informa, sin pedir corrección.
+    const sinUnidades = !(saldoHoy > EPS);
+    if (sinUnidades && ins0.length){
+      const r = refCost(docs, docs.length);
+      txt.push(`Entró ${fmt(ins0.reduce((a, m) => a + m.qty, 0))} a $0 (${ins0.map(m => m.tipo + ' #' + m.folio).join(', ')}), pero hoy no quedan unidades en Defontana: no se puede corregir el costo, ya salió en las salidas.` + (r ? ` Si haces una entrada de ajuste, hazla a ${money(r.v)} c/u.` : ' Si haces una entrada de ajuste, usa el costo de la factura.'));
+      ins0 = [];
+    }
+    for (const {m, f} of yaCorregidos) txt.push(`Entró ${fmt(m.qty)} a $0 con ${m.tipo} #${m.folio} del ${fmtDate(m.fecha)}, pero el costo ya se corrigió: ${f}.`);
     if (sinCostoHoy){ txt.push(`Hoy tiene ${fmt(saldoHoy)} sin costo en Defontana (PMP $0).`); hacer.push({k:'cost', txt:`Ajuste de valor: cargar el costo a las ${fmt(saldoHoy)} unidades`}); }
     const costos = [];
     for (const m of ins0){
@@ -784,16 +842,15 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
       costos.push({doc: `${m.tipo} #${m.folio}`, qty: m.qty, v: r ? r.v : null, src: r ? r.src : 'no hay compras con costo en el informe: usa el costo de la factura'});
       hacer.push({k:'cost', txt: r ? `Corregir el costo de ${m.tipo} #${m.folio}: ${fmt(m.qty)} a ${money(r.v)} c/u` : `Corregir el costo de ${m.tipo} #${m.folio} con el valor de la factura`});
     }
-    for (const m of outsSinStock){
-      const i = docs.indexOf(m), r = refCost(docs, i);
-      costos.push({doc: `entrada por ${m.tipo} #${m.folio}`, qty: m.qty, v: r ? r.v : null, src: r ? r.src : 'no hay compras con costo en el informe: usa el costo de la factura'});
-    }
-    if (outsSinStock.length){ const r = refCost(docs, docs.indexOf(outsSinStock[0])); txt.push(`Salió ${fmt(outsSinStock.reduce((a, m) => a + m.qty, 0))} sin tener stock (${outsSinStock.map(m => m.tipo + ' #' + m.folio).join(', ')}): faltó registrar el ingreso con su costo.`); hacer.push({k:'in', txt:`Parte de Entrada por ${fmt(outsSinStock.reduce((a, m) => a + m.qty, 0))} (lo que salió sin stock)` + (r ? ` a ${money(r.v)} c/u` : ' con el costo de la factura')}); }
+    // Salidas sin stock: la cantidad la corrige el ajuste por conteo (no se agrega otra entrada);
+    // solo se avisa a qué costo hacer la entrada si el plan pide una.
+    if (outsSinStock.length){ const r = refCost(docs, docs.indexOf(outsSinStock[0])); txt.push(`Salió ${fmt(outsSinStock.reduce((a, m) => a + m.qty, 0))} sin tener stock (${outsSinStock.map(m => m.tipo + ' #' + m.folio).join(', ')}): quedó sin costo. La cantidad se corrige con el ajuste por conteo` + (r ? `; si hay entrada, hazla a ${money(r.v)} c/u.` : '; si hay entrada, usa el costo de la factura.')); }
     const corr = ins0.length ? correctedToday(docs) : null;
     if (corr && Math.abs(corr.ajuste) > 0.5) hacer.push({k:'cost', txt:`Si no se puede corregir el ingreso: ajuste de valor por ${money(corr.ajuste)} (el PMP queda en ${money(corr.pmp)})`});
     if (sinCostoHoy && !ins0.length){ const r = refCost(docs, docs.length); costos.push({doc: 'stock actual', qty: saldoHoy, v: r ? r.v : null, src: r ? r.src : 'no hay compras con costo en el informe: usa el costo de la factura'}); }
-    const need = sinCostoHoy || ins0.length > 0 || outsSinStock.length > 0;
-    if (!need) txt.push(`Tuvo salidas a $0, pero hoy ya tiene costo (PMP ${money(pmpHoy)}). No hace falta corregir.`);
+    const need = sinCostoHoy || ins0.length > 0;
+    if (!need && !yaCorregidos.length) txt.push(`Tuvo salidas a $0, pero hoy ya tiene costo (PMP ${money(pmpHoy)}). No hace falta corregir.`);
+    else if (!need) txt.push('No hace falta corregir nada más.');
     return {need, txt, hacer, costos, corr};
   }
   function zeroReview(m, docs, j, pmp){
@@ -801,12 +858,16 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     const costo = r ? {v: r.v, src: r.src} : null;
     if (m.kind === 'in'){
       const corr = correctedToday(docs);
+      const f = costFixed(docs, j, corr);
+      if (f) return {need:false, costo, corr:null, txt:`No. El costo ya se corrigió: ${f}.`, hacer:'Nada: el costo ya está corregido'};
+      const saldoFin = docs[docs.length - 1].saldo;
+      if (!(saldoFin > EPS)) return {need:false, costo, corr:null, txt:'No se puede. Hoy no quedan unidades en Defontana: el costo de este ingreso ya salió en las salidas.', hacer: r ? `Nada que corregir; si haces una entrada de ajuste, hazla a ${money(r.v)} c/u` : 'Nada que corregir; si haces una entrada de ajuste, usa el costo de la factura'};
       const extra = corr && Math.abs(corr.ajuste) > 0.5 ? ` Si no se puede corregir: ajuste de valor por ${money(corr.ajuste)} (PMP queda en ${money(corr.pmp)})` : '';
       return antes > EPS
         ? {need:true, costo, corr, txt:`Sí. Entró a $0 y el PMP bajó de ${money(antes)} a ${money(pmpAt(m))}.`, hacer: (r ? `Corregir el costo del ingreso a ${money(r.v)} c/u (${money(r.v * m.qty)} en total).` : 'Corregir el costo del ingreso con la factura.') + extra}
         : {need:true, costo, corr, txt:'Sí. El producto entró sin costo y no tenía costo antes.', hacer: (r ? `Corregir el costo del ingreso a ${money(r.v)} c/u (${money(r.v * m.qty)} en total).` : 'Cargar el costo real (factura o importación).') + extra};
     }
-    if (m.saldo != null && m.saldo + m.qty <= EPS) return {need:true, costo, txt:'Sí. Salió sin tener stock en Defontana: faltó registrar el ingreso.', hacer: r ? `Parte de Entrada por ${fmt(m.qty)} a ${money(r.v)} c/u` : 'Parte de Entrada con el costo de la factura'};
+    if (m.saldo != null && m.saldo + m.qty <= EPS) return {need:false, costo, txt:'No. Salió sin tener stock en Defontana, por eso quedó sin costo. La cantidad se corrige con el ajuste por conteo.', hacer: r ? `Si el plan pide una entrada, hazla a ${money(r.v)} c/u` : 'Si el plan pide una entrada, usa el costo de la factura'};
     const hoy = pmpAt(docs[docs.length - 1]);
     return hoy > EPS
       ? {need:false, txt:`No. Salió a $0 porque en ese momento no tenía costo, pero hoy su PMP es ${money(hoy)}.`, hacer:'Nada (solo la salida quedó sin costo)'}
@@ -1398,6 +1459,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
         if (key === 'stock') fillLineas();
         if (key === 'mov2'){ state.ajSel = null; if (!state.mov || !state.mov.length) { state.mov = data; fillBodegas(); } }
         render();
+        if (key === 'mov' || key === 'mov2'){ avisoGuardado(st, guardarArchivo(key === 'mov' ? 'informe' : 'informe_ajustes', file)); if (key === 'mov2') guardarEstado(); }
       }).catch(e => { drop.classList.remove('ok'); drop.classList.add('err'); st.textContent = e.message || 'No se pudo leer el archivo.'; });
     };
     input.addEventListener('change', () => { handle(input.files[0]); input.value = ''; });
@@ -1435,13 +1497,13 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     const v = b.dataset.all;
     state.ajOpen = true;
     state.ajSel = new Set(v === '1' ? state.docGroups.map(g => g.id) : v === 'auto' ? state.docGroups.filter(g => g.auto).map(g => g.id) : []);
-    render();
+    render(); guardarEstado();
   });
   $('ajDocs').addEventListener('toggle', e => { if (e.target.tagName === 'DETAILS') state.ajOpen = e.target.open; }, true);
   $('ajDocs').addEventListener('change', e => {
     const c = e.target.closest('input[data-doc]'); if (!c) return;
     if (c.checked) state.ajSel.add(c.dataset.doc); else state.ajSel.delete(c.dataset.doc);
-    render();
+    render(); guardarEstado();
   });
 
   // ---------- Eventos ----------
@@ -1480,12 +1542,47 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     const inp = e.target.closest('input.pmp'); if (!inp) return;
     const v = num(inp.value);
     if (v == null) state.pmpEdit.delete(inp.dataset.key); else state.pmpEdit.set(inp.dataset.key, v);
+    guardarEstado();
     render();
   });
+
+  // Carga lo guardado en el sistema la última vez (informes y estado)
+  async function cargarGuardado(){
+    const g = (CFG && CFG.guardados) || {};
+    if (!Object.keys(g).length) return;
+    state.cargando = true;
+    const leerInforme = async (clave, key, dropId, statusId) => {
+      const info = g[clave]; if (!info) return;
+      $(statusId).textContent = 'Cargando ' + info.nombre + ' guardado…';
+      try {
+        const r = await fetch(urlDe(clave), {credentials:'same-origin'});
+        if (!r.ok) throw new Error();
+        const wb = XLSX.read(await r.arrayBuffer(), {type:'array'});
+        const data = parseMov(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header:1, raw:true, defval:null, blankrows:false}));
+        state[key] = data;
+        $(dropId).classList.add('ok');
+        $(statusId).textContent = `${info.nombre} · ${fmt(data.length)} líneas · guardado el ${info.fecha}${info.por ? ' por ' + info.por : ''}. Sube otro para reemplazarlo.`;
+      } catch(_){ $(statusId).textContent = 'No se pudo cargar el informe guardado; súbelo de nuevo.'; }
+    };
+    await leerInforme('informe', 'mov', 'dropMov', 'stMov');
+    await leerInforme('informe_ajustes', 'mov2', 'dropMov2', 'stMov2');
+    if (!state.mov.length && state.mov2) state.mov = state.mov2;
+    if (g.estado){
+      try {
+        const e = await (await fetch(urlDe('estado'), {credentials:'same-origin'})).json();
+        if (e.recount){ state.recount = new Map(Object.entries(e.recount).map(([k, v]) => [k, {qty: v.qty, fecha: new Date(v.fecha)}])); }
+        if (e.pmp) state.pmpEdit = new Map(Object.entries(e.pmp));
+        if (e.ajSel && state.mov2) state.ajSel = new Set(e.ajSel);
+      } catch(_){}
+    }
+    state.cargando = false;
+    fillBodegas(); render(); refreshRecountStatus();
+  }
 
   fillBodegas();
   fillLineas();
   render();
   refreshRecountStatus();
+  cargarGuardado();
 })();
 </script>

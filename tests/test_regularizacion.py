@@ -1,16 +1,24 @@
 """Submódulo Regularización: la página entrega el conteo para cruzarlo con Defontana en el navegador."""
 
+import io
 import json
 import re
 from datetime import datetime
 
 from app.models.conteo_inventario import ItemConteoInventario
+from app.models.regularizacion import RegularizacionArchivo
 from tests.conftest import login
 
 
 def _conteo_de_la_pagina(cuerpo):
     datos = re.search(r'<script type="application/json" id="regx-conteo">(.*?)</script>', cuerpo, re.S)
     assert datos, "la página debe traer el conteo como JSON"
+    return json.loads(datos.group(1))
+
+
+def _config_de_la_pagina(cuerpo):
+    datos = re.search(r'<script type="application/json" id="regx-config">(.*?)</script>', cuerpo, re.S)
+    assert datos, "la página debe traer la configuración de guardado"
     return json.loads(datos.group(1))
 
 
@@ -77,3 +85,92 @@ def test_aparece_en_el_menu_de_inventario(client, usuario_bodega):
     cuerpo = client.get("/inventario/stock").get_data(as_text=True)
     assert "/inventario/regularizacion" in cuerpo
     assert "Regularización" in cuerpo
+
+
+# --- Lo que se sube queda guardado ---
+
+
+def test_guardar_y_leer_un_informe(client, db, empresa, usuario_admin):
+    login(client, "admin@test.cl")
+    respuesta = client.post(
+        "/inventario/regularizacion/guardado/informe",
+        data={"archivo": (io.BytesIO(b"contenido del informe"), "informe.xlsx")},
+        content_type="multipart/form-data",
+    )
+    assert respuesta.status_code == 200
+    assert respuesta.get_json()["nombre"] == "informe.xlsx"
+
+    leido = client.get("/inventario/regularizacion/guardado/informe")
+    assert leido.status_code == 200
+    assert leido.data == b"contenido del informe"
+
+    # la página avisa que hay un informe guardado para cargarlo solo
+    config = _config_de_la_pagina(client.get("/inventario/regularizacion").get_data(as_text=True))
+    assert config["guardados"]["informe"]["nombre"] == "informe.xlsx"
+    assert config["guardar"] is True
+
+
+def test_subir_de_nuevo_reemplaza_lo_guardado(client, db, empresa, usuario_admin):
+    login(client, "admin@test.cl")
+    for contenido in (b"primero", b"segundo"):
+        client.post(
+            "/inventario/regularizacion/guardado/informe",
+            data={"archivo": (io.BytesIO(contenido), "informe.xlsx")},
+            content_type="multipart/form-data",
+        )
+    assert RegularizacionArchivo.query.filter_by(clave="informe").count() == 1
+    assert client.get("/inventario/regularizacion/guardado/informe").data == b"segundo"
+
+
+def test_guardar_el_estado_en_json(client, db, empresa, usuario_admin):
+    login(client, "admin@test.cl")
+    estado = {"recount": {"COD001": {"qty": 38, "fecha": 1}}, "pmp": {}, "ajSel": None}
+    respuesta = client.post("/inventario/regularizacion/guardado/estado", data=json.dumps(estado), content_type="application/json")
+    assert respuesta.status_code == 200
+    assert client.get("/inventario/regularizacion/guardado/estado").get_json() == estado
+    assert client.post("/inventario/regularizacion/guardado/estado", data="no es json", content_type="application/json").status_code == 400
+
+
+def test_sin_permiso_de_edicion_no_se_guarda_pero_se_lee(client, db, empresa, usuario_bodega):
+    db.session.add(RegularizacionArchivo(empresa_id=empresa.id, clave="informe", nombre="x.xlsx", contenido=b"guardado"))
+    db.session.commit()
+    login(client, "bodega@test.cl")
+    respuesta = client.post(
+        "/inventario/regularizacion/guardado/informe",
+        data={"archivo": (io.BytesIO(b"otro"), "otro.xlsx")},
+        content_type="multipart/form-data",
+    )
+    assert respuesta.status_code == 403
+    assert client.get("/inventario/regularizacion/guardado/informe").data == b"guardado"
+    assert _config_de_la_pagina(client.get("/inventario/regularizacion").get_data(as_text=True))["guardar"] is False
+
+
+def test_lo_guardado_es_de_cada_empresa(client, db, empresa, usuario_admin):
+    from app.models.empresa import Empresa
+
+    otra = Empresa(rut="77.000.000-0", razon_social="Otra SPA")
+    db.session.add(otra)
+    db.session.commit()
+    db.session.add(RegularizacionArchivo(empresa_id=otra.id, clave="informe", nombre="ajeno.xlsx", contenido=b"ajeno"))
+    db.session.commit()
+    login(client, "admin@test.cl")
+    assert client.get("/inventario/regularizacion/guardado/informe").status_code == 404
+    assert client.get("/inventario/regularizacion/guardado/otra-cosa").status_code == 404
+
+
+# --- Conteo de una toma cerrada ---
+
+
+def test_con_la_toma_cerrada_usa_su_conteo(client, db, empresa, usuario_admin):
+    login(client, "admin@test.cl")
+    _items(db, empresa, usuario_admin)
+    client.post("/inventario/toma/cerrar")   # archiva el conteo y deja el cruce vivo en blanco
+
+    cuerpo = client.get("/inventario/regularizacion").get_data(as_text=True)
+    conteo = {fila[0]: fila for fila in _conteo_de_la_pagina(cuerpo)}
+    assert conteo["COD-001"][2] == 12.5            # viene de la toma cerrada
+    assert "toma cerrada" in cuerpo
+
+    # se puede elegir el conteo en curso, que quedó vacío
+    cuerpo = client.get("/inventario/regularizacion?conteo=actual").get_data(as_text=True)
+    assert all(fila[2] is None for fila in _conteo_de_la_pagina(cuerpo))
