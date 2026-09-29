@@ -63,6 +63,8 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
    Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
 /* Regularización de inventario (Inventario → Regularización).
    Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
+/* Regularización de inventario (Inventario → Regularización).
+   Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
 .regx{--bg:#F2F4F3; --surface:#FFFFFF; --surface2:#EDF1EF; --ink:#16201D; --muted:#5E6B66; --line:#DCE3E0;
   --accent:#245E8F; --accent-ink:#FFFFFF; --accent-soft:#E1EBF4;
   --in:#1B7446; --in-soft:#E0F2E7; --out:#B0362A; --out-soft:#FAE3E0; --warn:#8A5A00; --warn-soft:#FBEDCF; --gray-soft:#ECEFEE;
@@ -1062,7 +1064,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     return `<tr class="rx-row s-${r.st}${state.open.has(r.key) ? ' open' : ''}" data-key="${esc(r.key)}" tabindex="0">
       <td><div class="code">${esc(r.code)}</div><div class="pname">${esc(r.name)}</div>${aliasNote(r)}</td>
       ${lineaCell(r.linea)}
-      <td class="num">${r.counted ? fmt(r.s.stock) + '<div class="small">' + fmtDate(r.s.fecha) + (r.s.recontado ? ' · recuento' : '') + '</div>' + (r.umInfo ? '<div class="small alias">en ' + esc(r.umInfo.de) + ' · Defontana en ' + esc(r.umInfo.a) + (r.umInfo.f ? ' (convertido)' : '') + '</div>' : '') : '<span class="mut">—</span>'}${r.s && r.s.recontado && r.s.original && r.s.original.stock != null ? '<div class="small">antes: ' + fmt(r.s.original.stock) + ' el ' + fmtDate(r.s.original.fecha) + '</div>' : ''}${r.s ? `<input class="recount" type="number" step="any" min="0" inputmode="decimal" data-key="${esc(r.key)}" value="${r.s.recontado ? r.s.stock : ''}" placeholder="Recuento hoy" aria-label="Recuento de hoy de ${esc(r.code)}">` : ''}</td>
+      <td class="num">${r.counted ? fmt(r.s.stock) + '<div class="small">' + fmtDate(r.s.fecha) + (r.s.recontado ? ' · recuento' : '') + '</div>' + (r.umInfo ? '<div class="small alias">en ' + esc(r.umInfo.de) + ' · Defontana en ' + esc(r.umInfo.a) + (r.umInfo.f ? ' (convertido)' : '') + '</div>' : '') : '<span class="mut">—</span>'}${r.s && r.s.recontado && r.s.original && r.s.original.stock != null ? '<div class="small">antes: ' + fmt(r.s.original.stock) + ' el ' + fmtDate(r.s.original.fecha) + '</div>' : ''}${r.s ? `<input class="recount" type="number" step="any" min="0" inputmode="decimal" data-key="${esc(r.key)}" value="${r.s.recontado ? r.s.stock : ''}" placeholder="Recuento" title="Recuento de hoy" aria-label="Recuento de hoy de ${esc(r.code)}">` : ''}</td>
       <td class="num">${r.counted ? (r.ins || r.outs ? (r.ins ? '<span class="plus">+' + fmt(r.ins) + '</span> ' : '') + (r.outs ? '<span class="minus">−' + fmt(r.outs) + '</span>' : '') : '<span class="mut">sin movimientos</span>') : '<span class="mut">—</span>'}</td>
       <td class="num"><b>${fmt(r.realNow)}</b></td>
       <td class="num">${fmt(hoyDe(r))}${r.sysAtCount != null && r.counted ? '<div class="small">al conteo: ' + fmt(r.sysAtCount) + '</div>' : ''}${r.sysCalc != null && r.sysNow != null && Math.abs(r.sysCalc - r.sysNow) > EPS ? '<div class="small">última fila del informe: ' + fmt(r.sysNow) + '</div>' : ''}</td>
