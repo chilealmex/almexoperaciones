@@ -974,9 +974,9 @@
       : auto.length ? 'Encontré estos documentos que calzan con las diferencias del conteo o cambian el costo. Marca o desmarca los que corresponden a ajustes de inventario.' : 'No encontré documentos que calcen con las diferencias. Marca abajo los documentos de ajuste.';
     const lista = `${auto.map(item).join('')}
       ${nSel > auto.length + 5 ? '<p class="note warnline">Ojo: marcaste documentos que no son ajustes. Los movimientos normales (ventas, envíos a producción, compras) no deben marcarse, porque el programa los tomaría como ajustes y el resultado no sería correcto.</p>' : ''}
-      ${rest.length ? `<details${auto.length && !state.ajOpen ? '' : ' open'}><summary>Otros documentos posteriores al conteo (${fmt(rest.length)})</summary><div class="ajlist">${rest.map(item).join('')}</div></details>` : ''}`;
+      ${rest.length ? `<details${auto.length && !state.ajOpen ? '' : ' open'}><summary>Otros documentos posteriores al conteo (${fmt(rest.length)}) — son movimientos normales: márcalos solo si alguno es un ajuste</summary><div class="ajlist">${rest.map(item).join('')}</div></details>` : ''}`;
     const head = `<div class="ajhead"><h3>Comprobantes de ajuste ya hechos <span class="note">(${fmt(nSel)} de ${fmt(G.length)} marcados)</span></h3>
-      <span class="ajbtns"><button type="button" class="rx-btn ghost sm" data-all="1">Marcar todos</button><button type="button" class="rx-btn ghost sm" data-all="0">Quitar todos</button><button type="button" class="rx-btn ghost sm" data-all="auto">Solo los sugeridos</button></span></div>
+      <span class="ajbtns">${principal ? '' : '<button type="button" class="rx-btn ghost sm" data-all="1">Marcar todos</button>'}<button type="button" class="rx-btn ghost sm" data-all="0">Quitar todos</button><button type="button" class="rx-btn ghost sm" data-all="auto">Solo los sugeridos</button></span></div>
       <p class="note">${intro}</p>`;
     box.innerHTML = principal
       ? `<details class="ajbox"${state.ajMainOpen ? ' open' : ''}><summary><b>Comprobantes de ajuste ya hechos:</b> ${fmt(nSel)} marcados${nSel ? ' (' + G.filter(ajMarcado).slice(0, 4).map(g => esc(g.tipo) + ' #' + esc(g.folio)).join(', ') + (nSel > 4 ? '…' : '') + ')' : ''}</summary>${head}${lista}</details>`
