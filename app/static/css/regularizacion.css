@@ -174,3 +174,4 @@
 .regx details.ajbox{display:block}
 .regx details.ajbox > summary{cursor:pointer;font-size:13px;color:var(--ink)}
 .regx details.ajbox[open] > summary{margin-bottom:6px}
+.regx .plantillas{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0;font-size:12px;color:var(--muted)}

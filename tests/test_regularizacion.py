@@ -110,6 +110,21 @@ def test_guardar_y_leer_un_informe(client, db, empresa, usuario_admin):
     assert config["guardar"] is True
 
 
+def test_guardar_y_quitar_el_archivo_de_ajustes_hechos(client, db, empresa, usuario_admin):
+    login(client, "admin@test.cl")
+    respuesta = client.post(
+        "/inventario/regularizacion/guardado/ajustes",
+        data={"archivo": (io.BytesIO(b"solo ajustes"), "solo_ajuste.xlsx")},
+        content_type="multipart/form-data",
+    )
+    assert respuesta.status_code == 200
+    config = _config_de_la_pagina(client.get("/inventario/regularizacion").get_data(as_text=True))
+    assert config["guardados"]["ajustes"]["nombre"] == "solo_ajuste.xlsx"
+
+    assert client.post("/inventario/regularizacion/guardado/ajustes", data={"borrar": "1"}).status_code == 200
+    assert client.get("/inventario/regularizacion/guardado/ajustes").status_code == 404
+
+
 def test_subir_de_nuevo_reemplaza_lo_guardado(client, db, empresa, usuario_admin):
     login(client, "admin@test.cl")
     for contenido in (b"primero", b"segundo"):
