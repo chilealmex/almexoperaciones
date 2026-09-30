@@ -139,7 +139,7 @@
       const body = JSON.stringify({
         recount: Object.fromEntries([...state.recount].map(([k, v]) => [k, {qty: v.qty, fecha: +v.fecha}])),
         pmp: Object.fromEntries(state.pmpEdit),
-        ajSi: [...state.ajSi], ajNo: [...state.ajNo]
+        ajSi: [...state.ajSi], ajNo: [...state.ajNo], hechos: [...state.hechos]
       });
       fetch(urlDe('estado'), {method:'POST', body, headers:{'Content-Type':'application/json', 'X-CSRFToken': CFG.csrf}, credentials:'same-origin'}).then(r => { if (r.ok) marcarActualizado(); }).catch(() => {});
     }, 800);
@@ -177,7 +177,7 @@
 
 
   // ---------- Estado ----------
-  const state = {stock:[], mov:[], view:'reg', filter:{reg:'all', zero:'all', check:'all'}, mov2:null, ajustes:null, ajSi:new Set(), ajNo:new Set(), docGroupsMain:[], checkRows:[], docGroups:[],
+  const state = {stock:[], mov:[], view:'reg', filter:{reg:'all', zero:'all', check:'all'}, mov2:null, ajustes:null, hechos:new Set(), ajSi:new Set(), ajNo:new Set(), docGroupsMain:[], checkRows:[], docGroups:[],
     sort:{reg:{k:'code', d:1}, zero:{k:'fecha', d:1}, check:{k:'code', d:1}}, open:new Set(), pmpEdit:new Map(), recount:leerRecuentos(), rows:[], zero:[]};
 
   function fillBodegas(){
@@ -294,11 +294,22 @@
     if (lastOut) obs.push('Última salida antes del conteo: ' + docTxt(lastOut) + '.');
     if (!pre.length && docs.length) obs.push('No tenía documentos antes del conteo; el saldo al conteo se calculó hacia atrás desde el primer documento.');
     if (zeros) obs.push(zeros + (zeros === 1 ? ' documento' : ' documentos') + ' a costo $0.');
-    if (s.nCounted > 1) obs.push('Se contó en ' + s.nCounted + ' códigos distintos y se sumaron.');
+    if (s.nCounted > 1) obs.push('Se contó en ' + s.nCounted + ' códigos distintos el mismo día y se sumaron.');
     return {cause, obs};
   }
 
+  // Unidad más reciente de cada artículo en todos los archivos de Defontana subidos
+  function unidadesRecientes(){
+    const m = new Map();
+    for (const L of [state.mov, state.mov2, state.ajustes]) for (const d of (L || [])){
+      if (!d.um) continue;
+      const k = norm(d.art), p = m.get(k);
+      if (!p || (d.fecha || 0) >= (p.f || 0)) m.set(k, {u: d.um, f: d.fecha});
+    }
+    return m;
+  }
   function compute(movList){
+    const unidadReciente = unidadesRecientes();
     const bod = $('optBodega').value, sameAfter = $('optSame').value === 'after', onlyAprob = $('optAprob').checked;
     // El mismo código puede venir escrito de varias formas: se agrupa por la clave normalizada
     const groups = new Map();
@@ -315,12 +326,17 @@
       byKey.get(m._k).push(m);
     }
     const mergeGroup = list => {
-      const done = list.filter(x => x.stock != null && x.fecha != null);
+      // El mismo producto contado con códigos distintos: los conteos del mismo día se suman (p. ej. dos
+      // ubicaciones); si hay uno de otro día más reciente, ese reemplaza a los anteriores (es un nuevo conteo).
+      const todos = list.filter(x => x.stock != null && x.fecha != null);
+      const ultimoDia = todos.length ? Math.max(...todos.map(x => dayKey(x.fecha))) : null;
+      const done = todos.filter(x => dayKey(x.fecha) === ultimoDia);
+      const previos = todos.filter(x => dayKey(x.fecha) !== ultimoDia);
       const main = done[0] || list[0];
       const g = {code:main.code, key:main.key, name:main.name, por:main.por, estado:main.estado, um:main.um || '', linea:(list.find(x => x.linea) || main).linea || '',
         stock: done.length ? done.reduce((a, x) => a + x.stock, 0) : null,
         fecha: done.length ? new Date(Math.max(...done.map(x => +x.fecha))) : null,
-        variants: list.map(x => x.code), nCounted: done.length};
+        variants: list.map(x => x.code), nCounted: done.length, previos};
       // Un recuento ingresado en la tabla reemplaza al conteo original
       const rc = state.recount.get(main.key);
       if (rc){ g.original = {stock: g.stock, fecha: g.fecha}; g.stock = rc.qty; g.fecha = rc.fecha; g.por = 'Recuento'; g.recontado = true; g.nCounted = Math.max(1, g.nCounted); }
@@ -332,10 +348,14 @@
       // Lo contado (y su unidad) es la referencia. Si Defontana lleva el producto en otra unidad,
       // antes de cruzar se pasan sus cantidades (saldos y movimientos) a la unidad del conteo.
       let umInfo = null;
-      const umDef = docs.length ? umGrupo(docs[docs.length - 1].um) : '';
+      // Unidad de Defontana: la más reciente del artículo en cualquiera de los archivos subidos (si se cambió
+      // la unidad, vale la nueva aunque el informe principal sea anterior al cambio)
+      const lastDoc = docs[docs.length - 1], umRec = lastDoc ? unidadReciente.get(norm(lastDoc.art)) : null;
+      const umDefTxt = lastDoc ? (umRec ? umRec.u : lastDoc.um) : '';
+      const umDef = umGrupo(umDefTxt);
       if (s && s.stock != null && s.um && umDef && umGrupo(s.um) !== umDef){
         const f = umFactor(umDef, umGrupo(s.um));   // 1 unidad de Defontana = f unidades del conteo
-        umInfo = {de: s.um, a: docs[docs.length - 1].um, f};
+        umInfo = {de: s.um, a: umDefTxt, f};
         if (f) docs = docs.map(m => ({...m, qty: m.qty * f, saldo: m.saldo != null ? m.saldo * f : null}));
       }
       const counted = !!s && s.stock != null && s.fecha != null;
@@ -434,7 +454,10 @@
         if (pend != null) st = Math.abs(pend) <= EPS ? 'done' : pend > 0 ? 'up' : 'down';
         if (st === 'done'){ dx.cause = null; dx.obs = dx.obs.filter(x => /^Ajuste de (cantidad|costo) ya hecho/.test(x)); }
       }
-      return {cause:dx.cause, obs:dx.obs, umRound: !!dx.umRound, umMaster: !!dx.umMaster, linea: s ? s.linea || '' : '', alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, umInfo, arts, artAjuste, pend, costDocs, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs, sysCalc, toOther,
+      // Marcado a mano como ya regularizado (p. ej. se corrigió la unidad de medida en Defontana)
+      const manual = !!s && state.hechos.has(s.key);
+      if (manual){ st = 'done'; cost = null; dx.cause = null; dx.obs = ['Marcado a mano como ya regularizado.', ...dx.obs.filter(x => /^Ajuste de (cantidad|costo) ya hecho/.test(x))]; }
+      return {cause:dx.cause, obs:dx.obs, umRound: !!dx.umRound, umMaster: !!dx.umMaster, linea: s ? s.linea || '' : '', alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, umInfo, arts, artAjuste, pend, costDocs, manual, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs, sysCalc, toOther,
         sysAtCount, sysNow, realNow, diff, st, pmp, edited, pmpSrc: edited ? 'Ingresado a mano' : pm ? pm.src : 'Sin costo en Defontana',
         valor: st === 'done' ? 0 : pend != null && pmp != null ? pend * pmp : diff != null && Math.abs(diff) > EPS && pmp != null ? diff * pmp : (st === 'ok' ? 0 : null), zeros, cost};
     };
@@ -603,6 +626,7 @@
     if (r._steps) return r._steps;
     const d = r.pend ?? r.diff, q = d != null ? fmt(Math.abs(d)) : '', steps = [];
     const add = (k, txt) => steps.push({k, txt});
+    if (r.manual){ add('none', 'Nada: marcado como ya regularizado'); r._steps = steps; return steps; }
     if (r.umInfo && r.umInfo.f && r.counted) add('unit', `Cambiar la unidad en Defontana de ${r.umInfo.a} a ${r.umInfo.de}: el saldo de ${fmt(r.umInfo.hoyDef)} ${r.umInfo.a} queda en ${fmt(r.umInfo.hoyConv)} ${r.umInfo.de}`);
     if (r.umMaster) add('verify', `Corregir la unidad en el maestro de Defontana (${r.umInfo.a} → ${r.umInfo.de}) y confirmar en qué unidad están sus cantidades antes de ajustar`);
     else if (r.umRound) add('none', 'Nada: la diferencia es solo el redondeo al convertir la unidad del conteo');
@@ -646,7 +670,7 @@
   }
   // Saldo de Defontana hoy (todos los documentos del informe) y lo que falta para llegar al stock real
   const hoyDe = r => r.sysCalc ?? r.sysNow;
-  const ajusteHoy = r => r.counted && r.realNow != null && hoyDe(r) != null ? r.realNow - hoyDe(r) : null;
+  const ajusteHoy = r => r.manual ? null : r.counted && r.realNow != null && hoyDe(r) != null ? r.realNow - hoyDe(r) : null;
   const makeCell = list => list.length ? `<ul class="make">${list.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '';
 
   // ---------- Comprobantes de ajuste ----------
@@ -878,7 +902,8 @@
     const bits = [];
     if (r.alias.length) bits.push('También escrito: ' + r.alias.map(esc).join(', '));
     if (r.viaName) bits.push('Cruzado por nombre');
-    if (r.nCounted > 1) bits.push('Contado en ' + r.nCounted + ' códigos (se sumaron)');
+    if (r.nCounted > 1) bits.push('Contado en ' + r.nCounted + ' códigos el mismo día (se sumaron)');
+    if (r.s && r.s.previos && r.s.previos.length) bits.push('Conteo anterior no usado: ' + r.s.previos.map(x => esc(x.code) + ' = ' + fmt(x.stock) + ' el ' + fmtDate(x.fecha)).join(', ') + ' (vale el más reciente)');
     return bits.length ? `<div class="alias">${bits.join(' · ')}</div>` : '';
   }
   function regRow(r){
@@ -906,7 +931,7 @@
       <td class="num diff ${r.st === 'check' ? 'mut' : aj > EPS ? 'plus' : aj < -EPS ? 'minus' : 'mut'}">${aj == null ? '—' : Math.abs(aj) <= EPS ? '0' : r.st === 'check' ? '<span class="small">a confirmar</span><div class="small">(' + sgn(aj) + ' si no se explica)</div>' : sgn(aj)}</td>
       <td><span class="pill ${cls}">${label}${qty}</span>${r.sameDay && r.counted ? '<span class="flag" title="Hay documentos el mismo día del conteo">· mismo día</span>' : ''}</td>
       <td class="obs">${obsCell(r)}</td>
-      <td class="tomake">${stepsCell(docSteps(r))}</td>
+      <td class="tomake">${stepsCell(docSteps(r))}${r.s && (r.manual || r.st === 'up' || r.st === 'down' || r.st === 'check') ? `<button type="button" class="rx-btn ghost sm hecho" data-hecho="${esc(r.key)}" title="${r.manual ? 'Volver a mostrarlo como pendiente' : 'Ya lo regularizaste en Defontana: deja de pedir ajuste'}">${r.manual ? 'Desmarcar' : '✓ Ya regularizado'}</button>` : ''}</td>
       <td class="num">${costCell(r)}</td>
       <td class="num">${r.st === 'up' || r.st === 'down' || r.st === 'check' ? pmpInput(r.key, r.pmp, r.edited, r.code) : '<span class="mut">' + (r.pmp != null ? money(r.pmp) : '—') + '</span>'}</td>
       <td class="num diff ${r.valor > 0.5 ? 'plus' : r.valor < -0.5 ? 'minus' : 'mut'}">${r.st === 'up' || r.st === 'down' || r.st === 'check' ? money(r.valor) : '—'}</td></tr>`;
@@ -998,7 +1023,7 @@
       if (r.st === 'up') plan.in.push({r, qty:r.pend ?? r.diff, v:r.pmp > 0 ? r.pmp : null, src:r.pmpSrc, motivo:r.cause ? CAUSES[r.cause] : 'Sobra en bodega'});
       if (r.st === 'down') plan.out.push({r, qty:-(r.pend ?? r.diff), v:r.pmp > 0 ? r.pmp : null, src:r.pmpSrc, motivo:r.cause ? CAUSES[r.cause] : 'Falta en bodega'});
     }
-    plan.um = R.filter(r => r.umInfo && (!lin || (r.linea || '') === lin)).map(r => ({r}));
+    plan.um = R.filter(r => r.umInfo && !r.manual && (!lin || (r.linea || '') === lin)).map(r => ({r}));
     const byCode = (a, b) => String(a.r.code).localeCompare(String(b.r.code), 'es', {numeric:true});
     Object.values(plan).forEach(L => L.sort(byCode));
     return plan;
@@ -1371,7 +1396,10 @@
   $('optCause').addEventListener('change', () => { state.cause = $('optCause').value; render(); });
   let t; $('optSearch').addEventListener('input', () => { clearTimeout(t); t = setTimeout(render, 150); });
   const toggle = tr => { const k = tr.dataset.key; state.open.has(k) ? state.open.delete(k) : state.open.add(k); render(); };
-  $('tbody').addEventListener('click', e => { if (e.target.closest('input')) return; const tr = e.target.closest('tr.rx-row'); if (tr) toggle(tr); });
+  $('tbody').addEventListener('click', e => {
+    const hb = e.target.closest('[data-hecho]');
+    if (hb){ const k = hb.dataset.hecho; if (state.hechos.has(k)) state.hechos.delete(k); else state.hechos.add(k); guardarEstado(); render(); return; }
+    if (e.target.closest('input')) return; const tr = e.target.closest('tr.rx-row'); if (tr) toggle(tr); });
   $('tbody').addEventListener('keydown', e => { if (e.target.closest('input')) return; const tr = e.target.closest('tr.rx-row'); if (tr && (e.key === 'Enter' || e.key === ' ')){ e.preventDefault(); toggle(tr); } });
   $('tbody').addEventListener('change', e => {
     const rc = e.target.closest('input.recount');
@@ -1418,6 +1446,7 @@
         if (e.pmp) state.pmpEdit = new Map(Object.entries(e.pmp));
         if (e.ajSi) state.ajSi = new Set(e.ajSi);
         if (e.ajNo) state.ajNo = new Set(e.ajNo);
+        if (e.hechos) state.hechos = new Set(e.hechos);
         if (e.ajSel && !e.ajSi) state.ajSi = new Set(e.ajSel);   // formato anterior
       } catch(_){}
     }
