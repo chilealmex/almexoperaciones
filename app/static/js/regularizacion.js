@@ -141,14 +141,20 @@
         pmp: Object.fromEntries(state.pmpEdit),
         ajSi: [...state.ajSi], ajNo: [...state.ajNo]
       });
-      fetch(urlDe('estado'), {method:'POST', body, headers:{'Content-Type':'application/json', 'X-CSRFToken': CFG.csrf}, credentials:'same-origin'}).catch(() => {});
+      fetch(urlDe('estado'), {method:'POST', body, headers:{'Content-Type':'application/json', 'X-CSRFToken': CFG.csrf}, credentials:'same-origin'}).then(r => { if (r.ok) marcarActualizado(); }).catch(() => {});
     }, 800);
   }
   const avisoGuardado = (st, p) => {
     if (!CFG) return;
     if (!CFG.guardar){ st.textContent += ' · no se guarda (sin permiso de edición)'; return; }
-    p.then(r => { if (r) st.textContent += ' · guardado en el sistema'; }).catch(() => { st.textContent += ' · no se pudo guardar'; });
+    p.then(r => { if (r){ st.textContent += ' · guardado en el sistema'; marcarActualizado(); } }).catch(() => { st.textContent += ' · no se pudo guardar'; });
   };
+  // Arriba de la página: cuándo fue la última actualización guardada
+  function marcarActualizado(){
+    const el = document.getElementById('ultimaAct'); if (!el) return;
+    const d = new Date(), hh = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    el.innerHTML = `Última actualización guardada: <strong>${fmtDate(d)} ${hh}</strong>. Puedes subir archivos nuevos cuando quieras: cada uno reemplaza al anterior.`;
+  }
 
   // Excel de recuentos: una fila por producto con el código y la cantidad contada hoy
   function parseRecount(rows){
@@ -169,17 +175,9 @@
     throw new Error('No encontré las columnas del código (Código o Artículo) y de la cantidad (Físico o Cantidad).');
   }
 
-  // ---------- Conteo del sistema ----------
-  // La página trae el conteo de "Stock y conteo" como JSON: [código, nombre, stock físico, estado, contado por, fecha y hora]
-  function conteoDelSistema(){
-    const el = document.getElementById('regx-conteo');
-    let data = [];
-    try { data = JSON.parse(el ? el.textContent : '[]'); } catch(_){ data = []; }
-    return data.map(([code, name, stock, estado, por, fecha, um, linea]) => ({code, key:keyOf(code), name, stock, estado, por, fecha:parseDate(fecha), um: um || '', linea: linea || ''}));
-  }
 
   // ---------- Estado ----------
-  const state = {stock:conteoDelSistema(), mov:[], view:'reg', filter:{reg:'all', zero:'all', check:'all'}, mov2:null, ajustes:null, ajSi:new Set(), ajNo:new Set(), docGroupsMain:[], checkRows:[], docGroups:[],
+  const state = {stock:[], mov:[], view:'reg', filter:{reg:'all', zero:'all', check:'all'}, mov2:null, ajustes:null, ajSi:new Set(), ajNo:new Set(), docGroupsMain:[], checkRows:[], docGroups:[],
     sort:{reg:{k:'code', d:1}, zero:{k:'fecha', d:1}, check:{k:'code', d:1}}, open:new Set(), pmpEdit:new Map(), recount:leerRecuentos(), rows:[], zero:[]};
 
   function fillBodegas(){
@@ -1247,7 +1245,8 @@
         if (key === 'mov2'){ if (!state.mov || !state.mov.length) { state.mov = data; fillBodegas(); } }
         render();
         if (key === 'ajustes') $('btnClearAjustes').hidden = false;
-        if (key === 'mov' || key === 'mov2' || key === 'ajustes'){ avisoGuardado(st, guardarArchivo({mov:'informe', mov2:'informe_ajustes', ajustes:'ajustes'}[key], file)); if (key === 'mov2') guardarEstado(); }
+        const clave = {stock:'conteo', mov:'informe', mov2:'informe_ajustes', ajustes:'ajustes'}[key];
+        if (clave){ avisoGuardado(st, guardarArchivo(clave, file)); if (key === 'mov2') guardarEstado(); }
       }).catch(e => { drop.classList.remove('ok'); drop.classList.add('err'); st.textContent = e.message || 'No se pudo leer el archivo.'; });
     };
     input.addEventListener('change', () => { handle(input.files[0]); input.value = ''; });
@@ -1393,19 +1392,20 @@
     const g = (CFG && CFG.guardados) || {};
     if (!Object.keys(g).length) return;
     state.cargando = true;
-    const leerInforme = async (clave, key, dropId, statusId) => {
+    const leerInforme = async (clave, key, dropId, statusId, parser = parseMov, que = 'líneas') => {
       const info = g[clave]; if (!info) return;
       $(statusId).textContent = 'Cargando ' + info.nombre + ' guardado…';
       try {
         const r = await fetch(urlDe(clave), {credentials:'same-origin'});
         if (!r.ok) throw new Error();
         const wb = XLSX.read(await r.arrayBuffer(), {type:'array'});
-        const data = parseMov(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header:1, raw:true, defval:null, blankrows:false}));
+        const data = parser(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header:1, raw:true, defval:null, blankrows:false}));
         state[key] = data;
         $(dropId).classList.add('ok');
-        $(statusId).textContent = `${info.nombre} · ${fmt(data.length)} líneas · guardado el ${info.fecha}${info.por ? ' por ' + info.por : ''}. Sube otro para reemplazarlo.`;
-      } catch(_){ $(statusId).textContent = 'No se pudo cargar el informe guardado; súbelo de nuevo.'; }
+        $(statusId).textContent = `${info.nombre} · ${fmt(data.length)} ${que} · guardado el ${info.fecha}${info.por ? ' por ' + info.por : ''}. Sube otro para reemplazarlo.`;
+      } catch(_){ $(statusId).textContent = 'No se pudo cargar el archivo guardado; súbelo de nuevo.'; }
     };
+    await leerInforme('conteo', 'stock', 'dropStock', 'stStock', parseStock, 'códigos');
     await leerInforme('informe', 'mov', 'dropMov', 'stMov');
     await leerInforme('informe_ajustes', 'mov2', 'dropMov2', 'stMov2');
     await leerInforme('ajustes', 'ajustes', 'dropAjustes', 'stAjustes');
@@ -1422,7 +1422,7 @@
       } catch(_){}
     }
     state.cargando = false;
-    fillBodegas(); render(); refreshRecountStatus();
+    fillBodegas(); fillLineas(); render(); refreshRecountStatus();
   }
 
   fillBodegas();

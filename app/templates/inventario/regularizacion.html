@@ -9,28 +9,10 @@
 <div class="page-head">
   <div>
     <h1>Regularización</h1>
-    <p class="page-sub">Cruza el conteo físico con el Informe de Documentos de Defontana: qué productos aumentar o disminuir, a qué PMP, por qué están descuadrados y si los ajustes quedaron bien.</p>
+    <p class="page-sub">Cruza el conteo físico con el Informe de Documentos de Defontana: qué productos aumentar o disminuir, a qué PMP, por qué están descuadrados y si los ajustes quedaron bien. Es independiente de la toma de inventario: usa solo los archivos que subas aquí.</p>
+    <p class="small text-muted mb-0" id="ultimaAct">{% if ultima %}Última actualización guardada: <strong>{{ ultima.fecha }}</strong>{% if ultima.por %} por {{ ultima.por }}{% endif %}. Puedes subir archivos nuevos cuando quieras: cada uno reemplaza al anterior.{% else %}Aún no hay nada guardado. Sube los archivos: quedan guardados y puedes reemplazarlos cuando quieras.{% endif %}</p>
   </div>
-  <form method="get" class="d-flex align-items-center gap-2">
-    <label for="conteo" class="small text-muted mb-0">Conteo</label>
-    <select id="conteo" name="conteo" class="form-select form-select-sm" onchange="this.form.submit()">
-      <option value="actual"{% if fuente == 'actual' %} selected{% endif %}>En curso ({{ contados_vivo }} contados)</option>
-      {% for t in tomas %}
-      <option value="{{ t.id }}"{% if fuente == t.id|string %} selected{% endif %}>Toma cerrada el {{ t.fecha_fin|fecha_hora }} ({{ t.articulos_contados }} contados)</option>
-      {% endfor %}
-    </select>
-  </form>
 </div>
-
-{% if toma %}
-<div class="alert alert-secondary py-2">Se está usando el conteo de la <strong>toma cerrada el {{ toma.fecha_fin|fecha_hora }}</strong>{% if contados_vivo == 0 %}, porque el conteo en curso está vacío{% endif %}. Puedes cambiarlo arriba a la derecha.</div>
-{% endif %}
-
-{% if contados == 0 and not toma %}
-<div class="alert alert-info">
-  Aún no hay productos contados. Registra el conteo en <a href="{{ url_for('inventario.stock') }}">Stock y conteo</a> o sube un Excel de conteo en el recuadro 1.
-</div>
-{% endif %}
 
 <div class="regx">
 <div class="wrap">
@@ -44,10 +26,10 @@
   </div>
 
   <section class="loaders">
-    <div class="drop ok" id="dropStock">
-      <input type="file" id="fileStock" accept=".xlsx,.xls,.csv" aria-label="Usar otro Excel de conteo">
+    <div class="drop" id="dropStock">
+      <input type="file" id="fileStock" accept=".xlsx,.xls,.csv" aria-label="Excel del conteo físico">
       <span class="num">1</span>
-      <span class="txt"><span class="t">Conteo físico</span><span class="s" id="stStock">{% if toma %}Toma cerrada el {{ toma.fecha_fin|fecha_hora }}{% else %}De Stock y conteo{% endif %}: {{ total|cantidad }} códigos · {{ contados|cantidad }} contados. Para usar otro Excel de conteo, arrástralo aquí.</span></span>
+      <span class="txt"><span class="t">Conteo físico</span><span class="s" id="stStock">Elige o arrastra el Excel del conteo físico (código, stock físico y fecha del conteo)</span></span>
     </div>
     <div class="drop" id="dropMov">
       <input type="file" id="fileMov" accept=".xlsx,.xls,.csv" aria-label="Informe de documentos de Defontana">
@@ -137,13 +119,11 @@
 </div>
 </div>
 
-<script type="application/json" id="regx-conteo">{{ conteo|tojson }}</script>
 <script type="application/json" id="regx-config">{{ {
   'guardar': puede_guardar,
   'guardados': guardados,
   'url': url_for('inventario.regularizacion_guardado', clave='__CLAVE__'),
-  'csrf': csrf_token(),
-  'fuente': fuente
+  'csrf': csrf_token()
 }|tojson }}</script>
 {% endblock %}
 {% block scripts %}
