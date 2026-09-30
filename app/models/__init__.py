@@ -3,6 +3,7 @@ from app.models.usuario import Rol, Usuario
 from app.models.permiso import MODULOS, RolModuloPermiso, PermisoUsuario
 from app.models.cliente import Cliente, Proveedor
 from app.models.conteo_inventario import ItemConteoInventario
+from app.models.equivalencia_codigo import EquivalenciaCodigo
 from app.models.importacion_inventario import ImportacionInventario
 from app.models.contrato import ContratoCliente
 from app.models.contrato_generado import ContratoGenerado
@@ -50,6 +51,7 @@ __all__ = [
     "Documento",
     "RegularizacionArchivo",
     "ImportacionInventario",
+    "EquivalenciaCodigo",
     "ProveedorImportacion",
     "Importacion",
     "ImportacionAsientoLinea",

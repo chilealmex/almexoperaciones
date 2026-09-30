@@ -13,9 +13,11 @@ from app.inventario import bp
 from app.inventario.forms import AccionForm, ImportarCsvForm
 from app.extensions import db
 from app.models.conteo_inventario import ItemConteoInventario, TomaInventario, TomaInventarioDetalle
+from app.models.equivalencia_codigo import EquivalenciaCodigo, crear_equivalencia
 from app.models.importacion_inventario import registrar_importacion, ultimas_importaciones
 from app.models.regularizacion import RegularizacionArchivo
 from app.utils.decorators import require_permission
+from app.utils.equivalencias_codigos import proponer
 from app.utils.importar_conteo import (
     articulos_fuera_de_ambas_planillas,
     codigo_normalizado,
@@ -1384,3 +1386,100 @@ def conteo_importar_defontana():
     else:
         flash("Selecciona un archivo .csv o .xlsx válido.", "danger")
     return redirect(url_for("inventario.conteo_importar"))
+
+
+# --- Equivalencias de códigos: el mismo artículo con otro código en cada sistema ---
+#
+# El mismo artículo debería existir en QMS y en Defontana: en eso consiste el
+# cruce. Cuando el código se creó distinto en cada uno, el cruce por código no
+# los encuentra y quedan dos filas sueltas, una "Falta en Defontana" y otra
+# "Falta en QMS".
+#
+# Nada se une solo. Se proponen parejas y alguien confirma una por una: unir
+# dos artículos distintos suma sus existencias y falsea el inventario.
+
+
+def _sueltos(empresa_id):
+    """Los que quedaron en un solo sistema, que son los candidatos a unir."""
+    base = ItemConteoInventario.query.filter_by(empresa_id=empresa_id)
+    solo_qms = base.filter(
+        ItemConteoInventario.en_qms.is_(True), ItemConteoInventario.en_defontana.is_(False)
+    ).order_by(ItemConteoInventario.codigo).all()
+    solo_defo = base.filter(
+        ItemConteoInventario.en_defontana.is_(True), ItemConteoInventario.en_qms.is_(False)
+    ).order_by(ItemConteoInventario.codigo).all()
+    return solo_qms, solo_defo
+
+
+@bp.route("/equivalencias")
+@require_permission("inventario", "editar")
+def equivalencias_codigos():
+    """Propone qué artículo de QMS es el mismo que cuál de Defontana."""
+    solo_qms, solo_defo = _sueltos(current_user.empresa_id)
+    ya_unidos = {e.clave_qms for e in EquivalenciaCodigo.query.filter_by(
+        empresa_id=current_user.empresa_id).all()}
+    claves_unidas = {e.clave_defontana for e in EquivalenciaCodigo.query.filter_by(
+        empresa_id=current_user.empresa_id).all()}
+
+    # Lo ya confirmado sale de la lista de candidatos: se resolvió.
+    pendientes_qms = [i for i in solo_qms if codigo_normalizado(i.codigo) not in ya_unidos]
+    pendientes_defo = [i for i in solo_defo if codigo_normalizado(i.codigo) not in claves_unidas]
+
+    return render_template(
+        "inventario/equivalencias.html",
+        propuestas=proponer(pendientes_qms, pendientes_defo),
+        solo_qms=pendientes_qms,
+        solo_defontana=pendientes_defo,
+        confirmadas=EquivalenciaCodigo.query.filter_by(
+            empresa_id=current_user.empresa_id
+        ).order_by(EquivalenciaCodigo.creado_en.desc()).all(),
+        form=AccionForm(),
+    )
+
+
+@bp.route("/equivalencias/unir", methods=["POST"])
+@require_permission("inventario", "editar")
+def equivalencias_unir():
+    """Confirma una pareja. Queda guardada y el importador la respeta siempre."""
+    if not AccionForm().validate_on_submit():
+        abort(400)
+
+    codigo_qms = (request.form.get("codigo_qms") or "").strip()
+    codigo_defo = (request.form.get("codigo_defontana") or "").strip()
+    _equivalencia, error = crear_equivalencia(
+        current_user.empresa_id, codigo_qms, codigo_defo, current_user.id,
+        puntaje=request.form.get("puntaje", type=float),
+        motivo=request.form.get("motivo"),
+    )
+    if error:
+        flash(error, "warning")
+        return redirect(url_for("inventario.equivalencias_codigos"))
+
+    db.session.commit()
+    flash(
+        f"{codigo_defo} (Defontana) y {codigo_qms} (QMS) quedaron unidos. "
+        "Se van a cruzar en todas las importaciones, desde la próxima.",
+        "success",
+    )
+    return redirect(url_for("inventario.equivalencias_codigos"))
+
+
+@bp.route("/equivalencias/<int:equivalencia_id>/deshacer", methods=["POST"])
+@require_permission("inventario", "editar")
+def equivalencias_deshacer(equivalencia_id):
+    """Separa dos códigos que se habían unido por error."""
+    if not AccionForm().validate_on_submit():
+        abort(400)
+
+    equivalencia = EquivalenciaCodigo.query.filter_by(
+        id=equivalencia_id, empresa_id=current_user.empresa_id
+    ).first_or_404()
+    codigos = f"{equivalencia.codigo_defontana} y {equivalencia.codigo_qms}"
+    db.session.delete(equivalencia)
+    db.session.commit()
+    flash(
+        f"{codigos} vuelven a ser artículos separados. "
+        "El stock ya cruzado se reordena en la próxima importación.",
+        "success",
+    )
+    return redirect(url_for("inventario.equivalencias_codigos"))

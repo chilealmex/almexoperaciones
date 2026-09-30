@@ -7,6 +7,7 @@ from sqlalchemy import update
 
 from app.extensions import db
 from app.models.conteo_inventario import ItemConteoInventario
+from app.utils.codigos import codigo_normalizado, rarezas_del_codigo  # noqa: F401
 from app.utils.cantidades import a_cantidad
 
 _ESPACIOS_RE = re.compile(r"\s+")
@@ -153,42 +154,6 @@ def _leer_filas(file_storage, codificaciones_csv=("utf-8-sig",)):
 
 # Guiones que Excel y Word escriben en vez del normal. Se unifican al '-' de
 # toda la vida: "KIT–ST" y "KIT-ST" son el mismo artículo escrito distinto.
-_GUIONES = {
-    "‐": "-",  # HYPHEN
-    "‑": "-",  # NON-BREAKING HYPHEN
-    "‒": "-",  # FIGURE DASH
-    "–": "-",  # EN DASH
-    "—": "-",  # EM DASH
-    "―": "-",  # HORIZONTAL BAR
-    "−": "-",  # MINUS SIGN
-}
-
-
-def codigo_normalizado(codigo) -> str:
-    """Clave para comparar códigos que son el mismo escrito distinto.
-
-    QMS y Defontana no siempre escriben igual el código del mismo artículo:
-    "EM-R-Pantalla BG3" y "EM-R-PantallaBG3" son el mismo producto. Para
-    compararlos se saca todo lo que no cambia de qué artículo se trata:
-
-    - espacios de cualquier tipo, incluido el espacio duro que pega Excel;
-    - caracteres invisibles (categoría Cf): espacio de ancho cero, guion suave,
-      la marca BOM... No se ven en pantalla, así que dos códigos que sólo se
-      diferencian en eso parecen idénticos y aun así no cruzaban;
-    - los distintos guiones tipográficos, que se unifican al '-';
-    - el apóstrofe con que Excel marca "esto es texto";
-    - acentos y mayúsculas.
-    """
-    texto = str(codigo or "").strip().lstrip("'").strip()
-    # Los Cf hay que sacarlos antes de comparar nada: son invisibles.
-    sin_invisibles = "".join(c for c in texto if unicodedata.category(c) != "Cf")
-    sin_guiones = "".join(_GUIONES.get(c, c) for c in sin_invisibles)
-    sin_acentos = "".join(
-        c for c in unicodedata.normalize("NFD", sin_guiones) if unicodedata.category(c) != "Mn"
-    )
-    return "".join(sin_acentos.split()).upper()
-
-
 def _congela_el_stock(item, solo_no_contados: bool) -> bool:
     """True si a este artículo no hay que actualizarle el stock declarado por el sistema.
 
@@ -231,15 +196,23 @@ def _aplicar_en_lote(cambios: list) -> None:
         db.session.execute(update(ItemConteoInventario), cambios[inicio : inicio + 500])
 
 
-def _marcar_ausentes_en_lote(items, codigos_del_archivo, campo: str) -> None:
+def _marcar_ausentes_en_lote(items, codigos_del_archivo, campo: str, equivalentes=None) -> None:
     """Apaga la marca del sistema recién importado en los artículos que no venían.
 
     'items' son los que ya existían antes de esta importación, así que los
     recién creados quedan fuera por construcción: un artículo creado por ESTA
     planilla no puede estar ausente de ella. El otro sistema no se toca, porque
     de esa planilla no sabemos nada en esta pasada.
+
+    Los códigos del archivo se traducen antes de comparar: un artículo unido a
+    mano viene con el código del otro sistema, y sin traducirlo se lo daría por
+    ausente justo después de haberle actualizado el stock.
     """
-    presentes = {codigo_normalizado(c) for c in codigos_del_archivo}
+    equivalentes = equivalentes or {}
+    presentes = set()
+    for codigo in codigos_del_archivo:
+        clave = codigo_normalizado(codigo)
+        presentes.add(equivalentes.get(clave, clave))
     ids = [
         item.id
         for item in items
@@ -431,6 +404,9 @@ def importar_defontana(file_storage, empresa_id: int, solo_no_contados: bool = F
 
     items = _items_de_la_empresa(empresa_id)
     existentes = _por_codigo_normalizado(items)
+    # Códigos que alguien ya confirmó que son el mismo artículo escrito distinto
+    # en cada sistema. Sin esto habría que rehacer esa unión en cada carga.
+    equivalentes = _traducciones_confirmadas(empresa_id)
     filas_creadas = 0
     filas_actualizadas = 0
     filas_congeladas = 0
@@ -438,7 +414,8 @@ def importar_defontana(file_storage, empresa_id: int, solo_no_contados: bool = F
     cambios = []
     for codigo, datos in acumulado.items():
         bodegas = ", ".join(sorted(datos["bodegas"]))[:255] if datos["bodegas"] else ""
-        item = existentes.get(codigo_normalizado(codigo))
+        clave = codigo_normalizado(codigo)
+        item = existentes.get(equivalentes.get(clave, clave))
         if item is None:
             item = ItemConteoInventario(empresa_id=empresa_id, codigo=codigo, cantidad_qms=0,
                                         en_defontana=True, en_qms=False)
@@ -471,7 +448,7 @@ def importar_defontana(file_storage, empresa_id: int, solo_no_contados: bool = F
     if nuevos:
         db.session.add_all(nuevos)
     _aplicar_en_lote(cambios)
-    _marcar_ausentes_en_lote(items, acumulado.keys(), "en_defontana")
+    _marcar_ausentes_en_lote(items, acumulado.keys(), "en_defontana", equivalentes)
     db.session.commit()
     return {
         "total_codigos": len(acumulado),
@@ -479,6 +456,17 @@ def importar_defontana(file_storage, empresa_id: int, solo_no_contados: bool = F
         "actualizados": filas_actualizadas,
         "congelados": filas_congeladas,
     }
+
+
+def _traducciones_confirmadas(empresa_id) -> dict:
+    """{clave Defontana: clave QMS} de las equivalencias ya confirmadas.
+
+    El import va acá dentro y no arriba porque el modelo de equivalencias usa
+    codigo_normalizado() de este mismo módulo, y arriba sería un ciclo.
+    """
+    from app.models.equivalencia_codigo import traducciones
+
+    return traducciones(empresa_id)
 
 
 def articulos_fuera_de_ambas_planillas(empresa_id: int) -> list:
@@ -543,39 +531,4 @@ def unificar_grupo(items: list) -> ItemConteoInventario:
     return principal
 
 
-# Nombre corto para los caracteres que no se ven pero separan dos códigos.
-_INVISIBLES = {
-    " ": "espacio duro",
-    "​": "espacio de ancho cero",
-    "‌": "separador de ancho cero",
-    "‍": "unión de ancho cero",
-    "⁠": "unión invisible",
-    "﻿": "marca BOM",
-    "­": "guion suave",
-    "\t": "tabulador",
-}
 
-
-def rarezas_del_codigo(codigo) -> list:
-    """Qué tiene este código que no se ve en pantalla.
-
-    Dos códigos que sólo se diferencian en un carácter invisible se ven
-    idénticos, así que en la pantalla de depuración no habría forma de saber
-    por qué aparecen repetidos. Esto lo explica en palabras.
-    """
-    texto = str(codigo or "")
-    encontradas = []
-    if texto != texto.strip():
-        encontradas.append("espacios al principio o al final")
-    if texto.startswith("'"):
-        encontradas.append("apóstrofe de Excel")
-    if " " in texto.strip():
-        encontradas.append("espacios en medio")
-    for caracter, nombre in _INVISIBLES.items():
-        if caracter in texto:
-            encontradas.append(nombre)
-    for caracter in _GUIONES:
-        if caracter in texto:
-            encontradas.append("guion tipográfico")
-            break
-    return encontradas
