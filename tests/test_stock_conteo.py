@@ -1,4 +1,6 @@
+import io
 import json
+import re
 
 from app.models.conteo_inventario import ItemConteoInventario
 from tests.conftest import login
@@ -63,6 +65,169 @@ def test_buscar_por_codigo(client, db, empresa, usuario_admin):
 
     body = client.get("/inventario/stock?q=tornillo").get_data(as_text=True)
     assert "TORNILLO-1" in body and "TUERCA-9" not in body
+
+
+# --- Esconder los artículos que están en cero en los dos sistemas ---
+#
+# El maestro trae miles de artículos y la mayoría no tiene existencias en
+# ninguno de los dos sistemas: no hay nada que contar en ellos y empujan fuera
+# de la pantalla a los que sí importan. Es una decisión aparte de los filtros
+# de arriba y se combina con todos ellos.
+
+
+def _pantalla(client, consulta=""):
+    return client.get(f"/inventario/stock{consulta}").get_data(as_text=True)
+
+
+def _codigos(client, consulta=""):
+    """Los códigos que la tabla está mostrando de verdad.
+
+    Buscar "EN-CERO" deja ese texto escrito en dos lugares más —el cuadro de
+    búsqueda y el aviso "Sin resultados para ..."— así que mirar la página
+    entera, o incluso sólo el cuerpo de la tabla, daba por encontrado un
+    artículo que no se estaba mostrando.
+    """
+    return set(re.findall(
+        r'<td class="text-nowrap fw-semibold">([^<]*)</td>', _pantalla(client, consulta)
+    ))
+
+
+def test_al_entrar_no_se_ven_los_que_estan_en_cero_en_los_dos_sistemas(
+    client, db, empresa, usuario_admin
+):
+    _item(db, empresa, "SOLO-QMS", 7, 0)
+    _item(db, empresa, "SOLO-DEFO", 0, 3)
+    _item(db, empresa, "EN-AMBOS", 5, 5)
+    _item(db, empresa, "EN-CERO", 0, 0)
+    login(client, "admin@test.cl")
+
+    assert _codigos(client) == {"SOLO-QMS", "SOLO-DEFO", "EN-AMBOS"}
+
+
+def test_se_sigue_entrando_por_lo_que_falta_contar(client, db, empresa, usuario_admin):
+    """Esconder lo vacío no reemplaza al filtro de entrada, se suma a él.
+
+    Durante una toma lo que se quiere ver es lo que falta por contar *y* tiene
+    existencias; con un solo filtro eso no se puede pedir.
+    """
+    _item(db, empresa, "FALTA-Y-TIENE", 5, 5)
+    _item(db, empresa, "YA-CONTADO-CON-STOCK", 5, 5, fisica=5)
+    _item(db, empresa, "FALTA-PERO-VACIO", 0, 0)
+    login(client, "admin@test.cl")
+
+    assert _codigos(client) == {"FALTA-Y-TIENE"}
+
+
+def test_se_combina_con_cualquier_filtro(client, db, empresa, usuario_admin):
+    _item(db, empresa, "CONTADO-CON-STOCK", 4, 4, fisica=4)
+    _item(db, empresa, "SIN-CONTAR-CON-STOCK", 4, 4)
+    login(client, "admin@test.cl")
+
+    assert _codigos(client, "?filtro=contados") == {"CONTADO-CON-STOCK"}
+
+
+def test_lo_ya_contado_no_se_esconde_aunque_los_sistemas_lo_den_en_cero(
+    client, db, empresa, usuario_admin
+):
+    """Es justamente un hallazgo: no está en ningún sistema y apareció en bodega.
+
+    Esconderlo sería esconder trabajo ya hecho y una diferencia real.
+    """
+    _item(db, empresa, "APARECIDO", 0, 0, fisica=4)
+    _item(db, empresa, "CONTADO-EN-CERO", 0, 0, fisica=0)
+    login(client, "admin@test.cl")
+
+    assert _codigos(client, "?filtro=todos") == {"APARECIDO", "CONTADO-EN-CERO"}
+
+
+def test_un_stock_negativo_no_es_un_articulo_vacio(client, db, empresa, usuario_admin):
+    """Es un error que hay que ver, no algo que esconder."""
+    _item(db, empresa, "NEGATIVO", -2, 0)
+    login(client, "admin@test.cl")
+
+    assert "NEGATIVO" in _codigos(client)
+
+
+def test_se_pueden_mostrar_los_vacios_cuando_se_quiere(client, db, empresa, usuario_admin):
+    _item(db, empresa, "EN-CERO", 0, 0)
+    login(client, "admin@test.cl")
+
+    assert "EN-CERO" in _codigos(client, "?vacios=si")
+
+
+def test_la_busqueda_encuentra_un_articulo_en_cero(client, db, empresa, usuario_admin):
+    """Si no, la pantalla diría "no hay resultados" por un artículo que existe,
+    sólo porque venía escondido; y buscarlo es justo lo que se hace cuando no
+    aparece en la lista."""
+    _item(db, empresa, "EN-CERO", 0, 0)
+    login(client, "admin@test.cl")
+
+    assert _codigos(client, "?q=EN-CERO") == {"EN-CERO"}
+
+
+def test_buscar_puede_seguir_escondiendo_los_vacios_si_se_pide(
+    client, db, empresa, usuario_admin
+):
+    _item(db, empresa, "TORNILLO-VACIO", 0, 0)
+    _item(db, empresa, "TORNILLO-CON-STOCK", 3, 3)
+    login(client, "admin@test.cl")
+
+    assert _codigos(client, "?q=tornillo&vacios=no") == {"TORNILLO-CON-STOCK"}
+
+
+def test_se_avisa_cuantos_articulos_quedaron_ocultos(client, db, empresa, usuario_admin):
+    """Sin el aviso, "no encuentro el artículo" se lee como un dato perdido."""
+    _item(db, empresa, "CON-STOCK", 1, 1)
+    for n in range(3):
+        _item(db, empresa, f"VACIO-{n}", 0, 0)
+    login(client, "admin@test.cl")
+
+    body = _pantalla(client)
+
+    assert "Se están ocultando" in body
+    assert "<strong>3</strong>" in body
+    assert "Mostrarlos" in body
+
+
+def test_sin_articulos_en_cero_no_se_avisa_nada(client, db, empresa, usuario_admin):
+    _item(db, empresa, "CON-STOCK", 1, 1)
+    login(client, "admin@test.cl")
+
+    assert "Se están ocultando" not in _pantalla(client)
+
+
+def test_si_el_excel_recorta_lo_dice_en_el_encabezado(client, db, empresa, usuario_admin):
+    """Un informe que dejó fuera parte del maestro no puede leerse como el total."""
+    _item(db, empresa, "EN-CERO", 0, 0)
+    _item(db, empresa, "CON-STOCK", 1, 1)
+    login(client, "admin@test.cl")
+
+    from openpyxl import load_workbook
+
+    respuesta = client.get("/inventario/stock.xlsx?vacios=no")
+    hoja = load_workbook(io.BytesIO(respuesta.data)).active
+    texto = " ".join(
+        str(c.value) for fila in hoja.iter_rows(max_row=6) for c in fila if c.value
+    )
+
+    assert "artículos en cero" in texto
+
+
+def test_el_excel_baja_tambien_los_vacios(client, db, empresa, usuario_admin):
+    """La pantalla recorta para poder trabajar; el archivo descargado se
+    entiende como el registro completo y no puede recortar en silencio."""
+    _item(db, empresa, "EN-CERO", 0, 0)
+    _item(db, empresa, "CON-STOCK", 1, 1)
+    login(client, "admin@test.cl")
+
+    from openpyxl import load_workbook
+
+    respuesta = client.get("/inventario/stock.xlsx")
+    hoja = load_workbook(io.BytesIO(respuesta.data)).active
+    codigos = {fila[0] for fila in hoja.iter_rows(values_only=True) if fila[0]}
+
+    assert "EN-CERO" in codigos
+    assert "CON-STOCK" in codigos
 
 
 def test_contar_en_la_misma_fila_guarda_y_devuelve_diferencias(client, db, empresa, usuario_admin):

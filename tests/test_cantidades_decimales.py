@@ -18,6 +18,7 @@ from app.utils.cantidades import (
     a_entero_clp,
     format_cantidad,
     format_cantidad_signo,
+    punto_ambiguo,
 )
 from tests.conftest import login
 
@@ -307,3 +308,65 @@ def test_la_valorizacion_de_una_cantidad_decimal_queda_en_pesos_enteros(db, empr
     assert item.valor_qms == 12513
     assert isinstance(item.valor_qms, int)
     assert item.valor_defontana == 12513
+
+
+# --- El punto con tres dígitos: mil veces la cantidad, o la cantidad ---
+#
+# En Chile "1.234" son mil doscientos treinta y cuatro. Leyendo archivos esa
+# regla hay que mantenerla, porque así exportan las planillas. Pero cuando
+# alguien lo teclea en el campo de conteo no hay forma de saber cuál quiso, y
+# equivocarse deja anotado mil veces lo que de verdad hay en bodega.
+
+
+@pytest.mark.parametrize("texto", ["3.125", "1.500", "12.345"])
+def test_un_punto_con_tres_digitos_escrito_a_mano_es_ambiguo(texto):
+    assert punto_ambiguo(texto) is True
+
+
+@pytest.mark.parametrize("texto", ["0.125", "3,125", "12.75", "3125", "1.234.567", "", None])
+def test_lo_que_no_deja_dudas_no_se_marca(texto):
+    """'0.125' no entra: ningún separador de miles empieza con un cero solo."""
+    assert punto_ambiguo(texto) is False
+
+
+def test_contar_con_un_punto_ambiguo_pregunta_en_vez_de_adivinar(
+    client, db, empresa, usuario_admin
+):
+    item = _item(db, empresa, "CABLE-MT", Decimal("5000"), Decimal("5000"))
+    login(client, "admin@test.cl")
+
+    respuesta = client.post(
+        f"/inventario/stock/{item.id}/contar",
+        data=json.dumps({"cantidad": "3.125"}),
+        content_type="application/json",
+    )
+
+    assert respuesta.status_code == 400
+    # El mensaje ofrece las dos lecturas, escritas sin ambigüedad
+    mensaje = respuesta.get_json()["error"]
+    assert "3,125" in mensaje and "3125" in mensaje
+    # Y sobre todo: no quedó nada guardado a medias
+    db.session.refresh(item)
+    assert item.cantidad_fisica is None
+
+
+@pytest.mark.parametrize("entrada, esperado", [
+    ("12,5", "12.5"), ("12.5", "12.5"), ("0,125", "0.125"),
+    ("0.125", "0.125"), ("3,125", "3.125"), ("40", "40"),
+])
+def test_los_decimales_del_conteo_se_guardan_tal_cual(
+    client, db, empresa, usuario_admin, entrada, esperado
+):
+    """Metros, kilos y litros no siempre dan justo: es lo que se pidió."""
+    item = _item(db, empresa, "CABLE-MT", Decimal("100"), Decimal("100"))
+    login(client, "admin@test.cl")
+
+    respuesta = client.post(
+        f"/inventario/stock/{item.id}/contar",
+        data=json.dumps({"cantidad": entrada}),
+        content_type="application/json",
+    )
+
+    assert respuesta.status_code == 200
+    db.session.refresh(item)
+    assert item.cantidad_fisica == Decimal(esperado)

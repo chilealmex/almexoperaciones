@@ -12,7 +12,10 @@
   <a href="{{ url_for('inventario.cruce_datos_excel', **request.args) }}" class="btn btn-primary btn-sm">⬇ Excel</a>
 </div>
 
-{% if totales.articulos == 0 and not q %}
+{# "vacios" cuenta los que el recorte dejó fuera: si hay alguno, artículos hay.
+   Sin esa condición, esconderlos todos hacía decir "aún no hay artículos" y
+   mandaba a subir archivos que ya estaban subidos. #}
+{% if totales.articulos == 0 and not q and not vacios %}
 <div class="alert alert-info">
   Aún no hay artículos cruzados. {% if puede('inventario', 'editar') %}Sube los archivos de QMS y Defontana en <a href="{{ url_for('inventario.conteo_importar') }}">Importar</a>.{% endif %}
 </div>
@@ -34,6 +37,17 @@
   <div class="col-6 col-lg-3">
     {{ g.kpi('Sin costo cargado', totales.sin_costo, tono='' if totales.sin_costo else 'ok',
              href=url_for('inventario.cruce_datos', filtro='sin_costo')) }}
+  </div>
+</div>
+
+{# Un costo sobre cero unidades no valoriza nada: o falta cargar el stock, o el
+   costo quedó de un movimiento viejo. Por eso tiene tarjeta propia. #}
+<div class="row g-3 mb-3">
+  <div class="col-12 col-lg-6">
+    {{ g.kpi('Con costo cargado y sin stock', totales.costo_sin_stock,
+             tono='warn' if totales.costo_sin_stock else 'ok',
+             pie='Valorizan $0 igual: revisa si falta el stock o sobra el costo',
+             href=url_for('inventario.cruce_datos', filtro='costo_sin_stock')) }}
   </div>
 </div>
 
@@ -61,6 +75,9 @@
   <input type="hidden" name="filtro" value="{{ filtro }}">
   <input type="hidden" name="orden" value="{{ orden }}">
   <input type="hidden" name="dir" value="{{ direccion }}">
+  {# Sólo se arrastra cuando están a la vista: si se arrastrara el "esconder",
+     buscar un artículo vacío no lo encontraría nunca. #}
+  {% if not sin_vacios %}<input type="hidden" name="vacios" value="si">{% endif %}
   <div class="col-12 col-md-5 col-lg-4">
     <input type="search" name="q" value="{{ q }}" class="form-control" placeholder="Buscar por código o descripción...">
   </div>
@@ -78,7 +95,27 @@
   {{ t.pill('Distinta unidad', 'dif_unidad', filtro, totales.dif_unidad if filtro == 'todos' else None) }}
   {{ t.pill('Costo y unidad difieren', 'ambas', filtro, totales.ambas if filtro == 'todos' else None) }}
   {{ t.pill('Sin costo cargado', 'sin_costo', filtro, totales.sin_costo if filtro == 'todos' else None) }}
+  {{ t.pill('Costo sin stock', 'costo_sin_stock', filtro, totales.costo_sin_stock if filtro == 'todos' else None) }}
 </div>
+
+{# El recorte de esta pantalla no es el mismo que el de Stock y conteo: acá se
+   conserva lo que tiene costo aunque no tenga stock, porque es justamente lo
+   que hay que revisar. #}
+{% if vacios %}
+<div class="d-flex flex-wrap align-items-baseline gap-2 mb-3 small">
+  {% if sin_vacios %}
+    <span class="text-muted">
+      Se están ocultando <strong>{{ vacios }}</strong> artículos sin stock y sin costo en
+      ninguno de los dos sistemas: no hay nada que cruzar en ellos.
+    </span>
+    <a href="{{ url_con(vacios='si', pagina=None) }}">Mostrarlos</a>
+  {% else %}
+    <span class="text-muted">Se están mostrando también los {{ vacios }} artículos sin stock ni costo.</span>
+    <a href="{{ url_con(vacios='no', pagina=None) }}">Ocultarlos</a>
+  {% endif %}
+  <span class="text-muted">· Buscar por código o descripción los encuentra igual.</span>
+</div>
+{% endif %}
 
 {% if pares_de_unidades %}
 <div class="card mb-3">
@@ -175,6 +212,9 @@
              mirar es sólo dónde falta. #}
           <td class="text-nowrap">
             {% if i.falta_en %}<span class="badge bg-warning text-dark">{{ i.falta_en }}</span>{% endif %}
+            {% if i.costo_sin_stock %}
+            <span class="badge bg-warning text-dark" title="Tiene costo cargado pero ningún sistema declara existencias: valoriza $0 igual.">Costo sin stock</span>
+            {% endif %}
           </td>
           <td class="d-none d-xl-table-cell">{{ i.categoria or '—' }}</td>
         </tr>

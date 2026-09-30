@@ -10,6 +10,7 @@ sacan colas —12,3 - 10 daría 2,3000000000000007—, justo en la columna donde
 diferencia es lo único que importa.
 """
 
+import re
 from decimal import Context, Decimal, InvalidOperation
 
 # Tres decimales: alcanza para gramos dentro de un kilo y para milímetros
@@ -153,3 +154,25 @@ def a_entero_clp(valor) -> int:
     if valor is None:
         return 0
     return int(Decimal(valor).to_integral_value(rounding="ROUND_HALF_UP"))
+
+
+# Un punto seguido de exactamente tres dígitos es de miles en Chile ("1.234" son
+# mil doscientos treinta y cuatro) y decimal en una planilla en inglés. Al leer
+# archivos esa regla hay que mantenerla. Pero cuando alguien lo escribe a mano
+# en el campo de conteo no hay forma de saber cuál quiso: "3.125" metros puede
+# ser tres coma ciento veinticinco o tres mil ciento veinticinco, y equivocarse
+# son mil veces la cantidad real anotada en el inventario.
+_PUNTO_AMBIGUO = re.compile(r"^\s*\d+\.\d{" + str(DECIMALES) + r"}\s*$")
+
+
+def punto_ambiguo(texto) -> bool:
+    """Si lo escrito puede leerse igual de bien como miles o como decimal.
+
+    Sólo para lo que se teclea a mano: ahí conviene preguntar antes que adivinar.
+    "0.125" no entra, porque delante del punto sólo hay un cero y ningún
+    separador de miles empieza así.
+    """
+    limpio = str(texto or "").strip()
+    if not _PUNTO_AMBIGUO.match(limpio):
+        return False
+    return limpio.split(".")[0].lstrip("0") != ""

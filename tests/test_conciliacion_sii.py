@@ -11,6 +11,9 @@ from werkzeug.datastructures import FileStorage
 
 from app.utils.conciliacion_sii import (
     COLUMNAS_MONTO,
+    TIPOS_DOCUMENTO,
+    TIPOS_NOTA_CREDITO,
+    TIPOS_NOTA_DEBITO,
     ArchivoInvalido,
     a_monto,
     cruzar,
@@ -375,15 +378,94 @@ def test_una_diferencia_de_un_peso_es_redondeo_y_no_descuadre(db):
     assert cruzar(sii, defo, "compra")["filas"][0]["estado"] == "coincide"
 
 
-def test_en_ventas_las_notas_de_debito_se_comparan_en_positivo(db):
-    sii = [{"tipo_doc": "56", "folio": "1", "rut": "60111222-3", "contraparte": "C",
-            "fecha": "01/08/2026", "neto": 10000, "exento": 0, "iva": 1900, "total": 11900}]
-    defo = [{"tipo_doc": "56", "folio": "1", "rut": "60111222-3", "contraparte": "C",
-             "fecha": "01/08/2026", "neto": -10000, "exento": 0, "iva": -1900, "total": -11900}]
+def _nota(tipo, **montos):
+    base = {"tipo_doc": tipo, "folio": "1", "rut": "60111222-3", "contraparte": "C",
+            "fecha": "01/08/2026", "neto": 0, "exento": 0, "iva": 0, "total": 0}
+    return dict(base, **montos)
 
-    assert cruzar(sii, defo, "venta")["filas"][0]["estado"] == "coincide"
-    # En compras no se aplica ese ajuste: ahí sí sería una diferencia real.
+
+# El signo se corrige en las dos planillas, así que cada caso se prueba con el
+# signo raro en el SII y también con el signo raro en Defontana. Si sólo se
+# probara uno de los dos lados, se podría borrar media corrección sin que
+# ninguna prueba se diera cuenta.
+_LADOS = ["compra", "venta"], ["sii", "defontana"]
+
+
+@pytest.mark.parametrize("libro", _LADOS[0])
+@pytest.mark.parametrize("lado_al_reves", _LADOS[1])
+@pytest.mark.parametrize("tipo", ["55", "56", "112"])
+def test_una_nota_de_debito_cruza_aunque_cada_sistema_le_ponga_otro_signo(
+    db, libro, lado_al_reves, tipo
+):
+    """El caso que traía la usuaria, en los dos libros y por los dos lados.
+
+    Una nota de débito de 5.750 exentos salía como descuadre de 11.500 sólo
+    porque un sistema la exportaba en negativo y el otro en positivo. La plata
+    es la misma; lo único distinto era la convención de cada planilla.
+    """
+    derecho = [_nota(tipo, exento=5750, total=5750)]
+    alreves = [_nota(tipo, exento=-5750, total=-5750)]
+    sii, defo = (alreves, derecho) if lado_al_reves == "sii" else (derecho, alreves)
+
+    fila = cruzar(sii, defo, libro)["filas"][0]
+
+    assert fila["estado"] == "coincide"
+    # Y queda en positivo por los dos lados: una nota de débito suma.
+    assert fila["total_sii"] == 5750 and fila["total_defontana"] == 5750
+
+
+@pytest.mark.parametrize("libro", _LADOS[0])
+@pytest.mark.parametrize("lado_al_reves", _LADOS[1])
+@pytest.mark.parametrize("tipo", ["60", "61", "111"])
+def test_una_nota_de_credito_cruza_aunque_cada_sistema_le_ponga_otro_signo(
+    db, libro, lado_al_reves, tipo
+):
+    """Lo mismo para las de crédito, que es lo que pidió: que se traten igual."""
+    derecho = [_nota(tipo, neto=-10000, iva=-1900, total=-11900)]
+    alreves = [_nota(tipo, neto=10000, iva=1900, total=11900)]
+    sii, defo = (alreves, derecho) if lado_al_reves == "sii" else (derecho, alreves)
+
+    fila = cruzar(sii, defo, libro)["filas"][0]
+
+    assert fila["estado"] == "coincide"
+    # En negativo por los dos lados: una nota de crédito resta.
+    assert fila["total_sii"] == -11900 and fila["total_defontana"] == -11900
+
+
+def test_en_una_factura_el_signo_al_reves_sigue_siendo_un_descuadre(db):
+    """El ajuste es sólo para notas: en el resto, un signo distinto es un error."""
+    sii = [_nota("33", neto=10000, iva=1900, total=11900)]
+    defo = [_nota("33", neto=-10000, iva=-1900, total=-11900)]
+
     assert cruzar(sii, defo, "compra")["filas"][0]["estado"] == "dif_monto"
+
+
+def test_una_nota_en_dos_lineas_se_suma_antes_de_darle_el_signo(db):
+    """Si el signo se aplicara línea por línea, dos asientos que se corrigen
+    entre sí sumarían en vez de anularse."""
+    sii = [_nota("61", neto=10000, total=10000), _nota("61", neto=-4000, total=-4000)]
+    defo = [_nota("61", neto=-6000, total=-6000)]
+
+    fila = cruzar(sii, defo, "venta")["filas"][0]
+
+    assert fila["estado"] == "coincide"
+    assert fila["total_sii"] == -6000
+
+
+def test_el_tipo_de_documento_se_llama_como_lo_llama_el_sii(db):
+    """El 60 se mostraba como 'Nota de Débito' siendo de crédito, y confundía:
+    en pantalla decía débito y el cruce —bien— la restaba como crédito."""
+    assert TIPOS_DOCUMENTO["55"] == "Nota de Débito"
+    assert TIPOS_DOCUMENTO["56"] == "Nota de Débito Electrónica"
+    assert TIPOS_DOCUMENTO["60"] == "Nota de Crédito"
+    assert TIPOS_DOCUMENTO["61"] == "Nota de Crédito Electrónica"
+    # Los códigos que el motor trata como nota, escritos acá a propósito: si se
+    # agrega o se saca uno, esta prueba obliga a mirar también los cruces de más
+    # arriba, que están parametrizados con la misma lista.
+    assert sorted(TIPOS_NOTA_CREDITO) == ["111", "60", "61"]
+    assert sorted(TIPOS_NOTA_DEBITO) == ["112", "55", "56"]
+    # Y ninguna nota queda en los dos grupos a la vez.
+    assert not (TIPOS_NOTA_CREDITO & TIPOS_NOTA_DEBITO)
 
 
 def test_un_documento_repetido_en_varias_lineas_se_suma(db):

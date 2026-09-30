@@ -43,8 +43,9 @@ TIPOS_DOCUMENTO = {
     "43": "Liquidación Factura Electrónica",
     "45": "Factura de Compra",
     "46": "Factura de Compra Electrónica",
-    "56": "Nota de Débito",
-    "60": "Nota de Débito",
+    "55": "Nota de Débito",
+    "56": "Nota de Débito Electrónica",
+    "60": "Nota de Crédito",
     "61": "Nota de Crédito Electrónica",
     "110": "Factura de Exportación Electrónica",
     "111": "Nota de Crédito de Exportación",
@@ -52,14 +53,18 @@ TIPOS_DOCUMENTO = {
     "914": "Declaración de Importación (DIN)",
 }
 
-# Notas de crédito: el SII las informa en positivo, pero contablemente restan.
-# Se les da vuelta el signo antes de comparar, porque Defontana ya las tiene
-# con el signo que corresponde.
+# Las notas de crédito restan y las de débito suman: eso lo decide el tipo de
+# documento, no el sistema que lo exporta. Cada exportador escribe el signo a su
+# manera —el SII manda las notas de crédito en positivo, Defontana manda algunas
+# notas de débito en negativo— así que antes de comparar se llevan las dos
+# planillas a la convención contable y recién ahí se restan una de la otra.
 TIPOS_NOTA_CREDITO = frozenset({"60", "61", "111"})
+TIPOS_NOTA_DEBITO = frozenset({"55", "56", "112"})
 
-# Notas de débito en el libro de ventas de Defontana: a veces salen en negativo
-# aunque suman. Se toma el valor absoluto para poder compararlas con el SII.
-TIPOS_NOTA_DEBITO = frozenset({"56", "112"})
+SIGNO_DE_NOTA = {
+    **{tipo: -1 for tipo in TIPOS_NOTA_CREDITO},
+    **{tipo: +1 for tipo in TIPOS_NOTA_DEBITO},
+}
 
 # Los montos se guardan en pesos enteros. Una diferencia de hasta un peso es
 # redondeo de alguno de los dos sistemas, no un descuadre real.
@@ -481,24 +486,25 @@ def describir_diferencia(detalles) -> str:
     return " · ".join(partes)
 
 
-def _invertir_notas_credito(documentos):
-    """Da vuelta el signo de las notas de crédito del SII, que restan."""
-    ajustados = []
-    for doc in documentos:
-        if doc["tipo_doc"] in TIPOS_NOTA_CREDITO:
-            doc = dict(doc, **{campo: -doc[campo] for campo in _CAMPOS_MONTO})
-        ajustados.append(doc)
-    return ajustados
+def _con_signo_contable(indexados):
+    """Deja cada nota con el signo que le corresponde por su tipo.
 
+    Sin esto, una misma nota aparece como descuadre sólo porque un sistema la
+    escribió en positivo y el otro en negativo: 5.750 contra -5.750 se lee como
+    una diferencia de 11.500 que no existe. El resto de los documentos no se
+    toca; ahí un signo distinto sí es un error que hay que ver.
 
-def _absolutizar_notas_debito(documentos):
-    """Deja en positivo las notas de débito, que suman aunque vengan con signo."""
-    ajustados = []
-    for doc in documentos:
-        if doc["tipo_doc"] in TIPOS_NOTA_DEBITO:
-            doc = dict(doc, **{campo: abs(doc[campo]) for campo in _CAMPOS_MONTO})
-        ajustados.append(doc)
-    return ajustados
+    Se aplica sobre los documentos ya sumados por folio, no línea por línea: una
+    nota registrada en dos asientos que se corrigen entre sí tiene que quedar
+    con la suma de los dos, y recién esa suma lleva signo.
+    """
+    for (tipo_doc, _folio), doc in indexados.items():
+        signo = SIGNO_DE_NOTA.get(tipo_doc)
+        if signo is None:
+            continue
+        for campo in _CAMPOS_MONTO:
+            doc[campo] = signo * abs(doc[campo])
+    return indexados
 
 
 def _por_llave(documentos):
@@ -526,11 +532,13 @@ def cruzar(documentos_sii, documentos_defontana, libro: str = "compra") -> dict:
     Devuelve {'filas', 'conteos', 'totales'}: las filas ya ordenadas con lo que
     requiere trabajo primero, cuántas hay de cada estado, y las sumas para
     poder cuadrar contra la declaración.
+
+    El libro —compra o venta— se recibe pero ya no cambia cómo se comparan las
+    notas: una nota de crédito resta y una de débito suma en los dos libros
+    igual, así que la regla de signo es la misma para ambos.
     """
-    sii = _por_llave(_invertir_notas_credito(documentos_sii))
-    defontana = _por_llave(
-        _absolutizar_notas_debito(documentos_defontana) if libro == "venta" else documentos_defontana
-    )
+    sii = _con_signo_contable(_por_llave(documentos_sii))
+    defontana = _con_signo_contable(_por_llave(documentos_defontana))
 
     filas = []
     for llave in set(sii) | set(defontana):

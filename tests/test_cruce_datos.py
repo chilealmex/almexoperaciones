@@ -1,5 +1,7 @@
 """Submódulo Cruce de datos: consistencia de unidad de medida y costo unitario."""
 
+import re
+
 import io
 
 from werkzeug.datastructures import FileStorage
@@ -163,10 +165,10 @@ def test_cruce_de_datos_exige_sesion(client, empresa):
 # --- Columna "Falta en" ---
 
 
-def _item(db, empresa, codigo, en_qms=True, en_defontana=True):
+def _item(db, empresa, codigo, en_qms=True, en_defontana=True, **campos):
     item = ItemConteoInventario(
         empresa_id=empresa.id, codigo=codigo, nombre=codigo,
-        en_qms=en_qms, en_defontana=en_defontana,
+        en_qms=en_qms, en_defontana=en_defontana, **campos,
     )
     db.session.add(item)
     db.session.commit()
@@ -191,8 +193,9 @@ def test_si_ya_no_esta_en_ninguno_lo_dice_completo(db, empresa):
 
 
 def test_la_columna_aparece_en_la_pantalla_de_cruce(client, db, empresa, usuario_admin):
-    _item(db, empresa, "SOLO-QMS", en_defontana=False)
-    _item(db, empresa, "EN-AMBOS")
+    # Con stock: la pantalla entra escondiendo lo que no tiene ni stock ni costo.
+    _item(db, empresa, "SOLO-QMS", en_defontana=False, cantidad_qms=5)
+    _item(db, empresa, "EN-AMBOS", cantidad_qms=5, cantidad_defontana=5)
     login(client, "admin@test.cl")
 
     texto = client.get("/inventario/cruce-datos").get_data(as_text=True)
@@ -219,3 +222,101 @@ def test_la_columna_va_tambien_en_el_excel(client, db, empresa, usuario_admin):
 
     assert "Falta en" in valores
     assert "QMS" in valores
+
+
+# --- Cruzar sólo lo que aporta algo: con stock, o con costo sin stock ---
+#
+# Un costo sobre cero unidades valoriza $0 igual, así que o falta cargar el
+# stock o el costo quedó de un movimiento viejo. Es lo que hay que revisar, y
+# por eso es lo único sin stock que la pantalla conserva.
+
+
+def _cuerpo(client, consulta=""):
+    """Sólo las filas: la píldora del filtro dice "Costo sin stock" igual que la
+    insignia, así que mirar la página entera daba por marcada una fila que no lo
+    estaba."""
+    texto = client.get(f"/inventario/cruce-datos{consulta}").get_data(as_text=True)
+    return texto[texto.index("<tbody>"):texto.index("</tbody>")]
+
+
+def _codigos_visibles(client, consulta=""):
+    return set(re.findall(
+        r'<td class="text-nowrap fw-semibold">([^<]*)</td>', _cuerpo(client, consulta)
+    ))
+
+
+def test_al_entrar_se_cruzan_los_que_tienen_stock(client, db, empresa, usuario_admin):
+    _item(db, empresa, "CON-STOCK-QMS", cantidad_qms=4)
+    _item(db, empresa, "CON-STOCK-DEFO", cantidad_defontana=9)
+    _item(db, empresa, "SIN-NADA")
+    login(client, "admin@test.cl")
+
+    assert _codigos_visibles(client) == {"CON-STOCK-QMS", "CON-STOCK-DEFO"}
+
+
+def test_un_costo_sin_stock_no_se_esconde_porque_es_lo_que_hay_que_revisar(
+    client, db, empresa, usuario_admin
+):
+    _item(db, empresa, "COSTO-SIN-STOCK", costo_unitario_qms=1500)
+    _item(db, empresa, "SIN-NADA")
+    login(client, "admin@test.cl")
+
+    assert _codigos_visibles(client) == {"COSTO-SIN-STOCK"}
+
+
+def test_el_costo_sin_stock_se_marca_en_la_fila(client, db, empresa, usuario_admin):
+    _item(db, empresa, "COSTO-SIN-STOCK", costo_unitario_defontana=800)
+    login(client, "admin@test.cl")
+
+    assert "Costo sin stock" in _cuerpo(client)
+
+
+def test_hay_un_filtro_para_verlos_solos(client, db, empresa, usuario_admin):
+    _item(db, empresa, "COSTO-SIN-STOCK", costo_unitario_qms=1500)
+    _item(db, empresa, "COSTO-CON-STOCK", cantidad_qms=3, costo_unitario_qms=1500)
+    login(client, "admin@test.cl")
+
+    assert _codigos_visibles(client, "?filtro=costo_sin_stock") == {"COSTO-SIN-STOCK"}
+
+
+def test_con_stock_el_costo_no_se_marca(client, db, empresa, usuario_admin):
+    _item(db, empresa, "NORMAL", cantidad_qms=3, costo_unitario_qms=1500)
+    login(client, "admin@test.cl")
+
+    assert "Costo sin stock" not in _cuerpo(client)
+
+
+def test_esconderlos_todos_no_dice_que_falta_importar(client, db, empresa, usuario_admin):
+    """Decía "aún no hay artículos cruzados" y mandaba a subir archivos que ya
+    estaban subidos: el dato estaba, sólo escondido."""
+    _item(db, empresa, "SIN-NADA")
+    login(client, "admin@test.cl")
+
+    texto = client.get("/inventario/cruce-datos").get_data(as_text=True)
+
+    assert "Aún no hay artículos cruzados" not in texto
+    assert "Se están ocultando" in texto
+
+
+def test_se_pueden_mostrar_y_la_busqueda_los_encuentra(client, db, empresa, usuario_admin):
+    _item(db, empresa, "SIN-NADA")
+    login(client, "admin@test.cl")
+
+    assert _codigos_visibles(client, "?vacios=si") == {"SIN-NADA"}
+    assert _codigos_visibles(client, "?q=SIN-NADA") == {"SIN-NADA"}
+
+
+def test_el_excel_del_cruce_sigue_bajando_todo(client, db, empresa, usuario_admin):
+    import io
+    from openpyxl import load_workbook
+
+    _item(db, empresa, "SIN-NADA")
+    _item(db, empresa, "COSTO-SIN-STOCK", costo_unitario_qms=1500)
+    login(client, "admin@test.cl")
+
+    hoja = load_workbook(io.BytesIO(
+        client.get("/inventario/cruce-datos.xlsx").get_data())).active
+    valores = [c.value for fila in hoja.iter_rows() for c in fila]
+
+    assert "SIN-NADA" in valores
+    assert "Costo sin stock" in valores
