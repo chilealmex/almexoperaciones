@@ -25,7 +25,7 @@ from app.utils.importar_conteo import (
     importar_qms,
     unificar_grupo,
 )
-from app.utils.cantidades import a_cantidad
+from app.utils.cantidades import a_cantidad, punto_ambiguo
 from app.utils.formatting import format_clp, format_fecha_hora
 from app.utils.graficos import COLOR, serie, widget_seguro
 from app.utils.paneles import panel_inventario
@@ -586,6 +586,18 @@ def stock_contar(item_id):
         # Se aceptan decimales: hay artículos que se cuentan en metros, kilos o
         # litros, y ahí "12,5" es la cantidad real. Vale escribirlo con coma o
         # con punto, que es como sale de la calculadora del teléfono.
+        #
+        # Salvo un punto con tres dígitos detrás, que en Chile es de miles:
+        # "3.125" se guardaría como tres mil ciento veinticinco cuando lo
+        # contado eran tres metros y ciento veinticinco milímetros. Mil veces
+        # la cantidad real, sin aviso. Antes que adivinar, se pregunta.
+        if punto_ambiguo(valor):
+            entero = valor.strip().replace(".", "")
+            return jsonify({
+                "ok": False,
+                "error": f"¿{valor.strip().replace('.', ',')} o {entero}? Escribe los decimales "
+                         f"con coma ({valor.strip().replace('.', ',')}) o sin puntos ({entero}).",
+            }), 400
         cantidad = a_cantidad(valor)
         if cantidad is None:
             return jsonify({"ok": False, "error": "Ingresa un número, por ejemplo 12 o 12,5."}), 400
