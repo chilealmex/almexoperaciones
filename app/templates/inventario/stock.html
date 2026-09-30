@@ -28,6 +28,8 @@
     <a href="{{ url_for('inventario.conteo_importar') }}" class="btn btn-outline-secondary btn-sm">Importar archivos</a>
     {% endif %}
   </div>
+
+{% include "partials/_ultima_importacion.html" %}
 </div>
 
 {% if resumen.total == 0 %}

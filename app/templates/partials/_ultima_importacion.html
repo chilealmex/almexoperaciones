@@ -1,0 +1,26 @@
+{# Cuándo se subió por última vez cada planilla.
+
+   Mirando una tabla de stock no hay forma de saber si el número viene del
+   archivo de hoy o del de la semana pasada: se ve igual de convincente en los
+   dos casos. Esta línea lo dice sin que haya que ir a buscarlo.
+
+   El contexto lo pone el context_processor del blueprint de inventario, así
+   que basta con incluir esta plantilla donde haga falta. #}
+{% if ultimas_importaciones is defined %}
+<p class="text-muted small mb-3 d-flex flex-wrap gap-3 align-items-baseline">
+  {% for clave, etiqueta in [('qms', 'QMS'), ('defontana', 'Defontana')] %}
+    {% set carga = ultimas_importaciones.get(clave) %}
+    <span>
+      <strong>{{ etiqueta }}:</strong>
+      {% if carga %}
+        {{ carga.archivo or 'archivo sin nombre' }}
+        · {{ carga.importado_en | fecha_hora }}
+        {%- if carga.importado_por %} · {{ carga.importado_por.nombre_completo }}{% endif %}
+        · {{ carga.total_codigos }} códigos
+      {% else %}
+        <span class="text-warning-emphasis">nunca se ha importado</span>
+      {% endif %}
+    </span>
+  {% endfor %}
+</p>
+{% endif %}

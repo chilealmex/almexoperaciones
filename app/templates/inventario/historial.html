@@ -10,6 +10,8 @@
   <a href="{{ url_for('inventario.stock') }}" class="btn btn-outline-secondary btn-sm">← Volver a Stock y conteo</a>
 </div>
 
+{% include "partials/_ultima_importacion.html" %}
+
 {% if not tomas %}
 <div class="alert alert-info">
   Aún no se ha cerrado ninguna toma de inventario. Desde <a href="{{ url_for('inventario.stock') }}">Stock y conteo</a>, un administrador puede usar el botón <strong>Finalizar toma</strong> para archivar el estado actual y empezar un conteo nuevo.

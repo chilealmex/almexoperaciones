@@ -49,6 +49,17 @@ MODULOS = (
                 "endpoints": ("inventario.cruce_datos",),
             },
             {
+                "clave": "equivalencias",
+                "etiqueta": "Unificar códigos",
+                "accion": "editar",
+                "endpoint": "inventario.equivalencias_codigos",
+                "endpoints": (
+                    "inventario.equivalencias_codigos",
+                    "inventario.equivalencias_unir",
+                    "inventario.equivalencias_deshacer",
+                ),
+            },
+            {
                 "clave": "regularizacion",
                 "etiqueta": "Regularización",
                 "endpoint": "inventario.regularizacion",

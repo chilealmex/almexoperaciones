@@ -507,6 +507,44 @@ def _con_signo_contable(indexados):
     return indexados
 
 
+def separar_por_sistema(documentos_guardados):
+    """Reconstruye las dos listas de documentos a partir de un cruce ya guardado.
+
+    Sirve para volver a cruzar un mes sin pedir de nuevo los archivos. El cruce
+    guardado tiene las dos versiones de cada documento en la misma fila —lo que
+    dijo el SII y lo que dijo Defontana— así que se puede deshacer y rehacer la
+    comparación con las reglas de hoy.
+
+    De qué lado está cada documento lo dice su estado, no si los montos vienen
+    en cero: hay documentos que de verdad valen cero en una de las dos columnas
+    y no por eso faltan en ese sistema.
+    """
+    sii, defontana = [], []
+    for guardado in documentos_guardados:
+        comun = {
+            "tipo_doc": guardado.tipo_doc,
+            "folio": guardado.folio,
+            "fecha": guardado.fecha or "",
+        }
+        if guardado.estado != "solo_defontana":
+            sii.append(dict(
+                comun,
+                rut=guardado.rut_sii or "",
+                contraparte=guardado.contraparte_sii or "",
+                neto=guardado.neto_sii, exento=guardado.exento_sii,
+                iva=guardado.iva_sii, total=guardado.total_sii,
+            ))
+        if guardado.estado != "solo_sii":
+            defontana.append(dict(
+                comun,
+                rut=guardado.rut_defontana or "",
+                contraparte=guardado.contraparte_defontana or "",
+                neto=guardado.neto_defontana, exento=guardado.exento_defontana,
+                iva=guardado.iva_defontana, total=guardado.total_defontana,
+            ))
+    return sii, defontana
+
+
 def _por_llave(documentos):
     """Indexa por tipo de documento + folio, que es lo único que ambos comparten.
 
