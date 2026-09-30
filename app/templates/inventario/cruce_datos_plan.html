@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Paso a paso · Cruce de datos{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <h1>Paso a paso para regularizar</h1>
+    <p class="page-sub">Qué hacer para que QMS quede igual a Defontana, tomando Defontana como la fuente correcta. Sigue los pasos en orden.</p>
+  </div>
+  <div class="d-flex gap-2">
+    <a href="{{ url_for('inventario.cruce_datos') }}" class="btn btn-outline-secondary btn-sm">← Cruce de datos</a>
+    <a href="{{ url_for('inventario.cruce_datos_plan_excel') }}" class="btn btn-primary btn-sm">⬇ Excel (una hoja por paso)</a>
+  </div>
+</div>
+
+{% include "partials/_ultima_importacion.html" %}
+
+{% if total == 0 %}
+<div class="alert alert-success">No hay nada que regularizar: QMS y Defontana coinciden en unidad, costo y stock, y todos los artículos están en los dos sistemas.</div>
+{% else %}
+
+{# Resumen: un paso por línea, con cuántos artículos tiene y enlace a su lista #}
+<div class="card mb-3">
+  <div class="card-body">
+    <ol class="mb-0 ps-3">
+      {% for n, clave, titulo, porque, lista in pasos %}
+      <li class="mb-1">
+        {% if lista %}<a href="#paso-{{ clave }}"><strong>{{ titulo }}</strong></a>{% else %}<span class="text-muted">{{ titulo }}</span>{% endif %}
+        <span class="badge {{ 'bg-warning text-dark' if lista else 'bg-success' }} ms-1">{{ lista|length }} {{ 'artículo' if lista|length == 1 else 'artículos' }}</span>
+        {% if not lista %}<span class="text-muted small">· nada que hacer</span>{% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+  </div>
+</div>
+
+{% for n, clave, titulo, porque, lista in pasos if lista %}
+<section class="mb-4" id="paso-{{ clave }}">
+  <h2 class="h5 mb-1">Paso {{ n }}: {{ titulo }} <span class="badge bg-secondary">{{ lista|length }}</span></h2>
+  <p class="text-muted small mb-2">{{ porque }}</p>
+  <div class="table-card">
+    <div class="table-responsive">
+      <table class="table table-sm table-hover align-middle mb-0">
+        <thead>
+          <tr>
+            <th>#</th><th>Código</th><th>Descripción</th>
+            <th>Un. QMS</th><th>Un. Defontana</th>
+            <th class="num">Costo QMS</th><th class="num">Costo Defontana</th>
+            <th class="num">Stock QMS</th><th class="num">Stock Defontana</th>
+            <th>Qué hacer</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for i, accion in lista[:limite] %}
+          <tr>
+            <td class="text-muted">{{ loop.index }}</td>
+            <td class="text-nowrap"><code>{{ i.codigo }}</code></td>
+            <td>{{ i.nombre or '' }}{% if i.linea_negocio %}<div class="small text-muted">{{ i.linea_negocio }}</div>{% endif %}</td>
+            <td>{{ i.unidad_qms or '—' }}</td>
+            <td>{{ i.unidad_defontana or '—' }}</td>
+            <td class="num">{{ i.costo_unitario_qms|clp if i.costo_unitario_qms else '—' }}</td>
+            <td class="num">{{ i.costo_unitario_defontana|clp if i.costo_unitario_defontana else '—' }}</td>
+            <td class="num">{{ i.cantidad_qms|cantidad }}</td>
+            <td class="num">{{ i.cantidad_defontana|cantidad }}</td>
+            <td><strong>{{ accion }}</strong></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% if lista|length > limite %}
+  <p class="small text-muted mt-1">Se muestran los primeros {{ limite }} de {{ lista|length }}. El Excel trae la lista completa.</p>
+  {% endif %}
+</section>
+{% endfor %}
+
+<p class="small text-muted">Después de corregir, vuelve a importar las planillas de QMS y Defontana: el plan se actualiza solo y cada artículo corregido sale de su paso.</p>
+{% endif %}
+
+{% endblock %}

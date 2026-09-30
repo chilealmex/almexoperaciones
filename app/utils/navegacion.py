@@ -46,7 +46,7 @@ MODULOS = (
                 "clave": "cruce_datos",
                 "etiqueta": "Cruce de datos",
                 "endpoint": "inventario.cruce_datos",
-                "endpoints": ("inventario.cruce_datos",),
+                "endpoints": ("inventario.cruce_datos", "inventario.cruce_datos_plan", "inventario.cruce_datos_plan_excel"),
             },
             {
                 "clave": "equivalencias",

@@ -140,8 +140,22 @@ def nombre_de_hoja(titulo: str) -> str:
 
 def construir_libro(titulo, columnas, filas, subtitulo=""):
     """Arma el libro de Excel completo y lo devuelve en memoria."""
+    return construir_libro_hojas([(titulo, columnas, filas, subtitulo)])
+
+
+def construir_libro_hojas(hojas):
+    """Como construir_libro(), pero con varias hojas: [(titulo, columnas, filas, subtitulo), ...]."""
     libro = Workbook()
-    hoja = libro.active
+    for indice, (titulo, columnas, filas, subtitulo) in enumerate(hojas):
+        hoja = libro.active if indice == 0 else libro.create_sheet()
+        _llenar_hoja(hoja, titulo, columnas, filas, subtitulo)
+    memoria = BytesIO()
+    libro.save(memoria)
+    memoria.seek(0)
+    return memoria
+
+
+def _llenar_hoja(hoja, titulo, columnas, filas, subtitulo):
     hoja.title = nombre_de_hoja(titulo)
 
     _escribir_encabezado(hoja, titulo, subtitulo, len(columnas))
@@ -159,16 +173,24 @@ def construir_libro(titulo, columnas, filas, subtitulo=""):
     hoja.freeze_panes = hoja.cell(row=fila_titulos + 1, column=1)
     hoja.sheet_view.showGridLines = False
 
-    memoria = BytesIO()
-    libro.save(memoria)
-    memoria.seek(0)
-    return memoria
-
 
 def responder_excel(nombre_archivo, titulo, columnas, filas, subtitulo=""):
     """Respuesta HTTP con el informe listo para descargar."""
     memoria = construir_libro(titulo, columnas, filas, subtitulo)
 
+    respuesta = make_response(memoria.read())
+    respuesta.headers["Content-Type"] = (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    respuesta.headers["Content-Disposition"] = (
+        f"attachment; filename={nombre_archivo}-{date.today().isoformat()}.xlsx"
+    )
+    return respuesta
+
+
+def responder_excel_hojas(nombre_archivo, hojas):
+    """Respuesta HTTP con un libro de varias hojas (ver construir_libro_hojas)."""
+    memoria = construir_libro_hojas(hojas)
     respuesta = make_response(memoria.read())
     respuesta.headers["Content-Type"] = (
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

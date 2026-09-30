@@ -27,11 +27,11 @@ from app.utils.importar_conteo import (
     importar_qms,
     unificar_grupo,
 )
-from app.utils.cantidades import a_cantidad, punto_ambiguo
+from app.utils.cantidades import a_cantidad, format_cantidad, punto_ambiguo
 from app.utils.formatting import format_clp, format_fecha_hora
 from app.utils.graficos import COLOR, serie, widget_seguro
 from app.utils.paneles import panel_inventario
-from app.utils.exportar import responder_excel, responder_plantilla_excel, col, CLP, CANTIDAD, FECHA, PORCENTAJE
+from app.utils.exportar import responder_excel, responder_excel_hojas, responder_plantilla_excel, col, CLP, CANTIDAD, FECHA, PORCENTAJE
 
 
 def _stats_inventario():
@@ -1107,6 +1107,128 @@ def cruce_datos_excel():
             "sin los artículos sin stock ni costo" if sin_vacios else "",
         ),
     )
+
+
+# --- Cruce de datos: paso a paso para dejar QMS igual a Defontana ---
+#
+# Defontana se toma como la fuente correcta: cada paso dice qué corregir en QMS
+# (o qué crear en el sistema donde falta el artículo). El orden importa: primero
+# la unidad, porque el costo unitario y el stock se expresan en ella; después el
+# costo y el stock; al final los artículos que faltan en uno de los dos sistemas.
+
+PASOS_REGULARIZAR = (
+    ("unidad", "Corregir la unidad de medida en QMS",
+     "Deja en QMS la misma unidad que tiene Defontana. Va primero: el costo unitario y el stock se miden en esa unidad."),
+    ("costo", "Corregir el costo unitario",
+     "Deja en QMS el costo unitario de Defontana. Si Defontana no tiene costo, cárgalo primero en Defontana (con la factura)."),
+    ("stock", "Ajustar el stock de QMS",
+     "Deja en QMS el mismo stock que Defontana. Si crees que Defontana está mal, regularízalo antes en Inventario → Regularización."),
+    ("crear_defontana", "Crear en Defontana los artículos que solo están en QMS",
+     "Existen en QMS pero no en Defontana. Créalos en Defontana con su unidad y costo, y regístrales el stock."),
+    ("crear_qms", "Crear en QMS los artículos que solo están en Defontana",
+     "Existen en Defontana pero no en QMS. Créalos en QMS con la unidad, el costo y el stock de Defontana."),
+    ("sin_costo", "Cargar costo a los artículos con stock y sin costo",
+     "Tienen stock pero ningún sistema tiene costo. Cárgalo en Defontana con la factura y luego en QMS."),
+)
+
+
+def _pasos_regularizar(items):
+    """Arma el plan: para cada paso, la lista de (artículo, qué hacer)."""
+    pasos = {clave: [] for clave, _titulo, _porque in PASOS_REGULARIZAR}
+    for i in items:
+        if not _hay_algo_que_mirar(i):
+            continue
+        if i.en_qms and not i.en_defontana:
+            detalle = ", ".join(
+                x for x in (
+                    f"unidad {i.unidad_qms}" if i.unidad_qms else "",
+                    f"costo {format_clp(i.costo_unitario_qms)}" if i.costo_unitario_qms else "",
+                    f"stock {format_cantidad(i.cantidad_qms)}" if i.cantidad_qms else "",
+                ) if x
+            )
+            pasos["crear_defontana"].append((i, "Crear en Defontana" + (f" ({detalle}, según QMS)" if detalle else "")))
+            continue
+        if i.en_defontana and not i.en_qms:
+            detalle = ", ".join(
+                x for x in (
+                    f"unidad {i.unidad_defontana}" if i.unidad_defontana else "",
+                    f"costo {format_clp(i.costo_unitario_defontana)}" if i.costo_unitario_defontana else "",
+                    f"stock {format_cantidad(i.cantidad_defontana)}" if i.cantidad_defontana else "",
+                ) if x
+            )
+            pasos["crear_qms"].append((i, "Crear en QMS" + (f" ({detalle}, según Defontana)" if detalle else "")))
+            continue
+        if not i.en_qms and not i.en_defontana:
+            continue  # ya no viene en ninguna de las dos planillas
+        if not i.unidades_coinciden:
+            pasos["unidad"].append((i, f"Cambiar en QMS la unidad {i.unidad_qms} por {i.unidad_defontana}"))
+        costo_qms, costo_def = i.costo_unitario_qms, i.costo_unitario_defontana
+        if costo_def and costo_qms != costo_def:
+            pasos["costo"].append((i, f"Cambiar en QMS el costo de {format_clp(costo_qms or 0)} a {format_clp(costo_def)}"))
+        elif not costo_def and costo_qms:
+            pasos["costo"].append((i, f"Defontana no tiene costo: cargarlo en Defontana (QMS tiene {format_clp(costo_qms)}; confírmalo con la factura)"))
+        elif not costo_def and not costo_qms and _tiene_stock(i):
+            pasos["sin_costo"].append((i, "Cargar el costo en Defontana con la factura y luego en QMS"))
+        if i.diferencia_sistemas != 0:
+            pasos["stock"].append((
+                i, f"Ajustar en QMS el stock de {format_cantidad(i.cantidad_qms or 0)} a {format_cantidad(i.cantidad_defontana or 0)}"
+            ))
+    return pasos
+
+
+def _items_plan():
+    return (
+        ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id)
+        .order_by(ItemConteoInventario.codigo)
+        .all()
+    )
+
+
+@bp.route("/cruce-datos/plan")
+@require_permission("inventario", "ver")
+def cruce_datos_plan():
+    """Paso a paso para regularizar el cruce QMS/Defontana, con Defontana como referencia."""
+    pasos = _pasos_regularizar(_items_plan())
+    return render_template(
+        "inventario/cruce_datos_plan.html",
+        pasos=[(n, clave, titulo, porque, pasos[clave]) for n, (clave, titulo, porque) in enumerate(PASOS_REGULARIZAR, start=1)],
+        total=sum(len(v) for v in pasos.values()),
+        limite=300,
+    )
+
+
+@bp.route("/cruce-datos/plan.xlsx")
+@require_permission("inventario", "ver")
+def cruce_datos_plan_excel():
+    """El plan en Excel: una hoja por paso."""
+    pasos = _pasos_regularizar(_items_plan())
+    columnas = [
+        col("#", ancho=6),
+        col("Código", ancho=20, total="texto"),
+        col("Descripción", ancho=44),
+        col("Línea de negocio", ancho=20),
+        col("Unidad QMS", ancho=12),
+        col("Unidad Defontana", ancho=17),
+        col("Costo QMS", ancho=14, formato=CLP),
+        col("Costo Defontana", ancho=16, formato=CLP),
+        col("Stock QMS", ancho=12, formato=CANTIDAD),
+        col("Stock Defontana", ancho=15, formato=CANTIDAD),
+        col("Qué hacer", ancho=60),
+        col("Hecho", ancho=8),
+    ]
+    hojas = []
+    for numero, (clave, titulo, porque) in enumerate(PASOS_REGULARIZAR, start=1):
+        filas = [
+            [
+                n, i.codigo, i.nombre or "", i.linea_negocio or "",
+                i.unidad_qms or "", i.unidad_defontana or "",
+                i.costo_unitario_qms, i.costo_unitario_defontana,
+                i.cantidad_qms, i.cantidad_defontana, accion, "",
+            ]
+            for n, (i, accion) in enumerate(pasos[clave], start=1)
+        ]
+        hojas.append((f"Paso {numero} - {titulo}", columnas, filas, porque))
+    return responder_excel_hojas("regularizar-qms-defontana", hojas)
 
 
 # --- Regularización: conteo físico contra el Informe de Documentos de Defontana ---

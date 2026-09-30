@@ -320,3 +320,40 @@ def test_el_excel_del_cruce_sigue_bajando_todo(client, db, empresa, usuario_admi
 
     assert "SIN-NADA" in valores
     assert "Costo sin stock" in valores
+
+
+# --- Paso a paso para regularizar (Defontana como referencia) ---
+
+
+def test_plan_paso_a_paso_ordena_lo_que_hay_que_corregir(client, db, empresa, usuario_admin):
+    from app.inventario.routes import _pasos_regularizar
+
+    _importar(empresa)
+    pasos = _pasos_regularizar(ItemConteoInventario.query.order_by(ItemConteoInventario.codigo).all())
+    codigos = {clave: [i.codigo for i, _ in lista] for clave, lista in pasos.items()}
+
+    assert codigos["unidad"] == ["COD-002"]            # RL en QMS, UN en Defontana
+    assert codigos["costo"] == ["COD-001"]             # $10.000 en QMS, $9.500 en Defontana
+    assert codigos["stock"] == ["COD-001"]             # 10 en QMS, 8 en Defontana
+    assert codigos["crear_defontana"] == ["COD-003"]   # solo está en QMS
+    acciones = dict((i.codigo, a) for i, a in pasos["costo"])
+    assert "a $9.500" in acciones["COD-001"]
+
+    login(client, "admin@test.cl")
+    cuerpo = client.get("/inventario/cruce-datos/plan").get_data(as_text=True)
+    assert "Paso a paso para regularizar" in cuerpo
+    assert "Cambiar en QMS la unidad RL por UN" in cuerpo
+    assert "Crear en Defontana" in cuerpo
+    assert "/inventario/cruce-datos/plan" in client.get("/inventario/cruce-datos").get_data(as_text=True)
+
+
+def test_plan_paso_a_paso_en_excel_con_una_hoja_por_paso(client, db, empresa, usuario_admin):
+    from openpyxl import load_workbook
+
+    _importar(empresa)
+    login(client, "admin@test.cl")
+    respuesta = client.get("/inventario/cruce-datos/plan.xlsx")
+    assert respuesta.status_code == 200
+    libro = load_workbook(io.BytesIO(respuesta.data))
+    assert len(libro.sheetnames) == 6
+    assert libro.sheetnames[0].startswith("Paso 1")
