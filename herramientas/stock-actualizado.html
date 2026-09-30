@@ -89,6 +89,8 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
    Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
 /* Regularización de inventario (Inventario → Regularización).
    Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
+/* Regularización de inventario (Inventario → Regularización).
+   Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
 .regx{--bg:#F2F4F3; --surface:#FFFFFF; --surface2:#EDF1EF; --ink:#16201D; --muted:#5E6B66; --line:#DCE3E0;
   --accent:#245E8F; --accent-ink:#FFFFFF; --accent-soft:#E1EBF4;
   --in:#1B7446; --in-soft:#E0F2E7; --out:#B0362A; --out-soft:#FAE3E0; --warn:#8A5A00; --warn-soft:#FBEDCF; --gray-soft:#ECEFEE;
@@ -671,7 +673,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     if (lastOut) obs.push('Última salida antes del conteo: ' + docTxt(lastOut) + '.');
     if (!pre.length && docs.length) obs.push('No tenía documentos antes del conteo; el saldo al conteo se calculó hacia atrás desde el primer documento.');
     if (zeros) obs.push(zeros + (zeros === 1 ? ' documento' : ' documentos') + ' a costo $0.');
-    if (s.nCounted > 1) obs.push('Se contó en ' + s.nCounted + ' códigos distintos y se sumaron.');
+    if (s.nCounted > 1) obs.push('Se contó en ' + s.nCounted + ' códigos distintos el mismo día y se sumaron.');
     return {cause, obs};
   }
 
@@ -692,12 +694,17 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
       byKey.get(m._k).push(m);
     }
     const mergeGroup = list => {
-      const done = list.filter(x => x.stock != null && x.fecha != null);
+      // El mismo producto contado con códigos distintos: los conteos del mismo día se suman (p. ej. dos
+      // ubicaciones); si hay uno de otro día más reciente, ese reemplaza a los anteriores (es un nuevo conteo).
+      const todos = list.filter(x => x.stock != null && x.fecha != null);
+      const ultimoDia = todos.length ? Math.max(...todos.map(x => dayKey(x.fecha))) : null;
+      const done = todos.filter(x => dayKey(x.fecha) === ultimoDia);
+      const previos = todos.filter(x => dayKey(x.fecha) !== ultimoDia);
       const main = done[0] || list[0];
       const g = {code:main.code, key:main.key, name:main.name, por:main.por, estado:main.estado, um:main.um || '', linea:(list.find(x => x.linea) || main).linea || '',
         stock: done.length ? done.reduce((a, x) => a + x.stock, 0) : null,
         fecha: done.length ? new Date(Math.max(...done.map(x => +x.fecha))) : null,
-        variants: list.map(x => x.code), nCounted: done.length};
+        variants: list.map(x => x.code), nCounted: done.length, previos};
       // Un recuento ingresado en la tabla reemplaza al conteo original
       const rc = state.recount.get(main.key);
       if (rc){ g.original = {stock: g.stock, fecha: g.fecha}; g.stock = rc.qty; g.fecha = rc.fecha; g.por = 'Recuento'; g.recontado = true; g.nCounted = Math.max(1, g.nCounted); }
@@ -1255,7 +1262,8 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     const bits = [];
     if (r.alias.length) bits.push('También escrito: ' + r.alias.map(esc).join(', '));
     if (r.viaName) bits.push('Cruzado por nombre');
-    if (r.nCounted > 1) bits.push('Contado en ' + r.nCounted + ' códigos (se sumaron)');
+    if (r.nCounted > 1) bits.push('Contado en ' + r.nCounted + ' códigos el mismo día (se sumaron)');
+    if (r.s && r.s.previos && r.s.previos.length) bits.push('Conteo anterior no usado: ' + r.s.previos.map(x => esc(x.code) + ' = ' + fmt(x.stock) + ' el ' + fmtDate(x.fecha)).join(', ') + ' (vale el más reciente)');
     return bits.length ? `<div class="alias">${bits.join(' · ')}</div>` : '';
   }
   function regRow(r){
