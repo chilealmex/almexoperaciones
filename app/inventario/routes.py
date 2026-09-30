@@ -8,7 +8,6 @@ from flask import render_template, redirect, url_for, flash, request, abort, jso
 from flask_login import current_user
 from sqlalchemy import or_, and_
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import joinedload
 
 from app.inventario import bp
 from app.inventario.forms import AccionForm, ImportarCsvForm
@@ -1093,67 +1092,17 @@ def cruce_datos_excel():
 # --- Regularización: conteo físico contra el Informe de Documentos de Defontana ---
 
 
-def _fila_conteo(i):
-    """Una fila del conteo para la página: vale para el cruce vivo y para una toma cerrada."""
-    return [
-        i.codigo,
-        i.nombre or "",
-        float(i.cantidad_fisica) if i.cantidad_fisica is not None else None,
-        "Contado" if i.cantidad_fisica is not None else "Pendiente",
-        i.contado_por.nombre_completo if i.contado_por else "",
-        format_fecha_hora(i.contado_en),
-        # unidad en que se cuenta (la que muestra Stock y conteo); si difiere de la de Defontana se convierte
-        i.unidad_qms or i.unidad_defontana or "",
-        i.linea_negocio or "",
-    ]
-
-
 @bp.route("/regularizacion")
 @require_permission("inventario", "ver")
 def regularizacion():
-    """Cruce del conteo físico con el Informe de Documentos de Defontana.
+    """Cruce de un conteo físico con el Informe de Documentos de Defontana.
 
-    El cálculo corre en el navegador (static/js/regularizacion.js). Esta vista
-    entrega el conteo con la fecha y hora de cada toma: el conteo en curso de
-    "Stock y conteo" o, si se elige (o si el conteo en curso está vacío porque se
-    cerró la toma), una toma cerrada del historial. También entrega lo guardado
-    de la última vez (informes y estado) para no tener que volver a subirlo.
+    Es independiente de la toma de inventario: no lee "Stock y conteo" ni las
+    tomas cerradas. Trabaja solo con los archivos que se suben aquí (conteo,
+    informes y ajustes), que quedan guardados para no tener que volver a subirlos.
+    El cálculo corre en el navegador (static/js/regularizacion.js).
     """
-    empresa_id = current_user.empresa_id
-    items = (
-        ItemConteoInventario.query.filter_by(empresa_id=empresa_id)
-        .options(joinedload(ItemConteoInventario.contado_por))
-        .order_by(ItemConteoInventario.codigo)
-        .all()
-    )
-    contados_vivo = sum(1 for i in items if i.contado)
-    tomas = (
-        TomaInventario.query.filter_by(empresa_id=empresa_id)
-        .order_by(TomaInventario.fecha_fin.desc())
-        .limit(12)
-        .all()
-    )
-
-    fuente = request.args.get("conteo")
-    if fuente is None:
-        # Sin elegir: el conteo en curso; si está vacío (se cerró la toma), la última toma cerrada
-        fuente = "actual" if contados_vivo or not tomas else str(tomas[0].id)
-
-    toma = None
-    if fuente != "actual" and fuente.isdigit():
-        toma = TomaInventario.query.filter_by(empresa_id=empresa_id, id=int(fuente)).first()
-    if toma is not None:
-        filas = (
-            TomaInventarioDetalle.query.filter_by(toma_id=toma.id)
-            .options(joinedload(TomaInventarioDetalle.contado_por))
-            .order_by(TomaInventarioDetalle.codigo)
-            .all()
-        )
-        fuente = str(toma.id)
-    else:
-        filas, fuente = items, "actual"
-
-    conteo = [_fila_conteo(i) for i in filas]
+    registros = RegularizacionArchivo.query.filter_by(empresa_id=current_user.empresa_id).all()
     guardados = {
         g.clave: {
             "nombre": g.nombre or "",
@@ -1161,18 +1110,15 @@ def regularizacion():
             "por": g.actualizado_por.nombre_completo if g.actualizado_por else "",
             "url": url_for("inventario.regularizacion_guardado", clave=g.clave),
         }
-        for g in RegularizacionArchivo.query.filter_by(empresa_id=empresa_id).all()
+        for g in registros
     }
+    # Lo último que se actualizó (cada subida reemplaza la anterior y queda guardada)
+    reciente = max(registros, key=lambda g: g.actualizado_en, default=None)
+    ultima = guardados[reciente.clave] if reciente else None
     return render_template(
         "inventario/regularizacion.html",
-        conteo=conteo,
-        total=len(filas),
-        contados=sum(1 for f in conteo if f[2] is not None),
-        fuente=fuente,
-        toma=toma,
-        tomas=tomas,
-        contados_vivo=contados_vivo,
         guardados=guardados,
+        ultima=ultima,
         puede_guardar=current_user.tiene_permiso("inventario", "editar", submodulo="regularizacion"),
     )
 
