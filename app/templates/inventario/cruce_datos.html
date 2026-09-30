@@ -12,6 +12,8 @@
   <a href="{{ url_for('inventario.cruce_datos_excel', **request.args) }}" class="btn btn-primary btn-sm">⬇ Excel</a>
 </div>
 
+{% include "partials/_ultima_importacion.html" %}
+
 {# "vacios" cuenta los que el recorte dejó fuera: si hay alguno, artículos hay.
    Sin esa condición, esconderlos todos hacía decir "aún no hay artículos" y
    mandaba a subir archivos que ya estaban subidos. #}

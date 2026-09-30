@@ -13,6 +13,7 @@ from app.inventario import bp
 from app.inventario.forms import AccionForm, ImportarCsvForm
 from app.extensions import db
 from app.models.conteo_inventario import ItemConteoInventario, TomaInventario, TomaInventarioDetalle
+from app.models.importacion_inventario import registrar_importacion, ultimas_importaciones
 from app.models.regularizacion import RegularizacionArchivo
 from app.utils.decorators import require_permission
 from app.utils.importar_conteo import (
@@ -51,6 +52,23 @@ def resumen():
     stats = _stats_inventario()
     panel = widget_seguro(panel_inventario, nombre="resumen de inventario")
     return render_template("inventario/resumen.html", stats=stats, panel=panel)
+
+
+@bp.context_processor
+def _rastro_de_importaciones():
+    """Deja a mano en todo Inventario cuándo se importó cada sistema.
+
+    Va por context_processor y no vista por vista porque la pregunta —"¿el
+    stock que estoy mirando está al día?"— es la misma en todas las pantallas
+    del módulo, y agregarlo a mano en cada una es justo lo que se olvida al
+    crear la siguiente.
+
+    Sólo corre cuando se dibuja una plantilla, así que los endpoints que
+    devuelven JSON (guardar un conteo, por ejemplo) no pagan la consulta.
+    """
+    if not current_user.is_authenticated:
+        return {}
+    return {"ultimas_importaciones": ultimas_importaciones(current_user.empresa_id)}
 
 
 # --- Stock: cruce QMS / Defontana, conteo físico y diferencias en una sola vista ---
@@ -1325,6 +1343,13 @@ def conteo_importar_qms():
             resultado = importar_qms(
                 form.archivo.data, current_user.empresa_id, form.solo_no_contados.data
             )
+            # Se deja el rastro dentro del mismo commit que el stock: si la
+            # importación falla, tampoco queda dicho que ocurrió.
+            registrar_importacion(
+                current_user.empresa_id, "qms", form.archivo.data.filename,
+                current_user.id, resultado,
+            )
+            db.session.commit()
             flash(f"QMS importado: {_resumen_importacion(resultado)}", "success")
         except ValueError as e:
             flash(str(e), "danger")
@@ -1344,6 +1369,13 @@ def conteo_importar_defontana():
             resultado = importar_defontana(
                 form.archivo.data, current_user.empresa_id, form.solo_no_contados.data
             )
+            # Se deja el rastro dentro del mismo commit que el stock: si la
+            # importación falla, tampoco queda dicho que ocurrió.
+            registrar_importacion(
+                current_user.empresa_id, "defontana", form.archivo.data.filename,
+                current_user.id, resultado,
+            )
+            db.session.commit()
             flash(f"Defontana importado: {_resumen_importacion(resultado)}", "success")
         except ValueError as e:
             flash(str(e), "danger")

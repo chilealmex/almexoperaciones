@@ -13,6 +13,8 @@
     <a href="{{ url_for('inventario.ajuste_excel', **request.args) }}" class="btn btn-primary btn-sm">⬇ Excel</a>
     <a href="{{ url_for('inventario.ajuste_csv', **request.args) }}" class="btn btn-outline-secondary btn-sm">CSV</a>
   </div>
+
+{% include "partials/_ultima_importacion.html" %}
 </div>
 
 {% if totales.articulos == 0 and not q %}
