@@ -171,6 +171,21 @@ class _CalculosConteoMixin:
         return bool(self.costo_unitario_qms or self.costo_unitario_defontana)
 
     @property
+    def hay_stock_declarado(self) -> bool:
+        """Alguno de los dos sistemas declara existencias de este artículo."""
+        return bool(self.cantidad_qms or self.cantidad_defontana)
+
+    @property
+    def costo_sin_stock(self) -> bool:
+        """Tiene costo cargado pero ningún sistema declara existencias.
+
+        Vale la pena mirarlo: la valorización de ese artículo es $0 igual —el
+        costo se multiplica por cero— así que un costo ahí no está valorizando
+        nada. O falta cargar el stock, o el costo quedó de un movimiento viejo.
+        """
+        return self.tiene_costo and not self.hay_stock_declarado
+
+    @property
     def tiene_diferencia(self) -> bool:
         if self.diferencia_sistemas != 0:
             return True
@@ -229,6 +244,7 @@ class ItemConteoInventario(db.Model, _CalculosConteoMixin):
             # Ya no viene en ninguna de las dos planillas: dejó de ser stock vigente.
             return "QMS y Defontana"
         return "Defontana" if self.en_qms else "QMS"
+
     actualizado_en = db.Column(
         db.DateTime,
         default=lambda: datetime.now(timezone.utc),

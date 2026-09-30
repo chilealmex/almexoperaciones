@@ -465,17 +465,18 @@ def historial_excel(toma_id):
     )
 
 
-def _descripcion_filtros(q, filtro, filtros_columna, etiquetas, sin_vacios=False):
+def _descripcion_filtros(q, filtro, filtros_columna, etiquetas, nota=""):
     """Texto legible con los filtros aplicados, para dejarlo escrito en el informe.
 
     Un informe que dejó fuera parte del maestro tiene que decirlo en su
-    encabezado: si no, se lee como el total y cuadra contra nada.
+    encabezado: si no, se lee como el total y cuadra contra nada. Cada pantalla
+    recorta con su propia regla, así que el texto lo pone quien llama.
     """
     partes = []
     if filtro and filtro != "todos":
         partes.append(etiquetas.get(filtro, filtro))
-    if sin_vacios:
-        partes.append("sin los artículos en cero en los dos sistemas")
+    if nota:
+        partes.append(nota)
     if q:
         partes.append(f'búsqueda "{q}"')
     for parametro, texto in (filtros_columna or {}).items():
@@ -559,7 +560,10 @@ def stock_excel():
         "Stock y conteo",
         columnas,
         filas,
-        _descripcion_filtros(q, filtro, filtros_columna, ETIQUETAS_STOCK, _sin_vacios),
+        _descripcion_filtros(
+            q, filtro, filtros_columna, ETIQUETAS_STOCK,
+            "sin los artículos en cero en los dos sistemas" if _sin_vacios else "",
+        ),
     )
 
 
@@ -856,7 +860,7 @@ def ajuste_excel():
 # qué SKUs quedaron con distinta unidad de medida o distinto costo unitario cargado
 # en cada sistema, para poder corregirlos en el origen.
 
-FILTROS_CRUCE = ("todos", "dif_costo", "dif_unidad", "ambas", "sin_costo")
+FILTROS_CRUCE = ("todos", "dif_costo", "dif_unidad", "ambas", "sin_costo", "costo_sin_stock")
 
 ETIQUETAS_ESTADO_MAESTRO = {
     "ok": "Costo y unidad coinciden",
@@ -871,6 +875,7 @@ ETIQUETAS_CRUCE = {
     "dif_unidad": "Solo con distinta unidad de medida",
     "ambas": "Solo con costo y unidad distintos",
     "sin_costo": "Solo sin costo cargado",
+    "costo_sin_stock": "Solo con costo cargado y sin stock",
     "f_codigo": "Código",
     "f_nombre": "Descripción",
     "f_unidad": "Unidad",
@@ -880,29 +885,52 @@ ETIQUETAS_CRUCE = {
 }
 
 
-def _items_cruce_datos(args):
+def _hay_algo_que_mirar(item) -> bool:
+    """Si el artículo aporta algo al cruce de maestro.
+
+    Cruzar tiene sentido cuando hay existencias, y también cuando hay un costo
+    cargado sin existencias: eso último es justamente lo que hay que revisar,
+    porque un costo sobre cero unidades no valoriza nada. Lo que no tiene ni
+    stock ni costo no dice nada y sólo empuja fuera de pantalla a lo que sí.
+    """
+    return _tiene_stock(item) or item.tiene_costo
+
+
+def _items_cruce_datos(args, esconder_vacios_por_defecto=False):
     """Items del cruce QMS/Defontana filtrados según consistencia del maestro."""
     consulta = ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id)
 
     busqueda = (args.get("q") or "").strip()
+    sin_vacios = esconder_vacios(args, esconder_vacios_por_defecto)
     if busqueda:
         patron = f"%{busqueda}%"
         consulta = consulta.filter(
             or_(ItemConteoInventario.codigo.ilike(patron), ItemConteoInventario.nombre.ilike(patron))
         )
+        # Igual que en Stock y conteo: buscar un artículo tiene que encontrarlo
+        # aunque esté vacío, que es cuando más falta hace buscarlo.
+        if (args.get("vacios") or "").strip() != "no":
+            sin_vacios = False
 
     consulta, filtros_columna = _filtros_de_columna(consulta, args)
     consulta, orden, direccion = _ordenar(consulta, args, COLUMNAS_AJUSTE, "codigo")
 
     items = consulta.all()
+    # Se cuentan siempre, se escondan o no: la pantalla dice cuántos son en los
+    # dos casos, y así no hace falta una segunda consulta para averiguarlo.
+    vacios = sum(1 for i in items if not _hay_algo_que_mirar(i))
+    if sin_vacios:
+        items = [i for i in items if _hay_algo_que_mirar(i)]
 
     filtro = args.get("filtro", "todos")
     if filtro not in FILTROS_CRUCE:
         filtro = "todos"
     if filtro in ETIQUETAS_ESTADO_MAESTRO:
         items = [i for i in items if i.estado_maestro == filtro]
+    elif filtro == "costo_sin_stock":
+        items = [i for i in items if i.costo_sin_stock]
 
-    return items, busqueda, filtros_columna, filtro, orden, direccion
+    return items, busqueda, filtros_columna, filtro, orden, direccion, sin_vacios, vacios
 
 
 def _totales_cruce(items):
@@ -912,6 +940,7 @@ def _totales_cruce(items):
     return {
         "articulos": len(items),
         "con_costo": sum(1 for i in items if i.tiene_costo),
+        "costo_sin_stock": sum(1 for i in items if i.costo_sin_stock),
         **por_estado,
     }
 
@@ -920,7 +949,9 @@ def _totales_cruce(items):
 @require_permission("inventario", "ver")
 def cruce_datos():
     """Consistencia de unidad de medida y costo unitario entre QMS y Defontana."""
-    items, busqueda, filtros_columna, filtro, orden, direccion = _items_cruce_datos(request.args)
+    items, busqueda, filtros_columna, filtro, orden, direccion, sin_vacios, vacios = (
+        _items_cruce_datos(request.args, esconder_vacios_por_defecto=True)
+    )
     totales = _totales_cruce(items)
 
     pagina = max(1, request.args.get("pagina", 1, type=int))
@@ -964,6 +995,8 @@ def cruce_datos():
         grafico_estado=grafico_estado,
         grafico_impacto=grafico_impacto,
         pares_de_unidades=_pares_de_unidades_distintas(items),
+        sin_vacios=sin_vacios,
+        vacios=vacios,
     )
 
 
@@ -987,7 +1020,11 @@ def _pares_de_unidades_distintas(items):
 @require_permission("inventario", "ver")
 def cruce_datos_excel():
     """Informe en Excel de consistencia de unidad y costo, con los filtros de la pantalla."""
-    items, q, filtros_columna, filtro, _orden, _dir = _items_cruce_datos(request.args)
+    # Como en Stock y conteo: el archivo descargado es el registro completo y
+    # no recorta por su cuenta; sólo si se lo piden a mano.
+    items, q, filtros_columna, filtro, _orden, _dir, sin_vacios, _vacios = _items_cruce_datos(
+        request.args, esconder_vacios_por_defecto=False
+    )
 
     columnas = [
         col("Código", ancho=20, total="texto"),
@@ -1002,6 +1039,7 @@ def cruce_datos_excel():
         col("Impacto en stock QMS", ancho=20, formato=CLP, total="suma"),
         col("Falta en", ancho=16),
         col("Estado del maestro", ancho=22),
+        col("Costo sin stock", ancho=16),
         col("Categoría", ancho=24),
         col("Línea de negocio", ancho=24),
         col("Ubicación", ancho=28),
@@ -1020,6 +1058,7 @@ def cruce_datos_excel():
             i.impacto_diferencia_costo,
             i.falta_en,
             ETIQUETAS_ESTADO_MAESTRO[i.estado_maestro],
+            "Sí" if i.costo_sin_stock else "",
             i.categoria or "",
             i.linea_negocio or "",
             i.ubicacion or "",
@@ -1032,7 +1071,10 @@ def cruce_datos_excel():
         "Cruce de unidades y costos",
         columnas,
         filas,
-        _descripcion_filtros(q, filtro, filtros_columna, ETIQUETAS_CRUCE),
+        _descripcion_filtros(
+            q, filtro, filtros_columna, ETIQUETAS_CRUCE,
+            "sin los artículos sin stock ni costo" if sin_vacios else "",
+        ),
     )
 
 
