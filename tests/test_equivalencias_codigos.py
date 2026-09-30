@@ -207,7 +207,11 @@ def test_lo_ya_unido_sale_de_las_propuestas(client, db, empresa, usuario_admin):
 
 
 def test_no_se_puede_unir_un_codigo_a_dos_articulos(client, db, empresa, usuario_admin):
-    """Si un código de Defontana apuntara a dos de QMS, su stock se duplicaría."""
+    """Si un código de Defontana apuntara a dos de QMS, su stock se duplicaría.
+
+    Por la pantalla ni siquiera se llega a intentarlo: al unir, la fila de
+    Defontana se absorbe en la de QMS y deja de estar suelta.
+    """
     _item(db, empresa, "QMS-A", "A", en_defontana=False)
     _item(db, empresa, "QMS-B", "B", en_defontana=False)
     _item(db, empresa, "DEFO-X", "X", en_qms=False)
@@ -215,25 +219,86 @@ def test_no_se_puede_unir_un_codigo_a_dos_articulos(client, db, empresa, usuario
     client.post("/inventario/equivalencias/unir", data={
         "codigo_qms": "QMS-A", "codigo_defontana": "DEFO-X"}, follow_redirects=True)
 
-    cuerpo = client.post("/inventario/equivalencias/unir", data={
-        "codigo_qms": "QMS-B", "codigo_defontana": "DEFO-X"},
-        follow_redirects=True).get_data(as_text=True)
+    client.post("/inventario/equivalencias/unir", data={
+        "codigo_qms": "QMS-B", "codigo_defontana": "DEFO-X"}, follow_redirects=True)
 
-    assert "ya está unido" in cuerpo
+    assert EquivalenciaCodigo.query.count() == 1
+    assert EquivalenciaCodigo.query.one().codigo_qms == "QMS-A"
+
+
+def test_el_modelo_tampoco_deja_unir_dos_veces_el_mismo_codigo(db, empresa):
+    """La guarda de fondo, por si alguna vez se llega por otro camino."""
+    from app.models.equivalencia_codigo import crear_equivalencia
+
+    crear_equivalencia(empresa.id, "QMS-A", "DEFO-X", None)
+    db.session.commit()
+
+    _equivalencia, error = crear_equivalencia(empresa.id, "QMS-B", "DEFO-X", None)
+
+    assert "ya está unido" in error
     assert EquivalenciaCodigo.query.count() == 1
 
 
-def test_unir_un_codigo_consigo_mismo_se_rechaza(client, db, empresa, usuario_admin):
-    """Con distinto espaciado y mayúsculas ya cruzan solos desde la importación:
-    guardar una equivalencia ahí sería ruido que después confunde."""
-    _item(db, empresa, "MISMO-1", "X", en_defontana=False)
+def test_al_unir_se_juntan_las_dos_filas_en_una(client, db, empresa, usuario_admin):
+    """Si la fila de Defontana quedara, la próxima importación mandaría su
+    stock a la de QMS y esa se quedaría con el saldo viejo para siempre,
+    apareciendo como un artículo que ya no está en ningún sistema."""
+    _item(db, empresa, "QMS-A", "Perno", en_defontana=False, cantidad_qms=4)
+    _item(db, empresa, "DEFO-X", "PERNO HEX", en_qms=False,
+          cantidad_defontana=9, unidad_defontana="UN")
+    login(client, "admin@test.cl")
+
+    client.post("/inventario/equivalencias/unir", data={
+        "codigo_qms": "QMS-A", "codigo_defontana": "DEFO-X"}, follow_redirects=True)
+
+    assert ItemConteoInventario.query.count() == 1
+    item = ItemConteoInventario.query.one()
+    assert item.codigo == "QMS-A"
+    assert item.cantidad_qms == 4
+    assert item.cantidad_defontana == 9
+    assert item.unidad_defontana == "UN"
+    assert item.falta_en == ""
+
+
+def test_al_unir_no_se_pierde_el_conteo_fisico_de_la_fila_que_se_va(
+    client, db, empresa, usuario_admin
+):
+    """Contar es trabajo de bodega: no puede perderse por unir dos códigos."""
+    _item(db, empresa, "QMS-A", "Perno", en_defontana=False, cantidad_qms=4)
+    _item(db, empresa, "DEFO-X", "PERNO HEX", en_qms=False,
+          cantidad_defontana=9, cantidad_fisica=7)
+    login(client, "admin@test.cl")
+
+    client.post("/inventario/equivalencias/unir", data={
+        "codigo_qms": "QMS-A", "codigo_defontana": "DEFO-X"}, follow_redirects=True)
+
+    assert ItemConteoInventario.query.one().cantidad_fisica == 7
+
+
+def test_un_codigo_que_no_existe_se_rechaza(client, db, empresa, usuario_admin):
+    """Los códigos se escriben a mano: un dedazo no puede quedar guardado como
+    una equivalencia hacia un artículo que no existe, sin unir nada y sin que
+    se note nunca."""
+    _item(db, empresa, "QMS-A", "A", en_defontana=False)
+    _item(db, empresa, "DEFO-X", "X", en_qms=False)
     login(client, "admin@test.cl")
 
     cuerpo = client.post("/inventario/equivalencias/unir", data={
-        "codigo_qms": "MISMO-1", "codigo_defontana": " mismo-1 "},
+        "codigo_qms": "QMS-A", "codigo_defontana": "NO-EXISTE"},
         follow_redirects=True).get_data(as_text=True)
 
-    assert "ya cruzan solos" in cuerpo
+    assert "No hay ningún artículo suelto en Defontana" in cuerpo
+    assert EquivalenciaCodigo.query.count() == 0
+
+
+def test_unir_dos_codigos_que_ya_cruzan_solos_se_rechaza(db, empresa):
+    """Con distinto espaciado y mayúsculas ya cruzan desde la importación:
+    guardar una equivalencia ahí sería ruido que después confunde."""
+    from app.models.equivalencia_codigo import crear_equivalencia
+
+    _equivalencia, error = crear_equivalencia(empresa.id, "MISMO-1", " mismo-1 ", None)
+
+    assert "ya cruzan solos" in error
     assert EquivalenciaCodigo.query.count() == 0
 
 
@@ -282,6 +347,8 @@ def test_la_union_se_respeta_en_la_siguiente_importacion(
 
     _item(db, empresa, "GOL.PRE-5_8", "GOLILLA PRESION 5/8",
           en_defontana=False, cantidad_qms=4)
+    _item(db, empresa, "GOLPRE-58", "GOL.PRESION 5-8",
+          en_qms=False, cantidad_defontana=2)
     login(client, "admin@test.cl")
     client.post("/inventario/equivalencias/unir", data={
         "codigo_qms": "GOL.PRE-5_8", "codigo_defontana": "GOLPRE-58",
@@ -318,3 +385,71 @@ def test_sin_union_la_importacion_los_deja_separados(client, db, empresa, usuari
 
 def test_las_traducciones_son_de_cada_empresa(db, empresa):
     assert traducciones(empresa.id) == {}
+
+
+# --- Que la pantalla alcance a responder ---
+#
+# Comparar todos contra todos es cuadrático: con tres mil artículos por lado
+# son nueve millones de comparaciones, cada una con dos medidas de parecido, y
+# la pantalla no alcanzaba a abrirse. Se indexa por trozos de código.
+
+
+def _lote(cantidad, patron, desde):
+    return [
+        _Articulo(patron.format(i=i), f"ARTICULO DE PRUEBA NUMERO {i}")
+        for i in range(desde, desde + cantidad)
+    ]
+
+
+def test_el_indice_no_pierde_ninguna_pareja_confiable():
+    """El riesgo de indexar es perder parejas buenas por no llegar a medirlas.
+
+    La garantía es concreta y es la que sostiene el umbral: todo lo que puntúa
+    0,80 o más se encuentra. Más abajo el índice puede no llegar a medir una
+    pareja que comparte muy poco código, y por eso el umbral de la pantalla
+    está sobre ese piso: no se ofrece una revisión exhaustiva que no ocurre.
+
+    Las parejas de este caso NO calzan exacto —se diferencian en el "00-" de
+    relleno— así que pasan por el emparejado difuso, que es justo el que puede
+    dejar cosas fuera. Y cada una lleva señuelos que comparten con ella más
+    trozos de código que su pareja verdadera: si el índice se quedara con unos
+    pocos candidatos, los señuelos taparían la buena.
+    """
+    qms, defontana = [], []
+    for i in range(40):
+        qms.append(_Articulo(f"00-FSR-SCW-{i:03d}", f"SCREWS {i}"))
+        defontana.append(_Articulo(f"FSR-SCW-{i}", f"SCREWS {i}"))
+        for extra in range(9, 15):
+            # Comparte todos los trozos del de QMS y algunos más. La letra
+            # evita que el señuelo termine siendo el mismo código que otro de
+            # la lista una vez quitados los ceros de relleno.
+            defontana.append(
+                _Articulo(f"00-FSR-SCW-{i:03d}-K{extra}", f"OTRA MEDIDA {i}-{extra}")
+            )
+    qms += [_Articulo(f"Q{7000000 + i}", f"SUELTO EN QMS {i}") for i in range(40)]
+    defontana += [_Articulo(f"D{3000000 + i}", f"APARTE DEFONTANA {i}") for i in range(40)]
+
+    encontradas = {
+        (p["qms"].codigo, p["defontana"].codigo) for p in proponer(qms, defontana, tope=10**6)
+    }
+    confiables = {
+        (a.codigo, b.codigo) for a in qms for b in defontana if puntaje(a, b) >= 0.80
+    }
+
+    assert confiables, "el caso de prueba no tiene ninguna pareja confiable"
+    assert confiables <= encontradas, f"se perdieron: {sorted(confiables - encontradas)[:5]}"
+
+
+def test_con_miles_de_articulos_la_pantalla_responde():
+    """Guarda de verdad: si alguien vuelve a comparar todo contra todo, esto
+    tarda minutos en vez de segundos y la prueba lo delata."""
+    import time
+
+    qms = _lote(1200, "QM{i:05d}-A", 0)
+    defontana = _lote(1200, "DF{i:05d}-B", 50000)
+
+    inicio = time.perf_counter()
+    proponer(qms, defontana)
+    tardanza = time.perf_counter() - inicio
+
+    assert tardanza < 5, f"tardó {tardanza:.1f}s: la pantalla no alcanza a abrirse"

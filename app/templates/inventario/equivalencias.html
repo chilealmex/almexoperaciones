@@ -94,25 +94,23 @@
       Para las parejas que el sistema no propone porque los códigos no se parecen en nada.
       Tú sabes cuáles son; el sistema sólo puede adivinar por el texto.
     </p>
+    {# Se escriben los códigos en vez de elegirlos de una lista: con miles de
+       artículos sueltos, dos listas desplegables son miles de <option> que el
+       navegador tiene que dibujar, y la pantalla se vuelve lentísima antes de
+       que nadie alcance a usarlas. Los dos códigos se comprueban al guardar. #}
     <form method="post" action="{{ url_for('inventario.equivalencias_unir') }}" class="row g-2 align-items-end">
       {{ form.hidden_tag() }}
       <div class="col-12 col-md-5">
-        <label class="form-label small mb-1" for="sel-qms">Artículo en QMS</label>
-        <select class="form-select" id="sel-qms" name="codigo_qms" required>
-          <option value="">Elige uno…</option>
-          {% for i in solo_qms %}
-          <option value="{{ i.codigo }}">{{ i.codigo }} — {{ (i.nombre or '')[:60] }}</option>
-          {% endfor %}
-        </select>
+        <label class="form-label small mb-1" for="cod-qms">Código en QMS</label>
+        <input type="text" class="form-control" id="cod-qms" name="codigo_qms" required
+               placeholder="{{ solo_qms[0].codigo if solo_qms else 'GOL.PRE-5_8' }}"
+               autocomplete="off" spellcheck="false">
       </div>
       <div class="col-12 col-md-5">
-        <label class="form-label small mb-1" for="sel-defo">Artículo en Defontana</label>
-        <select class="form-select" id="sel-defo" name="codigo_defontana" required>
-          <option value="">Elige uno…</option>
-          {% for i in solo_defontana %}
-          <option value="{{ i.codigo }}">{{ i.codigo }} — {{ (i.nombre or '')[:60] }}</option>
-          {% endfor %}
-        </select>
+        <label class="form-label small mb-1" for="cod-defo">Código en Defontana</label>
+        <input type="text" class="form-control" id="cod-defo" name="codigo_defontana" required
+               placeholder="{{ solo_defontana[0].codigo if solo_defontana else 'GOLPRE-58' }}"
+               autocomplete="off" spellcheck="false">
       </div>
       <div class="col-12 col-md-2">
         <button type="submit" class="btn btn-outline-primary w-100">Unir</button>
