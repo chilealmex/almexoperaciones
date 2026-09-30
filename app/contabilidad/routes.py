@@ -26,7 +26,13 @@ from app.utils.conciliacion_sii import COLUMNAS_MONTO as COLUMNAS_MONTO_CONCILIA
 from app.utils.conciliacion_sii import ESTADO_ETIQUETAS as ESTADO_ETIQUETAS_CONCILIACION
 from app.utils.conciliacion_sii import ESTADOS as ESTADOS_CONCILIACION
 from app.utils.conciliacion_sii import TIPOS_DOCUMENTO as TIPOS_DOCUMENTO_SII
-from app.utils.conciliacion_sii import ArchivoInvalido, cruzar, leer_libro_defontana, leer_rcv_sii
+from app.utils.conciliacion_sii import (
+    ArchivoInvalido,
+    cruzar,
+    leer_libro_defontana,
+    leer_rcv_sii,
+    separar_por_sistema,
+)
 from app.utils.decorators import require_permission
 from app.utils.dif_tipo_cambio import recalcular_periodo, totales_periodo
 from app.utils.dif_tipo_cambio_excel import PlanillaInvalida as PlanillaInvalidaMayor
@@ -686,12 +692,17 @@ def _conciliacion_bloqueada(conciliacion) -> bool:
     return conciliacion.cerrado and not current_user.es_superadmin
 
 
-def _guardar_cruce(conciliacion, clave_libro, resultado, nombre_sii, nombre_defontana):
+def _guardar_cruce(conciliacion, clave_libro, resultado, nombre_sii, nombre_defontana,
+                   es_carga=True):
     """Reemplaza el cruce de un libro con el recién calculado.
 
     Se borra el anterior en vez de acumular: la conciliación se rehace varias
     veces en el mes a medida que se corrigen los asientos, y lo que interesa es
     la foto de ahora, no el historial de intentos.
+
+    Con es_carga=False se está recalculando lo ya guardado y no llegó ningún
+    archivo nuevo: se deja intacto quién cargó el libro y cuándo, y no se suma
+    una carga. Si no, un recálculo mentiría diciendo que alguien subió algo.
     """
     libro = conciliacion.libro_por_clave(clave_libro)
     aceptaciones = {}
@@ -713,9 +724,10 @@ def _guardar_cruce(conciliacion, clave_libro, resultado, nombre_sii, nombre_defo
 
     libro.archivo_sii = (nombre_sii or "")[:255] or None
     libro.archivo_defontana = (nombre_defontana or "")[:255] or None
-    libro.cargado_en = datetime.now(timezone.utc)
-    libro.cargado_por_id = current_user.id
-    libro.cargas = (libro.cargas or 0) + 1
+    if es_carga:
+        libro.cargado_en = datetime.now(timezone.utc)
+        libro.cargado_por_id = current_user.id
+        libro.cargas = (libro.cargas or 0) + 1
 
     conteos = resultado["conteos"]
     libro.n_coincide = conteos["coincide"]
@@ -1051,6 +1063,65 @@ def aceptar_diferencia_conciliacion_sii(conciliacion_id, clave, documento_id):
     )
     db.session.commit()
     flash(mensaje, "success")
+    return redirect(_volver_al_libro(conciliacion, clave))
+
+
+@bp.route("/conciliacion-sii/<int:conciliacion_id>/<clave>/recalcular", methods=["POST"])
+@require_permission("contabilidad", "editar")
+def recalcular_libro_conciliacion_sii(conciliacion_id, clave):
+    """Vuelve a cruzar el libro con lo que ya está guardado, sin pedir archivos.
+
+    El cruce guarda su veredicto en el momento de cargar los archivos, así que
+    cuando se corrige una regla de comparación los meses ya cargados siguen
+    mostrando la evaluación vieja. Hasta ahora la única salida era volver a
+    subir los dos archivos de cada mes.
+
+    No se inventa nada: la fila guardada tiene las dos versiones completas de
+    cada documento, que es exactamente lo que necesita el cruce. Lo que cambia
+    es sólo cómo se comparan.
+    """
+    if clave not in ("compra", "venta"):
+        abort(404)
+    conciliacion = _conciliacion_or_404(conciliacion_id)
+    libro = _libro_or_404(conciliacion, clave)
+    if not AccionForm().validate_on_submit():
+        abort(400)
+
+    if conciliacion.cerrado:
+        flash(
+            f"{_etiqueta_periodo(conciliacion)} está cerrado. Reábrelo para recalcularlo.",
+            "warning",
+        )
+        return redirect(_volver_al_libro(conciliacion, clave))
+
+    antes = {d.llave: d.estado for d in libro.documentos}
+    documentos_sii, documentos_defo = separar_por_sistema(libro.documentos)
+    resultado = cruzar(documentos_sii, documentos_defo, clave)
+    _guardar_cruce(
+        conciliacion, clave, resultado,
+        libro.archivo_sii, libro.archivo_defontana, es_carga=False,
+    )
+    db.session.commit()
+
+    cambiados = sum(
+        1 for fila in resultado["filas"]
+        if antes.get((fila["tipo_doc"], fila["folio"])) not in (None, fila["estado"])
+    )
+    if cambiados:
+        cuantos = (
+            "1 documento cambió de estado" if cambiados == 1
+            else f"{cambiados} documentos cambiaron de estado"
+        )
+        flash(
+            f"{libro.etiqueta} de {_etiqueta_periodo(conciliacion)} recalculado: {cuantos}.",
+            "success",
+        )
+    else:
+        flash(
+            f"{libro.etiqueta} de {_etiqueta_periodo(conciliacion)} recalculado: "
+            "ningún documento cambió de estado.",
+            "info",
+        )
     return redirect(_volver_al_libro(conciliacion, clave))
 
 

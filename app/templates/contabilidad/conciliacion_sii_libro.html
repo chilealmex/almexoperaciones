@@ -22,6 +22,19 @@
     </p>
   </div>
   <div class="d-flex gap-2">
+    {% if puede_editar %}
+    {# El cruce guarda su veredicto al cargar los archivos, así que un mes ya
+       cargado conserva la evaluación vieja cuando se corrige una regla de
+       comparación. Esto lo vuelve a cruzar con lo guardado, sin pedir los
+       archivos de nuevo. #}
+    <form method="post"
+          action="{{ url_for('contabilidad.recalcular_libro_conciliacion_sii', conciliacion_id=conciliacion.id, clave=libro.libro, **request.args) }}"
+          onsubmit="return confirm('¿Volver a cruzar {{ libro.etiqueta }} de {{ mes_nombre }} {{ conciliacion.anio }}?\n\nSe usan los mismos datos ya cargados, sin pedir los archivos otra vez. Sirve cuando se corrigió una regla de comparación y este mes quedó con la evaluación anterior.\n\nLas diferencias que ya aceptaste se conservan.');">
+      {{ accion.hidden_tag() }}
+      <button type="submit" class="btn btn-outline-secondary btn-sm"
+              title="Vuelve a comparar los documentos ya cargados con las reglas de hoy. No pide archivos y no pierde las diferencias aceptadas.">↻ Recalcular</button>
+    </form>
+    {% endif %}
     <a href="{{ url_for('contabilidad.exportar_libro_conciliacion_sii', conciliacion_id=conciliacion.id, clave=libro.libro, **request.args) }}"
        class="btn btn-outline-secondary btn-sm">⬇ Excel</a>
     <a href="{{ url_for('contabilidad.conciliacion_sii') }}" class="btn btn-outline-secondary btn-sm">Volver</a>

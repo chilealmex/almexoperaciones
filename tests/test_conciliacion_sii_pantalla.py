@@ -610,3 +610,167 @@ def test_el_titulo_de_la_pagina_no_trae_html(client, db, empresa, usuario_admin)
     assert "<" not in titulo, f"el título trae marcado: {titulo[:80]}"
     assert body.count('id="modal-diferencia"') == 1
     assert body.index('id="modal-diferencia"') > body.index("</head>")
+
+
+# --- Recalcular: volver a cruzar lo guardado, sin pedir los archivos ---
+#
+# El cruce guarda su veredicto en el momento de cargar. Cuando se corrige una
+# regla de comparación —como el signo de las notas de débito— los meses ya
+# cargados siguen mostrando la evaluación vieja, y la única salida era volver a
+# subir los cuatro archivos de cada mes.
+
+
+def _recalcular(client, conciliacion, clave="compra"):
+    return client.post(
+        f"/contabilidad/conciliacion-sii/{conciliacion.id}/{clave}/recalcular",
+        data={}, follow_redirects=True,
+    )
+
+
+def test_recalcular_arregla_un_mes_cargado_con_la_regla_vieja(
+    client, db, empresa, usuario_admin
+):
+    """El caso real: una nota de débito quedó guardada como descuadre.
+
+    Se simula lo que dejó la regla anterior —el SII en negativo y Defontana en
+    positivo, marcado como diferencia de monto— y se comprueba que recalcular
+    lo deja en 'Coincide' sin tocar los archivos.
+    """
+    login(client, "admin@test.cl")
+    _cargar(client)
+    conciliacion = ConciliacionSii.query.one()
+    compras = conciliacion.compras
+
+    compras.documentos.append(ConciliacionSiiDocumento(
+        tipo_doc="56", folio="777", fecha="20/08/2026",
+        rut_sii="76.123.456-7", contraparte_sii="ALMEX PACIFIC FTY LTD",
+        rut_defontana="76.123.456-7", contraparte_defontana="ALMEX PACIFIC FTY LTD",
+        exento_sii=-5750, total_sii=-5750,
+        exento_defontana=5750, total_defontana=5750,
+        dif_exento=-11500, diferencia=-11500,
+        estado="dif_monto", orden=99,
+    ))
+    db.session.commit()
+
+    _recalcular(client, conciliacion)
+
+    nota = ConciliacionSiiDocumento.query.filter_by(folio="777").one()
+    assert nota.estado == "coincide"
+    # Y queda en positivo por los dos lados: una nota de débito suma.
+    assert nota.total_sii == 5750 and nota.total_defontana == 5750
+    assert nota.diferencia == 0
+
+
+def test_recalcular_no_pierde_las_diferencias_ya_aceptadas(
+    client, db, empresa, usuario_admin
+):
+    """Revisar una diferencia y darla por buena es trabajo: no puede borrarse
+    porque se apretó un botón que ni siquiera pide archivos."""
+    login(client, "admin@test.cl")
+    _cargar(client)
+    conciliacion = ConciliacionSii.query.one()
+    documento = ConciliacionSiiDocumento.query.filter_by(folio="1001").one()
+    _aceptar(client, conciliacion, documento, motivo="Impuesto específico")
+
+    _recalcular(client, conciliacion)
+
+    despues = ConciliacionSiiDocumento.query.filter_by(folio="1001").one()
+    assert despues.aceptado is True
+    assert despues.motivo_aceptacion == "Impuesto específico"
+    assert conciliacion.compras.n_aceptados == 1
+
+
+def test_recalcular_no_dice_que_alguien_subio_un_archivo(
+    client, db, empresa, usuario_admin
+):
+    """No llegó ningún archivo: quién cargó el libro y cuándo no puede cambiar,
+    ni contarse como una carga más."""
+    login(client, "admin@test.cl")
+    _cargar(client)
+    conciliacion = ConciliacionSii.query.one()
+    antes_cargas = conciliacion.compras.cargas
+    antes_fecha = conciliacion.compras.cargado_en
+    antes_archivo = conciliacion.compras.archivo_sii
+
+    _recalcular(client, conciliacion)
+
+    assert conciliacion.compras.cargas == antes_cargas
+    assert conciliacion.compras.cargado_en == antes_fecha
+    assert conciliacion.compras.archivo_sii == antes_archivo
+
+
+def test_recalcular_sin_cambios_lo_dice(client, db, empresa, usuario_admin):
+    login(client, "admin@test.cl")
+    _cargar(client)
+    conciliacion = ConciliacionSii.query.one()
+
+    cuerpo = _recalcular(client, conciliacion).get_data(as_text=True)
+
+    assert "ningún documento cambió de estado" in cuerpo
+
+
+def test_un_periodo_cerrado_no_se_recalcula(client, db, empresa, usuario_admin):
+    """Cerrado es de sólo lectura: recalcular cambia estados y montos."""
+    login(client, "admin@test.cl")
+    _cargar(client)
+    conciliacion = ConciliacionSii.query.one()
+    conciliacion.estado = "cerrado"
+    db.session.commit()
+    estados_antes = {d.folio: d.estado for d in conciliacion.compras.documentos}
+
+    cuerpo = _recalcular(client, conciliacion).get_data(as_text=True)
+
+    assert "está cerrado" in cuerpo
+    assert {d.folio: d.estado for d in conciliacion.compras.documentos} == estados_antes
+
+
+def test_el_boton_esta_en_la_pantalla_del_libro(client, db, empresa, usuario_admin):
+    login(client, "admin@test.cl")
+    _cargar(client)
+    conciliacion = ConciliacionSii.query.one()
+
+    cuerpo = client.get(
+        f"/contabilidad/conciliacion-sii/{conciliacion.id}/compra"
+    ).get_data(as_text=True)
+
+    assert "Recalcular" in cuerpo
+    assert f"/{conciliacion.id}/compra/recalcular" in cuerpo
+
+
+def test_recalcular_dos_veces_da_lo_mismo(client, db, empresa, usuario_admin):
+    """Es un botón: se va a apretar dos veces.
+
+    El ajuste de signo se aplica sobre valores que ya pueden venir ajustados,
+    así que tiene que dar igual cuántas veces se pase. Si no, cada clic movería
+    los montos un poco más.
+    """
+    login(client, "admin@test.cl")
+    _cargar(client)
+    conciliacion = ConciliacionSii.query.one()
+    compras = conciliacion.compras
+    compras.documentos.append(ConciliacionSiiDocumento(
+        tipo_doc="61", folio="900", fecha="20/08/2026",
+        rut_sii="76.123.456-7", contraparte_sii="PROVEEDOR UNO SPA",
+        rut_defontana="76.123.456-7", contraparte_defontana="PROVEEDOR UNO SPA",
+        neto_sii=10000, iva_sii=1900, total_sii=11900,
+        neto_defontana=-10000, iva_defontana=-1900, total_defontana=-11900,
+        diferencia=23800, estado="dif_monto", orden=99,
+    ))
+    db.session.commit()
+
+    def foto():
+        return sorted(
+            (d.tipo_doc, d.folio, d.estado, d.neto_sii, d.neto_defontana,
+             d.total_sii, d.total_defontana, d.diferencia)
+            for d in ConciliacionSii.query.one().compras.documentos
+        )
+
+    _recalcular(client, conciliacion)
+    primera = foto()
+    cuerpo = _recalcular(client, conciliacion).get_data(as_text=True)
+
+    assert foto() == primera
+    assert "ningún documento cambió de estado" in cuerpo
+    # Y la nota de crédito quedó restando por los dos lados
+    nota = ConciliacionSiiDocumento.query.filter_by(folio="900").one()
+    assert (nota.total_sii, nota.total_defontana, nota.estado) == (-11900, -11900, "coincide")
