@@ -1074,23 +1074,33 @@
     const lineaDe = r => r.linea || 'Sin línea';
     const L = k => { if (!D.lineas.has(k)) D.lineas.set(k, {in:0, out:0, cost:0, p:new Set()}); return D.lineas.get(k); };
     const comp = (m, tipo) => { const id = docId(m); if (!D.comps.has(id)) D.comps.set(id, {tipo:m.tipo, folio:m.folio, fecha:m.fecha, clase:tipo, lin:0, u:0, v:0, p:new Set()}); return D.comps.get(id); };
+    // Estado de los productos (ya ajustados y pendientes)
+    const filaDe = new Map();
     for (const r of state.rows){
       if (r.st === 'done') D.hechos++;
       if (r.manual) D.manual++;
       if (r.st === 'up' || r.st === 'down' || r.st === 'check'){ D.pend.n++; D.pend.v += r.valor || 0; }
-      for (const m of r.ajDocs || []){
-        const k = m.kind, v = m.valor || 0, g = D[k], c = comp(m, 'Cantidad'), l = L(lineaDe(r));
-        g.lin++; g.u += m.qty; g.v += v; g.p.add(r.key);
-        c.lin++; c.u += k === 'in' ? m.qty : -m.qty; c.v += k === 'in' ? v : -v; c.p.add(r.key);
-        l[k] += v; l.p.add(r.key);
-        D.detalle.push({r, m, clase: k === 'in' ? 'Entrada' : 'Salida', u: k === 'in' ? m.qty : -m.qty, v: k === 'in' ? v : -v});
-      }
-      for (const m of r.costDocs || []){
-        const v = (m.kind === 'in' ? 1 : -1) * (m.valor || 0), c = comp(m, 'Costo'), l = L(lineaDe(r));
-        D.cost.lin++; D.cost.v += v; D.cost.p.add(r.key);
-        c.lin++; c.v += v; c.p.add(r.key);
-        l.cost += v; l.p.add(r.key);
-        D.detalle.push({r, m, clase:'Costo', u: m.qty > EPS ? (m.kind === 'in' ? m.qty : -m.qty) : 0, v});
+      for (const m of r.docs || []) filaDe.set(m, r);
+    }
+    // Los montos salen de todas las líneas de los comprobantes de ajuste, igual que el total del
+    // comprobante en Defontana: cantidad 0 = ajuste de costo; si no, entrada o salida.
+    const marcados = new Set(state.docGroupsMain.filter(ajMarcado).map(g => g.id));
+    for (const m of conAjustes(state.mov)){
+      if (!marcados.has(docId(m))) continue;
+      const r = filaDe.get(m), prod = norm(m.art), l = L(r ? lineaDe(r) : 'Sin línea');
+      const fila = r || {code: m.art, name: m.desc || '', linea: ''};
+      if (m.qty <= EPS){
+        const v = (m.kind === 'in' ? 1 : -1) * (m.valor || 0), c = comp(m, 'Costo');
+        D.cost.lin++; D.cost.v += v; D.cost.p.add(prod);
+        c.lin++; c.v += v; c.p.add(prod);
+        l.cost += v; l.p.add(prod);
+        D.detalle.push({r: fila, m, clase:'Costo', u: 0, v});
+      } else {
+        const k = m.kind, v = m.valor || 0, g = D[k], c = comp(m, 'Cantidad');
+        g.lin++; g.u += m.qty; g.v += v; g.p.add(prod);
+        c.lin++; c.u += k === 'in' ? m.qty : -m.qty; c.v += k === 'in' ? v : -v; c.p.add(prod);
+        l[k] += v; l.p.add(prod);
+        D.detalle.push({r: fila, m, clase: k === 'in' ? 'Entrada' : 'Salida', u: k === 'in' ? m.qty : -m.qty, v: k === 'in' ? v : -v});
       }
     }
     D.neto = D.in.v - D.out.v + D.cost.v;
