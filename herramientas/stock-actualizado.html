@@ -111,6 +111,8 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
    Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
 /* Regularización de inventario (Inventario → Regularización).
    Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
+/* Regularización de inventario (Inventario → Regularización).
+   Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
 .regx{--bg:#F2F4F3; --surface:#FFFFFF; --surface2:#EDF1EF; --ink:#16201D; --muted:#5E6B66; --line:#DCE3E0;
   --accent:#245E8F; --accent-ink:#FFFFFF; --accent-soft:#E1EBF4;
   --in:#1B7446; --in-soft:#E0F2E7; --out:#B0362A; --out-soft:#FAE3E0; --warn:#8A5A00; --warn-soft:#FBEDCF; --gray-soft:#ECEFEE;
@@ -1507,6 +1509,23 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
       }
     }
     D.neto = D.in.v - D.out.v + D.cost.v;
+    // Lo ajustado contra lo que el programa sugería ajustar, producto por producto.
+    // Sugerido = lo que faltaba para llegar al stock real antes de los ajustes; ajustado = lo que
+    // movieron los comprobantes de cantidad; diferencia = lo que aún falta (o sobró) hoy.
+    D.cmp = []; D.cmpN = {ok:0, distinto:0, noSugerido:0, sinAjustar:0, sinConteo:0};
+    for (const r of state.rows){
+      const aj = r.aj || 0, hayAj = (r.ajDocs || []).length > 0, hoy = hoyDe(r);
+      if (!r.counted || r.realNow == null || hoy == null){
+        if (hayAj){ D.cmpN.sinConteo++; D.cmp.push({r, sug:null, aj, dif:null, vSug:null, vAj:r.ajVal || 0, estado:'sinConteo'}); }
+        continue;
+      }
+      if (r.manual) continue;   // marcado a mano como regularizado
+      const sug = r.realNow - (hoy - aj), dif = sug - aj;
+      if (Math.abs(sug) <= EPS && !hayAj) continue;   // no había nada que ajustar
+      const estado = !hayAj ? 'sinAjustar' : Math.abs(sug) <= EPS ? 'noSugerido' : Math.abs(dif) <= EPS ? 'ok' : 'distinto';
+      D.cmpN[estado]++;
+      D.cmp.push({r, sug, aj, dif, vSug: r.pmp > 0 ? sug * r.pmp : null, vAj: r.ajVal || 0, estado});
+    }
     return D;
   }
   function renderDash(){
@@ -1534,10 +1553,30 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
         <div class="tablebox"><table class="plantable"><thead><tr><th>Comprobante</th><th>Fecha</th><th>Tipo de ajuste</th><th class="num">Productos</th><th class="num">Líneas</th><th class="num">Unidades</th><th class="num">Valor</th></tr></thead>
         <tbody>${comps.map(c => `<tr><td>${esc(c.tipo)} <b>#${esc(c.folio)}</b></td><td>${fmtDate(c.fecha)}</td><td>${c.clase}</td><td class="num">${fmt(c.p.size)}</td><td class="num">${fmt(c.lin)}</td><td class="num">${c.clase === 'Costo' ? '—' : sgn(c.u)}</td><td class="num"><b>${money(c.v)}</b></td></tr>`).join('')}</tbody>
         <tfoot><tr><td colspan="6"><b>Total</b></td><td class="num"><b>${money(D.neto)}</b></td></tr></tfoot></table></div></section>` : ''}
+      ${renderCmp(D)}
       ${lineas.length ? `<section class="plansec"><div class="planhead"><div><h3>Por línea de negocio</h3></div></div>
         <div class="tablebox"><table class="plantable"><thead><tr><th>Línea</th><th class="num">Productos</th><th class="num">Entradas</th><th class="num">Salidas</th><th class="num">Costo</th><th class="num">Neto</th></tr></thead>
         <tbody>${lineas.map(([k, l]) => `<tr><td>${esc(k)}</td><td class="num">${fmt(l.p.size)}</td><td class="num">${money(l.in)}</td><td class="num">${money(-l.out)}</td><td class="num">${money(l.cost)}</td><td class="num"><b>${money(l.in - l.out + l.cost)}</b></td></tr>`).join('')}</tbody>
         <tfoot><tr><td><b>Total</b></td><td></td><td class="num"><b>${money(D.in.v)}</b></td><td class="num"><b>${money(-D.out.v)}</b></td><td class="num"><b>${money(D.cost.v)}</b></td><td class="num"><b>${money(D.neto)}</b></td></tr></tfoot></table></div></section>` : ''}`;
+  }
+  const CMP_ESTADO = {ok:['a-ok', 'Ajustado como se sugirió'], distinto:['a-warn', 'Ajustado con otra cantidad'], noSugerido:['a-warn', 'Ajustado sin que se sugiriera'], sinAjustar:['a-down', 'Sugerido y no ajustado'], sinConteo:['a-warn', 'Ajustado sin conteo']};
+  function renderCmp(D){
+    const N = D.cmpN, f = state.cmpFiltro || 'dif';
+    const L = D.cmp.filter(x => f === 'todos' || (f === 'dif' ? x.estado !== 'ok' : x.estado === f))
+      .sort((a, b) => Math.abs(b.dif ?? b.aj) - Math.abs(a.dif ?? a.aj));
+    const chip = (k, label, n) => `<button type="button" class="chip" data-cmp="${k}" aria-pressed="${f === k}">${label}<span class="c">${fmt(n)}</span></button>`;
+    const lim = 300;
+    return `<section class="plansec"><div class="planhead"><div><h3>Ajustes vs. lo sugerido</h3>
+      <p class="pwhy note">Compara, producto por producto, la cantidad que el programa sugería ajustar con la que movieron tus comprobantes de ajuste. "Diferencia" es lo que todavía falta (+) o sobra (−) para llegar al stock real.</p></div></div>
+      <div class="chips">${chip('dif', 'Con diferencia', N.distinto + N.noSugerido + N.sinAjustar + N.sinConteo)}${chip('ok', 'Ajustado como se sugirió', N.ok)}${chip('distinto', 'Otra cantidad', N.distinto)}${chip('noSugerido', 'No sugerido', N.noSugerido)}${chip('sinAjustar', 'Sugerido y no ajustado', N.sinAjustar)}${chip('sinConteo', 'Sin conteo', N.sinConteo)}${chip('todos', 'Todos', D.cmp.length)}</div>
+      ${L.length ? `<div class="tablebox"><table class="plantable"><thead><tr><th>Producto</th><th>Línea</th><th class="num">Sugerido</th><th class="num">Ajustado</th><th class="num">Diferencia</th><th class="num">Valor sugerido</th><th class="num">Valor ajustado</th><th>Comprobantes</th><th>Estado</th></tr></thead>
+      <tbody>${L.slice(0, lim).map(x => `<tr><td><div class="code">${esc(x.r.code)}</div><div class="pname">${esc(x.r.name)}</div></td><td>${esc(x.r.linea || '')}</td>
+        <td class="num">${x.sug == null ? '—' : sgn(x.sug)}</td><td class="num">${sgn(x.aj)}</td><td class="num"><b>${x.dif == null ? '—' : sgn(x.dif)}</b></td>
+        <td class="num">${x.vSug == null ? '—' : money(x.vSug)}</td><td class="num">${money(x.vAj)}</td>
+        <td class="small">${(x.r.ajDocs || []).map(m => esc(m.tipo) + ' #' + esc(m.folio)).filter((v, i, a) => a.indexOf(v) === i).join('<br>') || '<span class="mut">—</span>'}</td>
+        <td><span class="pill ${CMP_ESTADO[x.estado][0]}">${CMP_ESTADO[x.estado][1]}</span></td></tr>`).join('')}</tbody></table></div>
+        ${L.length > lim ? `<p class="note">Se muestran ${fmt(lim)} de ${fmt(L.length)}. El Excel trae la lista completa.</p>` : ''}` : '<p class="note">Nada en este filtro.</p>'}
+    </section>`;
   }
   function dashExcel(){
     const D = state.dash || buildDash(), wb = XLSX.utils.book_new();
@@ -1552,6 +1591,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
       {'Concepto': 'Pendiente por ajustar', 'Unidades': '', 'Productos': D.pend.n, 'Valor': r0(D.pend.v)}]);
     hoja('Por comprobante', [...D.comps.values()].map(c => ({'Tipo documento': c.tipo, 'Folio': c.folio, 'Fecha': fmtDate(c.fecha), 'Tipo de ajuste': c.clase, 'Productos': c.p.size, 'Líneas': c.lin, 'Unidades': c.clase === 'Costo' ? '' : c.u, 'Valor': r0(c.v)})));
     hoja('Por línea', [...D.lineas.entries()].map(([k, l]) => ({'Línea': k, 'Productos': l.p.size, 'Entradas': r0(l.in), 'Salidas': r0(-l.out), 'Costo': r0(l.cost), 'Neto': r0(l.in - l.out + l.cost)})));
+    hoja('Ajustes vs sugerido', D.cmp.map(x => ({'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Sugerido': x.sug == null ? '' : x.sug, 'Ajustado': x.aj, 'Diferencia': x.dif == null ? '' : x.dif, 'Valor sugerido': x.vSug == null ? '' : r0(x.vSug), 'Valor ajustado': r0(x.vAj), 'Comprobantes': [...new Set((x.r.ajDocs || []).map(m => m.tipo + ' #' + m.folio))].join(', '), 'Estado': CMP_ESTADO[x.estado][1]})));
     hoja('Detalle', D.detalle.map(x => ({'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Tipo de ajuste': x.clase, 'Comprobante': `${x.m.tipo} #${x.m.folio}`, 'Fecha': fmtDate(x.m.fecha), 'Unidades': x.u, 'Valor': r0(x.v)})));
     XLSX.writeFile(wb, 'resumen-ajustes-' + fmtDate(new Date()) + '.xlsx');
   }
@@ -1910,6 +1950,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
   $('planBox').addEventListener('click', e => { if (e.target.closest('#btnPlanXlsx')) planExcel(); });
   $('dashBox').addEventListener('click', e => {
     if (e.target.closest('#btnDashXlsx')) dashExcel();
+    const cf = e.target.closest('[data-cmp]'); if (cf){ state.cmpFiltro = cf.dataset.cmp; renderDash(); return; }
     if (e.target.closest('[data-dash-go]')){ state.view = 'reg'; state.filter.reg = 'bad'; render(); }
   });
   $('stepsPanel').addEventListener('click', e => {
