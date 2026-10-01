@@ -68,7 +68,7 @@
     metro:['M','MT','MTS','METRO','METROS'], pie:['FT','PIE','PIES','FEET'], pulgada:['IN','PULG','PULGADA','PULGADAS'],
     centimetro:['CM','CMS'], milimetro:['MM'], litro:['L','LT','LTS','LITRO','LITROS'], galon:['GL','GAL','GALON','GALONES'],
     kilo:['KG','KGS','KILO','KILOS','KILOGRAMO','KILOGRAMOS'], libra:['LB','LBS','LIBRA','LIBRAS'], gramo:['G','GR','GRS','GRAMO','GRAMOS'],
-    unidad:['UN','UND','UNI','UD','UNIDAD','UNIDADES','CU'], par:['PAR','PARES','PR'], docena:['DOC','DOCENA','DOCENAS','DZ'], pack:['PK','PACK','PACKS'], rollo:['RL','ROLLO','ROLLOS'], caja:['CJ','CAJA','CAJAS']
+    unidad:['UN','UND','UNI','UD','UNIDAD','UNIDADES','CU','EA','EACH'], par:['PAR','PARES','PR'], docena:['DOC','DOCENA','DOCENAS','DZ'], pack:['PK','PACK','PACKS'], rollo:['RL','ROLLO','ROLLOS'], caja:['CJ','CAJA','CAJAS']
   };
   const UM_NOMBRE = {metro:'metros', pie:'pies', pulgada:'pulgadas', centimetro:'centímetros', milimetro:'milímetros', litro:'litros', galon:'galones', kilo:'kilos', libra:'libras', gramo:'gramos', unidad:'unidades', par:'pares', docena:'docenas', pack:'packs', rollo:'rollos', caja:'cajas'};
   const UM_POR_FORMA = {};
@@ -139,7 +139,7 @@
       const body = JSON.stringify({
         recount: Object.fromEntries([...state.recount].map(([k, v]) => [k, {qty: v.qty, fecha: +v.fecha}])),
         pmp: Object.fromEntries(state.pmpEdit),
-        ajSi: [...state.ajSi], ajNo: [...state.ajNo], hechos: [...state.hechos]
+        ajSi: [...state.ajSi], ajNo: [...state.ajNo], hechos: Object.fromEntries(state.hechos)
       });
       fetch(urlDe('estado'), {method:'POST', body, headers:{'Content-Type':'application/json', 'X-CSRFToken': CFG.csrf}, credentials:'same-origin'}).then(r => { if (r.ok) marcarActualizado(); }).catch(() => {});
     }, 800);
@@ -177,7 +177,7 @@
 
 
   // ---------- Estado ----------
-  const state = {stock:[], mov:[], view:'reg', filter:{reg:'all', zero:'all', check:'all'}, mov2:null, ajustes:null, hechos:new Set(), ajSi:new Set(), ajNo:new Set(), docGroupsMain:[], checkRows:[], docGroups:[],
+  const state = {stock:[], mov:[], view:'reg', filter:{reg:'all', zero:'all', check:'all'}, mov2:null, ajustes:null, hechos:new Map(), ajSi:new Set(), ajNo:new Set(), docGroupsMain:[], checkRows:[], docGroups:[],
     sort:{reg:{k:'code', d:1}, zero:{k:'fecha', d:1}, check:{k:'code', d:1}}, open:new Set(), pmpEdit:new Map(), recount:leerRecuentos(), rows:[], zero:[]};
 
   function fillBodegas(){
@@ -434,6 +434,9 @@
           umInfo.hoyDef = hoy != null ? Math.round(hoy / umInfo.f * 1000) / 1000 : null;
           umInfo.hoyConv = hoy != null ? Math.round(hoy * 1000) / 1000 : null;
           dx.obs.push(`Defontana lleva este producto en ${a} y se contó en ${de}: sus cantidades se pasaron a ${de} (1 ${a} = ${fmt(Math.round(umInfo.f * 10000) / 10000)} ${de}) antes de cruzar. Primero cambia la unidad en Defontana: su saldo de ${fmt(umInfo.hoyDef)} ${a} queda en ${fmt(umInfo.hoyConv)} ${de}.`);
+        } else if (diff != null && Math.abs(diff) <= EPS){
+          // Mismas cantidades: solo cambia cómo se escribe la unidad. No hay nada que ajustar.
+          dx.obs.push(`Se contó en ${de} y en Defontana está en ${a}, pero las cantidades coinciden: no hay que ajustar. Si es la misma unidad, conviene dejarla igual en el maestro.`);
         } else {
           dx.cause = 'um'; dx.umMaster = true;
           dx.obs.unshift(`Se contó en ${de}, pero en Defontana el producto está en ${a} y no hay una conversión conocida entre esas unidades: se compararon las cifras tal cual. Corrige la unidad en el maestro de Defontana y confirma en qué unidad se registraron sus movimientos antes de ajustar.`);
@@ -463,7 +466,14 @@
         if (st === 'done'){ dx.cause = null; dx.obs = dx.obs.filter(x => /^Ajuste de (cantidad|costo) ya hecho/.test(x)); }
       }
       // Marcado a mano como ya regularizado (p. ej. se corrigió la unidad de medida en Defontana)
-      const manual = !!s && state.hechos.has(s.key);
+      // La marca "Ya regularizado" vale mientras el producto siga con la misma diferencia y el mismo conteo;
+      // si una carga nueva la cambia, el producto vuelve a aparecer.
+      const sugHoy = counted && realNow != null && (sysCalc ?? sysNow) != null ? realNow - ((sysCalc ?? sysNow) - aj) : null;
+      const marca = s && state.hechos.has(s.key) ? state.hechos.get(s.key) : undefined;
+      const marcaVale = marca === null || (marca !== undefined && marca.fecha === (s.fecha ? +s.fecha : null) &&
+        ((marca.sug == null && sugHoy == null) || (marca.sug != null && sugHoy != null && Math.abs(marca.sug - sugHoy) <= EPS)));
+      if (marca !== undefined && !marcaVale) dx.obs.unshift('Estaba marcado como "Ya regularizado", pero con los archivos nuevos la diferencia cambió: revísalo de nuevo.');
+      const manual = !!s && marcaVale;
       if (manual){ st = 'done'; cost = null; dx.cause = null; dx.obs = ['Marcado a mano como ya regularizado.', ...dx.obs.filter(x => /^Ajuste de (cantidad|costo) ya hecho/.test(x))]; }
       return {cause:dx.cause, obs:dx.obs, umRound: !!dx.umRound, umMaster: !!dx.umMaster, linea: s ? s.linea || '' : '', alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, umInfo, arts, artAjuste, pend, costDocs, manual, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs, sysCalc, toOther,
         sysAtCount, sysNow, realNow, diff, st, pmp, edited, pmpSrc: edited ? 'Ingresado a mano' : pm ? pm.src : 'Sin costo en Defontana',
@@ -1070,7 +1080,7 @@
   // las de cantidad separadas en entradas y salidas, y las de costo (ajustes de valor).
   function buildDash(){
     const D = {in:{lin:0, u:0, v:0, p:new Set()}, out:{lin:0, u:0, v:0, p:new Set()}, cost:{lin:0, v:0, p:new Set()},
-      comps:new Map(), lineas:new Map(), detalle:[], hechos:0, manual:0, pend:{n:0, v:0}};
+      comps:new Map(), lineas:new Map(), detalle:[], raros:[], hechos:0, manual:0, pend:{n:0, v:0}};
     const lineaDe = r => r.linea || 'Sin línea';
     const L = k => { if (!D.lineas.has(k)) D.lineas.set(k, {in:0, out:0, cost:0, p:new Set()}); return D.lineas.get(k); };
     const comp = (m, tipo) => { const id = docId(m); if (!D.comps.has(id)) D.comps.set(id, {tipo:m.tipo, folio:m.folio, fecha:m.fecha, clase:tipo, lin:0, u:0, v:0, p:new Set()}); return D.comps.get(id); };
@@ -1097,6 +1107,10 @@
         D.detalle.push({r: fila, m, clase:'Costo', u: 0, v});
       } else {
         const k = m.kind, v = m.valor || 0, g = D[k], c = comp(m, 'Cantidad');
+        // Valor que no calza: costo unitario de la línea muy lejos del PMP del producto (p. ej. una
+        // línea que trae el total de todo el comprobante en vez del suyo)
+        const pmp = r && r.pmp > 0 ? r.pmp : null, cu = v / m.qty;
+        if (pmp && Math.abs(v) > 100000 && (cu > pmp * 10 || cu < pmp / 10)) D.raros.push({r: fila, m, cu, pmp, v, esperado: pmp * m.qty});
         g.lin++; g.u += m.qty; g.v += v; g.p.add(prod);
         c.lin++; c.u += k === 'in' ? m.qty : -m.qty; c.v += k === 'in' ? v : -v; c.p.add(prod);
         l[k] += v; l.p.add(prod);
@@ -1149,6 +1163,10 @@
         <div class="tablebox"><table class="plantable"><thead><tr><th>Comprobante</th><th>Fecha</th><th>Tipo de ajuste</th><th class="num">Productos</th><th class="num">Líneas</th><th class="num">Unidades</th><th class="num">Valor</th></tr></thead>
         <tbody>${comps.map(c => `<tr><td>${esc(c.tipo)} <b>#${esc(c.folio)}</b></td><td>${fmtDate(c.fecha)}</td><td>${c.clase}</td><td class="num">${fmt(c.p.size)}</td><td class="num">${fmt(c.lin)}</td><td class="num">${c.clase === 'Costo' ? '—' : sgn(c.u)}</td><td class="num"><b>${money(c.v)}</b></td></tr>`).join('')}</tbody>
         <tfoot><tr><td colspan="6"><b>Total</b></td><td class="num"><b>${money(D.neto)}</b></td></tr></tfoot></table></div></section>` : ''}
+      ${D.raros.length ? `<section class="plansec warnbox"><div class="planhead"><div><h3>⚠ Líneas de ajuste con un valor que no calza <span class="pcount">${fmt(D.raros.length)}</span></h3>
+        <p class="pwhy note">El costo unitario de estas líneas está muy lejos del PMP del producto. Suele pasar cuando el informe de Defontana trae en una línea el total de todo el comprobante. Revísalas contra el PDF del comprobante: inflan los totales de arriba.</p></div></div>
+        <div class="tablebox"><table class="plantable"><thead><tr><th>Producto</th><th>Comprobante</th><th class="num">Cantidad</th><th class="num">Valor en el informe</th><th class="num">Costo unitario</th><th class="num">PMP del producto</th><th class="num">Valor esperado</th></tr></thead>
+        <tbody>${D.raros.map(x => `<tr><td><div class="code">${esc(x.r.code)}</div><div class="pname">${esc(x.r.name)}</div></td><td>${esc(x.m.tipo)} <b>#${esc(x.m.folio)}</b> · ${fmtDate(x.m.fecha)}</td><td class="num">${fmt(x.m.qty)}</td><td class="num"><b>${money(x.v)}</b></td><td class="num">${money(x.cu)}</td><td class="num">${money(x.pmp)}</td><td class="num">${money(x.esperado)}</td></tr>`).join('')}</tbody></table></div></section>` : ''}
       ${renderCmp(D)}
       ${lineas.length ? `<section class="plansec"><div class="planhead"><div><h3>Por línea de negocio</h3></div></div>
         <div class="tablebox"><table class="plantable"><thead><tr><th>Línea</th><th class="num">Productos</th><th class="num">Entradas</th><th class="num">Salidas</th><th class="num">Costo</th><th class="num">Neto</th></tr></thead>
@@ -1187,6 +1205,7 @@
       {'Concepto': 'Pendiente por ajustar', 'Unidades': '', 'Productos': D.pend.n, 'Valor': r0(D.pend.v)}]);
     hoja('Por comprobante', [...D.comps.values()].map(c => ({'Tipo documento': c.tipo, 'Folio': c.folio, 'Fecha': fmtDate(c.fecha), 'Tipo de ajuste': c.clase, 'Productos': c.p.size, 'Líneas': c.lin, 'Unidades': c.clase === 'Costo' ? '' : c.u, 'Valor': r0(c.v)})));
     hoja('Por línea', [...D.lineas.entries()].map(([k, l]) => ({'Línea': k, 'Productos': l.p.size, 'Entradas': r0(l.in), 'Salidas': r0(-l.out), 'Costo': r0(l.cost), 'Neto': r0(l.in - l.out + l.cost)})));
+    if (D.raros.length) hoja('Valores que no calzan', D.raros.map(x => ({'Código': x.r.code, 'Nombre': x.r.name, 'Comprobante': `${x.m.tipo} #${x.m.folio}`, 'Fecha': fmtDate(x.m.fecha), 'Cantidad': x.m.qty, 'Valor en el informe': r0(x.v), 'Costo unitario': r0(x.cu), 'PMP del producto': r0(x.pmp), 'Valor esperado': r0(x.esperado)})));
     hoja('Ajustes vs sugerido', D.cmp.map(x => ({'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Sugerido': x.sug == null ? '' : x.sug, 'Ajustado': x.aj, 'Diferencia': x.dif == null ? '' : x.dif, 'Valor sugerido': x.vSug == null ? '' : r0(x.vSug), 'Valor ajustado': r0(x.vAj), 'Comprobantes': [...new Set((x.r.ajDocs || []).map(m => m.tipo + ' #' + m.folio))].join(', '), 'Estado': CMP_ESTADO[x.estado][1]})));
     hoja('Detalle', D.detalle.map(x => ({'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Tipo de ajuste': x.clase, 'Comprobante': `${x.m.tipo} #${x.m.folio}`, 'Fecha': fmtDate(x.m.fecha), 'Unidades': x.u, 'Valor': r0(x.v)})));
     XLSX.writeFile(wb, 'resumen-ajustes-' + fmtDate(new Date()) + '.xlsx');
@@ -1569,7 +1588,12 @@
   const toggle = tr => { const k = tr.dataset.key; state.open.has(k) ? state.open.delete(k) : state.open.add(k); render(); };
   $('tbody').addEventListener('click', e => {
     const hb = e.target.closest('[data-hecho]');
-    if (hb){ const k = hb.dataset.hecho; if (state.hechos.has(k)) state.hechos.delete(k); else state.hechos.add(k); guardarEstado(); render(); return; }
+    if (hb){
+      const k = hb.dataset.hecho, r = state.rows.find(x => x.key === k);
+      if (r && r.manual) state.hechos.delete(k);
+      else if (r){ const hoy = hoyDe(r); state.hechos.set(k, {sug: r.counted && r.realNow != null && hoy != null ? r.realNow - (hoy - (r.aj || 0)) : null, fecha: r.s && r.s.fecha ? +r.s.fecha : null}); }
+      guardarEstado(); render(); return;
+    }
     if (e.target.closest('input')) return; const tr = e.target.closest('tr.rx-row'); if (tr) toggle(tr); });
   $('tbody').addEventListener('keydown', e => { if (e.target.closest('input')) return; const tr = e.target.closest('tr.rx-row'); if (tr && (e.key === 'Enter' || e.key === ' ')){ e.preventDefault(); toggle(tr); } });
   $('tbody').addEventListener('change', e => {
@@ -1617,7 +1641,8 @@
         if (e.pmp) state.pmpEdit = new Map(Object.entries(e.pmp));
         if (e.ajSi) state.ajSi = new Set(e.ajSi);
         if (e.ajNo) state.ajNo = new Set(e.ajNo);
-        if (e.hechos) state.hechos = new Set(e.hechos);
+        // Cada marca guarda la diferencia que tenía el producto al marcarlo (formato anterior: solo la lista de claves)
+        if (e.hechos) state.hechos = Array.isArray(e.hechos) ? new Map(e.hechos.map(k => [k, null])) : new Map(Object.entries(e.hechos));
         if (e.ajSel && !e.ajSi) state.ajSi = new Set(e.ajSel);   // formato anterior
       } catch(_){}
     }
