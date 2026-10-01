@@ -1080,14 +1080,16 @@
   // las de cantidad separadas en entradas y salidas, y las de costo (ajustes de valor).
   function buildDash(){
     const D = {in:{lin:0, u:0, v:0, p:new Set()}, out:{lin:0, u:0, v:0, p:new Set()}, cost:{lin:0, v:0, p:new Set()},
-      comps:new Map(), lineas:new Map(), detalle:[], raros:[], hechos:0, manual:0, pend:{n:0, v:0}};
+      comps:new Map(), lineas:new Map(), detalle:[], raros:[], hechos:0, soloCosto:0, manual:0, pend:{n:0, v:0}};
     const lineaDe = r => r.linea || 'Sin línea';
     const L = k => { if (!D.lineas.has(k)) D.lineas.set(k, {in:0, out:0, cost:0, p:new Set()}); return D.lineas.get(k); };
     const comp = (m, tipo) => { const id = docId(m); if (!D.comps.has(id)) D.comps.set(id, {tipo:m.tipo, folio:m.folio, fecha:m.fecha, clase:tipo, lin:0, u:0, v:0, p:new Set()}); return D.comps.get(id); };
     // Estado de los productos (ya ajustados y pendientes)
     const filaDe = new Map();
     for (const r of state.rows){
+      // Mismo criterio que el filtro "Ya ajustados": cantidad ya ajustada o costo ya ajustado
       if (r.st === 'done') D.hechos++;
+      else if (r.costDocs && r.costDocs.length){ D.hechos++; D.soloCosto++; }
       if (r.manual) D.manual++;
       if (r.st === 'up' || r.st === 'down' || r.st === 'check'){ D.pend.n++; D.pend.v += r.valor || 0; }
       for (const m of r.docs || []) filaDe.set(m, r);
@@ -1156,7 +1158,7 @@
         <div class="rx-card down"><span class="lbl">Salidas por ajuste</span><span class="big">${money(-D.out.v)}</span><span class="note">${unid(D.out.u)} · ${prods(D.out.p)}</span></div>
         <div class="rx-card"><span class="lbl">Ajustes de costo</span><span class="big">${money(D.cost.v)}</span><span class="note">${prods(D.cost.p)} · ${fmt(D.cost.lin)} ${D.cost.lin === 1 ? 'línea' : 'líneas'}</span></div>
         <div class="rx-card"><span class="lbl">Efecto neto en el inventario</span><span class="big">${money(D.neto)}</span><span class="note">entradas − salidas + costo</span></div>
-        <div class="rx-card"><span class="lbl">Productos ya ajustados</span><span class="big">${fmt(D.hechos)}</span><span class="note">${D.manual ? fmt(D.manual) + ' marcados a mano' : 'cuadrados con los comprobantes'}</span></div>
+        <div class="rx-card"><span class="lbl">Productos ya ajustados</span><span class="big">${fmt(D.hechos)}</span><span class="note">${[D.hechos - D.soloCosto ? fmt(D.hechos - D.soloCosto) + ' de cantidad' : '', D.soloCosto ? fmt(D.soloCosto) + ' solo de costo' : '', D.manual ? fmt(D.manual) + ' marcados a mano' : ''].filter(Boolean).join(' · ') || 'cuadrados con los comprobantes'}</span></div>
         <button class="rx-card bad" type="button" data-dash-go="bad"><span class="lbl">Pendiente por ajustar</span><span class="big">${fmt(D.pend.n)}</span><span class="note">${money(D.pend.v)} · ver en Productos</span></button>
       </div>
       ${comps.length ? `<section class="plansec"><div class="planhead"><div><h3>Por comprobante <span class="pcount">${fmt(comps.length)}</span></h3></div></div>
