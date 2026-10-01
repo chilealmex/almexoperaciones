@@ -131,6 +131,8 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
    Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
 /* Regularización de inventario (Inventario → Regularización).
    Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
+/* Regularización de inventario (Inventario → Regularización).
+   Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
 .regx{--bg:#F2F4F3; --surface:#FFFFFF; --surface2:#EDF1EF; --ink:#16201D; --muted:#5E6B66; --line:#DCE3E0;
   --accent:#245E8F; --accent-ink:#FFFFFF; --accent-soft:#E1EBF4;
   --in:#1B7446; --in-soft:#E0F2E7; --out:#B0362A; --out-soft:#FAE3E0; --warn:#8A5A00; --warn-soft:#FBEDCF; --gray-soft:#ECEFEE;
@@ -1598,6 +1600,13 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     }
     return D;
   }
+  // Línea que no calza: se muestra con su propio código y descripción, tal como viene en el archivo,
+  // y de qué archivo salió, para poder encontrarla
+  const rarosFuente = x => x.m._ext ? 'en el archivo de ajustes hechos' : 'en el Informe de Documentos';
+  function rarosProd(x){
+    const otro = norm(x.m.art) !== norm(x.r.code);
+    return `<div class="code">${esc(x.m.art)}</div><div class="pname">${esc(x.m.desc || x.r.name)}</div>` + (otro ? `<div class="small alias">se cruzó con ${esc(x.r.code)}</div>` : '');
+  }
   function renderDash(){
     const box = $('dashBox');
     if (!state.mov.length){ box.innerHTML = '<p class="empty">Sube el Informe de Documentos de Defontana y el archivo de ajustes hechos para ver el resumen.</p>'; return; }
@@ -1626,7 +1635,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
       ${D.raros.length ? `<section class="plansec warnbox"><div class="planhead"><div><h3>⚠ Líneas de ajuste con un valor que no calza <span class="pcount">${fmt(D.raros.length)}</span></h3>
         <p class="pwhy note">El costo unitario de estas líneas está muy lejos del PMP del producto. Suele pasar cuando el informe de Defontana trae en una línea el total de todo el comprobante. Revísalas contra el PDF del comprobante: inflan los totales de arriba.</p></div></div>
         <div class="tablebox"><table class="plantable"><thead><tr><th>Producto</th><th>Comprobante</th><th class="num">Cantidad</th><th class="num">Valor en el informe</th><th class="num">Costo unitario</th><th class="num">PMP del producto</th><th class="num">Valor esperado</th></tr></thead>
-        <tbody>${D.raros.map(x => `<tr><td><div class="code">${esc(x.r.code)}</div><div class="pname">${esc(x.r.name)}</div></td><td>${esc(x.m.tipo)} <b>#${esc(x.m.folio)}</b> · ${fmtDate(x.m.fecha)}</td><td class="num">${fmt(x.m.qty)}</td><td class="num"><b>${money(x.v)}</b></td><td class="num">${money(x.cu)}</td><td class="num">${money(x.pmp)}</td><td class="num">${money(x.esperado)}</td></tr>`).join('')}</tbody></table></div></section>` : ''}
+        <tbody>${D.raros.map(x => `<tr><td>${rarosProd(x)}</td><td>${esc(x.m.tipo)} <b>#${esc(x.m.folio)}</b> · ${fmtDate(x.m.fecha)}<div class="small">${rarosFuente(x)}</div></td><td class="num">${fmt(x.m.qty)}</td><td class="num"><b>${money(x.v)}</b></td><td class="num">${money(x.cu)}</td><td class="num">${money(x.pmp)}</td><td class="num">${money(x.esperado)}</td></tr>`).join('')}</tbody></table></div></section>` : ''}
       ${renderCmp(D)}
       ${lineas.length ? `<section class="plansec"><div class="planhead"><div><h3>Por línea de negocio</h3></div></div>
         <div class="tablebox"><table class="plantable"><thead><tr><th>Línea</th><th class="num">Productos</th><th class="num">Entradas</th><th class="num">Salidas</th><th class="num">Costo</th><th class="num">Neto</th></tr></thead>
@@ -1680,7 +1689,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
       {'Concepto': 'Pendiente por ajustar', 'Unidades': '', 'Productos': D.pend.n, 'Valor': r0(D.pend.v)}]);
     hoja('Por comprobante', [...D.comps.values()].map(c => ({'Tipo documento': c.tipo, 'Folio': c.folio, 'Fecha': fmtDate(c.fecha), 'Tipo de ajuste': c.clase, 'Productos': c.p.size, 'Líneas': c.lin, 'Unidades': c.clase === 'Costo' ? '' : c.u, 'Valor': r0(c.v)})));
     hoja('Por línea', [...D.lineas.entries()].map(([k, l]) => ({'Línea': k, 'Productos': l.p.size, 'Entradas': r0(l.in), 'Salidas': r0(-l.out), 'Costo': r0(l.cost), 'Neto': r0(l.in - l.out + l.cost)})));
-    if (D.raros.length) hoja('Valores que no calzan', D.raros.map(x => ({'Código': x.r.code, 'Nombre': x.r.name, 'Comprobante': `${x.m.tipo} #${x.m.folio}`, 'Fecha': fmtDate(x.m.fecha), 'Cantidad': x.m.qty, 'Valor en el informe': r0(x.v), 'Costo unitario': r0(x.cu), 'PMP del producto': r0(x.pmp), 'Valor esperado': r0(x.esperado)})));
+    if (D.raros.length) hoja('Valores que no calzan', D.raros.map(x => ({'Código en el archivo': x.m.art, 'Descripción en el archivo': x.m.desc || '', 'Producto con que se cruzó': x.r.code, 'Archivo': rarosFuente(x).replace(/^en (el )?/, ''), 'Comprobante': `${x.m.tipo} #${x.m.folio}`, 'Fecha': fmtDate(x.m.fecha), 'Cantidad': x.m.qty, 'Valor en el informe': r0(x.v), 'Costo unitario': r0(x.cu), 'PMP del producto': r0(x.pmp), 'Valor esperado': r0(x.esperado)})));
     hoja('Ajustes vs sugerido', D.cmp.map(x => ({'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Sugerido': x.sug == null ? '' : x.sug, 'Ajustado': Math.round(x.aj * 1e4) / 1e4, 'Diferencia': x.dif == null ? '' : x.dif, 'Valor sugerido': x.vSug == null ? '' : r0(x.vSug), 'Valor ajustado': r0(x.vAj), 'Comprobantes': [...new Set((x.r.ajDocs || []).map(m => m.tipo + ' #' + m.folio))].join(', '), 'Estado': CMP_ESTADO[x.estado][1], 'Diferencia de valor por costo': x.costo ? r0(x.costo.dv) : '', 'Detalle del costo': x.costo ? costoTxt(x).replace(/<[^>]+>/g, '') : ''})));
     hoja('Detalle', D.detalle.map(x => ({'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Tipo de ajuste': x.clase, 'Comprobante': `${x.m.tipo} #${x.m.folio}`, 'Fecha': fmtDate(x.m.fecha), 'Unidades': x.u, 'Valor': r0(x.v)})));
     XLSX.writeFile(wb, 'resumen-ajustes-' + fmtDate(new Date()) + '.xlsx');
