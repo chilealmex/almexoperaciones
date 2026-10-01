@@ -452,8 +452,8 @@
       if (dx.cause === 'late' || dx.cause === 'sameday' || dx.cause === 'um') st = 'check';
       // Ya se hicieron comprobantes de ajuste: lo que queda por ajustar es lo que falta para llegar al stock real hoy
       let pend = null;
-      const docTxtAj = L => L.map(m => `${m.tipo} #${m.folio} (${m.kind === 'in' ? '+' : '−'}${fmt(m.qty)})`).join(', ');
-      const costTxt = costDocs.map(m => `${m.tipo} #${m.folio} (${m.qty > EPS ? (m.kind === 'in' ? '+' : '−') + fmt(m.qty) + ' · ' : ''}${money((m.kind === 'in' ? 1 : -1) * (m.valor || 0))})`).join(', ');
+      const docTxtAj = L => L.map(m => `${m.tipo} #${m.folio} del ${fmtDate(m.fecha)} (${m.kind === 'in' ? '+' : '−'}${fmt(m.qty)})`).join(', ');
+      const costTxt = costDocs.map(m => `${m.tipo} #${m.folio} del ${fmtDate(m.fecha)} (${m.qty > EPS ? (m.kind === 'in' ? '+' : '−') + fmt(m.qty) + ' · ' : ''}${money((m.kind === 'in' ? 1 : -1) * (m.valor || 0))})`).join(', ');
       if (costDocs.length) dx.obs.unshift(`Ajuste de costo ya hecho: ${esc(costTxt)}.` + (pm ? ` PMP hoy: ${money(pm.v)}.` : ''));
       if (counted && ajDocs.length && diff != null){
         const hoy = sysCalc ?? sysNow;
@@ -935,6 +935,14 @@
     if (r.s && r.s.previos && r.s.previos.length) bits.push('Conteo anterior no usado: ' + r.s.previos.map(x => esc(x.code) + ' = ' + fmt(x.stock) + ' el ' + fmtDate(x.fecha)).join(', ') + ' (vale el más reciente)');
     return bits.length ? `<div class="alias">${bits.join(' · ')}</div>` : '';
   }
+  // Comprobantes con que se ajustó el producto (cantidad y costo), con su fecha
+  const listaAj = r => [...(r.ajDocs || []), ...(r.costDocs || [])];
+  const comprobantesAj = r => {
+    const L = listaAj(r); if (!L.length) return '';
+    const vistos = new Set(), items = [];
+    for (const m of L){ const k = docId(m); if (vistos.has(k)) continue; vistos.add(k); items.push(`${esc(m.tipo)} <b>#${esc(m.folio)}</b> · ${fmtDate(m.fecha)}`); }
+    return `<div class="small ajcomp">${items.join('<br>')}</div>`;
+  };
   function regRow(r){
     const [cls, label] = ACTION[r.st], aj = ajusteHoy(r);
     const d = r.diff;
@@ -958,7 +966,7 @@
       <td class="num"><b>${fmt(r.realNow)}</b></td>
       <td class="num">${fmt(hoyDe(r))}${r.arts ? '<div class="small">' + r.arts.map(x => esc(x.art) + ': ' + fmt(x.hoy)).join('<br>') + '</div>' : ''}${r.sysAtCount != null && r.counted ? '<div class="small">al conteo: ' + fmt(r.sysAtCount) + '</div>' : ''}${r.sysCalc != null && r.sysNow != null && Math.abs(r.sysCalc - r.sysNow) > EPS ? '<div class="small">última fila del informe: ' + fmt(r.sysNow) + '</div>' : ''}</td>
       <td class="num diff ${r.st === 'check' ? 'mut' : aj > EPS ? 'plus' : aj < -EPS ? 'minus' : 'mut'}">${aj == null ? '—' : Math.abs(aj) <= EPS ? '0' : r.st === 'check' ? '<span class="small">a confirmar</span><div class="small">(' + sgn(aj) + ' si no se explica)</div>' : sgn(aj)}</td>
-      <td><span class="pill ${cls}">${label}${qty}</span>${r.sameDay && r.counted ? '<span class="flag" title="Hay documentos el mismo día del conteo">· mismo día</span>' : ''}</td>
+      <td><span class="pill ${cls}">${label}${qty}</span>${comprobantesAj(r)}${r.sameDay && r.counted ? '<span class="flag" title="Hay documentos el mismo día del conteo">· mismo día</span>' : ''}</td>
       <td class="obs">${obsCell(r)}</td>
       <td class="tomake">${stepsCell(docSteps(r))}${r.s && (r.manual || r.st === 'up' || r.st === 'down' || r.st === 'check') ? `<button type="button" class="rx-btn ghost sm hecho" data-hecho="${esc(r.key)}" title="${r.manual ? 'Volver a mostrarlo como pendiente' : 'Ya lo regularizaste en Defontana: deja de pedir ajuste'}">${r.manual ? 'Desmarcar' : '✓ Ya regularizado'}</button>` : ''}</td>
       <td class="num">${costCell(r)}</td>
@@ -1230,6 +1238,7 @@
   // ---------- Exportar ----------
   const regExport = r => ({
     'Código': r.code, 'Nombre': r.name, 'Línea': r.linea || '', 'Otras formas del código': r.alias.join(', ') + (r.viaName ? (r.alias.length ? ' · ' : '') + 'cruzado por nombre' : ''), 'Qué hacer': ACTION[r.st][1], 'Causa probable': r.cause ? CAUSES[r.cause] : '',
+    'Comprobante de ajuste': [...new Set(listaAj(r).map(m => `${m.tipo} #${m.folio}`))].join(', '), 'Fecha del ajuste': [...new Set(listaAj(r).map(m => fmtDate(m.fecha)))].join(', '),
     'Observaciones': r.obs.map(x => x.replace(/<[^>]+>/g, '')).join(' '),
     'Qué hacer, en orden': stepsText(r), 'Revisar costo': r.cost ? (r.cost.need ? 'Sí' : 'No') : '', 'Detalle costo': r.cost ? r.cost.txt.join(' ') : '',
     'Costo a usar (c/u)': r.cost && r.cost.need ? r.cost.costos.map(c => (c.v != null ? Math.round(c.v * 100) / 100 : 'factura') + ' (' + c.doc + ')').join(' · ') : '',
