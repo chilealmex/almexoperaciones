@@ -1411,15 +1411,29 @@ def _sueltos(empresa_id):
     return solo_qms, solo_defo
 
 
+def _codigo_que_no_esta(codigo, sueltos, sistema) -> str:
+    """Mensaje de error si el código no está entre los sueltos de ese sistema."""
+    if not codigo:
+        return f"Falta el código de {sistema}."
+    clave = codigo_normalizado(codigo)
+    if any(codigo_normalizado(i.codigo) == clave for i in sueltos):
+        return ""
+    return (
+        f'No hay ningún artículo suelto en {sistema} con el código "{codigo}". '
+        "Revisa cómo está escrito, o puede que ya cruce con el otro sistema."
+    )
+
+
 @bp.route("/equivalencias")
 @require_permission("inventario", "editar")
 def equivalencias_codigos():
     """Propone qué artículo de QMS es el mismo que cuál de Defontana."""
     solo_qms, solo_defo = _sueltos(current_user.empresa_id)
-    ya_unidos = {e.clave_qms for e in EquivalenciaCodigo.query.filter_by(
-        empresa_id=current_user.empresa_id).all()}
-    claves_unidas = {e.clave_defontana for e in EquivalenciaCodigo.query.filter_by(
-        empresa_id=current_user.empresa_id).all()}
+    confirmadas = EquivalenciaCodigo.query.filter_by(
+        empresa_id=current_user.empresa_id
+    ).order_by(EquivalenciaCodigo.creado_en.desc()).all()
+    ya_unidos = {e.clave_qms for e in confirmadas}
+    claves_unidas = {e.clave_defontana for e in confirmadas}
 
     # Lo ya confirmado sale de la lista de candidatos: se resolvió.
     pendientes_qms = [i for i in solo_qms if codigo_normalizado(i.codigo) not in ya_unidos]
@@ -1430,11 +1444,44 @@ def equivalencias_codigos():
         propuestas=proponer(pendientes_qms, pendientes_defo),
         solo_qms=pendientes_qms,
         solo_defontana=pendientes_defo,
-        confirmadas=EquivalenciaCodigo.query.filter_by(
-            empresa_id=current_user.empresa_id
-        ).order_by(EquivalenciaCodigo.creado_en.desc()).all(),
+        confirmadas=confirmadas,
         form=AccionForm(),
     )
+
+
+def _absorber_fila_de_defontana(codigo_qms, codigo_defo, solo_qms, solo_defo) -> None:
+    """Junta las dos filas en la de QMS y borra la de Defontana.
+
+    Sin esto, la fila de Defontana queda de zombi: la próxima importación
+    manda su stock a la fila de QMS —para eso es la equivalencia— y la vieja
+    se queda con el saldo de antes y sin actualizarse nunca, apareciendo como
+    un artículo que ya no está en ningún sistema.
+
+    Lo que declara Defontana se copia tal cual; lo de QMS no se toca.
+    """
+    clave_qms = codigo_normalizado(codigo_qms)
+    clave_defo = codigo_normalizado(codigo_defo)
+    destino = next((i for i in solo_qms if codigo_normalizado(i.codigo) == clave_qms), None)
+    origen = next((i for i in solo_defo if codigo_normalizado(i.codigo) == clave_defo), None)
+    if destino is None or origen is None or destino.id == origen.id:
+        return
+
+    destino.cantidad_defontana = origen.cantidad_defontana
+    destino.unidad_defontana = origen.unidad_defontana
+    destino.costo_unitario_defontana = origen.costo_unitario_defontana
+    destino.en_defontana = True
+    # Los datos de texto sólo se completan si al destino le faltaban.
+    for campo in ("nombre", "ubicacion", "categoria", "linea_negocio"):
+        if not getattr(destino, campo):
+            setattr(destino, campo, getattr(origen, campo))
+    # El conteo físico es trabajo de bodega: si sólo lo tiene el que se va, se
+    # conserva; si el destino ya tenía uno, ese manda.
+    if destino.cantidad_fisica is None and origen.cantidad_fisica is not None:
+        destino.cantidad_fisica = origen.cantidad_fisica
+        destino.contado_por_id = origen.contado_por_id
+        destino.contado_en = origen.contado_en
+
+    db.session.delete(origen)
 
 
 @bp.route("/equivalencias/unir", methods=["POST"])
@@ -1446,6 +1493,18 @@ def equivalencias_unir():
 
     codigo_qms = (request.form.get("codigo_qms") or "").strip()
     codigo_defo = (request.form.get("codigo_defontana") or "").strip()
+
+    # Los códigos se escriben a mano, así que un dedazo no puede terminar en
+    # una equivalencia hacia un artículo que no existe: eso no daría error
+    # nunca y quedaría ahí, sin unir nada, sin que se note.
+    solo_qms, solo_defo = _sueltos(current_user.empresa_id)
+    faltante = _codigo_que_no_esta(codigo_qms, solo_qms, "QMS") or _codigo_que_no_esta(
+        codigo_defo, solo_defo, "Defontana"
+    )
+    if faltante:
+        flash(faltante, "warning")
+        return redirect(url_for("inventario.equivalencias_codigos"))
+
     _equivalencia, error = crear_equivalencia(
         current_user.empresa_id, codigo_qms, codigo_defo, current_user.id,
         puntaje=request.form.get("puntaje", type=float),
@@ -1455,6 +1514,7 @@ def equivalencias_unir():
         flash(error, "warning")
         return redirect(url_for("inventario.equivalencias_codigos"))
 
+    _absorber_fila_de_defontana(codigo_qms, codigo_defo, solo_qms, solo_defo)
     db.session.commit()
     flash(
         f"{codigo_defo} (Defontana) y {codigo_qms} (QMS) quedaron unidos. "
