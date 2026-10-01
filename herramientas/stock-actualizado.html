@@ -133,6 +133,10 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
    Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
 /* Regularización de inventario (Inventario → Regularización).
    Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
+/* Regularización de inventario (Inventario → Regularización).
+   Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
+/* Regularización de inventario (Inventario → Regularización).
+   Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
 .regx{--bg:#F2F4F3; --surface:#FFFFFF; --surface2:#EDF1EF; --ink:#16201D; --muted:#5E6B66; --line:#DCE3E0;
   --accent:#245E8F; --accent-ink:#FFFFFF; --accent-soft:#E1EBF4;
   --in:#1B7446; --in-soft:#E0F2E7; --out:#B0362A; --out-soft:#FAE3E0; --warn:#8A5A00; --warn-soft:#FBEDCF; --gray-soft:#ECEFEE;
@@ -439,6 +443,8 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
   const fmt = n => n == null || n === '' || isNaN(n) ? '—' : Number(n).toLocaleString('es-CL', {maximumFractionDigits: 3});
   const sgn = n => n == null ? '—' : (n > EPS ? '+' : n < -EPS ? '−' : '') + fmt(Math.abs(n));
   const money = n => n == null || isNaN(n) ? '—' : (n < -0.5 ? '−$' : '$') + Math.abs(Math.round(n)).toLocaleString('es-CL');
+  // Costo unitario: con decimales cuando es bajo, para que se note la diferencia
+  const cuTxt = n => n != null && Math.abs(n) < 1000 ? (n < 0 ? '−$' : '$') + Math.abs(n).toLocaleString('es-CL', {maximumFractionDigits: 2}) : money(n);
   const dayKey = d => d ? d.getFullYear()*10000 + (d.getMonth()+1)*100 + d.getDate() : null;
   const fmtDate = (d, t) => !d ? '' : String(d.getDate()).padStart(2,'0') + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + d.getFullYear() +
     (t ? ' ' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0') : '');
@@ -1327,7 +1333,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
       ${lineaCell(r.linea)}
       <td class="num">${r.counted ? fmt(r.s.stock) + '<div class="small">' + fmtDate(r.s.fecha) + '</div>' : '—'}</td>
       <td class="num diff ${r.diff > EPS ? 'plus' : r.diff < -EPS ? 'minus' : 'mut'}">${r.diff == null ? '—' : sgn(r.diff)}</td>
-      <td class="num diff ${r.aj > EPS ? 'plus' : r.aj < -EPS ? 'minus' : 'mut'}">${Math.abs(r.aj) > EPS ? sgn(r.aj) + '<div class="small">' + money(r.ajVal) + '</div>' : '—'}</td>
+      <td class="num diff ${r.aj > EPS ? 'plus' : r.aj < -EPS ? 'minus' : 'mut'}">${Math.abs(r.aj) > EPS ? sgn(r.aj) + '<div class="small">' + money(r.ajVal) + ' · ' + cuTxt(r.ajVal / r.aj) + ' c/u</div>' : '—'}</td>
       <td><span class="pill ${cls}">${label}</span></td>
       <td class="obs"><div class="why">${r.cobs[0]}</div>${r.cobs.length > 1 ? '<div class="more-obs">' + r.cobs.slice(1).join('<br>') + '</div>' : ''}</td>
       <td class="tomake">${makeCell(checkToMake(r))}</td>
@@ -1644,11 +1650,16 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
   }
   const CMP_ESTADO = {ok:['a-ok', 'Ajustado como se sugirió'], costo:['a-down', 'Cantidad bien, costo distinto'], pmpCambio:['a-warn', 'Cantidad bien, PMP cambió desde el conteo'], distinto:['a-warn', 'Ajustado con otra cantidad'], noSugerido:['a-warn', 'Ajustado sin que se sugiriera'], sinAjustar:['a-down', 'Sugerido y no ajustado'], sinConteo:['a-warn', 'Ajustado sin conteo'], manual:['a-warn', 'Marcado a mano como regularizado']};
   // Explica la diferencia de costo de los ajustes de un producto y qué hacer
-  // Costo unitario: con decimales cuando es bajo, para que se note la diferencia
-  const cuTxt = n => n != null && Math.abs(n) < 1000 ? (n < 0 ? '−$' : '$') + Math.abs(n).toLocaleString('es-CL', {maximumFractionDigits: 2}) : money(n);
   function costoTxt(x){
     const c = x.costo, r = x.r, doc = m => `${esc(m.tipo)} #${esc(m.folio)}`;
     const cuanto = `el inventario quedó con ${money(Math.abs(c.dv))} ${c.dv > 0 ? 'más' : 'menos'} de valor`;
+    // Costo unitario 10 veces o más lejos del PMP del día: casi siempre es el archivo (una línea con el
+    // total de todo el comprobante), no lo que quedó en Defontana. No se sugiere ajustar.
+    const absurda = l => l.dia > EPS && (l.cu > l.dia * 10 || l.cu < l.dia / 10);
+    if (c.real && c.lineas.every(absurda)){
+      const lin = c.lineas.map(l => `${doc(l.m)} trae ${money(l.m.valor)} por ${fmt(l.m.qty)} (${cuTxt(l.cu)} c/u; el PMP ese día era ${cuTxt(l.dia)})`).join(', ');
+      return `${lin}. Parece un error del archivo exportado, no del ajuste: compáralo con el PDF del comprobante. Si el PDF muestra el valor normal (${money(c.lineas.reduce((a, l) => a + l.dia * l.m.qty, 0))}), no hagas ningún ajuste de costo.`;
+    }
     if (c.real){
       const lin = c.lineas.map(l => `${doc(l.m)} a ${cuTxt(l.cu)} c/u` + (l.dia > EPS ? ` (el PMP de Defontana ese día era ${cuTxt(l.dia)})` : '')).join(', ');
       return `Se ajustó con ${lin}: ${cuanto} de lo que correspondía. Revisa el costo de ese comprobante o haz un ajuste de costo por ${money(-c.dv)}.`;
@@ -1657,6 +1668,8 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     const compras = c.ingresos.length ? ` por ${[...new Set(c.ingresos.map(doc))].join(', ')}` : '';
     return `Se sugirió a ${cuTxt(r.pmp)} c/u (PMP al conteo) y se ajustó con ${lin}, que es el PMP que tenía Defontana ese día: cambió después del conteo${compras}. Frente a lo sugerido, ${cuanto}. Si el costo de esas compras está bien, no hay que hacer nada; si no, corrígelo o haz un ajuste de costo por ${money(-c.dv)}.`;
   }
+  // Valor unitario de lo ajustado: valor ÷ unidades (si las unidades suman 0, no hay)
+  const cuAj = x => Math.abs(x.aj) > EPS ? Math.round(x.vAj / x.aj * 100) / 100 : null;
   function renderCmp(D){
     const N = D.cmpN, f = state.cmpFiltro || 'dif';
     const conDif = x => x.costo || (x.estado !== 'ok' && !(x.estado === 'manual' && Math.abs(x.dif) <= EPS));
@@ -1670,7 +1683,7 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
       ${L.length ? `<div class="tablebox"><table class="plantable"><thead><tr><th>Producto</th><th>Línea</th><th class="num">Sugerido</th><th class="num">Ajustado</th><th class="num">Diferencia</th><th class="num">Valor sugerido</th><th class="num">Valor ajustado</th><th>Comprobantes</th><th>Estado</th></tr></thead>
       <tbody>${L.slice(0, lim).map(x => `<tr><td><div class="code">${esc(x.r.code)}</div><div class="pname">${esc(x.r.name)}</div></td><td>${esc(x.r.linea || '')}</td>
         <td class="num">${x.sug == null ? '—' : sgn(x.sug)}</td><td class="num">${sgn(x.aj)}</td><td class="num"><b>${x.dif == null ? '—' : sgn(x.dif)}</b></td>
-        <td class="num">${x.vSug == null ? '—' : money(x.vSug)}</td><td class="num">${money(x.vAj)}</td>
+        <td class="num">${x.vSug == null ? '—' : money(x.vSug) + '<div class="small">' + cuTxt(x.r.pmp) + ' c/u</div>'}</td><td class="num">${money(x.vAj)}${cuAj(x) != null ? '<div class="small">' + cuTxt(cuAj(x)) + ' c/u</div>' : ''}</td>
         <td class="small">${(x.r.ajDocs || []).map(m => esc(m.tipo) + ' #' + esc(m.folio)).filter((v, i, a) => a.indexOf(v) === i).join('<br>') || '<span class="mut">—</span>'}</td>
         <td><span class="pill ${CMP_ESTADO[x.estado][0]}">${CMP_ESTADO[x.estado][1]}</span>${x.costo ? `<div class="small wrapsmall">${costoTxt(x)}</div>` : ''}</td></tr>`).join('')}</tbody></table></div>
         ${L.length > lim ? `<p class="note">Se muestran ${fmt(lim)} de ${fmt(L.length)}. El Excel trae la lista completa.</p>` : ''}` : '<p class="note">Nada en este filtro.</p>'}
@@ -1690,8 +1703,8 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
     hoja('Por comprobante', [...D.comps.values()].map(c => ({'Tipo documento': c.tipo, 'Folio': c.folio, 'Fecha': fmtDate(c.fecha), 'Tipo de ajuste': c.clase, 'Productos': c.p.size, 'Líneas': c.lin, 'Unidades': c.clase === 'Costo' ? '' : c.u, 'Valor': r0(c.v)})));
     hoja('Por línea', [...D.lineas.entries()].map(([k, l]) => ({'Línea': k, 'Productos': l.p.size, 'Entradas': r0(l.in), 'Salidas': r0(-l.out), 'Costo': r0(l.cost), 'Neto': r0(l.in - l.out + l.cost)})));
     if (D.raros.length) hoja('Valores que no calzan', D.raros.map(x => ({'Código en el archivo': x.m.art, 'Descripción en el archivo': x.m.desc || '', 'Producto con que se cruzó': x.r.code, 'Archivo': rarosFuente(x).replace(/^en (el )?/, ''), 'Comprobante': `${x.m.tipo} #${x.m.folio}`, 'Fecha': fmtDate(x.m.fecha), 'Cantidad': x.m.qty, 'Valor en el informe': r0(x.v), 'Costo unitario': r0(x.cu), 'PMP del producto': r0(x.pmp), 'Valor esperado': r0(x.esperado)})));
-    hoja('Ajustes vs sugerido', D.cmp.map(x => ({'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Sugerido': x.sug == null ? '' : x.sug, 'Ajustado': Math.round(x.aj * 1e4) / 1e4, 'Diferencia': x.dif == null ? '' : x.dif, 'Valor sugerido': x.vSug == null ? '' : r0(x.vSug), 'Valor ajustado': r0(x.vAj), 'Comprobantes': [...new Set((x.r.ajDocs || []).map(m => m.tipo + ' #' + m.folio))].join(', '), 'Estado': CMP_ESTADO[x.estado][1], 'Diferencia de valor por costo': x.costo ? r0(x.costo.dv) : '', 'Detalle del costo': x.costo ? costoTxt(x).replace(/<[^>]+>/g, '') : ''})));
-    hoja('Detalle', D.detalle.map(x => ({'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Tipo de ajuste': x.clase, 'Comprobante': `${x.m.tipo} #${x.m.folio}`, 'Fecha': fmtDate(x.m.fecha), 'Unidades': x.u, 'Valor': r0(x.v)})));
+    hoja('Ajustes vs sugerido', D.cmp.map(x => ({'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Sugerido': x.sug == null ? '' : x.sug, 'Ajustado': Math.round(x.aj * 1e4) / 1e4, 'Diferencia': x.dif == null ? '' : x.dif, 'Valor sugerido': x.vSug == null ? '' : r0(x.vSug), 'Valor ajustado': r0(x.vAj), 'Valor unitario sugerido': x.r.pmp > 0 ? Math.round(x.r.pmp * 100) / 100 : '', 'Valor unitario ajustado': cuAj(x) ?? '', 'Comprobantes': [...new Set((x.r.ajDocs || []).map(m => m.tipo + ' #' + m.folio))].join(', '), 'Estado': CMP_ESTADO[x.estado][1], 'Diferencia de valor por costo': x.costo ? r0(x.costo.dv) : '', 'Detalle del costo': x.costo ? costoTxt(x).replace(/<[^>]+>/g, '') : ''})));
+    hoja('Detalle', D.detalle.map(x => ({'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Tipo de ajuste': x.clase, 'Comprobante': `${x.m.tipo} #${x.m.folio}`, 'Fecha': fmtDate(x.m.fecha), 'Unidades': x.u, 'Valor': r0(x.v), 'Valor unitario': x.u ? Math.round(x.v / x.u * 100) / 100 : ''})));
     XLSX.writeFile(wb, 'resumen-ajustes-' + fmtDate(new Date()) + '.xlsx');
   }
   function renderPlan(){
