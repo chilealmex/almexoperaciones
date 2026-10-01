@@ -9,7 +9,10 @@
     <h1>Cruce de datos</h1>
     <p class="page-sub">Consistencia de unidad de medida y costo unitario entre QMS y Defontana, por SKU.</p>
   </div>
-  <a href="{{ url_for('inventario.cruce_datos_excel', **request.args) }}" class="btn btn-primary btn-sm">⬇ Excel</a>
+  <div class="d-flex gap-2">
+    <a href="{{ url_for('inventario.cruce_datos_plan') }}" class="btn btn-success btn-sm">Paso a paso para regularizar →</a>
+    <a href="{{ url_for('inventario.cruce_datos_excel', **request.args) }}" class="btn btn-primary btn-sm">⬇ Excel</a>
+  </div>
 </div>
 
 {% include "partials/_ultima_importacion.html" %}
