@@ -1065,6 +1065,83 @@
     Object.values(plan).forEach(L => L.sort(byCode));
     return plan;
   }
+  // ---------- Resumen de ajustes: lo que ya se ajustó en Defontana ----------
+  // Suma las líneas de los comprobantes de ajuste reconocidos (archivo de ajustes o marcados):
+  // las de cantidad separadas en entradas y salidas, y las de costo (ajustes de valor).
+  function buildDash(){
+    const D = {in:{lin:0, u:0, v:0, p:new Set()}, out:{lin:0, u:0, v:0, p:new Set()}, cost:{lin:0, v:0, p:new Set()},
+      comps:new Map(), lineas:new Map(), detalle:[], hechos:0, manual:0, pend:{n:0, v:0}};
+    const lineaDe = r => r.linea || 'Sin línea';
+    const L = k => { if (!D.lineas.has(k)) D.lineas.set(k, {in:0, out:0, cost:0, p:new Set()}); return D.lineas.get(k); };
+    const comp = (m, tipo) => { const id = docId(m); if (!D.comps.has(id)) D.comps.set(id, {tipo:m.tipo, folio:m.folio, fecha:m.fecha, clase:tipo, lin:0, u:0, v:0, p:new Set()}); return D.comps.get(id); };
+    for (const r of state.rows){
+      if (r.st === 'done') D.hechos++;
+      if (r.manual) D.manual++;
+      if (r.st === 'up' || r.st === 'down' || r.st === 'check'){ D.pend.n++; D.pend.v += r.valor || 0; }
+      for (const m of r.ajDocs || []){
+        const k = m.kind, v = m.valor || 0, g = D[k], c = comp(m, 'Cantidad'), l = L(lineaDe(r));
+        g.lin++; g.u += m.qty; g.v += v; g.p.add(r.key);
+        c.lin++; c.u += k === 'in' ? m.qty : -m.qty; c.v += k === 'in' ? v : -v; c.p.add(r.key);
+        l[k] += v; l.p.add(r.key);
+        D.detalle.push({r, m, clase: k === 'in' ? 'Entrada' : 'Salida', u: k === 'in' ? m.qty : -m.qty, v: k === 'in' ? v : -v});
+      }
+      for (const m of r.costDocs || []){
+        const v = (m.kind === 'in' ? 1 : -1) * (m.valor || 0), c = comp(m, 'Costo'), l = L(lineaDe(r));
+        D.cost.lin++; D.cost.v += v; D.cost.p.add(r.key);
+        c.lin++; c.v += v; c.p.add(r.key);
+        l.cost += v; l.p.add(r.key);
+        D.detalle.push({r, m, clase:'Costo', u: m.qty > EPS ? (m.kind === 'in' ? m.qty : -m.qty) : 0, v});
+      }
+    }
+    D.neto = D.in.v - D.out.v + D.cost.v;
+    return D;
+  }
+  function renderDash(){
+    const box = $('dashBox');
+    if (!state.mov.length){ box.innerHTML = '<p class="empty">Sube el Informe de Documentos de Defontana y el archivo de ajustes hechos para ver el resumen.</p>'; return; }
+    const D = state.dash = buildDash();
+    const prods = s => `${fmt(s.size)} ${s.size === 1 ? 'producto' : 'productos'}`;
+    const unid = n => `${fmt(n)} ${Math.abs(n - 1) < EPS ? 'unidad' : 'unidades'}`;
+    const comps = [...D.comps.values()].sort((a, b) => (a.fecha || 0) - (b.fecha || 0) || String(a.folio).localeCompare(String(b.folio), 'es', {numeric:true}));
+    const lineas = [...D.lineas.entries()].sort((a, b) => Math.abs(b[1].in - b[1].out + b[1].cost) - Math.abs(a[1].in - a[1].out + a[1].cost));
+    const sinAjustes = !comps.length;
+    box.innerHTML = `
+      <div class="planhead"><div><h3>Resumen de ajustes</h3><p class="pwhy note">Lo que ya se ajustó en Defontana según los comprobantes reconocidos (archivo de ajustes hechos o marcados en "Comprobantes de ajuste ya hechos"). Los valores son los del informe de Defontana.</p></div>
+        <span class="ajbtns" style="margin-left:auto"><button type="button" class="rx-btn sm" id="btnDashXlsx">Descargar Excel</button></span></div>
+      ${sinAjustes ? '<p class="note warnline">Aún no hay comprobantes de ajuste reconocidos. Sube el archivo "Ajustes hechos en Defontana" o marca los comprobantes en la vista Productos.</p>' : ''}
+      <div class="summary">
+        <div class="rx-card up"><span class="lbl">Entradas por ajuste</span><span class="big">${money(D.in.v)}</span><span class="note">${unid(D.in.u)} · ${prods(D.in.p)}</span></div>
+        <div class="rx-card down"><span class="lbl">Salidas por ajuste</span><span class="big">${money(-D.out.v)}</span><span class="note">${unid(D.out.u)} · ${prods(D.out.p)}</span></div>
+        <div class="rx-card"><span class="lbl">Ajustes de costo</span><span class="big">${money(D.cost.v)}</span><span class="note">${prods(D.cost.p)} · ${fmt(D.cost.lin)} ${D.cost.lin === 1 ? 'línea' : 'líneas'}</span></div>
+        <div class="rx-card"><span class="lbl">Efecto neto en el inventario</span><span class="big">${money(D.neto)}</span><span class="note">entradas − salidas + costo</span></div>
+        <div class="rx-card"><span class="lbl">Productos ya ajustados</span><span class="big">${fmt(D.hechos)}</span><span class="note">${D.manual ? fmt(D.manual) + ' marcados a mano' : 'cuadrados con los comprobantes'}</span></div>
+        <button class="rx-card bad" type="button" data-dash-go="bad"><span class="lbl">Pendiente por ajustar</span><span class="big">${fmt(D.pend.n)}</span><span class="note">${money(D.pend.v)} · ver en Productos</span></button>
+      </div>
+      ${comps.length ? `<section class="plansec"><div class="planhead"><div><h3>Por comprobante <span class="pcount">${fmt(comps.length)}</span></h3></div></div>
+        <div class="tablebox"><table class="plantable"><thead><tr><th>Comprobante</th><th>Fecha</th><th>Tipo de ajuste</th><th class="num">Productos</th><th class="num">Líneas</th><th class="num">Unidades</th><th class="num">Valor</th></tr></thead>
+        <tbody>${comps.map(c => `<tr><td>${esc(c.tipo)} <b>#${esc(c.folio)}</b></td><td>${fmtDate(c.fecha)}</td><td>${c.clase}</td><td class="num">${fmt(c.p.size)}</td><td class="num">${fmt(c.lin)}</td><td class="num">${c.clase === 'Costo' ? '—' : sgn(c.u)}</td><td class="num"><b>${money(c.v)}</b></td></tr>`).join('')}</tbody>
+        <tfoot><tr><td colspan="6"><b>Total</b></td><td class="num"><b>${money(D.neto)}</b></td></tr></tfoot></table></div></section>` : ''}
+      ${lineas.length ? `<section class="plansec"><div class="planhead"><div><h3>Por línea de negocio</h3></div></div>
+        <div class="tablebox"><table class="plantable"><thead><tr><th>Línea</th><th class="num">Productos</th><th class="num">Entradas</th><th class="num">Salidas</th><th class="num">Costo</th><th class="num">Neto</th></tr></thead>
+        <tbody>${lineas.map(([k, l]) => `<tr><td>${esc(k)}</td><td class="num">${fmt(l.p.size)}</td><td class="num">${money(l.in)}</td><td class="num">${money(-l.out)}</td><td class="num">${money(l.cost)}</td><td class="num"><b>${money(l.in - l.out + l.cost)}</b></td></tr>`).join('')}</tbody>
+        <tfoot><tr><td><b>Total</b></td><td></td><td class="num"><b>${money(D.in.v)}</b></td><td class="num"><b>${money(-D.out.v)}</b></td><td class="num"><b>${money(D.cost.v)}</b></td><td class="num"><b>${money(D.neto)}</b></td></tr></tfoot></table></div></section>` : ''}`;
+  }
+  function dashExcel(){
+    const D = state.dash || buildDash(), wb = XLSX.utils.book_new();
+    const hoja = (nombre, filas) => XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filas.length ? filas : [{'': 'Sin datos'}]), nombre);
+    const r0 = v => Math.round(v);
+    hoja('Resumen', [
+      {'Concepto': 'Entradas por ajuste', 'Unidades': D.in.u, 'Productos': D.in.p.size, 'Valor': r0(D.in.v)},
+      {'Concepto': 'Salidas por ajuste', 'Unidades': -D.out.u, 'Productos': D.out.p.size, 'Valor': r0(-D.out.v)},
+      {'Concepto': 'Ajustes de costo', 'Unidades': '', 'Productos': D.cost.p.size, 'Valor': r0(D.cost.v)},
+      {'Concepto': 'Efecto neto', 'Unidades': '', 'Productos': '', 'Valor': r0(D.neto)},
+      {'Concepto': 'Productos ya ajustados', 'Unidades': '', 'Productos': D.hechos, 'Valor': ''},
+      {'Concepto': 'Pendiente por ajustar', 'Unidades': '', 'Productos': D.pend.n, 'Valor': r0(D.pend.v)}]);
+    hoja('Por comprobante', [...D.comps.values()].map(c => ({'Tipo documento': c.tipo, 'Folio': c.folio, 'Fecha': fmtDate(c.fecha), 'Tipo de ajuste': c.clase, 'Productos': c.p.size, 'Líneas': c.lin, 'Unidades': c.clase === 'Costo' ? '' : c.u, 'Valor': r0(c.v)})));
+    hoja('Por línea', [...D.lineas.entries()].map(([k, l]) => ({'Línea': k, 'Productos': l.p.size, 'Entradas': r0(l.in), 'Salidas': r0(-l.out), 'Costo': r0(l.cost), 'Neto': r0(l.in - l.out + l.cost)})));
+    hoja('Detalle', D.detalle.map(x => ({'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Tipo de ajuste': x.clase, 'Comprobante': `${x.m.tipo} #${x.m.folio}`, 'Fecha': fmtDate(x.m.fecha), 'Unidades': x.u, 'Valor': r0(x.v)})));
+    XLSX.writeFile(wb, 'resumen-ajustes-' + fmtDate(new Date()) + '.xlsx');
+  }
   function renderPlan(){
     const box = $('planBox');
     if (!state.mov.length){ box.innerHTML = '<p class="empty">Sube el Informe de Documentos de Defontana (archivo 2) para armar el plan.</p>'; return; }
@@ -1150,10 +1227,12 @@
     document.querySelectorAll('.view').forEach(b => b.setAttribute('aria-selected', b.dataset.view === state.view));
     $('checkPanel').hidden = !chk;
     renderStepsPanel(reg);
-    const plan = state.view === 'plan';
-    $('planBox').hidden = !plan; $('filtersBar').hidden = plan; $('tablebox').hidden = plan; $('summary').hidden = plan; $('copyNote').hidden = plan;
+    const dash = state.view === 'dash', plan = state.view === 'plan' || dash;
+    $('planBox').hidden = state.view !== 'plan'; $('dashBox').hidden = !dash;
+    $('filtersBar').hidden = plan; $('tablebox').hidden = plan; $('summary').hidden = plan; $('copyNote').hidden = plan;
     const boxMain = $('ajDocsMain');
     if (boxMain){ boxMain.hidden = chk; if (!chk) renderAjDocs('ajDocsMain', state.docGroupsMain, true); }
+    if (dash){ renderDash(); $('foot').innerHTML = ''; return; }
     if (plan){ renderPlan(); $('foot').innerHTML = ''; return; }
     if (chk) renderAjDocs('ajDocs', state.mov2 ? state.docGroups : [], false);
     const all = reg ? state.rows : chk ? state.checkRows : state.zero, F = reg ? REG_FILTERS : chk ? CHECK_FILTERS : ZERO_FILTERS, cols = reg ? REG_COLS : chk ? CHECK_COLS : ZERO_COLS;
@@ -1416,6 +1495,10 @@
     state.view = b.dataset.view; state.open.clear(); render();
   });
   $('planBox').addEventListener('click', e => { if (e.target.closest('#btnPlanXlsx')) planExcel(); });
+  $('dashBox').addEventListener('click', e => {
+    if (e.target.closest('#btnDashXlsx')) dashExcel();
+    if (e.target.closest('[data-dash-go]')){ state.view = 'reg'; state.filter.reg = 'bad'; render(); }
+  });
   $('stepsPanel').addEventListener('click', e => {
     const v = e.target.closest('[data-view-go]');
     if (v){ state.view = v.dataset.viewGo; state.open.clear(); render(); return; }
