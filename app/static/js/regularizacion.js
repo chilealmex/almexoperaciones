@@ -1223,6 +1223,13 @@
   function costoTxt(x){
     const c = x.costo, r = x.r, doc = m => `${esc(m.tipo)} #${esc(m.folio)}`;
     const cuanto = `el inventario quedó con ${money(Math.abs(c.dv))} ${c.dv > 0 ? 'más' : 'menos'} de valor`;
+    // Costo unitario 10 veces o más lejos del PMP del día: casi siempre es el archivo (una línea con el
+    // total de todo el comprobante), no lo que quedó en Defontana. No se sugiere ajustar.
+    const absurda = l => l.dia > EPS && (l.cu > l.dia * 10 || l.cu < l.dia / 10);
+    if (c.real && c.lineas.every(absurda)){
+      const lin = c.lineas.map(l => `${doc(l.m)} trae ${money(l.m.valor)} por ${fmt(l.m.qty)} (${cuTxt(l.cu)} c/u; el PMP ese día era ${cuTxt(l.dia)})`).join(', ');
+      return `${lin}. Parece un error del archivo exportado, no del ajuste: compáralo con el PDF del comprobante. Si el PDF muestra el valor normal (${money(c.lineas.reduce((a, l) => a + l.dia * l.m.qty, 0))}), no hagas ningún ajuste de costo.`;
+    }
     if (c.real){
       const lin = c.lineas.map(l => `${doc(l.m)} a ${cuTxt(l.cu)} c/u` + (l.dia > EPS ? ` (el PMP de Defontana ese día era ${cuTxt(l.dia)})` : '')).join(', ');
       return `Se ajustó con ${lin}: ${cuanto} de lo que correspondía. Revisa el costo de ese comprobante o haz un ajuste de costo por ${money(-c.dv)}.`;
