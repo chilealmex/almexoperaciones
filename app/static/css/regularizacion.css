@@ -176,3 +176,4 @@
 .regx details.ajbox[open] > summary{margin-bottom:6px}
 .regx .plantillas{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0;font-size:12px;color:var(--muted)}
 .regx .rx-btn.hecho{margin-top:6px}
+.regx .ajcomp{margin-top:4px;color:var(--muted);white-space:nowrap}
