@@ -523,6 +523,30 @@ def test_cargar_sobre_un_mes_cerrado_no_cambia_nada(client, db, empresa, usuario
     assert "quedó intacta" in body
 
 
+def test_un_superadmin_tampoco_pisa_un_mes_cerrado(client, db, empresa, usuario_admin):
+    """El bloqueo no distingue cargos, y es lo que importa: quien concilia es
+    superadmin, así que una excepción para ese rol dejaría la puerta abierta
+    justo para la persona que más carga archivos.
+
+    Para reemplazar un mes cerrado hay que reabrirlo a propósito, que es un
+    acto aparte y queda registrado.
+    """
+    login(client, "admin@test.cl")
+    _cargar(client)
+    conciliacion = ConciliacionSii.query.one()
+    _cerrar(client, conciliacion.id)
+    antes = {(d.tipo_doc, d.folio): d.total_sii for d in ConciliacionSiiDocumento.query.all()}
+
+    _superadmin(db, empresa)
+    login(client, "jefa@test.cl")
+    otro_csv = CSV_COMPRA.replace("100000;19000;119000", "999999;189999;1189998")
+    body = _cargar(client, sii_compra=_archivo(otro_csv, "compra.csv")).get_data(as_text=True)
+
+    despues = {(d.tipo_doc, d.folio): d.total_sii for d in ConciliacionSiiDocumento.query.all()}
+    assert despues == antes, "ni siquiera un superadmin pisa un mes cerrado por error"
+    assert "está cerrado" in body
+
+
 def test_un_mes_cerrado_no_bloquea_a_los_demas(client, db, empresa, usuario_admin):
     """Cerrar agosto no puede impedir cargar septiembre."""
     login(client, "admin@test.cl")
@@ -774,3 +798,102 @@ def test_recalcular_dos_veces_da_lo_mismo(client, db, empresa, usuario_admin):
     # Y la nota de crédito quedó restando por los dos lados
     nota = ConciliacionSiiDocumento.query.filter_by(folio="900").one()
     assert (nota.total_sii, nota.total_defontana, nota.estado) == (-11900, -11900, "coincide")
+
+
+# --- El listado agrupado por año ---
+#
+# Con dos o tres años cargados el listado era una tira de períodos donde había
+# que bajar buscando el mes. Ahora cada año se pliega y el encabezado resume
+# lo que hay dentro, que es lo único que se ve estando plegado.
+
+
+def _periodo(db, empresa, anio, mes, pendientes=0, cerrado=False, libros=("compra", "venta")):
+    from app.models.contabilidad import ConciliacionSiiLibro
+
+    conciliacion = ConciliacionSii(empresa_id=empresa.id, anio=anio, mes=mes,
+                                   estado="cerrado" if cerrado else "abierto")
+    for clave in libros:
+        conciliacion.libros.append(
+            ConciliacionSiiLibro(libro=clave, n_dif_monto=pendientes if clave == "compra" else 0)
+        )
+    db.session.add(conciliacion)
+    db.session.commit()
+    return conciliacion
+
+
+def test_los_periodos_se_agrupan_por_anio_del_mas_nuevo_al_mas_viejo(db, empresa):
+    from app.contabilidad.routes import agrupar_por_anio
+
+    _periodo(db, empresa, 2024, 9)
+    _periodo(db, empresa, 2026, 1)
+    _periodo(db, empresa, 2026, 10)
+
+    grupos = agrupar_por_anio(ConciliacionSii.query.all())
+
+    assert [g["anio"] for g in grupos] == [2026, 2024]
+    # Y dentro de cada año, el mes más nuevo primero
+    assert [c.mes for c in grupos[0]["meses"]] == [10, 1]
+
+
+def test_el_encabezado_del_anio_dice_lo_que_hay_dentro(db, empresa):
+    """Plegado es lo único que se ve: tiene que bastar para decidir si abrirlo."""
+    from app.contabilidad.routes import agrupar_por_anio
+
+    _periodo(db, empresa, 2026, 1, pendientes=3)
+    _periodo(db, empresa, 2026, 2, pendientes=5)
+    _periodo(db, empresa, 2026, 3)                      # cuadra
+    _periodo(db, empresa, 2026, 4, cerrado=True)
+    _periodo(db, empresa, 2026, 5, libros=("compra",))  # falta el de ventas
+
+    grupo = agrupar_por_anio(ConciliacionSii.query.all())[0]
+
+    assert len(grupo["meses"]) == 5
+    assert grupo["pendientes"] == 8        # 3 + 5
+    assert grupo["por_revisar"] == 2       # en dos meses
+    assert grupo["cerrados"] == 1
+    assert grupo["sin_cargar"] == 1
+
+
+def test_un_anio_sin_nada_pendiente_lo_dice(db, empresa):
+    from app.contabilidad.routes import agrupar_por_anio
+
+    _periodo(db, empresa, 2026, 1)
+
+    grupo = agrupar_por_anio(ConciliacionSii.query.all())[0]
+
+    assert grupo["pendientes"] == 0
+    assert grupo["por_revisar"] == 0
+
+
+def test_sin_periodos_no_hay_grupos(db, empresa):
+    from app.contabilidad.routes import agrupar_por_anio
+
+    assert agrupar_por_anio([]) == []
+
+
+def test_la_pantalla_muestra_el_anio_y_esconde_los_demas(client, db, empresa, usuario_admin):
+    """Sólo el año más nuevo abierto: es lo que se pidió para no ver todo."""
+    _periodo(db, empresa, 2024, 9)
+    _periodo(db, empresa, 2026, 10)
+    login(client, "admin@test.cl")
+
+    cuerpo = client.get("/contabilidad/conciliacion-sii").get_data(as_text=True)
+
+    assert 'data-anio="2026"' in cuerpo and 'data-anio="2024"' in cuerpo
+    # El año nuevo abierto, el viejo plegado
+    assert 'data-anio="2026"\n              aria-expanded="true"' in cuerpo
+    assert 'data-anio="2024"\n              aria-expanded="false"' in cuerpo
+    # Las filas del año viejo llegan escondidas, no ausentes: se despliegan sin recargar
+    assert 'class="mes-de-2024" hidden' in cuerpo
+    assert 'class="mes-de-2026">' in cuerpo
+
+
+def test_el_mes_ya_no_repite_el_anio(client, db, empresa, usuario_admin):
+    """Va dentro de su grupo: repetirlo en cada fila es ruido."""
+    _periodo(db, empresa, 2026, 10)
+    login(client, "admin@test.cl")
+
+    cuerpo = client.get("/contabilidad/conciliacion-sii").get_data(as_text=True)
+
+    assert "<strong>Octubre</strong>" in cuerpo
+    assert "Octubre 2026</strong>" not in cuerpo

@@ -100,13 +100,42 @@
           </tr>
         </thead>
         <tbody>
-          {% for c in conciliaciones %}
+          {% for grupo in grupos %}
+          {% set abierto = grupo.anio == anio_abierto %}
+          {# El encabezado del año resume lo que hay dentro: plegado es lo único
+             que se ve, así que tiene que bastar para decidir si abrirlo. #}
+          <tr class="fila-anio grupo-plegable" data-anio="{{ grupo.anio }}"
+              aria-expanded="{{ 'true' if abierto else 'false' }}"
+              role="button" tabindex="0">
+            <td colspan="11">
+              <span class="chevron-grupo">▾</span>
+              <strong>{{ grupo.anio }}</strong>
+              <span class="text-muted ms-2">{{ grupo.meses|length }}
+                {{ 'mes' if grupo.meses|length == 1 else 'meses' }}</span>
+              {% if grupo.por_revisar %}
+              <span class="badge bg-danger ms-2">{{ grupo.pendientes }} por revisar
+                en {{ grupo.por_revisar }}
+                {{ 'mes' if grupo.por_revisar == 1 else 'meses' }}</span>
+              {% else %}
+              <span class="badge bg-success ms-2">todo cuadra</span>
+              {% endif %}
+              {% if grupo.sin_cargar %}
+              <span class="badge bg-warning text-dark ms-1">{{ grupo.sin_cargar }}
+                {{ 'mes' if grupo.sin_cargar == 1 else 'meses' }} a medio cargar</span>
+              {% endif %}
+              {% if grupo.cerrados %}
+              <span class="badge bg-secondary ms-1">🔒 {{ grupo.cerrados }}
+                {{ 'cerrado' if grupo.cerrados == 1 else 'cerrados' }}</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% for c in grupo.meses %}
           {% for clave, etiqueta in [('compra', 'Compras'), ('venta', 'Ventas')] %}
           {% set libro = c.libro_por_clave(clave) %}
-          <tr>
+          <tr class="mes-de-{{ grupo.anio }}"{{ ' hidden' if not abierto }}>
             {% if loop.first %}
             <td rowspan="2" class="align-middle">
-              <div><strong>{{ meses[c.mes - 1] }} {{ c.anio }}</strong></div>
+              <div><strong>{{ meses[c.mes - 1] }}</strong></div>
               {% if c.cerrado %}
               <span class="badge bg-secondary" title="{% if c.cerrado_por %}Cerrado por {{ c.cerrado_por.nombre_completo }}{% endif %}{% if c.cerrado_en %} el {{ c.cerrado_en|fecha_hora }}{% endif %}">🔒 Cerrado</span>
               {% endif %}
@@ -154,6 +183,7 @@
           </tr>
           {% endfor %}
           {% endfor %}
+          {% endfor %}
         </tbody>
       </table>
     </div>
@@ -166,4 +196,31 @@
 </div>
 {% endif %}
 
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Plegar y desplegar los años. Se usa el atributo hidden y no la clase
+  // collapse de Bootstrap porque collapse cambia el display de la fila, y una
+  // <tr> que deja de ser table-row rompe la grilla de columnas de la tabla.
+  (function () {
+    document.querySelectorAll('.fila-anio[data-anio]').forEach(function (cabecera) {
+      function alternar() {
+        var abierto = cabecera.getAttribute('aria-expanded') === 'true';
+        cabecera.setAttribute('aria-expanded', abierto ? 'false' : 'true');
+        document.querySelectorAll('.mes-de-' + cabecera.dataset.anio).forEach(function (fila) {
+          fila.hidden = abierto;
+        });
+      }
+      cabecera.addEventListener('click', alternar);
+      cabecera.addEventListener('keydown', function (evento) {
+        // Con teclado: la fila es un botón, así que responde a Enter y espacio.
+        if (evento.key === 'Enter' || evento.key === ' ') {
+          evento.preventDefault();
+          alternar();
+        }
+      });
+    });
+  })();
+</script>
 {% endblock %}
