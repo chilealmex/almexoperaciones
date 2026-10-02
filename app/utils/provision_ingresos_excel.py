@@ -5,6 +5,7 @@ desde la 3. Este módulo solo convierte esa hoja en diccionarios; quién los
 guarda y cómo decide lo duplicado es cosa de las rutas.
 """
 
+import unicodedata
 from datetime import date, datetime
 
 HOJA = "Control"
@@ -81,16 +82,55 @@ def _fecha(valor):
     return None
 
 
+def numero_de_mes(valor):
+    """El número del mes, venga como número o escrito con letras.
+
+    La columna se llama "Mes" y la aplicación muestra los meses por su nombre
+    en todas las pantallas, así que escribir "septiembre" es lo natural: pedir
+    el número a secas rechazaba la planilla sin que nadie entendiera por qué.
+
+    Se aceptan el nombre completo y la abreviatura, con o sin tilde y en
+    cualquier combinación de mayúsculas; también "sept", que es como se abrevia
+    septiembre fuera de las tablas.
+    """
+    # Escribir "sep-26" hace que Excel lo guarde como fecha, y entonces la
+    # celda ya no trae un mes sino un día entero. Es el mismo tropiezo con
+    # otra forma, así que se resuelve igual.
+    fecha = _fecha(valor)
+    if fecha:
+        return fecha.month
+
+    numero = _entero(valor)
+    if numero is not None:
+        return numero if 1 <= numero <= 12 else None
+
+    texto = _texto(valor)
+    if not texto:
+        return None
+    limpio = "".join(
+        c for c in unicodedata.normalize("NFD", texto.lower()) if unicodedata.category(c) != "Mn"
+    ).strip(" .")
+    if not limpio:
+        return None
+    for indice, nombre in enumerate(MESES_NOMBRES, start=1):
+        if limpio == nombre.lower():
+            return indice
+    for indice, corto in enumerate(MESES_CORTOS, start=1):
+        # "sep", "sept" y "septiembre" valen igual; basta con que empiece por
+        # la abreviatura y sea el comienzo del nombre completo.
+        if limpio.startswith(corto) and MESES_NOMBRES[indice - 1].lower().startswith(limpio):
+            return indice
+    return None
+
+
 def _periodo(fecha_completa, mes, anio):
     """El período de la línea, venga como fecha o como mes y año por separado."""
     fecha = _fecha(fecha_completa)
     if fecha:
         return fecha
-    numero_mes = _entero(mes)
+    numero_mes = numero_de_mes(mes)
     numero_anio = _entero(anio)
     if not numero_mes or not numero_anio:
-        return None
-    if not (1 <= numero_mes <= 12):
         return None
     return date(numero_anio, numero_mes, 1)
 
@@ -160,6 +200,7 @@ def leer_provisiones(archivo):
 
     lineas = []
     descartadas = 0
+    sin_mes = 0
     for numero, fila in enumerate(hoja.iter_rows(min_row=fila_titulos + 1, values_only=True), start=fila_titulos + 1):
         if not any(v not in (None, "") for v in fila):
             continue
@@ -168,6 +209,10 @@ def leer_provisiones(archivo):
         ot = _texto(valor(fila, "ot"))
         if not (mes_ano and cbte_prov and ot):
             descartadas += 1
+            # Qué le faltaba, para poder decirlo después. Un mensaje que apunta
+            # a la columna equivocada hace buscar el problema donde no está.
+            if not mes_ano and (cbte_prov or ot):
+                sin_mes += 1
             continue  # fila de totales o incompleta: se ignora
         lineas.append(
             {
@@ -188,10 +233,16 @@ def leer_provisiones(archivo):
         )
     libro.close()
 
-    # Si había filas con datos y ninguna sirvió, casi siempre es porque los
-    # títulos y los datos no están en la misma columna: pasa al insertar una
-    # columna en la fila de títulos sin correr también los datos.
+    # Si había filas con datos y ninguna sirvió, hay que decir qué falló. Antes
+    # el mensaje siempre culpaba a las columnas corridas, y mandaba a revisar
+    # algo que estaba bien cuando lo que no se entendía era el mes.
     if not lineas and descartadas:
+        if sin_mes == descartadas:
+            raise PlanillaInvalida(
+                f"Se encontraron {descartadas} fila(s) con Cbte Prov y OT, pero no se entendió "
+                "el mes de ninguna. Escríbelo con su nombre (septiembre), abreviado (sep) o "
+                "con su número (9), y revisa que el Año tenga cuatro dígitos."
+            )
         raise PlanillaInvalida(
             f"Se encontraron {descartadas} fila(s) con datos, pero ninguna tiene Mes, Cbte Prov y OT "
             "en las columnas que indican los títulos. Revisa que cada dato esté justo debajo de su "
