@@ -453,3 +453,113 @@ def test_con_miles_de_articulos_la_pantalla_responde():
     tardanza = time.perf_counter() - inicio
 
     assert tardanza < 5, f"tardó {tardanza:.1f}s: la pantalla no alcanza a abrirse"
+
+
+# --- El Excel: para repartirse el trabajo fuera de la pantalla ---
+
+
+def _hojas(client):
+    from openpyxl import load_workbook
+
+    respuesta = client.get("/inventario/equivalencias.xlsx")
+    assert respuesta.status_code == 200
+    libro = load_workbook(io.BytesIO(respuesta.data))
+    return {h.title: [[c.value for c in f] for f in libro[h.title].iter_rows()] for h in libro}
+
+
+def test_el_excel_trae_las_cuatro_situaciones(client, db, empresa, usuario_admin):
+    _item(db, empresa, "GOL.PRE-5_8", "GOLILLA PRESION", en_defontana=False, cantidad_qms=4)
+    _item(db, empresa, "GOLPRE-58", "GOL.PRESION", en_qms=False, cantidad_defontana=4)
+    _item(db, empresa, "SOLO-EN-QMS", "Sin pareja posible", en_defontana=False, cantidad_qms=7)
+    _item(db, empresa, "ZZZZZ-999", "Otra cosa distinta", en_qms=False, cantidad_defontana=2)
+    login(client, "admin@test.cl")
+
+    hojas = _hojas(client)
+
+    assert sorted(hojas) == ["Por unir", "Sin pareja — Defontana", "Sin pareja — QMS", "Ya unidos"]
+
+
+def test_lo_que_falta_confirmar_va_con_su_puntaje_y_su_motivo(
+    client, db, empresa, usuario_admin
+):
+    _item(db, empresa, "GOL.PRE-5_8", "GOLILLA PRESION", en_defontana=False, cantidad_qms=4)
+    _item(db, empresa, "GOLPRE-58", "GOL.PRESION", en_qms=False, cantidad_defontana=9)
+    login(client, "admin@test.cl")
+
+    valores = [v for fila in _hojas(client)["Por unir"] for v in fila]
+
+    assert "GOL.PRE-5_8" in valores and "GOLPRE-58" in valores
+    # Los dos stocks, para poder decidir sin volver a la pantalla
+    assert 4 in valores and 9 in valores
+    assert any("Mismo código" in str(v) for v in valores)
+
+
+def test_lo_ya_unido_va_aparte(client, db, empresa, usuario_admin):
+    _item(db, empresa, "QMS-A", "A", en_defontana=False)
+    _item(db, empresa, "DEFO-X", "X", en_qms=False)
+    login(client, "admin@test.cl")
+    client.post("/inventario/equivalencias/unir", data={
+        "codigo_qms": "QMS-A", "codigo_defontana": "DEFO-X"}, follow_redirects=True)
+
+    hojas = _hojas(client)
+
+    assert any("QMS-A" in str(v) for fila in hojas["Ya unidos"] for v in fila)
+    # Y sale de lo pendiente: ya se resolvió
+    assert not any("QMS-A" in str(v) for fila in hojas["Por unir"] for v in fila)
+
+
+def test_los_que_no_tienen_pareja_propuesta_tambien_van(client, db, empresa, usuario_admin):
+    """Son los que hay que buscar a mano: sin ellos el archivo no sirve para
+    repartirse el trabajo, que es para lo que se descarga."""
+    _item(db, empresa, "SOLO-EN-QMS", "Sin pareja posible", en_defontana=False, cantidad_qms=7)
+    _item(db, empresa, "ZZZZZ-999", "Otra cosa distinta", en_qms=False, cantidad_defontana=2)
+    login(client, "admin@test.cl")
+
+    hojas = _hojas(client)
+
+    assert any("SOLO-EN-QMS" in str(v) for fila in hojas["Sin pareja — QMS"] for v in fila)
+    assert any("ZZZZZ-999" in str(v) for fila in hojas["Sin pareja — Defontana"] for v in fila)
+
+
+def test_el_que_tiene_pareja_propuesta_no_se_repite_en_los_sin_pareja(
+    client, db, empresa, usuario_admin
+):
+    """Si saliera en las dos hojas, se revisaría dos veces el mismo artículo."""
+    _item(db, empresa, "GOL.PRE-5_8", "GOLILLA PRESION", en_defontana=False)
+    _item(db, empresa, "GOLPRE-58", "GOL.PRESION", en_qms=False)
+    login(client, "admin@test.cl")
+
+    hojas = _hojas(client)
+
+    assert not any("GOL.PRE-5_8" in str(v) for fila in hojas["Sin pareja — QMS"] for v in fila)
+    assert not any("GOLPRE-58" in str(v) for fila in hojas["Sin pareja — Defontana"] for v in fila)
+
+
+def test_el_excel_y_la_pantalla_proponen_lo_mismo(client, db, empresa, usuario_admin):
+    """Si se armaran por separado podrían diferir, y se trabajaría sobre dos
+    listas que no son la misma."""
+    import re
+
+    for n in range(6):
+        _item(db, empresa, f"00-PZA-{n:03d}", f"PIEZA {n}", en_defontana=False)
+        _item(db, empresa, f"PZA-{n}", f"PIEZA {n}", en_qms=False)
+    login(client, "admin@test.cl")
+
+    pantalla = set(re.findall(
+        r'name="codigo_qms" value="([^"]+)"',
+        client.get("/inventario/equivalencias").get_data(as_text=True),
+    ))
+    # Las cuatro primeras filas son el encabezado del informe y la última es
+    # la de totales; en medio van los datos.
+    excel = {
+        fila[0] for fila in _hojas(client)["Por unir"][4:]
+        if fila[0] and not str(fila[0]).startswith("Totales")
+    }
+
+    assert pantalla and excel == pantalla
+
+
+def test_el_boton_esta_en_la_pantalla(client, db, empresa, usuario_admin):
+    login(client, "admin@test.cl")
+    assert "/inventario/equivalencias.xlsx" in client.get(
+        "/inventario/equivalencias").get_data(as_text=True)

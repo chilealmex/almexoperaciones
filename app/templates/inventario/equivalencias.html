@@ -8,7 +8,11 @@
     <h1>Unificar códigos</h1>
     <p class="page-sub">El mismo artículo con un código distinto en QMS y en Defontana.</p>
   </div>
-  <a href="{{ url_for('inventario.cruce_datos') }}" class="btn btn-outline-secondary btn-sm">Ir a Cruce de datos →</a>
+  <div class="d-flex gap-2">
+    <a href="{{ url_for('inventario.equivalencias_excel') }}" class="btn btn-outline-secondary btn-sm"
+       title="Cuatro hojas: lo que falta confirmar, lo ya unido, y los que quedaron sueltos en cada sistema sin pareja propuesta.">⬇ Excel</a>
+    <a href="{{ url_for('inventario.cruce_datos') }}" class="btn btn-outline-secondary btn-sm">Ir a Cruce de datos →</a>
+  </div>
 </div>
 
 {% include "partials/_ultima_importacion.html" %}
