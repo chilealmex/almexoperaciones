@@ -41,14 +41,37 @@
 {% endmacro %}
 
 {# Paginación simple #}
+{# Qué números de página mostrar: siempre la primera, la última y las vecinas
+   de la actual, con puntos suspensivos donde se salta. Con ocho páginas caben
+   todas; con doscientas, mostrarlas todas sería peor que no mostrar ninguna. #}
+{% macro _numeros_de_pagina(pagina, total_paginas, vecinas=2) %}
+{%- set visibles = [] -%}
+{%- for n in range(1, total_paginas + 1) -%}
+  {%- if n == 1 or n == total_paginas or (n >= pagina - vecinas and n <= pagina + vecinas) -%}
+    {%- set _ = visibles.append(n) -%}
+  {%- endif -%}
+{%- endfor -%}
+{%- set anterior = [] -%}
+{%- for n in visibles -%}
+  {%- if anterior and n - anterior[-1] > 1 -%}
+  <span class="btn btn-sm disabled border-0 px-1">…</span>
+  {%- endif -%}
+  <a class="btn btn-outline-secondary btn-sm{{ ' active' if n == pagina else '' }}"
+     href="{{ url_con(pagina=n) }}"{% if n == pagina %} aria-current="page"{% endif %}>{{ n }}</a>
+  {%- set _ = anterior.append(n) -%}
+{%- endfor -%}
+{% endmacro %}
+
 {% macro paginacion(pagina, total_paginas, total_registros, etiqueta='registros') %}
 {% if total_paginas > 1 or total_registros %}
 <div class="table-foot d-flex flex-wrap justify-content-between align-items-center gap-2">
   <span>{{ total_registros }} {{ etiqueta }}{% if total_paginas > 1 %} — página {{ pagina }} de {{ total_paginas }}{% endif %}</span>
   {% if total_paginas > 1 %}
-  <div class="btn-group btn-group-sm">
-    <a class="btn btn-outline-secondary{{ ' disabled' if pagina <= 1 else '' }}" href="{{ url_con(pagina=pagina - 1) }}">Anterior</a>
-    <a class="btn btn-outline-secondary{{ ' disabled' if pagina >= total_paginas else '' }}" href="{{ url_con(pagina=pagina + 1) }}">Siguiente</a>
+  {# Los números evitan tener que avanzar de a una para llegar al final. #}
+  <div class="d-flex flex-wrap align-items-center gap-1">
+    <a class="btn btn-outline-secondary btn-sm{{ ' disabled' if pagina <= 1 else '' }}" href="{{ url_con(pagina=pagina - 1) }}">Anterior</a>
+    {{ _numeros_de_pagina(pagina, total_paginas) }}
+    <a class="btn btn-outline-secondary btn-sm{{ ' disabled' if pagina >= total_paginas else '' }}" href="{{ url_con(pagina=pagina + 1) }}">Siguiente</a>
   </div>
   {% endif %}
 </div>
