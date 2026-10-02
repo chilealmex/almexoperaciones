@@ -10,13 +10,37 @@
   <div>
     <h1>Regularización</h1>
     <p class="page-sub">Cruza el conteo físico con el Informe de Documentos de Defontana: qué productos aumentar o disminuir, a qué PMP, por qué están descuadrados y si los ajustes quedaron bien. Es independiente de la toma de inventario: usa solo los archivos que subas aquí.</p>
+    {% if historial %}
+    <div class="alert alert-info py-2 mb-1 small">Estás viendo <strong>{{ historial.nombre }}</strong>, guardada en el historial el {{ historial.creado_en|fecha_hora }}{% if historial.creado_por %} por {{ historial.creado_por.nombre_completo }}{% endif %}. Es solo para consultar: lo que cambies aquí no se guarda.</div>
+    {% else %}
     <p class="small text-muted mb-0" id="ultimaAct">{% if ultima %}Última actualización guardada: <strong>{{ ultima.fecha }}</strong>{% if ultima.por %} por {{ ultima.por }}{% endif %}. Puedes subir archivos nuevos cuando quieras: cada uno reemplaza al anterior.{% else %}Aún no hay nada guardado. Sube los archivos: quedan guardados y puedes reemplazarlos cuando quieras.{% endif %}</p>
+    {% endif %}
+  </div>
+  <div class="d-flex gap-2 align-items-start flex-wrap">
+    {% if historial %}
+    <a href="{{ url_for('inventario.regularizacion') }}" class="btn btn-outline-secondary btn-sm">← Regularización en uso</a>
+    <a href="{{ url_for('inventario.regularizacion_historial') }}" class="btn btn-outline-secondary btn-sm">Historial</a>
+    {% else %}
+    <a href="{{ url_for('inventario.regularizacion_historial') }}" class="btn btn-outline-secondary btn-sm">Historial{% if n_historial %} ({{ n_historial }}){% endif %}</a>
+    {% if puede_guardar and guardados %}
+    <details class="regx-nueva">
+      <summary class="btn btn-primary btn-sm">Empezar una regularización nueva</summary>
+      <form method="post" action="{{ url_for('inventario.regularizacion_archivar') }}" class="card card-body mt-2 small">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <p class="mb-2">Lo que está cargado ahora (archivos, recuentos, PMP y marcas) se guarda en el <strong>Historial</strong>, donde puedes volver a verlo cuando quieras. La pantalla queda vacía para subir la información nueva.</p>
+        <label class="form-label mb-1" for="nombreHistorial">Nombre para guardarla</label>
+        <input class="form-control form-control-sm mb-2" id="nombreHistorial" name="nombre" maxlength="150" placeholder="Ej.: Regularización septiembre 2026">
+        <button type="submit" class="btn btn-primary btn-sm">Guardar en el historial y empezar de nuevo</button>
+      </form>
+    </details>
+    {% endif %}
+    {% endif %}
   </div>
 </div>
 
 {% include "partials/_ultima_importacion.html" %}
 
-<div class="regx">
+<div class="regx{% if historial %} solo-lectura{% endif %}">
 <div class="wrap">
   <div class="top">
     <div class="views" role="tablist" aria-label="Vista">
@@ -126,7 +150,8 @@
 <script type="application/json" id="regx-config">{{ {
   'guardar': puede_guardar,
   'guardados': guardados,
-  'url': url_for('inventario.regularizacion_guardado', clave='__CLAVE__'),
+  'url': url_patron,
+  'historial': historial is not none,
   'csrf': csrf_token()
 }|tojson }}</script>
 {% endblock %}

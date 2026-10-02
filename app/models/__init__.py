@@ -15,7 +15,7 @@ from app.models.arriendo import (
     PagoArriendoEntrada,
 )
 from app.models.documento import Documento
-from app.models.regularizacion import RegularizacionArchivo
+from app.models.regularizacion import RegularizacionArchivo, RegularizacionHistorial, RegularizacionHistorialArchivo
 from app.models.importacion import (
     ProveedorImportacion,
     Importacion,
@@ -50,6 +50,8 @@ __all__ = [
     "PagoArriendoEntrada",
     "Documento",
     "RegularizacionArchivo",
+    "RegularizacionHistorial",
+    "RegularizacionHistorialArchivo",
     "ImportacionInventario",
     "EquivalenciaCodigo",
     "ProveedorImportacion",

@@ -63,7 +63,9 @@ MODULOS = (
                 "clave": "regularizacion",
                 "etiqueta": "Regularización",
                 "endpoint": "inventario.regularizacion",
-                "endpoints": ("inventario.regularizacion", "inventario.regularizacion_guardado"),
+                "endpoints": ("inventario.regularizacion", "inventario.regularizacion_guardado", "inventario.regularizacion_archivar",
+                              "inventario.regularizacion_historial", "inventario.regularizacion_historial_ver",
+                              "inventario.regularizacion_historial_archivo", "inventario.regularizacion_historial_borrar"),
             },
             {
                 "clave": "historial_tomas",

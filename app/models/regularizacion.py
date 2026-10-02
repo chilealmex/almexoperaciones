@@ -35,3 +35,43 @@ class RegularizacionArchivo(db.Model):
 
     def __repr__(self):
         return f"<RegularizacionArchivo {self.clave} empresa={self.empresa_id}>"
+
+
+class RegularizacionHistorial(db.Model):
+    """Una regularización guardada aparte, para poder volver a verla cuando se quiera.
+
+    Al empezar una regularización nueva, los archivos y el estado que estaban en
+    uso se copian aquí (con su nombre y fecha) y la pantalla queda vacía para
+    subir la información nueva.
+    """
+
+    __tablename__ = "regularizacion_historial"
+
+    id = db.Column(db.Integer, primary_key=True)
+    empresa_id = db.Column(db.Integer, db.ForeignKey("empresas.id"), nullable=False, index=True)
+    nombre = db.Column(db.String(150), nullable=False)
+    creado_en = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    creado_por_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"), nullable=True)
+
+    creado_por = db.relationship("Usuario")
+    archivos = db.relationship("RegularizacionHistorialArchivo", backref="historial", cascade="all, delete-orphan",
+                               order_by="RegularizacionHistorialArchivo.id")
+
+    def __repr__(self):
+        return f"<RegularizacionHistorial {self.nombre!r} empresa={self.empresa_id}>"
+
+
+class RegularizacionHistorialArchivo(db.Model):
+    """Copia de un archivo (o del estado) de una regularización guardada en el historial."""
+
+    __tablename__ = "regularizacion_historial_archivos"
+
+    id = db.Column(db.Integer, primary_key=True)
+    historial_id = db.Column(db.Integer, db.ForeignKey("regularizacion_historial.id", ondelete="CASCADE"), nullable=False, index=True)
+    clave = db.Column(db.String(30), nullable=False)
+    nombre = db.Column(db.String(255), nullable=True)
+    contenido = db.Column(db.LargeBinary, nullable=False)
+    actualizado_en = db.Column(db.DateTime, nullable=False)
+    actualizado_por_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"), nullable=True)
+
+    actualizado_por = db.relationship("Usuario")
