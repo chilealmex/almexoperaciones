@@ -139,6 +139,8 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
    Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
 /* Regularización de inventario (Inventario → Regularización).
    Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
+/* Regularización de inventario (Inventario → Regularización).
+   Todo va bajo .regx para no chocar con Bootstrap ni con custom.css. */
 .regx{--bg:#F2F4F3; --surface:#FFFFFF; --surface2:#EDF1EF; --ink:#16201D; --muted:#5E6B66; --line:#DCE3E0;
   --accent:#245E8F; --accent-ink:#FFFFFF; --accent-soft:#E1EBF4;
   --in:#1B7446; --in-soft:#E0F2E7; --out:#B0362A; --out-soft:#FAE3E0; --warn:#8A5A00; --warn-soft:#FBEDCF; --gray-soft:#ECEFEE;
@@ -317,6 +319,13 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
 .regx .rx-btn.hecho{margin-top:6px}
 .regx .ajcomp{margin-top:4px;color:var(--muted);white-space:nowrap}
 .regx .warnbox{border-color:var(--warn)}
+
+/* Regularización guardada en el historial: solo para consultar, no se suben archivos */
+.regx.solo-lectura .drop input[type=file],.regx.solo-lectura .plantillas,.regx.solo-lectura #btnClearAjustes,.regx.solo-lectura #btnClearRecount,.regx.solo-lectura #dropRecount,.regx.solo-lectura [data-hecho]{display:none !important}
+.regx.solo-lectura .drop{cursor:default}
+.regx-nueva summary{list-style:none}
+.regx-nueva summary::-webkit-details-marker{display:none}
+.regx-nueva[open] form{max-width:420px}
 </style>
 <div class="suelta">
 <h1>Regularización de inventario</h1>
@@ -2125,14 +2134,14 @@ body{margin:0;background:#F2F4F3;font-family:system-ui,-apple-system,"Segoe UI",
         const data = parser(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header:1, raw:true, defval:null, blankrows:false}));
         state[key] = data;
         $(dropId).classList.add('ok');
-        $(statusId).textContent = `${info.nombre} · ${fmt(data.length)} ${que} · guardado el ${info.fecha}${info.por ? ' por ' + info.por : ''}. Sube otro para reemplazarlo.`;
+        $(statusId).textContent = `${info.nombre} · ${fmt(data.length)} ${que} · guardado el ${info.fecha}${info.por ? ' por ' + info.por : ''}` + (CFG.historial ? '' : '. Sube otro para reemplazarlo.');
       } catch(_){ $(statusId).textContent = 'No se pudo cargar el archivo guardado; súbelo de nuevo.'; }
     };
     await leerInforme('conteo', 'stock', 'dropStock', 'stStock', parseStock, 'códigos');
     await leerInforme('informe', 'mov', 'dropMov', 'stMov');
     await leerInforme('informe_ajustes', 'mov2', 'dropMov2', 'stMov2');
     await leerInforme('ajustes', 'ajustes', 'dropAjustes', 'stAjustes');
-    if (state.ajustes) $('btnClearAjustes').hidden = false;
+    if (state.ajustes && !CFG.historial) $('btnClearAjustes').hidden = false;
     if (!state.mov.length && state.mov2) state.mov = state.mov2;
     if (g.estado){
       try {

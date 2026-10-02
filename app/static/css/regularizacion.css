@@ -178,3 +178,10 @@
 .regx .rx-btn.hecho{margin-top:6px}
 .regx .ajcomp{margin-top:4px;color:var(--muted);white-space:nowrap}
 .regx .warnbox{border-color:var(--warn)}
+
+/* Regularización guardada en el historial: solo para consultar, no se suben archivos */
+.regx.solo-lectura .drop input[type=file],.regx.solo-lectura .plantillas,.regx.solo-lectura #btnClearAjustes,.regx.solo-lectura #btnClearRecount,.regx.solo-lectura #dropRecount,.regx.solo-lectura [data-hecho]{display:none !important}
+.regx.solo-lectura .drop{cursor:default}
+.regx-nueva summary{list-style:none}
+.regx-nueva summary::-webkit-details-marker{display:none}
+.regx-nueva[open] form{max-width:420px}

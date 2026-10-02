@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Historial · Regularización{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <h1>Historial de regularizaciones</h1>
+    <p class="page-sub">Regularizaciones guardadas al empezar una nueva. Ábrelas cuando quieras para ver cómo quedaron: se ven tal como estaban, con sus archivos, recuentos y marcas.</p>
+  </div>
+  <div class="d-flex gap-2">
+    <a href="{{ url_for('inventario.regularizacion') }}" class="btn btn-outline-secondary btn-sm">← Regularización en uso</a>
+  </div>
+</div>
+
+{% if not lista %}
+<div class="alert alert-light border">Aún no hay regularizaciones guardadas. En Regularización, usa <strong>Empezar una regularización nueva</strong>: lo que está cargado se guarda aquí y la pantalla queda lista para subir la información nueva.</div>
+{% else %}
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+        <tr><th>Nombre</th><th>Guardada</th><th>Archivos</th><th class="text-end"></th></tr>
+      </thead>
+      <tbody>
+        {% for h in lista %}
+        <tr>
+          <td><a href="{{ url_for('inventario.regularizacion_historial_ver', historial_id=h.id) }}"><strong>{{ h.nombre }}</strong></a></td>
+          <td class="small">{{ h.creado_en|fecha_hora }}{% if h.creado_por %}<div class="text-muted">por {{ h.creado_por.nombre_completo }}</div>{% endif %}</td>
+          <td class="small">
+            {% for a in h.archivos if a.clave != 'estado' %}
+            <div><a href="{{ url_for('inventario.regularizacion_historial_archivo', historial_id=h.id, clave=a.clave, descargar=1) }}">⬇ {{ a.nombre or a.clave }}</a></div>
+            {% endfor %}
+          </td>
+          <td class="text-end text-nowrap">
+            <a href="{{ url_for('inventario.regularizacion_historial_ver', historial_id=h.id) }}" class="btn btn-primary btn-sm">Ver</a>
+            {% if puede_borrar %}
+            <details class="d-inline-block text-start">
+              <summary class="btn btn-outline-danger btn-sm">Borrar</summary>
+              <form method="post" action="{{ url_for('inventario.regularizacion_historial_borrar', historial_id=h.id) }}" class="mt-1">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-danger btn-sm">Sí, borrar</button>
+              </form>
+            </details>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

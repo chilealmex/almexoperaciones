@@ -1693,14 +1693,14 @@
         const data = parser(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header:1, raw:true, defval:null, blankrows:false}));
         state[key] = data;
         $(dropId).classList.add('ok');
-        $(statusId).textContent = `${info.nombre} · ${fmt(data.length)} ${que} · guardado el ${info.fecha}${info.por ? ' por ' + info.por : ''}. Sube otro para reemplazarlo.`;
+        $(statusId).textContent = `${info.nombre} · ${fmt(data.length)} ${que} · guardado el ${info.fecha}${info.por ? ' por ' + info.por : ''}` + (CFG.historial ? '' : '. Sube otro para reemplazarlo.');
       } catch(_){ $(statusId).textContent = 'No se pudo cargar el archivo guardado; súbelo de nuevo.'; }
     };
     await leerInforme('conteo', 'stock', 'dropStock', 'stStock', parseStock, 'códigos');
     await leerInforme('informe', 'mov', 'dropMov', 'stMov');
     await leerInforme('informe_ajustes', 'mov2', 'dropMov2', 'stMov2');
     await leerInforme('ajustes', 'ajustes', 'dropAjustes', 'stAjustes');
-    if (state.ajustes) $('btnClearAjustes').hidden = false;
+    if (state.ajustes && !CFG.historial) $('btnClearAjustes').hidden = false;
     if (!state.mov.length && state.mov2) state.mov = state.mov2;
     if (g.estado){
       try {

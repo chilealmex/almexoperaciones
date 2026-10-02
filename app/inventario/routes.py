@@ -15,7 +15,7 @@ from app.extensions import db
 from app.models.conteo_inventario import ItemConteoInventario, TomaInventario, TomaInventarioDetalle
 from app.models.equivalencia_codigo import EquivalenciaCodigo, crear_equivalencia
 from app.models.importacion_inventario import registrar_importacion, ultimas_importaciones
-from app.models.regularizacion import RegularizacionArchivo
+from app.models.regularizacion import RegularizacionArchivo, RegularizacionHistorial, RegularizacionHistorialArchivo
 from app.utils.decorators import require_permission
 from app.utils.equivalencias_codigos import proponer
 from app.utils.importar_conteo import (
@@ -1245,12 +1245,26 @@ def regularizacion():
     El cálculo corre en el navegador (static/js/regularizacion.js).
     """
     registros = RegularizacionArchivo.query.filter_by(empresa_id=current_user.empresa_id).all()
+    return _pagina_regularizacion(
+        registros,
+        url_para=lambda clave: url_for("inventario.regularizacion_guardado", clave=clave),
+        puede_guardar=_puede_editar_regularizacion(),
+        n_historial=RegularizacionHistorial.query.filter_by(empresa_id=current_user.empresa_id).count(),
+    )
+
+
+def _puede_editar_regularizacion():
+    return current_user.tiene_permiso("inventario", "editar", submodulo="regularizacion")
+
+
+def _pagina_regularizacion(registros, url_para, puede_guardar, historial=None, n_historial=0):
+    """Pinta Regularización con los archivos indicados: los que están en uso o los de una guardada en el historial."""
     guardados = {
         g.clave: {
             "nombre": g.nombre or "",
             "fecha": format_fecha_hora(g.actualizado_en),
             "por": g.actualizado_por.nombre_completo if g.actualizado_por else "",
-            "url": url_for("inventario.regularizacion_guardado", clave=g.clave),
+            "url": url_para(g.clave),
         }
         for g in registros
     }
@@ -1261,8 +1275,97 @@ def regularizacion():
         "inventario/regularizacion.html",
         guardados=guardados,
         ultima=ultima,
-        puede_guardar=current_user.tiene_permiso("inventario", "editar", submodulo="regularizacion"),
+        puede_guardar=puede_guardar,
+        url_patron=url_para("__CLAVE__"),
+        historial=historial,
+        n_historial=n_historial,
     )
+
+
+@bp.route("/regularizacion/archivar", methods=["POST"])
+@require_permission("inventario", "ver")
+def regularizacion_archivar():
+    """Guarda en el historial la regularización en uso y deja la pantalla vacía para empezar una nueva."""
+    if not _puede_editar_regularizacion():
+        abort(403)
+    registros = RegularizacionArchivo.query.filter_by(empresa_id=current_user.empresa_id).all()
+    if not registros:
+        flash("No hay nada que guardar: aún no se ha subido ningún archivo.", "warning")
+        return redirect(url_for("inventario.regularizacion"))
+    ahora = datetime.now(timezone.utc)
+    nombre = (request.form.get("nombre") or "").strip()[:150] or f"Regularización del {format_fecha_hora(ahora)}"
+    historial = RegularizacionHistorial(empresa_id=current_user.empresa_id, nombre=nombre, creado_en=ahora, creado_por_id=current_user.id)
+    for g in registros:
+        historial.archivos.append(RegularizacionHistorialArchivo(
+            clave=g.clave, nombre=g.nombre, contenido=g.contenido,
+            actualizado_en=g.actualizado_en, actualizado_por_id=g.actualizado_por_id,
+        ))
+        db.session.delete(g)
+    db.session.add(historial)
+    db.session.commit()
+    flash(f"Se guardó \"{nombre}\" en el historial. Ya puedes subir la información nueva.", "success")
+    return redirect(url_for("inventario.regularizacion"))
+
+
+@bp.route("/regularizacion/historial")
+@require_permission("inventario", "ver")
+def regularizacion_historial():
+    """Regularizaciones guardadas, de la más reciente a la más antigua."""
+    lista = (RegularizacionHistorial.query.filter_by(empresa_id=current_user.empresa_id)
+             .order_by(RegularizacionHistorial.creado_en.desc(), RegularizacionHistorial.id.desc()).all())
+    return render_template(
+        "inventario/regularizacion_historial.html",
+        lista=lista,
+        puede_borrar=_puede_editar_regularizacion(),
+    )
+
+
+def _historial_de_la_empresa(historial_id):
+    historial = db.session.get(RegularizacionHistorial, historial_id)
+    if historial is None or historial.empresa_id != current_user.empresa_id:
+        abort(404)
+    return historial
+
+
+@bp.route("/regularizacion/historial/<int:historial_id>")
+@require_permission("inventario", "ver")
+def regularizacion_historial_ver(historial_id):
+    """Abre una regularización guardada tal como quedó (solo lectura: no cambia lo guardado)."""
+    historial = _historial_de_la_empresa(historial_id)
+    return _pagina_regularizacion(
+        historial.archivos,
+        url_para=lambda clave: url_for("inventario.regularizacion_historial_archivo", historial_id=historial.id, clave=clave),
+        puede_guardar=False,
+        historial=historial,
+    )
+
+
+@bp.route("/regularizacion/historial/<int:historial_id>/archivo/<clave>")
+@require_permission("inventario", "ver")
+def regularizacion_historial_archivo(historial_id, clave):
+    historial = _historial_de_la_empresa(historial_id)
+    archivo = next((a for a in historial.archivos if a.clave == clave), None)
+    if archivo is None:
+        abort(404)
+    respuesta = make_response(archivo.contenido)
+    respuesta.headers["Content-Type"] = "application/json" if clave == "estado" else "application/octet-stream"
+    if clave != "estado" and request.args.get("descargar"):
+        respuesta.headers["Content-Disposition"] = f'attachment; filename="{(archivo.nombre or clave + ".xlsx").replace(chr(34), "")}"'
+    respuesta.headers["Cache-Control"] = "no-store"
+    return respuesta
+
+
+@bp.route("/regularizacion/historial/<int:historial_id>/borrar", methods=["POST"])
+@require_permission("inventario", "ver")
+def regularizacion_historial_borrar(historial_id):
+    if not _puede_editar_regularizacion():
+        abort(403)
+    historial = _historial_de_la_empresa(historial_id)
+    nombre = historial.nombre
+    db.session.delete(historial)
+    db.session.commit()
+    flash(f"Se borró \"{nombre}\" del historial.", "success")
+    return redirect(url_for("inventario.regularizacion_historial"))
 
 
 @bp.route("/regularizacion/guardado/<clave>", methods=["GET", "POST"])
@@ -1285,7 +1388,7 @@ def regularizacion_guardado(clave):
         respuesta.headers["Cache-Control"] = "no-store"
         return respuesta
 
-    if not current_user.tiene_permiso("inventario", "editar", submodulo="regularizacion"):
+    if not _puede_editar_regularizacion():
         abort(403)
     if request.form.get("borrar"):
         if registro is not None:

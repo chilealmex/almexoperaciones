@@ -168,3 +168,78 @@ def test_lo_guardado_es_de_cada_empresa(client, db, empresa, usuario_admin):
     login(client, "admin@test.cl")
     assert client.get("/inventario/regularizacion/guardado/informe").status_code == 404
     assert client.get("/inventario/regularizacion/guardado/otra-cosa").status_code == 404
+
+
+# --- Empezar una regularización nueva: la anterior queda en el historial ---
+
+
+def _subir(client, clave, contenido, nombre):
+    return client.post(
+        f"/inventario/regularizacion/guardado/{clave}",
+        data={"archivo": (io.BytesIO(contenido), nombre)},
+        content_type="multipart/form-data",
+    )
+
+
+def test_empezar_una_nueva_guarda_la_anterior_en_el_historial(client, db, empresa, usuario_admin):
+    from app.models.regularizacion import RegularizacionHistorial
+
+    login(client, "admin@test.cl")
+    _subir(client, "conteo", b"conteo de septiembre", "conteo.xlsx")
+    _subir(client, "informe", b"informe de septiembre", "informe.xlsx")
+    client.post("/inventario/regularizacion/guardado/estado", data=json.dumps({"hechos": {}}), content_type="application/json")
+
+    respuesta = client.post("/inventario/regularizacion/archivar", data={"nombre": "Septiembre 2026"})
+    assert respuesta.status_code == 302
+
+    # la pantalla queda vacía para subir lo nuevo
+    assert RegularizacionArchivo.query.count() == 0
+    assert "Aún no hay nada guardado" in client.get("/inventario/regularizacion").get_data(as_text=True)
+
+    # y la anterior queda en el historial, con sus archivos y su estado
+    historial = RegularizacionHistorial.query.one()
+    assert historial.nombre == "Septiembre 2026"
+    assert sorted(a.clave for a in historial.archivos) == ["conteo", "estado", "informe"]
+    lista = client.get("/inventario/regularizacion/historial").get_data(as_text=True)
+    assert "Septiembre 2026" in lista and "conteo.xlsx" in lista
+
+    # se puede abrir para verla: lee sus propios archivos y no guarda cambios
+    pagina = client.get(f"/inventario/regularizacion/historial/{historial.id}")
+    assert pagina.status_code == 200
+    config = _config_de_la_pagina(pagina.get_data(as_text=True))
+    assert config["guardar"] is False and config["historial"] is True
+    assert config["guardados"]["conteo"]["nombre"] == "conteo.xlsx"
+    url = config["url"].replace("__CLAVE__", "informe")
+    assert client.get(url).data == b"informe de septiembre"
+
+    # subir lo nuevo no toca lo guardado en el historial
+    _subir(client, "informe", b"informe de octubre", "informe.xlsx")
+    assert client.get(url).data == b"informe de septiembre"
+    assert client.get("/inventario/regularizacion/guardado/informe").data == b"informe de octubre"
+
+
+def test_sin_archivos_no_se_guarda_nada_en_el_historial(client, db, empresa, usuario_admin):
+    from app.models.regularizacion import RegularizacionHistorial
+
+    login(client, "admin@test.cl")
+    client.post("/inventario/regularizacion/archivar", data={})
+    assert RegularizacionHistorial.query.count() == 0
+
+
+def test_borrar_del_historial(client, db, empresa, usuario_admin):
+    from app.models.regularizacion import RegularizacionHistorial, RegularizacionHistorialArchivo
+
+    login(client, "admin@test.cl")
+    _subir(client, "informe", b"informe", "informe.xlsx")
+    client.post("/inventario/regularizacion/archivar", data={})
+    historial = RegularizacionHistorial.query.one()
+    assert historial.nombre.startswith("Regularización del ")
+    assert client.post(f"/inventario/regularizacion/historial/{historial.id}/borrar").status_code == 302
+    assert RegularizacionHistorial.query.count() == 0
+    assert RegularizacionHistorialArchivo.query.count() == 0
+
+
+def test_sin_permiso_de_edicion_no_se_puede_empezar_una_nueva(client, db, empresa, usuario_bodega):
+    login(client, "bodega@test.cl")
+    assert client.post("/inventario/regularizacion/archivar", data={}).status_code == 403
+    assert client.get("/inventario/regularizacion/historial").status_code == 200
