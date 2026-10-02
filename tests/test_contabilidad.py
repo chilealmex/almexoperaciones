@@ -779,3 +779,148 @@ def test_los_desplegables_de_mes_y_anio_no_cargan_todas_las_lineas(client, usuar
     texto = client.get("/contabilidad/provision-ingresos").get_data(as_text=True)
     # Aunque ninguna línea se muestre (todas cerradas), los filtros siguen completos
     assert "2025" in texto and "2026" in texto
+
+
+# --- Cambiar el comprobante de provisión y la OT -------------------------
+#
+# Son parte de la llave con que se reconoce la línea al importar —mes,
+# comprobante y OT—, así que cambiarlos no es editar un dato más: la línea
+# deja de calzar con la de la planilla. Se puede, pero avisando.
+
+
+def _guardar(client, linea, **campos):
+    datos = {
+        f"linea-{linea.id}-reversa": "",
+        f"linea-{linea.id}-mes_reversa": "",
+        f"linea-{linea.id}-cbte_reversa": "",
+        f"linea-{linea.id}-cbte_prov": linea.cbte_prov,
+        f"linea-{linea.id}-ot": linea.ot,
+    }
+    datos.update({f"linea-{linea.id}-{k}": v for k, v in campos.items()})
+    return client.post(
+        "/contabilidad/provision-ingresos/guardar", data=datos, follow_redirects=True
+    )
+
+
+def _una_linea(client, empresa, fila=FILA_2):
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([fila]), "p.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    return ProvisionIngreso.query.filter_by(empresa_id=empresa.id).one()
+
+
+def test_se_puede_cambiar_la_ot(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    linea = _una_linea(client, empresa)
+
+    _guardar(client, linea, ot="9999")
+
+    assert ProvisionIngreso.query.one().ot == "9999"
+
+
+def test_se_puede_cambiar_el_comprobante_de_provision(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    linea = _una_linea(client, empresa)
+
+    _guardar(client, linea, cbte_prov="888")
+
+    assert ProvisionIngreso.query.one().cbte_prov == "888"
+
+
+def test_al_cambiarlos_se_avisa_que_la_planilla_ya_no_los_reconoce(
+    client, usuario_admin, empresa, db
+):
+    """El aviso importa más que el cambio: si no, la próxima importación
+    duplica la línea y nadie sabe por qué."""
+    login(client, "admin@test.cl")
+    linea = _una_linea(client, empresa)
+
+    cuerpo = _guardar(client, linea, ot="9999").get_data(as_text=True)
+
+    assert "6119" in cuerpo and "9999" in cuerpo
+    assert "líneas nuevas" in cuerpo or "línea" in cuerpo
+    assert "ya no las va a reconocer" in cuerpo
+
+
+def test_no_se_avisa_si_no_se_cambio_nada(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    linea = _una_linea(client, empresa)
+
+    cuerpo = _guardar(client, linea).get_data(as_text=True)
+
+    assert "ya no las va a reconocer" not in cuerpo
+
+
+def test_dos_lineas_del_mismo_mes_no_pueden_quedar_iguales(
+    client, usuario_admin, empresa, db
+):
+    """La base lo prohíbe; dejarlo llegar hasta allá sería un error 500."""
+    login(client, "admin@test.cl")
+    # Las dos abiertas y del mismo mes y comprobante: una línea cerrada no se
+    # toca, así que no serviría para probar el choque.
+    otra_fila = [date(2026, 3, 1), 67, 7777, 500000, None, None, None,
+                 "OTRO CLIENTE", "EMPNEGVTAVTAOEM", "83070800-6", None, 500000]
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([FILA_2, otra_fila]), "p.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    una = ProvisionIngreso.query.filter_by(ot="7777").one()
+    otra = ProvisionIngreso.query.filter_by(ot="6119").one()
+
+    cuerpo = _guardar(client, una, ot=otra.ot, cbte_prov=otra.cbte_prov).get_data(as_text=True)
+
+    assert "Ya hay otra línea" in cuerpo
+    # Y la línea quedó como estaba: el rechazo no la deja a medias
+    assert ProvisionIngreso.query.filter_by(ot="7777").one().cbte_prov == "67"
+    assert ProvisionIngreso.query.count() == 2
+
+
+def test_no_se_pueden_dejar_en_blanco(client, usuario_admin, empresa, db):
+    """Son obligatorios en la base: vaciarlos sería un error 500."""
+    login(client, "admin@test.cl")
+    linea = _una_linea(client, empresa)
+
+    cuerpo = _guardar(client, linea, ot="").get_data(as_text=True)
+
+    assert "no pueden ir en blanco" in cuerpo
+    assert ProvisionIngreso.query.one().ot == "6119"
+
+
+def test_cambiarlos_pide_confirmacion_en_la_pantalla(client, usuario_admin, empresa, db):
+    """Lo que ella pidió: que avise antes, no después."""
+    login(client, "admin@test.cl")
+    _una_linea(client, empresa)
+
+    cuerpo = client.get("/contabilidad/provision-ingresos?estado=todas").get_data(as_text=True)
+
+    assert 'name="linea-' in cuerpo and "-ot\"" in cuerpo
+    assert "data-confirmar-cambio" in cuerpo
+    assert "parte de cómo se reconoce la línea al importar" in cuerpo
+
+
+def test_el_choque_se_comprueba_con_el_texto_ya_recortado(client, usuario_admin, empresa, db):
+    """La columna guarda 30 caracteres. Comparar con el texto largo dejaría
+    pasar dos que van a terminar iguales en la base, y eso es un error 500."""
+    login(client, "admin@test.cl")
+    largo = "A" * 30
+    filas = [
+        [date(2026, 3, 1), 67, largo, 500000, None, None, None,
+         "UNO", "EMPNEGVTAVTAOEM", "83070800-6", None, 500000],
+        [date(2026, 3, 1), 67, "7777", 500000, None, None, None,
+         "OTRO", "EMPNEGVTAVTAOEM", "83070800-6", None, 500000],
+    ]
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla(filas), "p.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    linea = ProvisionIngreso.query.filter_by(ot="7777").one()
+
+    # Difiere del otro sólo después del carácter 30: al recortar quedan iguales.
+    cuerpo = _guardar(client, linea, ot=largo + "DISTINTO").get_data(as_text=True)
+
+    assert "Ya hay otra línea" in cuerpo
+    assert ProvisionIngreso.query.filter_by(ot="7777").one() is not None
