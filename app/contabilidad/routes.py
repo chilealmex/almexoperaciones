@@ -776,6 +776,43 @@ def _guardar_cruce(conciliacion, clave_libro, resultado, nombre_sii, nombre_defo
     return libro
 
 
+def agrupar_por_anio(conciliaciones) -> list:
+    """Los períodos agrupados por año, con lo que hace falta saber sin abrirlo.
+
+    Devuelve [{'anio', 'meses', 'pendientes', 'por_revisar', 'cerrados',
+    'sin_cargar'}] del año más nuevo al más viejo. El resumen va en el
+    encabezado porque, plegado, es lo único que se ve: un año que dice "todo
+    cuadra" no hace falta abrirlo, y uno que dice "3 meses por revisar" se
+    abre sabiendo qué se busca.
+
+    'pendientes' suma los documentos que exigen trabajo en los dos libros de
+    todos los meses del año; 'por_revisar' cuenta los meses que tienen alguno.
+    """
+    por_anio = {}
+    for conciliacion in conciliaciones:
+        por_anio.setdefault(conciliacion.anio, []).append(conciliacion)
+
+    grupos = []
+    for anio in sorted(por_anio, reverse=True):
+        meses = sorted(por_anio[anio], key=lambda c: c.mes, reverse=True)
+        pendientes = sum(
+            libro.pendientes for c in meses for libro in c.libros
+        )
+        grupos.append({
+            "anio": anio,
+            "meses": meses,
+            "pendientes": pendientes,
+            "por_revisar": sum(
+                1 for c in meses if any(libro.pendientes for libro in c.libros)
+            ),
+            "cerrados": sum(1 for c in meses if c.cerrado),
+            # Un mes al que le falta un libro no está listo, aunque lo cargado
+            # cuadre: es la otra razón para volver a él.
+            "sin_cargar": sum(1 for c in meses if len(c.libros) < 2),
+        })
+    return grupos
+
+
 @bp.route("/conciliacion-sii")
 @require_permission("contabilidad", "ver")
 def conciliacion_sii():
@@ -787,9 +824,14 @@ def conciliacion_sii():
     hoy = date.today()
     form = ConciliacionSiiForm(anio=hoy.year, mes=hoy.month)
     form.mes.choices = MESES_ELEGIBLES
+    grupos = agrupar_por_anio(conciliaciones)
     return render_template(
         "contabilidad/conciliacion_sii.html",
+        grupos=grupos,
         conciliaciones=conciliaciones,
+        # Sólo el año más nuevo abierto: el resto se despliega al pincharlo,
+        # que es justamente lo que se pidió para no ver todos los períodos.
+        anio_abierto=grupos[0]["anio"] if grupos else None,
         form=form,
         accion=AccionForm(),
         meses=MESES_NOMBRES,
