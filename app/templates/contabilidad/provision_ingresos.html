@@ -185,8 +185,24 @@
             <tr>
               <td class="fw-semibold">{{ nombre_mes(l.mes_ano) }}</td>
               <td>{{ l.mes_ano.year if l.mes_ano else '' }}</td>
-              <td>{{ l.cbte_prov }}</td>
-              <td>{{ l.ot }}</td>
+              {# El comprobante y la OT son parte de la llave con que se
+                 reconoce la línea al importar, así que cambiarlos no es editar
+                 un dato más: por eso piden confirmación y el aviso dice qué
+                 pasa después. Una línea cerrada no se toca, igual que el resto. #}
+              <td>
+                {% if editable %}
+                <input type="text" name="linea-{{ l.id }}-cbte_prov" value="{{ l.cbte_prov }}"
+                       class="form-control form-control-sm campo-excel" style="min-width:86px;"
+                       data-confirmar-cambio="el comprobante de provisión (OT {{ l.ot }}). Es parte de cómo se reconoce la línea al importar la planilla">
+                {% else %}{{ l.cbte_prov }}{% endif %}
+              </td>
+              <td>
+                {% if editable %}
+                <input type="text" name="linea-{{ l.id }}-ot" value="{{ l.ot }}"
+                       class="form-control form-control-sm campo-excel" style="min-width:86px;"
+                       data-confirmar-cambio="la OT de {{ (l.cliente or 'esta línea')|replace('"', '') }} (Cbte {{ l.cbte_prov }}). Es parte de cómo se reconoce la línea al importar la planilla">
+                {% else %}{{ l.ot }}{% endif %}
+              </td>
               <td class="num">{{ l.monto_provision|clp }}</td>
               {# Las cuatro columnas editables. El resto viene del Excel y es solo lectura. #}
               <td class="num">

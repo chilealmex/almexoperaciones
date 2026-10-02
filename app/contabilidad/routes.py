@@ -288,7 +288,9 @@ def guardar_provision_ingresos():
     if not form.validate_on_submit():
         abort(400)
 
-    for linea in _query_base().all():
+    todas = _query_base().all()
+    pedidos = []
+    for linea in todas:
         prefijo = f"linea-{linea.id}-"
         if prefijo + "reversa" not in request.form:
             continue  # línea que no está en la página que se envió
@@ -298,9 +300,73 @@ def guardar_provision_ingresos():
         linea.mes_reversa = (request.form.get(prefijo + "mes_reversa") or "").strip() or None
         linea.cbte_reversa = (request.form.get(prefijo + "cbte_reversa") or "").strip() or None
         linea.saldo = _saldo_de(linea)
+
+        nuevo_cbte = (request.form.get(prefijo + "cbte_prov") or "").strip()
+        nuevo_ot = (request.form.get(prefijo + "ot") or "").strip()
+        if (nuevo_cbte, nuevo_ot) != (linea.cbte_prov, linea.ot):
+            pedidos.append((linea, nuevo_cbte, nuevo_ot))
+
+    cambiadas, rechazadas = _cambiar_identidad(todas, pedidos)
     db.session.commit()
+
     flash("Cambios guardados.", "success")
+    if cambiadas:
+        flash(
+            f"{_frase(cambiadas, 'línea cambió', 'líneas cambiaron')} de comprobante u OT: "
+            + " · ".join(cambiadas)
+            + ". La próxima importación ya no las va a reconocer con los datos "
+            "viejos: si la planilla sigue trayendo los de antes, va a crear "
+            "líneas nuevas en vez de actualizar éstas.",
+            "warning",
+        )
+    for aviso in rechazadas:
+        flash(aviso, "danger")
     return redirect(url_for("contabilidad.provision_ingresos", **request.args))
+
+
+def _frase(cosas, singular, plural) -> str:
+    return f"{len(cosas)} {singular if len(cosas) == 1 else plural}"
+
+
+def _cambiar_identidad(todas, pedidos):
+    """Cambia el comprobante de provisión y la OT de las líneas pedidas.
+
+    Son parte de la llave con que se reconoce la línea —mes, comprobante y
+    OT—, así que cambiarlas no es editar un dato más: la línea deja de calzar
+    con la de la planilla. Se avisa después, y acá se cuida lo que el aviso no
+    puede arreglar.
+
+    Dos líneas del mismo mes no pueden quedar con el mismo comprobante y la
+    misma OT: la base lo prohíbe, y dejarlo llegar hasta allá sería un error
+    500 en vez de una explicación. Se rechaza una por una, así que un cambio
+    malo no bota los demás.
+    """
+    ocupadas = {(l.mes_ano, l.cbte_prov, l.ot) for l in todas}
+    cambiadas, rechazadas = [], []
+    for linea, cbte, ot in pedidos:
+        if not cbte or not ot:
+            rechazadas.append(
+                f"La línea {linea.cbte_prov}/{linea.ot} se quedó como estaba: "
+                "el comprobante y la OT no pueden ir en blanco."
+            )
+            continue
+        # Se recorta antes de comparar: la columna guarda 30 caracteres, y
+        # comprobar el choque con el texto largo dejaría pasar dos que van a
+        # terminar iguales en la base.
+        cbte, ot = cbte[:30], ot[:30]
+        antes = (linea.mes_ano, linea.cbte_prov, linea.ot)
+        ocupadas.discard(antes)
+        if (linea.mes_ano, cbte, ot) in ocupadas:
+            rechazadas.append(
+                f"Ya hay otra línea de ese mes con comprobante {cbte} y OT {ot}: "
+                f"la línea {linea.cbte_prov}/{linea.ot} se quedó como estaba."
+            )
+            ocupadas.add(antes)
+            continue
+        cambiadas.append(f"{linea.cbte_prov}/{linea.ot} → {cbte}/{ot}")
+        linea.cbte_prov, linea.ot = cbte, ot
+        ocupadas.add((linea.mes_ano, linea.cbte_prov, linea.ot))
+    return cambiadas, rechazadas
 
 
 @bp.route("/provision-ingresos/nueva", methods=["POST"])

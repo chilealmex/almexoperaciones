@@ -1649,13 +1649,16 @@ def _codigo_que_no_esta(codigo, sueltos, sistema) -> str:
     )
 
 
-@bp.route("/equivalencias")
-@require_permission("inventario", "editar")
-def equivalencias_codigos():
-    """Propone qué artículo de QMS es el mismo que cuál de Defontana."""
-    solo_qms, solo_defo = _sueltos(current_user.empresa_id)
+def estado_de_equivalencias(empresa_id) -> dict:
+    """Todo lo que hace falta saber, para la pantalla y para el Excel.
+
+    Van juntas a propósito: si el archivo se armara por su cuenta, podría
+    proponer otras parejas que la pantalla, y se estaría trabajando sobre dos
+    listas que no son la misma.
+    """
+    solo_qms, solo_defo = _sueltos(empresa_id)
     confirmadas = EquivalenciaCodigo.query.filter_by(
-        empresa_id=current_user.empresa_id
+        empresa_id=empresa_id
     ).order_by(EquivalenciaCodigo.creado_en.desc()).all()
     ya_unidos = {e.clave_qms for e in confirmadas}
     claves_unidas = {e.clave_defontana for e in confirmadas}
@@ -1663,13 +1666,33 @@ def equivalencias_codigos():
     # Lo ya confirmado sale de la lista de candidatos: se resolvió.
     pendientes_qms = [i for i in solo_qms if codigo_normalizado(i.codigo) not in ya_unidos]
     pendientes_defo = [i for i in solo_defo if codigo_normalizado(i.codigo) not in claves_unidas]
+    propuestas = proponer(pendientes_qms, pendientes_defo)
 
+    # Los que no alcanzaron ni una propuesta: son los que hay que revisar a
+    # mano, y sin ellos el archivo no serviría para repartirse el trabajo.
+    con_propuesta_qms = {p["qms"].id for p in propuestas}
+    con_propuesta_defo = {p["defontana"].id for p in propuestas}
+    return {
+        "propuestas": propuestas,
+        "confirmadas": confirmadas,
+        "pendientes_qms": pendientes_qms,
+        "pendientes_defontana": pendientes_defo,
+        "sin_pareja_qms": [i for i in pendientes_qms if i.id not in con_propuesta_qms],
+        "sin_pareja_defontana": [i for i in pendientes_defo if i.id not in con_propuesta_defo],
+    }
+
+
+@bp.route("/equivalencias")
+@require_permission("inventario", "editar")
+def equivalencias_codigos():
+    """Propone qué artículo de QMS es el mismo que cuál de Defontana."""
+    datos = estado_de_equivalencias(current_user.empresa_id)
     return render_template(
         "inventario/equivalencias.html",
-        propuestas=proponer(pendientes_qms, pendientes_defo),
-        solo_qms=pendientes_qms,
-        solo_defontana=pendientes_defo,
-        confirmadas=confirmadas,
+        propuestas=datos["propuestas"],
+        solo_qms=datos["pendientes_qms"],
+        solo_defontana=datos["pendientes_defontana"],
+        confirmadas=datos["confirmadas"],
         form=AccionForm(),
     )
 
@@ -1768,3 +1791,80 @@ def equivalencias_deshacer(equivalencia_id):
         "success",
     )
     return redirect(url_for("inventario.equivalencias_codigos"))
+
+
+@bp.route("/equivalencias.xlsx")
+@require_permission("inventario", "editar")
+def equivalencias_excel():
+    """El trabajo de unificar códigos, en un archivo para revisar fuera de la pantalla.
+
+    Cuatro hojas, que son las cuatro situaciones distintas: lo que falta
+    confirmar, lo que ya se unió, y los que quedaron sueltos en cada sistema
+    sin ninguna pareja propuesta. Esos últimos son los que hay que buscar a
+    mano, así que son los que más se agradece poder repartir.
+    """
+    datos = estado_de_equivalencias(current_user.empresa_id)
+
+    propuestas = [
+        col("Código QMS", ancho=22, total="texto"),
+        col("Descripción QMS", ancho=46),
+        col("Stock QMS", ancho=12, formato=CANTIDAD),
+        col("Código Defontana", ancho=22),
+        col("Descripción Defontana", ancho=46),
+        col("Stock Defontana", ancho=15, formato=CANTIDAD),
+        col("Qué tan seguro", ancho=14, formato=PORCENTAJE),
+        col("Por qué", ancho=52),
+    ]
+    filas_propuestas = [
+        [p["qms"].codigo, p["qms"].nombre or "", p["qms"].cantidad_qms,
+         p["defontana"].codigo, p["defontana"].nombre or "",
+         p["defontana"].cantidad_defontana, p["puntaje"], p["motivo"]]
+        for p in datos["propuestas"]
+    ]
+
+    unidos = [
+        col("Código Defontana", ancho=22, total="texto"),
+        col("Código QMS", ancho=22),
+        col("Por qué se unieron", ancho=46),
+        col("Qué tan seguro", ancho=14, formato=PORCENTAJE),
+        col("Quién", ancho=26),
+        col("Cuándo", ancho=18, formato=FECHA),
+    ]
+    filas_unidos = [
+        [e.codigo_defontana, e.codigo_qms, e.motivo or "",
+         (e.puntaje / 100) if e.puntaje else None,
+         e.creado_por.nombre_completo if e.creado_por else "", e.creado_en]
+        for e in datos["confirmadas"]
+    ]
+
+    def sueltos(items, campo_stock):
+        columnas = [
+            col("Código", ancho=22, total="texto"),
+            col("Descripción", ancho=52),
+            col("Stock", ancho=12, formato=CANTIDAD, total="suma"),
+            col("Unidad", ancho=10),
+            col("Ubicación", ancho=26),
+            col("Categoría", ancho=24),
+        ]
+        filas = [
+            [i.codigo, i.nombre or "", getattr(i, campo_stock),
+             (i.unidad_qms or i.unidad_defontana or ""), i.ubicacion or "", i.categoria or ""]
+            for i in items
+        ]
+        return columnas, filas
+
+    col_solo_qms, filas_solo_qms = sueltos(datos["sin_pareja_qms"], "cantidad_qms")
+    col_solo_defo, filas_solo_defo = sueltos(datos["sin_pareja_defontana"], "cantidad_defontana")
+
+    hojas = [
+        ("Por unir", propuestas, filas_propuestas,
+         "Parejas propuestas: confirma una por una en la pantalla. Unir dos "
+         "artículos distintos suma sus existencias."),
+        ("Ya unidos", unidos, filas_unidos,
+         "Equivalencias confirmadas: el importador las respeta en cada carga."),
+        ("Sin pareja — QMS", col_solo_qms, filas_solo_qms,
+         "Están solo en QMS y no se les encontró pareja: hay que buscarla a mano."),
+        ("Sin pareja — Defontana", col_solo_defo, filas_solo_defo,
+         "Están solo en Defontana y no se les encontró pareja: hay que buscarla a mano."),
+    ]
+    return responder_excel_hojas("unificar-codigos", hojas)
