@@ -10,17 +10,20 @@ from sqlalchemy import or_, and_
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.inventario import bp
-from app.inventario.forms import AccionForm, ImportarAmbosForm, ImportarCsvForm
+from app.inventario.forms import AccionForm, CruceDePruebaForm, ImportarCsvForm
 from app.extensions import db
 from app.models.conteo_inventario import ItemConteoInventario, TomaInventario, TomaInventarioDetalle
 from app.models.equivalencia_codigo import EquivalenciaCodigo, crear_equivalencia
 from app.models.codigo_unificado import CodigoUnificado
+from app.models.cruce_prueba import borrar_prueba, guardar_prueba, prueba_en_curso
 from app.models.importacion_inventario import registrar_importacion, ultimas_importaciones
 from app.models.regularizacion import RegularizacionArchivo, RegularizacionHistorial, RegularizacionHistorialArchivo
 from app.utils.decorators import require_permission
 from app.utils.equivalencias_codigos import proponer
 from app.utils.importar_conteo import (
     articulos_fuera_de_ambas_planillas,
+    leer_defontana,
+    leer_qms,
     clave_sin_ceros,
     codigo_normalizado,
     grupos_duplicados,
@@ -30,6 +33,7 @@ from app.utils.importar_conteo import (
     unificar_grupo,
 )
 from app.utils.cantidades import a_cantidad, format_cantidad, punto_ambiguo
+from app.utils.cruce_prueba import comparar, para_guardar
 from app.utils.formatting import format_clp, format_fecha_hora
 from app.utils.graficos import COLOR, serie, widget_seguro
 from app.utils.paneles import panel_inventario
@@ -1030,7 +1034,8 @@ def cruce_datos():
         pares_de_unidades=_pares_de_unidades_distintas(items),
         sin_vacios=sin_vacios,
         vacios=vacios,
-        form_importar=ImportarAmbosForm(),
+        form_importar=CruceDePruebaForm(),
+        prueba=prueba_en_curso(current_user.empresa_id, current_user.id),
         # Si la subida se rechazó, el panel tiene que volver abierto: cerrado,
         # el aviso de error queda arriba sin nada visible que lo explique.
         abrir_importar=request.args.get("subir") == "1",
@@ -1063,6 +1068,26 @@ def cruce_datos_excel():
         request.args, esconder_vacios_por_defecto=False
     )
 
+    columnas, filas = _excel_del_cruce(items)
+
+    return responder_excel(
+        "cruce-datos-inventario",
+        "Cruce de unidades y costos",
+        columnas,
+        filas,
+        _descripcion_filtros(
+            q, filtro, filtros_columna, ETIQUETAS_CRUCE,
+            "sin los artículos sin stock ni costo" if sin_vacios else "",
+        ),
+    )
+
+
+def _excel_del_cruce(items):
+    """Columnas y filas del informe del cruce.
+
+    Las comparten el cruce del sistema y el de prueba: la misma comparación
+    sobre datos distintos tiene que bajarse igual en los dos casos.
+    """
     columnas = [
         col("Código", ancho=20, total="texto"),
         col("Descripción", ancho=48),
@@ -1102,17 +1127,7 @@ def cruce_datos_excel():
         ]
         for i in items
     ]
-
-    return responder_excel(
-        "cruce-datos-inventario",
-        "Cruce de unidades y costos",
-        columnas,
-        filas,
-        _descripcion_filtros(
-            q, filtro, filtros_columna, ETIQUETAS_CRUCE,
-            "sin los artículos sin stock ni costo" if sin_vacios else "",
-        ),
-    )
+    return columnas, filas
 
 
 # --- Cruce de datos: paso a paso para dejar QMS igual a Defontana ---
@@ -1629,43 +1644,198 @@ def conteo_importar_defontana():
     return redirect(url_for("inventario.conteo_importar"))
 
 
-@bp.route("/cruce-datos/importar", methods=["POST"])
-@require_permission("inventario", "editar")
-def cruce_datos_importar():
-    """Subir las dos planillas sin salir del cruce, para ver el arreglo al tiro.
+# --- Cruce de prueba: comparar dos planillas sin cargarlas al sistema ---
+#
+# El maestro de artículos es uno solo y lo miran todos los submódulos de
+# Inventario. Para ver cómo quedaría un cruce no hace falta escribirlo: las dos
+# planillas se leen, se comparan en memoria y lo único que se guarda es esa
+# lectura, aparte, para que los filtros de la pantalla no obliguen a releer los
+# archivos en cada clic. El maestro no se toca.
+#
+# Cargar de verdad sigue estando en Importar, que es donde dice que carga.
 
-    Cada sistema se guarda por separado, como en Importar: si una de las dos
-    planillas viene mala, la otra igual queda cargada y el aviso dice cuál
-    falló. Guardar las dos juntas obligaría a volver a subir la buena.
-    """
-    form = ImportarAmbosForm()
+
+@bp.route("/cruce-datos/prueba", methods=["POST"])
+@require_permission("inventario", "editar")
+def cruce_prueba_subir():
+    form = CruceDePruebaForm()
     if not form.validate_on_submit():
         for errores in form.errors.values():
             for error in errores:
                 flash(error, "danger")
-        return redirect(url_for(
-            "inventario.cruce_datos", subir="1", **_filtros_vigentes(request.form)
-        ))
+        return redirect(url_for("inventario.cruce_datos", subir="1"))
 
-    # QMS primero y Defontana después, el mismo orden en que se leen las dos
-    # columnas de la pantalla. El resultado no depende del orden: cada
-    # importación marca las ausencias de su propio sistema.
-    for sistema, campo in (("qms", form.archivo_qms), ("defontana", form.archivo_defontana)):
-        if campo.data:
-            _importar_un_sistema(sistema, campo.data, form.solo_no_contados.data)
+    try:
+        lectura = {
+            "qms": para_guardar(leer_qms(form.archivo_qms.data)),
+            "defontana": para_guardar(leer_defontana(form.archivo_defontana.data)),
+        }
+    except ValueError as e:
+        flash(str(e), "danger")
+        return redirect(url_for("inventario.cruce_datos", subir="1"))
 
-    return redirect(url_for("inventario.cruce_datos", **_filtros_vigentes(request.form)))
+    guardar_prueba(
+        current_user.empresa_id, current_user.id, lectura,
+        form.archivo_qms.data.filename, form.archivo_defontana.data.filename,
+    )
+    db.session.commit()
+    return redirect(url_for("inventario.cruce_prueba"))
 
 
-# Lo que la pantalla traía puesto cuando se subió el archivo: si se perdiera,
-# después de importar aparecerían de golpe los miles de artículos escondidos y
-# habría que volver a filtrar para seguir donde se iba.
-_ESTADO_DE_LA_PANTALLA = ("q", "filtro", "orden", "direccion", "pagina", "vacios")
+@bp.route("/cruce-datos/prueba")
+@require_permission("inventario", "editar")
+def cruce_prueba():
+    """El cruce de las dos planillas subidas, sin que nada de esto se guarde."""
+    prueba = prueba_en_curso(current_user.empresa_id, current_user.id)
+    if prueba is None:
+        flash("Sube las dos planillas para compararlas.", "info")
+        return redirect(url_for("inventario.cruce_datos", subir="1"))
+
+    items, busqueda, filtros_columna, filtro, orden, direccion, sin_vacios, vacios = (
+        _items_de_la_prueba(prueba, request.args)
+    )
+    pagina = max(1, request.args.get("pagina", 1, type=int))
+    por_pagina = 100
+    total_paginas = max(1, (len(items) + por_pagina - 1) // por_pagina)
+    pagina = min(pagina, total_paginas)
+
+    return render_template(
+        "inventario/cruce_prueba.html",
+        prueba=prueba,
+        items=items[(pagina - 1) * por_pagina : pagina * por_pagina],
+        totales=_totales_cruce(items),
+        q=busqueda,
+        filtro=filtro,
+        filtros_columna=filtros_columna,
+        orden=orden,
+        direccion=direccion,
+        pagina=pagina,
+        total_paginas=total_paginas,
+        sin_vacios=sin_vacios,
+        vacios=vacios,
+        pares_de_unidades=_pares_de_unidades_distintas(items),
+        form=AccionForm(),
+    )
 
 
-def _filtros_vigentes(enviado):
-    campos = _ESTADO_DE_LA_PANTALLA + tuple(FILTROS_COLUMNA)
-    return {k: enviado[k] for k in campos if enviado.get(k)}
+@bp.route("/cruce-datos/prueba.xlsx")
+@require_permission("inventario", "editar")
+def cruce_prueba_excel():
+    """El cruce de prueba en Excel, con los mismos filtros de la pantalla."""
+    prueba = prueba_en_curso(current_user.empresa_id, current_user.id)
+    if prueba is None:
+        abort(404)
+    items, q, filtros_columna, filtro, _orden, _dir, sin_vacios, _vacios = _items_de_la_prueba(
+        prueba, request.args
+    )
+    columnas, filas = _excel_del_cruce(items)
+    return responder_excel(
+        "cruce-de-prueba",
+        "Cruce de prueba (no cargado al sistema)",
+        columnas,
+        filas,
+        _descripcion_filtros(
+            q, filtro, filtros_columna, ETIQUETAS_CRUCE,
+            "sin los artículos sin stock ni costo" if sin_vacios else "",
+        ),
+    )
+
+
+@bp.route("/cruce-datos/prueba/terminar", methods=["POST"])
+@require_permission("inventario", "editar")
+def cruce_prueba_terminar():
+    form = AccionForm()
+    if not form.validate_on_submit():
+        abort(400)
+    if borrar_prueba(current_user.empresa_id, current_user.id):
+        db.session.commit()
+        flash("Se descartó la comparación. En el sistema no había quedado nada.", "success")
+    return redirect(url_for("inventario.cruce_datos"))
+
+
+def _equivalencias_vigentes():
+    """Las uniones que alguien ya confirmó, para no volver a preguntar por ellas.
+
+    Se leen, no se cambian: sin esto la prueba mostraría como "Falta en QMS"
+    pares que ya se resolvieron en Unificar códigos.
+    """
+    from app.utils.importar_conteo import _encadenar, _redirecciones_de_unificaciones, _traducciones_confirmadas
+
+    return _encadenar(
+        _traducciones_confirmadas(current_user.empresa_id),
+        _redirecciones_de_unificaciones(current_user.empresa_id),
+    )
+
+
+def _items_de_la_prueba(prueba, args):
+    """El mismo filtrado y orden del cruce, pero sobre la lista en memoria."""
+    guardado = prueba.contenido
+    items = comparar(guardado["qms"], guardado["defontana"], _equivalencias_vigentes())
+
+    busqueda = (args.get("q") or "").strip()
+    sin_vacios = esconder_vacios(args, True)
+    if busqueda:
+        patron = busqueda.lower()
+        items = [
+            i for i in items
+            if patron in (i.codigo or "").lower() or patron in (i.nombre or "").lower()
+        ]
+        # Igual que en el cruce: buscar un artículo tiene que encontrarlo
+        # aunque esté vacío, que es cuando más falta hace buscarlo.
+        if (args.get("vacios") or "").strip() != "no":
+            sin_vacios = False
+
+    filtros_columna = {}
+    for parametro, atributo in FILTROS_COLUMNA_PRUEBA.items():
+        texto = (args.get(parametro) or "").strip()
+        filtros_columna[parametro] = texto
+        if texto:
+            items = [i for i in items if texto.lower() in (getattr(i, atributo) or "").lower()]
+
+    vacios = sum(1 for i in items if not _hay_algo_que_mirar(i))
+    if sin_vacios:
+        items = [i for i in items if _hay_algo_que_mirar(i)]
+
+    filtro = args.get("filtro", "todos")
+    if filtro not in FILTROS_CRUCE:
+        filtro = "todos"
+    if filtro in ETIQUETAS_ESTADO_MAESTRO:
+        items = [i for i in items if i.estado_maestro == filtro]
+    elif filtro == "costo_sin_stock":
+        items = [i for i in items if i.costo_sin_stock]
+
+    orden = args.get("orden") if args.get("orden") in ORDEN_PRUEBA else "codigo"
+    direccion = "desc" if args.get("direccion") == "desc" else "asc"
+    items = sorted(items, key=ORDEN_PRUEBA[orden], reverse=(direccion == "desc"))
+
+    return items, busqueda, filtros_columna, filtro, orden, direccion, sin_vacios, vacios
+
+
+FILTROS_COLUMNA_PRUEBA = {
+    "f_codigo": "codigo",
+    "f_nombre": "nombre",
+    "f_unidad": "unidad_qms",
+    "f_categoria": "categoria",
+    "f_linea": "linea_negocio",
+    "f_ubicacion": "ubicacion",
+}
+
+
+def _por_numero(nombre):
+    """Ordena dejando los vacíos al final, que es donde no estorban."""
+    return lambda i: (getattr(i, nombre) is None, getattr(i, nombre) or 0)
+
+
+ORDEN_PRUEBA = {
+    "codigo": lambda i: i.codigo or "",
+    "nombre": lambda i: (i.nombre or "").lower(),
+    "categoria": lambda i: (i.categoria or "").lower(),
+    "cantidad_qms": _por_numero("cantidad_qms"),
+    "cantidad_defontana": _por_numero("cantidad_defontana"),
+    "costo_unitario_qms": _por_numero("costo_unitario_qms"),
+    "costo_unitario_defontana": _por_numero("costo_unitario_defontana"),
+}
+
 
 
 # --- Equivalencias de códigos: el mismo artículo con otro código en cada sistema ---

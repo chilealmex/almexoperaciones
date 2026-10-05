@@ -6,6 +6,7 @@ from app.models.conteo_inventario import ItemConteoInventario
 from app.models.equivalencia_codigo import EquivalenciaCodigo
 from app.models.codigo_unificado import CodigoUnificado
 from app.models.importacion_inventario import ImportacionInventario
+from app.models.cruce_prueba import CruceDePrueba
 from app.models.contrato import ContratoCliente
 from app.models.contrato_generado import ContratoGenerado
 from app.models.activo_fijo import ActivoFijo, CategoriaActivo
