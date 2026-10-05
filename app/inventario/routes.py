@@ -14,6 +14,7 @@ from app.inventario.forms import AccionForm, ImportarCsvForm
 from app.extensions import db
 from app.models.conteo_inventario import ItemConteoInventario, TomaInventario, TomaInventarioDetalle
 from app.models.equivalencia_codigo import EquivalenciaCodigo, crear_equivalencia
+from app.models.codigo_unificado import CodigoUnificado
 from app.models.importacion_inventario import registrar_importacion, ultimas_importaciones
 from app.models.regularizacion import RegularizacionArchivo, RegularizacionHistorial, RegularizacionHistorialArchivo
 from app.utils.decorators import require_permission
@@ -1469,12 +1470,16 @@ def conteo_unificar_duplicados():
     eliminados = 0
     for grupo in grupos:
         eliminados += len(grupo) - 1
-        unificar_grupo(grupo)
+        unificar_grupo(grupo, current_user.id)
         unificados += 1
     db.session.commit()
 
     if unificados:
-        flash(f"Se unificaron {unificados} código(s); se juntaron {eliminados} línea(s) repetida(s).", "success")
+        flash(
+            f"Se unificaron {unificados} código(s); se juntaron {eliminados} línea(s) repetida(s). "
+            "Queda guardado: las próximas importaciones no los van a volver a separar.",
+            "success",
+        )
     else:
         flash("No quedaban códigos repetidos por unificar.", "info")
     return redirect(url_for("inventario.equivalencias_codigos"))
@@ -1665,6 +1670,9 @@ def estado_de_equivalencias(empresa_id) -> dict:
     confirmadas = EquivalenciaCodigo.query.filter_by(
         empresa_id=empresa_id
     ).order_by(EquivalenciaCodigo.creado_en.desc()).all()
+    unificados = CodigoUnificado.query.filter_by(
+        empresa_id=empresa_id
+    ).order_by(CodigoUnificado.creado_en.desc()).all()
     ya_unidos = {e.clave_qms for e in confirmadas}
     claves_unidas = {e.clave_defontana for e in confirmadas}
 
@@ -1680,6 +1688,7 @@ def estado_de_equivalencias(empresa_id) -> dict:
     return {
         "propuestas": propuestas,
         "confirmadas": confirmadas,
+        "unificados": unificados,
         "pendientes_qms": pendientes_qms,
         "pendientes_defontana": pendientes_defo,
         "sin_pareja_qms": [i for i in pendientes_qms if i.id not in con_propuesta_qms],
@@ -1706,6 +1715,7 @@ def equivalencias_codigos():
         solo_qms=datos["pendientes_qms"],
         solo_defontana=datos["pendientes_defontana"],
         confirmadas=datos["confirmadas"],
+        unificados=datos["unificados"],
         grupos=grupos_duplicados(current_user.empresa_id),
         clave_sin_ceros=clave_sin_ceros,
         rarezas_del_codigo=rarezas_del_codigo,
@@ -1804,6 +1814,32 @@ def equivalencias_deshacer(equivalencia_id):
     flash(
         f"{codigos} vuelven a ser artículos separados. "
         "El stock ya cruzado se reordena en la próxima importación.",
+        "success",
+    )
+    return redirect(url_for("inventario.equivalencias_codigos"))
+
+
+@bp.route("/equivalencias/unificado/<int:unificacion_id>/separar", methods=["POST"])
+@require_permission("inventario", "editar")
+def unificacion_separar(unificacion_id):
+    """Libera un código que se había retirado al unificar por error.
+
+    No devuelve la línea borrada: eso lo hace la próxima importación, que es
+    la que sabe el stock de hoy. Lo que hace es dejar de redirigir el código,
+    que es lo que impedía que volviera.
+    """
+    if not AccionForm().validate_on_submit():
+        abort(400)
+
+    unificacion = CodigoUnificado.query.filter_by(
+        id=unificacion_id, empresa_id=current_user.empresa_id
+    ).first_or_404()
+    retirado, vigente = unificacion.codigo_retirado, unificacion.codigo_vigente
+    db.session.delete(unificacion)
+    db.session.commit()
+    flash(
+        f"{retirado} deja de apuntar a {vigente}. "
+        "Vuelve a tener línea propia en la próxima importación que lo traiga.",
         "success",
     )
     return redirect(url_for("inventario.equivalencias_codigos"))
