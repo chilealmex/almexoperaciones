@@ -1,9 +1,18 @@
 import io
+import re
 
+import pytest
 from werkzeug.datastructures import FileStorage
 
 from app.models.conteo_inventario import ItemConteoInventario
-from app.utils.importar_conteo import importar_qms, importar_defontana
+from app.utils.importar_conteo import (
+    clave_sin_ceros,
+    grupos_duplicados,
+    importar_qms,
+    importar_defontana,
+    unificar_grupo,
+)
+from tests.conftest import login
 
 
 CSV_QMS = """﻿Sucursal;Linea Negocio;Categoria; Columna1 ; Valor Total Stock CLP ;Stock;Stock Critico;Descripción;Unidad;Código Único;ubicacion_bodega
@@ -733,7 +742,7 @@ Casa Matriz;GOMAS;CAT;10;KIT ST;UN;KIT-ST​315;RACK A
     assert "​" not in item.codigo
 
 
-def test_la_pantalla_de_depuracion_explica_la_diferencia_invisible(client, usuario_admin, empresa, db):
+def test_la_pantalla_de_unificar_explica_la_diferencia_invisible(client, usuario_admin, empresa, db):
     """Dos códigos que se ven iguales necesitan que la pantalla diga en qué difieren."""
     from tests.conftest import login
 
@@ -746,7 +755,7 @@ def test_la_pantalla_de_depuracion_explica_la_diferencia_invisible(client, usuar
     db.session.commit()
 
     login(client, "admin@test.cl")
-    texto = client.get("/inventario/conteo/duplicados").get_data(as_text=True)
+    texto = client.get("/inventario/equivalencias").get_data(as_text=True)
     assert "espacio de ancho cero" in texto
 
 
@@ -859,3 +868,235 @@ def test_si_la_importacion_falla_se_avisa_en_vez_de_mostrar_un_error_500(client,
     texto = respuesta.get_data(as_text=True)
     assert "No se pudo importar QMS" in texto
     assert "demasiado grande" in texto
+
+
+# --- Los ceros de relleno no hacen otro artículo ------------------------
+#
+# "011-CON-OTH-01" y "11-CON-OTH-01" son el mismo: el cero de adelante lo pone
+# quien exporta. Quedaban como dos filas, una viva en los dos sistemas y otra
+# dada de baja, y nada las juntaba.
+
+
+@pytest.mark.parametrize("uno, otro", [
+    ("011-CON-OTH-01", "11-CON-OTH-01"),
+    ("0136-1005", "136-1005"),
+    ("A-007", "A-7"),
+])
+def test_el_cero_de_relleno_no_separa_dos_codigos(uno, otro):
+    from app.utils.codigos import clave_sin_ceros
+
+    assert clave_sin_ceros(uno) == clave_sin_ceros(otro)
+
+
+@pytest.mark.parametrize("uno, otro", [
+    ("A-01", "A-02"),
+    ("PERNO-10", "PERNO-100"),
+    ("CABLE-3", "CABLE-4"),
+])
+def test_dos_codigos_de_verdad_distintos_siguen_separados(uno, otro):
+    from app.utils.codigos import clave_sin_ceros
+
+    assert clave_sin_ceros(uno) != clave_sin_ceros(otro)
+
+
+def test_la_llave_del_importador_no_cambia():
+    """clave_sin_ceros() sirve para *sospechar* que dos códigos son el mismo y
+    proponérselo a alguien. La identidad del maestro la sigue dando
+    codigo_normalizado(): moverla cambiaría a qué fila va cada importación."""
+    from app.utils.codigos import codigo_normalizado
+
+    assert codigo_normalizado("011-CON-OTH-01") != codigo_normalizado("11-CON-OTH-01")
+
+
+def test_se_proponen_como_duplicados(db, empresa):
+    """El caso que ella encontró en pantalla."""
+    db.session.add_all([
+        ItemConteoInventario(empresa_id=empresa.id, codigo="011-CON-OTH-01",
+                             nombre="RELAY E-MECH 6A", en_qms=False, en_defontana=False),
+        ItemConteoInventario(empresa_id=empresa.id, codigo="11-CON-OTH-01",
+                             nombre="RELAY E-MECH 6A", en_qms=True, en_defontana=True),
+    ])
+    db.session.commit()
+
+    grupos = grupos_duplicados(empresa.id)
+
+    assert len(grupos) == 1
+    assert {i.codigo for i in grupos[0]} == {"011-CON-OTH-01", "11-CON-OTH-01"}
+
+
+def test_al_unir_queda_el_codigo_que_las_planillas_todavia_traen(db, empresa):
+    """Importa cuál queda: el importador reconoce al artículo por su código.
+    Si quedara el viejo —el que ya no trae ningún sistema— la próxima
+    importación no lo encontraría y volvería a crear el otro: el duplicado
+    reaparecería solo."""
+    viejo = ItemConteoInventario(empresa_id=empresa.id, codigo="011-CON-OTH-01",
+                                 nombre="RELAY", en_qms=False, en_defontana=False)
+    db.session.add(viejo)
+    db.session.commit()   # el viejo queda con el id más bajo
+    vivo = ItemConteoInventario(empresa_id=empresa.id, codigo="11-CON-OTH-01",
+                                nombre="RELAY", categoria="REPUESTOS",
+                                costo_unitario_qms=31529, en_qms=True, en_defontana=True)
+    db.session.add(vivo)
+    db.session.commit()
+
+    queda = unificar_grupo(grupos_duplicados(empresa.id)[0])
+    db.session.commit()
+
+    assert queda.codigo == "11-CON-OTH-01"
+    assert ItemConteoInventario.query.count() == 1
+    assert queda.categoria == "REPUESTOS"
+
+
+def test_al_unir_una_fila_de_baja_con_una_viva_no_queda_dada_de_baja(db, empresa):
+    """El caso de ella: el código con cero quedó sin uso en los dos sistemas y
+    el otro se sigue exportando. Lo que queda tiene que ser el vivo."""
+    db.session.add_all([
+        ItemConteoInventario(empresa_id=empresa.id, codigo="011-CON-OTH-01",
+                             nombre="RELAY", en_qms=False, en_defontana=False),
+        ItemConteoInventario(empresa_id=empresa.id, codigo="11-CON-OTH-01",
+                             nombre="RELAY", en_qms=True, en_defontana=True),
+    ])
+    db.session.commit()
+
+    queda = unificar_grupo(grupos_duplicados(empresa.id)[0])
+    db.session.commit()
+
+    assert queda.en_qms is True and queda.en_defontana is True
+    assert queda.falta_en == ""
+
+
+def test_al_unir_dos_filas_repartidas_la_que_queda_esta_en_los_dos_sistemas(db, empresa):
+    """Cada sistema escribió el código a su manera, así que cada fila quedó
+    marcada en un solo sistema. Es la misma mercadería: la fila que queda está
+    en los dos, y no puede decir "Falta en Defontana" cuando Defontana sí lo
+    tiene, sólo con el otro código.
+
+    Ésta es la que obliga a propagar en_qms/en_defontana: cuando una de las dos
+    filas está dada de baja, el orden de preferencia ya deja viva a la correcta
+    y la propagación no haría falta.
+    """
+    db.session.add_all([
+        ItemConteoInventario(empresa_id=empresa.id, codigo="011-CON-OTH-01",
+                             nombre="RELAY", en_qms=True, en_defontana=False),
+        ItemConteoInventario(empresa_id=empresa.id, codigo="11-CON-OTH-01",
+                             nombre="RELAY", en_qms=False, en_defontana=True),
+    ])
+    db.session.commit()
+
+    queda = unificar_grupo(grupos_duplicados(empresa.id)[0])
+    db.session.commit()
+
+    assert queda.en_qms is True and queda.en_defontana is True
+    assert queda.falta_en == ""
+
+
+def test_al_unir_no_se_pierde_el_conteo_aunque_lo_tenga_la_fila_vieja(db, empresa):
+    """Contar es trabajo de bodega: se traspasa a la que queda, venga de donde
+    venga."""
+    viejo = ItemConteoInventario(empresa_id=empresa.id, codigo="011-AAA-01", nombre="X",
+                                 en_qms=False, en_defontana=False, cantidad_fisica=7)
+    db.session.add(viejo)
+    db.session.commit()
+    db.session.add(ItemConteoInventario(empresa_id=empresa.id, codigo="11-AAA-01", nombre="X",
+                                        en_qms=True, en_defontana=True))
+    db.session.commit()
+
+    queda = unificar_grupo(grupos_duplicados(empresa.id)[0])
+    db.session.commit()
+
+    assert queda.codigo == "11-AAA-01"   # la viva
+    assert queda.cantidad_fisica == 7    # y el conteo de la otra
+
+
+def test_si_se_contaron_las_dos_lineas_los_conteos_se_suman(db, empresa):
+    """Cada línea se contó por separado, así que cada una tiene su parte del
+    stock: la suma es lo que hay. Quedarse con uno de los dos borraría trabajo
+    de bodega ya hecho."""
+    primera = ItemConteoInventario(empresa_id=empresa.id, codigo="011-CCC-01", nombre="X",
+                                   en_qms=True, en_defontana=False, cantidad_fisica=6)
+    db.session.add(primera)
+    db.session.commit()
+    db.session.add(ItemConteoInventario(empresa_id=empresa.id, codigo="11-CCC-01", nombre="X",
+                                        en_qms=False, en_defontana=True, cantidad_fisica=3))
+    db.session.commit()
+
+    queda = unificar_grupo(grupos_duplicados(empresa.id)[0])
+    db.session.commit()
+
+    assert queda.cantidad_fisica == 9
+
+
+def test_si_no_se_conto_ninguna_la_que_queda_sigue_sin_contar(db, empresa):
+    """Sin esto, unir dos líneas sin contar dejaría un 0 que se lee como
+    "contado y no había nada", que es lo contrario de "falta contarlo"."""
+    db.session.add_all([
+        ItemConteoInventario(empresa_id=empresa.id, codigo="011-DDD-01", nombre="X",
+                             en_qms=False, en_defontana=False),
+        ItemConteoInventario(empresa_id=empresa.id, codigo="11-DDD-01", nombre="X",
+                             en_qms=True, en_defontana=True),
+    ])
+    db.session.commit()
+
+    queda = unificar_grupo(grupos_duplicados(empresa.id)[0])
+    db.session.commit()
+
+    assert queda.cantidad_fisica is None
+
+
+def test_los_codigos_repetidos_se_unen_desde_unificar_codigos(client, db, empresa, usuario_admin):
+    """Donde ella los fue a buscar. Antes estaban en una pantalla aparte a la
+    que sólo se llegaba desde un botón dentro de Importar, y había que saber de
+    antemano cuál de los dos casos era para dar con la pantalla correcta."""
+    db.session.add_all([
+        ItemConteoInventario(empresa_id=empresa.id, codigo="011-CON-OTH-01",
+                             nombre="RELAY", en_qms=False, en_defontana=False),
+        ItemConteoInventario(empresa_id=empresa.id, codigo="11-CON-OTH-01",
+                             nombre="RELAY", en_qms=True, en_defontana=True),
+    ])
+    db.session.commit()
+    login(client, "admin@test.cl")
+
+    texto = client.get("/inventario/equivalencias").get_data(as_text=True)
+
+    assert "011-CON-OTH-01" in texto and "11-CON-OTH-01" in texto
+    assert "El mismo código escrito distinto" in texto
+
+
+def test_unir_un_repetido_devuelve_a_unificar_codigos(client, db, empresa, usuario_admin):
+    """Si devolviera a la pantalla vieja, unir desde acá sacaría de la pantalla
+    sin avisar y el resto del trabajo quedaría a medias."""
+    db.session.add_all([
+        ItemConteoInventario(empresa_id=empresa.id, codigo="011-AAA-01", nombre="X",
+                             en_qms=False, en_defontana=False),
+        ItemConteoInventario(empresa_id=empresa.id, codigo="11-AAA-01", nombre="X",
+                             en_qms=True, en_defontana=True),
+    ])
+    db.session.commit()
+    login(client, "admin@test.cl")
+
+    respuesta = client.post("/inventario/conteo/duplicados/unificar",
+                            data={"clave": clave_sin_ceros("011-AAA-01")})
+
+    assert respuesta.headers["Location"].endswith("/inventario/equivalencias")
+    assert ItemConteoInventario.query.count() == 1
+
+
+def test_el_boton_de_unificar_encuentra_su_grupo(client, db, empresa, usuario_admin):
+    """El botón manda la llave del grupo. Si la pantalla y la ruta la calcularan
+    distinto —una con ceros y la otra sin— el botón no uniría nada y diría que
+    no quedaban repetidos."""
+    db.session.add_all([
+        ItemConteoInventario(empresa_id=empresa.id, codigo="011-BBB-01", nombre="X",
+                             en_qms=False, en_defontana=False),
+        ItemConteoInventario(empresa_id=empresa.id, codigo="11-BBB-01", nombre="X",
+                             en_qms=True, en_defontana=True),
+    ])
+    db.session.commit()
+    login(client, "admin@test.cl")
+
+    texto = client.get("/inventario/equivalencias").get_data(as_text=True)
+    llave = re.search(r'name="clave" value="([^"]+)"', texto).group(1)
+    client.post("/inventario/conteo/duplicados/unificar",
+                data={"clave": llave}, follow_redirects=True)
+
+    assert ItemConteoInventario.query.count() == 1

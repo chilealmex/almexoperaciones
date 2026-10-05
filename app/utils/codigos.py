@@ -6,6 +6,7 @@ tenerlo dentro del importador obligaba a que el modelo importara de él,
 cerrando un ciclo entre modelos y utilidades.
 """
 
+import re
 import unicodedata
 
 _GUIONES = {
@@ -81,3 +82,27 @@ def rarezas_del_codigo(codigo) -> list:
             encontradas.append("guion tipográfico")
             break
     return encontradas
+
+
+def clave_sin_ceros(codigo) -> str:
+    """Como codigo_normalizado(), pero sin los ceros de relleno de cada tramo.
+
+    "011-CON-OTH-01" y "11-CON-OTH-01" son el mismo artículo: el cero de
+    adelante lo pone quien exporta, no distingue nada. Lo mismo con
+    "0136-1005" y "136-1005".
+
+    No reemplaza a codigo_normalizado(): esa es la llave con que el importador
+    reconoce al artículo, y cambiarla movería la identidad de todo el maestro.
+    Ésta sirve para *sospechar* que dos códigos son el mismo y proponérselo a
+    alguien, que decide.
+    """
+    normalizado = codigo_normalizado(codigo)
+    if not normalizado:
+        return ""
+    # Se parten los tramos conservando los separadores: lo que cambia es sólo
+    # el relleno de los tramos numéricos.
+    partes = re.split(r"([^0-9A-Z])", normalizado)
+    return "".join(
+        (p.lstrip("0") or "0") if p.isdigit() else p
+        for p in partes
+    )
