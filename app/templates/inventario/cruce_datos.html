@@ -17,6 +17,54 @@
 
 {% include "partials/_ultima_importacion.html" %}
 
+{% if puede('inventario', 'editar') %}
+{# Subir las planillas sin salir del cruce: arreglar un código y volver a
+   cargar es ida y vuelta a Importar cada vez, y al volver se pierde el filtro
+   que se traía. Viene cerrado porque la pantalla es para mirar el cruce, no
+   para importar; se abre cuando hace falta. #}
+<details class="card mb-3" {% if abrir_importar %}open{% endif %}>
+  <summary class="card-body py-2 small fw-semibold" style="cursor: pointer;">
+    ⬆ Actualizar las planillas sin salir de acá
+  </summary>
+  <div class="card-body pt-0">
+    <p class="text-muted small">
+      Sube uno de los dos o los dos juntos. Al terminar vuelves a esta misma
+      pantalla, con el filtro y la búsqueda que traías, para ver el arreglo al tiro.
+    </p>
+    <form method="post" action="{{ url_for('inventario.cruce_datos_importar') }}"
+          enctype="multipart/form-data" data-boton-ocupado="Importando, espera...">
+      {{ form_importar.hidden_tag() }}
+      {# Lo que la pantalla traía puesto viaja con el archivo: si no, al volver
+         aparecerían de golpe los miles de artículos escondidos. #}
+      {% for clave, valor in request.args.items() %}
+      <input type="hidden" name="{{ clave }}" value="{{ valor }}">
+      {% endfor %}
+      <div class="row g-2">
+        <div class="col-12 col-md-5">
+          <label class="form-label small mb-1" for="archivo-qms">Archivo QMS</label>
+          {{ form_importar.archivo_qms(class="form-control form-control-sm", id="archivo-qms") }}
+        </div>
+        <div class="col-12 col-md-5">
+          <label class="form-label small mb-1" for="archivo-defo">Archivo Defontana</label>
+          {{ form_importar.archivo_defontana(class="form-control form-control-sm", id="archivo-defo") }}
+        </div>
+        <div class="col-12 col-md-2 d-flex align-items-end">
+          <button type="submit" class="btn btn-primary btn-sm w-100">Actualizar</button>
+        </div>
+      </div>
+      <div class="form-check mt-2">
+        {{ form_importar.solo_no_contados(class="form-check-input") }}
+        {{ form_importar.solo_no_contados.label(class="form-check-label small") }}
+      </div>
+      <div class="small text-muted mt-2" data-aviso-ocupado hidden>
+        Leyendo las planillas y actualizando el stock. Con varios miles de artículos puede
+        tardar hasta un minuto. <strong>No cierres ni recargues la página.</strong>
+      </div>
+    </form>
+  </div>
+</details>
+{% endif %}
+
 {# "vacios" cuenta los que el recorte dejó fuera: si hay alguno, artículos hay.
    Sin esa condición, esconderlos todos hacía decir "aún no hay artículos" y
    mandaba a subir archivos que ya estaban subidos. #}

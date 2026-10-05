@@ -10,7 +10,7 @@ from sqlalchemy import or_, and_
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.inventario import bp
-from app.inventario.forms import AccionForm, ImportarCsvForm
+from app.inventario.forms import AccionForm, ImportarAmbosForm, ImportarCsvForm
 from app.extensions import db
 from app.models.conteo_inventario import ItemConteoInventario, TomaInventario, TomaInventarioDetalle
 from app.models.equivalencia_codigo import EquivalenciaCodigo, crear_equivalencia
@@ -1030,6 +1030,10 @@ def cruce_datos():
         pares_de_unidades=_pares_de_unidades_distintas(items),
         sin_vacios=sin_vacios,
         vacios=vacios,
+        form_importar=ImportarAmbosForm(),
+        # Si la subida se rechazó, el panel tiene que volver abierto: cerrado,
+        # el aviso de error queda arriba sin nada visible que lo explique.
+        abrir_importar=request.args.get("subir") == "1",
     )
 
 
@@ -1571,27 +1575,44 @@ def _resumen_importacion(resultado: dict) -> str:
     return f"{resultado['total_codigos']} códigos ({', '.join(detalle)})."
 
 
+_NOMBRE_DEL_SISTEMA = {"qms": "QMS", "defontana": "Defontana"}
+
+
+def _importar_un_sistema(sistema: str, archivo, solo_no_contados: bool) -> bool:
+    """Carga una planilla y avisa cómo fue. Devuelve si quedó guardada.
+
+    Lo usan por igual la pantalla de Importar y la de Cruce de datos: si cada
+    una tuviera su copia, un arreglo en una se olvidaría en la otra.
+    """
+    nombre = _NOMBRE_DEL_SISTEMA[sistema]
+    # El importador se elige acá y no en una tabla armada al cargar el módulo:
+    # esa tabla se queda con la función de ese instante y deja de reflejar
+    # cualquier cambio posterior sobre el nombre.
+    importador = importar_qms if sistema == "qms" else importar_defontana
+    try:
+        resultado = importador(archivo, current_user.empresa_id, solo_no_contados)
+        # Se deja el rastro dentro del mismo commit que el stock: si la
+        # importación falla, tampoco queda dicho que ocurrió.
+        registrar_importacion(
+            current_user.empresa_id, sistema, archivo.filename,
+            current_user.id, resultado,
+        )
+        db.session.commit()
+        flash(f"{nombre} importado: {_resumen_importacion(resultado)}", "success")
+        return True
+    except ValueError as e:
+        flash(str(e), "danger")
+    except SQLAlchemyError as e:
+        _avisar_fallo_de_importacion(e, nombre)
+    return False
+
+
 @bp.route("/conteo/importar/qms", methods=["POST"])
 @require_permission("inventario", "editar")
 def conteo_importar_qms():
     form = ImportarCsvForm(prefix="qms")
     if form.validate_on_submit():
-        try:
-            resultado = importar_qms(
-                form.archivo.data, current_user.empresa_id, form.solo_no_contados.data
-            )
-            # Se deja el rastro dentro del mismo commit que el stock: si la
-            # importación falla, tampoco queda dicho que ocurrió.
-            registrar_importacion(
-                current_user.empresa_id, "qms", form.archivo.data.filename,
-                current_user.id, resultado,
-            )
-            db.session.commit()
-            flash(f"QMS importado: {_resumen_importacion(resultado)}", "success")
-        except ValueError as e:
-            flash(str(e), "danger")
-        except SQLAlchemyError as e:
-            _avisar_fallo_de_importacion(e, "QMS")
+        _importar_un_sistema("qms", form.archivo.data, form.solo_no_contados.data)
     else:
         flash("Selecciona un archivo .csv o .xlsx válido.", "danger")
     return redirect(url_for("inventario.conteo_importar"))
@@ -1602,25 +1623,49 @@ def conteo_importar_qms():
 def conteo_importar_defontana():
     form = ImportarCsvForm(prefix="def")
     if form.validate_on_submit():
-        try:
-            resultado = importar_defontana(
-                form.archivo.data, current_user.empresa_id, form.solo_no_contados.data
-            )
-            # Se deja el rastro dentro del mismo commit que el stock: si la
-            # importación falla, tampoco queda dicho que ocurrió.
-            registrar_importacion(
-                current_user.empresa_id, "defontana", form.archivo.data.filename,
-                current_user.id, resultado,
-            )
-            db.session.commit()
-            flash(f"Defontana importado: {_resumen_importacion(resultado)}", "success")
-        except ValueError as e:
-            flash(str(e), "danger")
-        except SQLAlchemyError as e:
-            _avisar_fallo_de_importacion(e, "Defontana")
+        _importar_un_sistema("defontana", form.archivo.data, form.solo_no_contados.data)
     else:
         flash("Selecciona un archivo .csv o .xlsx válido.", "danger")
     return redirect(url_for("inventario.conteo_importar"))
+
+
+@bp.route("/cruce-datos/importar", methods=["POST"])
+@require_permission("inventario", "editar")
+def cruce_datos_importar():
+    """Subir las dos planillas sin salir del cruce, para ver el arreglo al tiro.
+
+    Cada sistema se guarda por separado, como en Importar: si una de las dos
+    planillas viene mala, la otra igual queda cargada y el aviso dice cuál
+    falló. Guardar las dos juntas obligaría a volver a subir la buena.
+    """
+    form = ImportarAmbosForm()
+    if not form.validate_on_submit():
+        for errores in form.errors.values():
+            for error in errores:
+                flash(error, "danger")
+        return redirect(url_for(
+            "inventario.cruce_datos", subir="1", **_filtros_vigentes(request.form)
+        ))
+
+    # QMS primero y Defontana después, el mismo orden en que se leen las dos
+    # columnas de la pantalla. El resultado no depende del orden: cada
+    # importación marca las ausencias de su propio sistema.
+    for sistema, campo in (("qms", form.archivo_qms), ("defontana", form.archivo_defontana)):
+        if campo.data:
+            _importar_un_sistema(sistema, campo.data, form.solo_no_contados.data)
+
+    return redirect(url_for("inventario.cruce_datos", **_filtros_vigentes(request.form)))
+
+
+# Lo que la pantalla traía puesto cuando se subió el archivo: si se perdiera,
+# después de importar aparecerían de golpe los miles de artículos escondidos y
+# habría que volver a filtrar para seguir donde se iba.
+_ESTADO_DE_LA_PANTALLA = ("q", "filtro", "orden", "direccion", "pagina", "vacios")
+
+
+def _filtros_vigentes(enviado):
+    campos = _ESTADO_DE_LA_PANTALLA + tuple(FILTROS_COLUMNA)
+    return {k: enviado[k] for k in campos if enviado.get(k)}
 
 
 # --- Equivalencias de códigos: el mismo artículo con otro código en cada sistema ---
