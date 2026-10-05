@@ -2032,7 +2032,50 @@ def equivalencias_codigos():
         clave_sin_ceros=clave_sin_ceros,
         rarezas_del_codigo=rarezas_del_codigo,
         form=AccionForm(),
+        **_los_que_ya_cruzan(current_user.empresa_id, request.args.get("cruzado", "")),
     )
+
+
+# Buscar entre los que ya cruzan, y no listarlos todos: son miles, y la
+# pregunta nunca es "cuáles cruzan" sino "¿éste cruza o no?". Mil filas que
+# nadie lee tardan en dibujarse y esconden las tres listas que sí hay que
+# trabajar.
+_CUANTOS_CRUZADOS_MOSTRAR = 50
+
+
+def _los_que_ya_cruzan(empresa_id, busqueda):
+    """Los artículos que están en los dos sistemas con el mismo código.
+
+    No hay nada que unir en ellos: el cruce por código ya los junta. Están
+    acá porque al escribir un código a mano no había forma de saber si no
+    aparecía por estar mal escrito o por cruzar ya.
+    """
+    consulta = ItemConteoInventario.query.filter_by(
+        empresa_id=empresa_id, en_qms=True, en_defontana=True
+    )
+    total = consulta.count()
+    busqueda = (busqueda or "").strip()
+    if busqueda:
+        patron = f"%{busqueda}%"
+        consulta = consulta.filter(
+            or_(
+                ItemConteoInventario.codigo.ilike(patron),
+                ItemConteoInventario.nombre.ilike(patron),
+            )
+        )
+    # Se pide uno más de los que se muestran: ese sobrante es lo que dice si
+    # quedaron más afuera, sin tener que contarlos. El límite es para no traer
+    # miles de filas desde la base; lo que se muestra lo recorta la línea de
+    # abajo.
+    encontrados = consulta.order_by(ItemConteoInventario.codigo).limit(
+        _CUANTOS_CRUZADOS_MOSTRAR + 1
+    ).all()
+    return {
+        "cruzados": encontrados[:_CUANTOS_CRUZADOS_MOSTRAR],
+        "cruzados_total": total,
+        "cruzados_hay_mas": len(encontrados) > _CUANTOS_CRUZADOS_MOSTRAR,
+        "cruzados_busqueda": busqueda,
+    }
 
 
 def _absorber_fila_de_defontana(codigo_qms, codigo_defo, solo_qms, solo_defo) -> None:

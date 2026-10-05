@@ -200,6 +200,78 @@
 </div>
 {% endif %}
 
+{# ---------- Los que ya cruzan solos ----------
+   No hay nada que unir en ellos, pero hasta ahora no había forma de
+   comprobarlo: al escribir un código a mano, que no apareciera podía ser
+   porque estaba mal escrito o porque ya cruzaba, y las dos cosas se veían
+   igual. Se busca en vez de listarlos todos: son miles, y la pregunta nunca
+   es "cuáles cruzan" sino "¿éste cruza o no?". #}
+<h2 class="h5 mt-4">Ya cruzan solos <span class="text-muted">({{ cruzados_total }})</span></h2>
+<p class="text-muted small">
+  Están en QMS y en Defontana con el mismo código, así que el cruce ya los junta:
+  son una sola línea y no hay nada que unir. Busca acá el código que no te deja
+  unir a mano, para ver si es por esto.
+</p>
+
+<form method="get" class="row g-2 align-items-center mb-3">
+  <div class="col-12 col-md-5">
+    <input type="search" name="cruzado" value="{{ cruzados_busqueda }}" class="form-control"
+           placeholder="Buscar por código o descripción..." autocomplete="off" spellcheck="false">
+  </div>
+  <div class="col-auto">
+    <button type="submit" class="btn btn-primary">Buscar</button>
+    {% if cruzados_busqueda %}
+    <a href="{{ url_for('inventario.equivalencias_codigos') }}" class="btn btn-outline-secondary">Limpiar</a>
+    {% endif %}
+  </div>
+</form>
+
+{% if not cruzados %}
+  <p class="text-muted">
+    {% if cruzados_busqueda %}
+      Ningún artículo que cruce solo coincide con «{{ cruzados_busqueda }}». Si el código
+      existe, está en un solo sistema y debería aparecer en las listas de arriba.
+    {% else %}
+      Todavía no hay artículos que crucen por sí solos.
+    {% endif %}
+  </p>
+{% else %}
+<div class="table-card mb-4">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Código</th><th>Nombre</th>
+          <th class="num">QMS</th><th class="num">Defontana</th><th class="num">Dif.</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for i in cruzados %}
+        <tr>
+          <td class="fw-semibold text-nowrap">{{ i.codigo }}</td>
+          <td>{{ i.nombre or '—' }}</td>
+          <td class="num">{{ i.cantidad_qms|cantidad }}</td>
+          <td class="num">{{ i.cantidad_defontana|cantidad }}</td>
+          <td class="num">
+            {% if i.diferencia_sistemas == 0 %}
+            <span class="badge bg-success">0</span>
+            {% else %}
+            <span class="badge bg-danger">{{ i.diferencia_sistemas|cantidad }}</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if cruzados_hay_mas %}
+  <div class="p-2 small text-muted border-top">
+    Se muestran los primeros {{ cruzados|length }}. Busca por código para encontrar uno en particular.
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
 {# ---------- Ya confirmadas ---------- #}
 <h2 class="h5">Ya unidos <span class="text-muted">({{ confirmadas|length }})</span></h2>
 {% if not confirmadas %}

@@ -172,8 +172,11 @@ def test_la_pantalla_propone_los_sueltos(client, db, empresa, usuario_admin):
     cuerpo = client.get("/inventario/equivalencias").get_data(as_text=True)
 
     assert "GOL.PRE-5_8" in cuerpo and "GOLPRE-58" in cuerpo
-    # El que ya cruza no es candidato a nada
-    assert "EN-LOS-DOS" not in cuerpo
+    # El que ya cruza no es candidato a nada. Sí aparece más abajo, en la lista
+    # de los que cruzan solos, que es otra cosa: ahí se va a comprobar que un
+    # código no se pueda unir justamente porque ya cruza.
+    hasta_las_propuestas = cuerpo[:cuerpo.index("Ya cruzan solos")]
+    assert "EN-LOS-DOS" not in hasta_las_propuestas
 
 
 def test_unir_deja_la_pareja_guardada(client, db, empresa, usuario_admin):
@@ -665,3 +668,89 @@ def test_unir_dos_sueltos_de_verdad_sigue_funcionando(client, db, empresa, usuar
     cuerpo = _intentar_unir(client, "GOL.PRE-5_8", "GOLPRE-58")
 
     assert "quedaron unidos" in cuerpo
+
+
+# --- Ver los que ya cruzan solos ---
+#
+# Al escribir un código a mano, que no apareciera podía ser porque estaba mal
+# escrito o porque ya cruzaba: las dos cosas se veían igual, y no había dónde
+# comprobarlo.
+
+
+def _pantalla(client, **args):
+    from urllib.parse import urlencode
+
+    url = "/inventario/equivalencias"
+    if args:
+        url += "?" + urlencode(args)
+    return client.get(url).get_data(as_text=True)
+
+
+def test_se_pueden_buscar_los_que_ya_cruzan(client, db, empresa, usuario_admin):
+    """El caso que la dejó atascada: un código que está en los dos sistemas,
+    que por eso no aparece entre los sueltos y no se puede unir a mano."""
+    _articulo(db, empresa, "A2000ETQ-CATNOINFLAMABL", nombre="ETIQUETA CATALIZADOR",
+              en_qms=True, en_defontana=True, cantidad_qms=5, cantidad_defontana=5)
+    login(client, "admin@test.cl")
+
+    cuerpo = _pantalla(client, cruzado="A2000ETQ")
+
+    assert "A2000ETQ-CATNOINFLAMABL" in cuerpo
+    assert "ETIQUETA CATALIZADOR" in cuerpo
+
+
+def test_la_busqueda_no_muestra_los_que_estan_en_un_solo_sistema(
+    client, db, empresa, usuario_admin
+):
+    """Esos no cruzan: aparecen en las listas de arriba, que es donde se
+    trabajan. Mezclarlos acá haría creer que ya están resueltos."""
+    _articulo(db, empresa, "SOLO-QMS", en_qms=True, en_defontana=False)
+    _articulo(db, empresa, "SOLO-DEFO", en_qms=False, en_defontana=True)
+    _articulo(db, empresa, "LOS-DOS", en_qms=True, en_defontana=True)
+    login(client, "admin@test.cl")
+
+    cuerpo = _pantalla(client, cruzado="SOLO")
+
+    assert "Ningún artículo que cruce solo coincide" in cuerpo
+
+
+def test_dice_cuantos_cruzan_en_total(client, db, empresa, usuario_admin):
+    for n in range(3):
+        _articulo(db, empresa, f"CRUZA-{n}", en_qms=True, en_defontana=True)
+    _articulo(db, empresa, "NO-CRUZA", en_qms=True, en_defontana=False)
+    login(client, "admin@test.cl")
+
+    cuerpo = _pantalla(client)
+
+    assert "Ya cruzan solos <span class=\"text-muted\">(3)</span>" in cuerpo
+
+
+def test_no_se_listan_todos_de_una_porque_son_miles(client, db, empresa, usuario_admin):
+    """Mil filas que nadie lee tardan en dibujarse y esconden las tres listas
+    que sí hay que trabajar."""
+    for n in range(60):
+        _articulo(db, empresa, f"CRUZA-{n:03}", en_qms=True, en_defontana=True)
+    login(client, "admin@test.cl")
+
+    cuerpo = _pantalla(client)
+
+    assert "CRUZA-000" in cuerpo
+    assert "CRUZA-059" not in cuerpo
+    assert "Se muestran los primeros" in cuerpo
+
+
+def test_la_diferencia_de_stock_se_ve_en_los_que_cruzan(client, db, empresa, usuario_admin):
+    """Cruzar por código no significa que cuadren: el stock puede diferir, y
+    eso es justamente lo que hay que mirar después."""
+    _articulo(db, empresa, "CRUZA-DESCUADRADO", en_qms=True, en_defontana=True,
+              cantidad_qms=10, cantidad_defontana=7)
+    login(client, "admin@test.cl")
+
+    cuerpo = _pantalla(client, cruzado="CRUZA-DESCUADRADO")
+    # Desde el <tbody>: el primer lugar donde aparece el código es la caja de
+    # búsqueda, que lo trae escrito.
+    tabla = cuerpo[cuerpo.rindex("<tbody"):]
+    fila = tabla[tabla.index("CRUZA-DESCUADRADO"):]
+    fila = fila[:fila.index("</tr>")]
+
+    assert "bg-danger" in fila
