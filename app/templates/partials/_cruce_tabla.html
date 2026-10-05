@@ -26,6 +26,7 @@
 
 <div class="filtro-pills mb-3">
   {{ t.pill('Todos', 'todos', filtro, totales.articulos if filtro == 'todos' else None) }}
+  {{ t.pill('Stock distinto', 'dif_stock', filtro, totales.dif_stock if filtro == 'todos' else None) }}
   {{ t.pill('Diferencia de costo', 'dif_costo', filtro, totales.dif_costo if filtro == 'todos' else None) }}
   {{ t.pill('Distinta unidad', 'dif_unidad', filtro, totales.dif_unidad if filtro == 'todos' else None) }}
   {{ t.pill('Costo y unidad difieren', 'ambas', filtro, totales.ambas if filtro == 'todos' else None) }}
@@ -83,6 +84,9 @@
           {{ t.th('Descripción', 'nombre', orden, direccion) }}
           {{ t.th('Un. QMS', 'unidad_qms', orden, direccion) }}
           {{ t.th('Un. Defontana', 'unidad_defontana', orden, direccion) }}
+          {{ t.th('Stock QMS', 'cantidad_qms', orden, direccion, 'num') }}
+          {{ t.th('Stock Defontana', 'cantidad_defontana', orden, direccion, 'num') }}
+          <th class="num">Dif. stock</th>
           {{ t.th('Costo QMS', 'costo_qms', orden, direccion, 'num') }}
           {{ t.th('Costo Defontana', 'costo_defontana', orden, direccion, 'num') }}
           <th class="num">Dif. costo</th>
@@ -97,6 +101,9 @@
           {{ t.filtro('f_nombre', filtros_columna, 'filtros-cruce', 'Descripción') }}
           {{ t.filtro('f_unidad', filtros_columna, 'filtros-cruce', 'Unidad') }}
           {{ t.sin_filtro() }}
+          {{ t.sin_filtro('num') }}
+          {{ t.sin_filtro('num') }}
+          {{ t.sin_filtro('num') }}
           {{ t.sin_filtro('num') }}
           {{ t.sin_filtro('num') }}
           {{ t.sin_filtro('num') }}
@@ -118,6 +125,18 @@
             {{ i.unidad_defontana or '—' }}
             {% else %}
             <span class="badge bg-danger" title="Las unidades de medida no coinciden">{{ i.unidad_defontana }}</span>
+            {% endif %}
+          </td>
+          <td class="num">{{ i.cantidad_qms|cantidad }}</td>
+          <td class="num">{{ i.cantidad_defontana|cantidad }}</td>
+          <td class="num">
+            {# Los dos sistemas deberían declarar el mismo stock: en eso
+               consiste el cruce. Cuando no, la diferencia es lo que hay que
+               mirar, así que se marca en vez de dejarla como un número más. #}
+            {% if i.diferencia_sistemas == 0 %}
+            <span class="badge bg-success">0</span>
+            {% else %}
+            <span class="badge bg-danger">{{ i.diferencia_sistemas|cantidad }}</span>
             {% endif %}
           </td>
           <td class="num">{{ i.costo_unitario_qms|clp if i.costo_unitario_qms is not none else '—' }}</td>
@@ -151,7 +170,14 @@
              Van de colores distintos por lo mismo: que el artículo no exista en
              un sistema no es lo mismo que tenga costo sin existencias. #}
           <td class="text-nowrap">
-            {% if i.falta_en %}
+            {# No es lo mismo que falte en un sistema que que ya no venga en
+               ninguno: lo primero es un cruce por resolver, lo segundo un
+               artículo dado de baja. Decir "Falta en QMS y Defontana" sobre un
+               archivo recién subido se leía como que el cruce había fallado. #}
+            {% if not i.en_qms and not i.en_defontana %}
+            <span class="badge bg-secondary"
+                  title="Ninguna de las dos planillas que subiste trae este código. Quedó de una importación anterior: si ya no existe, se da de baja en Importar → Dar de baja los que ya no existen.">Ya no viene en ninguna</span>
+            {% elif i.falta_en %}
             <span class="badge bg-danger"
                   title="El artículo no existe en {{ i.falta_en }}. No siempre es un dato mal cargado: muchas veces simplemente no está creado ahí.">Falta en {{ i.falta_en }}</span>
             {% endif %}
@@ -164,7 +190,7 @@
           <td class="d-none d-xl-table-cell">{{ i.categoria or '—' }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="12" class="text-center text-muted py-4">Sin resultados con los filtros aplicados.</td></tr>
+        <tr><td colspan="15" class="text-center text-muted py-4">Sin resultados con los filtros aplicados.</td></tr>
         {% endfor %}
       </tbody>
     </table>

@@ -367,11 +367,19 @@ def test_plan_paso_a_paso_en_excel_con_una_hoja_por_paso(client, db, empresa, us
 
 
 def _avisos_de(client, codigo):
+    """Los avisos de una fila: los que dicen algo, no los que son un número.
+
+    Las columnas de diferencia (de stock, de costo) también usan insignias para
+    que el número salte a la vista. Son parte de la comparación, no avisos, y
+    contarlas acá haría fallar estas pruebas cada vez que se agregue una
+    columna numérica.
+    """
     texto = client.get("/inventario/cruce-datos?filtro=todos").get_data(as_text=True)
     cuerpo = texto[texto.index("<tbody"):texto.index("</tbody>")]
     fila = cuerpo[cuerpo.index(codigo):]
     fila = fila[:fila.index("</tr>")]
-    return re.findall(r'<span class="badge[^"]*"[^>]*>([^<]+)</span>', fila), fila
+    insignias = re.findall(r'<span class="badge[^"]*"[^>]*>([^<]+)</span>', fila)
+    return [t for t in insignias if not re.fullmatch(r"[-+$.,\d\s]+", t.strip())], fila
 
 
 def test_el_aviso_dice_en_que_sistema_falta(client, db, empresa, usuario_admin):
@@ -394,9 +402,17 @@ def test_cada_aviso_va_en_su_propia_columna(client, db, empresa, usuario_admin):
     avisos, fila = _avisos_de(client, "LOS-DOS")
 
     assert avisos == ["Falta en QMS", "Costo sin stock"]
-    # Cada insignia en su propia celda, no las dos en la misma
-    celdas_con_aviso = [c for c in fila.split("<td") if "badge" in c]
-    assert len(celdas_con_aviso) == 2
+    # Cada insignia en su propia celda, no las dos en la misma. Se cuentan
+    # sólo las celdas con un aviso de texto: las de diferencia también usan
+    # insignia, para que el número salte a la vista, y no son avisos.
+    con_aviso = [
+        c for c in fila.split("<td")
+        if any(
+            not re.fullmatch(r"[-+$.,\d\s]+", t.strip())
+            for t in re.findall(r'<span class="badge[^"]*"[^>]*>([^<]+)</span>', c)
+        )
+    ]
+    assert len(con_aviso) == 2
 
 
 def test_lo_que_esta_en_los_dos_sistemas_no_avisa_nada(client, db, empresa, usuario_admin):
@@ -468,3 +484,116 @@ def test_el_excel_sigue_diciendo_el_sistema_a_secas(client, db, empresa, usuario
 
     assert "Falta en" in valores   # el título de la columna
     assert "QMS" in valores        # y el valor, sin repetir el título
+
+
+# --- Cruzar las cantidades, no sólo la unidad y el costo ---
+#
+# Los dos sistemas deberían declarar el mismo stock: en eso consiste el cruce.
+# La pantalla comparaba unidad y costo, pero no las existencias, que es el
+# número por el que se pregunta primero.
+
+
+def test_la_pantalla_muestra_el_stock_de_cada_sistema(client, db, empresa, usuario_admin):
+    _item(db, empresa, "CON-DIFERENCIA", cantidad_qms=10, cantidad_defontana=7)
+    login(client, "admin@test.cl")
+
+    texto = client.get("/inventario/cruce-datos").get_data(as_text=True)
+    encabezado = texto[texto.index("<thead"):texto.index("</thead>")]
+
+    assert "Stock QMS" in encabezado
+    assert "Stock Defontana" in encabezado
+    assert "Dif. stock" in encabezado
+
+
+def test_la_diferencia_de_stock_se_marca_cuando_los_sistemas_no_cuadran(
+    client, db, empresa, usuario_admin
+):
+    _item(db, empresa, "NO-CUADRA", cantidad_qms=10, cantidad_defontana=7)
+    _item(db, empresa, "CUADRA", cantidad_qms=4, cantidad_defontana=4)
+    login(client, "admin@test.cl")
+
+    texto = client.get("/inventario/cruce-datos?filtro=todos").get_data(as_text=True)
+    cuerpo = texto[texto.index("<tbody"):texto.index("</tbody>")]
+    filas = {
+        re.search(r'fw-semibold">([^<]+)<', f).group(1): f
+        for f in cuerpo.split("</tr>") if 'fw-semibold">' in f
+    }
+
+    assert "bg-danger" in filas["NO-CUADRA"]   # 3 de diferencia
+    assert "bg-success" in filas["CUADRA"]     # 0
+
+
+def test_el_filtro_de_stock_distinto_deja_solo_los_que_no_cuadran(
+    client, db, empresa, usuario_admin
+):
+    _item(db, empresa, "DESCUADRADO", cantidad_qms=10, cantidad_defontana=7)
+    _item(db, empresa, "PAREJO", cantidad_qms=4, cantidad_defontana=4)
+    login(client, "admin@test.cl")
+
+    texto = client.get("/inventario/cruce-datos?filtro=dif_stock").get_data(as_text=True)
+    cuerpo = texto[texto.index("<tbody"):texto.index("</tbody>")]
+
+    assert "DESCUADRADO" in cuerpo
+    assert "PAREJO" not in cuerpo
+
+
+def test_el_excel_trae_las_tres_columnas_de_stock(client, db, empresa, usuario_admin):
+    import io
+
+    from openpyxl import load_workbook
+
+    _item(db, empresa, "NO-CUADRA", cantidad_qms=10, cantidad_defontana=7)
+    login(client, "admin@test.cl")
+
+    hoja = load_workbook(io.BytesIO(
+        client.get("/inventario/cruce-datos.xlsx").get_data())).active
+    filas = list(hoja.iter_rows(values_only=True))
+    titulos = next(f for f in filas if f and "Código" in f)
+    fila = next(f for f in filas if f and f[0] == "NO-CUADRA")
+
+    for columna, esperado in [("Stock QMS", 10), ("Stock Defontana", 7), ("Dif. stock", 3)]:
+        assert fila[titulos.index(columna)] == esperado, columna
+
+
+# --- "Ya no viene en ninguna planilla" no es un cruce fallido ---
+
+
+def test_lo_que_no_trae_ninguna_planilla_no_dice_que_falta(client, db, empresa, usuario_admin):
+    """Decir "Falta en QMS y Defontana" sobre un archivo recién subido se lee
+    como que el cruce falló. Es otra cosa: el artículo quedó de una
+    importación anterior y ninguna de las dos planillas lo trae ya."""
+    _item(db, empresa, "DADO-DE-BAJA", en_qms=False, en_defontana=False,
+          costo_unitario_qms=500)
+    login(client, "admin@test.cl")
+
+    avisos, _fila = _avisos_de(client, "DADO-DE-BAJA")
+
+    assert "Ya no viene en ninguna" in avisos
+    assert not any("Falta en" in a for a in avisos)
+
+
+def test_en_el_excel_tambien_lo_dice_asi(client, db, empresa, usuario_admin):
+    import io
+
+    from openpyxl import load_workbook
+
+    _item(db, empresa, "DADO-DE-BAJA", en_qms=False, en_defontana=False,
+          costo_unitario_qms=500)
+    login(client, "admin@test.cl")
+
+    hoja = load_workbook(io.BytesIO(
+        client.get("/inventario/cruce-datos.xlsx?vacios=si").get_data())).active
+    valores = [c.value for fila in hoja.iter_rows() for c in fila]
+
+    assert "Ya no viene en ninguna" in valores
+    assert "QMS y Defontana" not in valores
+
+
+def test_el_que_falta_en_un_solo_sistema_sigue_diciendolo(client, db, empresa, usuario_admin):
+    """El cambio de arriba no puede tapar el caso que sí es un cruce pendiente."""
+    _item(db, empresa, "SOLO-QMS", en_defontana=False, cantidad_qms=5)
+    login(client, "admin@test.cl")
+
+    avisos, _fila = _avisos_de(client, "SOLO-QMS")
+
+    assert avisos == ["Falta en Defontana"]
