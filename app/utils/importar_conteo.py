@@ -302,13 +302,18 @@ def importar_qms(file_storage, empresa_id: int, solo_no_contados: bool = False) 
 
     items = _items_de_la_empresa(empresa_id)
     existentes = _por_codigo_normalizado(items)
+    # Códigos que alguien ya retiró al unificar dos líneas del mismo artículo.
+    # Sin esto la planilla —que sigue trayendo el código viejo— lo recrearía y
+    # habría que rehacer la unión en cada carga.
+    redirigidos = _redirecciones_de_unificaciones(empresa_id)
     filas_creadas = 0
     filas_actualizadas = 0
     filas_congeladas = 0
     nuevos = []
     cambios = []
     for codigo, datos in acumulado.items():
-        item = existentes.get(codigo_normalizado(codigo))
+        clave = codigo_normalizado(codigo)
+        item = existentes.get(redirigidos.get(clave, clave))
         if item is None:
             item = ItemConteoInventario(empresa_id=empresa_id, codigo=codigo, cantidad_defontana=0,
                                         en_qms=True, en_defontana=False)
@@ -345,7 +350,7 @@ def importar_qms(file_storage, empresa_id: int, solo_no_contados: bool = False) 
     if nuevos:
         db.session.add_all(nuevos)
     _aplicar_en_lote(cambios)
-    _marcar_ausentes_en_lote(items, acumulado.keys(), "en_qms")
+    _marcar_ausentes_en_lote(items, acumulado.keys(), "en_qms", redirigidos)
     db.session.commit()
     return {
         "total_codigos": len(acumulado),
@@ -408,9 +413,12 @@ def importar_defontana(file_storage, empresa_id: int, solo_no_contados: bool = F
 
     items = _items_de_la_empresa(empresa_id)
     existentes = _por_codigo_normalizado(items)
-    # Códigos que alguien ya confirmó que son el mismo artículo escrito distinto
-    # en cada sistema. Sin esto habría que rehacer esa unión en cada carga.
-    equivalentes = _traducciones_confirmadas(empresa_id)
+    # Las dos decisiones que alguien ya tomó sobre estos códigos: la pareja
+    # confirmada entre sistemas y la línea retirada al unificar. Sin esto
+    # habría que rehacer las dos uniones en cada carga.
+    equivalentes = _encadenar(
+        _traducciones_confirmadas(empresa_id), _redirecciones_de_unificaciones(empresa_id)
+    )
     filas_creadas = 0
     filas_actualizadas = 0
     filas_congeladas = 0
@@ -462,6 +470,38 @@ def importar_defontana(file_storage, empresa_id: int, solo_no_contados: bool = F
     }
 
 
+def _encadenar(*mapas) -> dict:
+    """Un solo mapa que aplica los otros en orden, de izquierda a derecha.
+
+    Un código de Defontana puede tener que dar dos saltos: primero el de la
+    pareja confirmada, que lo lleva al código de QMS, y después el de una
+    unificación, si esa línea de QMS se unió después con otra. Los
+    importadores resuelven un salto, así que la cadena se arma acá.
+    """
+    resuelto = {}
+    for clave in {k for mapa in mapas for k in mapa}:
+        destino = clave
+        for mapa in mapas:
+            destino = mapa.get(destino, destino)
+        if destino != clave:
+            resuelto[clave] = destino
+    return resuelto
+
+
+def _registrar_unificacion(empresa_id, codigo_vigente, codigo_retirado, usuario_id) -> None:
+    """El import va acá dentro por el mismo ciclo que _traducciones_confirmadas()."""
+    from app.models.codigo_unificado import registrar_unificacion
+
+    registrar_unificacion(empresa_id, codigo_vigente, codigo_retirado, usuario_id)
+
+
+def _redirecciones_de_unificaciones(empresa_id) -> dict:
+    """{clave retirada: clave vigente} de las líneas ya unificadas."""
+    from app.models.codigo_unificado import redirecciones
+
+    return redirecciones(empresa_id)
+
+
 def _traducciones_confirmadas(empresa_id) -> dict:
     """{clave Defontana: clave QMS} de las equivalencias ya confirmadas.
 
@@ -508,7 +548,7 @@ def _primero(valores):
     return next((v for v in valores if v not in (None, "")), None)
 
 
-def unificar_grupo(items: list) -> ItemConteoInventario:
+def unificar_grupo(items: list, usuario_id=None) -> ItemConteoInventario:
     """Deja un solo artículo con la suma de los duplicados y borra el resto.
 
     La fila que queda es la que todavía viene en alguna de las dos planillas.
@@ -516,6 +556,11 @@ def unificar_grupo(items: list) -> ItemConteoInventario:
     quedara el código viejo —el que ya no trae ningún sistema— la próxima
     importación no lo encontraría y volvería a crear el otro. El duplicado
     reaparecería solo.
+
+    Los códigos que se retiran quedan guardados apuntando al que queda. Sin eso
+    la unión duraba hasta la próxima importación: la planilla sigue trayendo el
+    código retirado —quien exporta no cambió nada— y el duplicado volvía a
+    aparecer en cada carga.
 
     Entre las que vienen en una planilla, se prefiere la que tiene conteo
     físico y, entre iguales, la más antigua. El conteo no se pierde en ningún
@@ -557,6 +602,7 @@ def unificar_grupo(items: list) -> ItemConteoInventario:
             setattr(principal, campo, _primero(getattr(i, campo) for i in ordenados))
 
     for item in resto:
+        _registrar_unificacion(principal.empresa_id, principal.codigo, item.codigo, usuario_id)
         db.session.delete(item)
     return principal
 

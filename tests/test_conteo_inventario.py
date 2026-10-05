@@ -5,6 +5,8 @@ import pytest
 from werkzeug.datastructures import FileStorage
 
 from app.models.conteo_inventario import ItemConteoInventario
+from app.utils.cantidades import a_cantidad
+from app.utils.codigos import codigo_normalizado
 from app.utils.importar_conteo import (
     clave_sin_ceros,
     grupos_duplicados,
@@ -1100,3 +1102,206 @@ def test_el_boton_de_unificar_encuentra_su_grupo(client, db, empresa, usuario_ad
                 data={"clave": llave}, follow_redirects=True)
 
     assert ItemConteoInventario.query.count() == 1
+
+
+# ---------------------------------------------------------------------------
+# Unificar deja guardado el código que se retira
+#
+# Antes la unión duraba hasta la próxima importación: unificar sólo borraba la
+# línea sobrante y no guardaba nada, así que la planilla —que sigue trayendo el
+# código viejo, porque quien exporta no cambió nada— lo volvía a crear y el
+# duplicado reaparecía en cada carga.
+# ---------------------------------------------------------------------------
+
+QMS_011 = """﻿Sucursal;Linea Negocio;Categoria; Columna1 ; Valor Total Stock CLP ;Stock;Stock Critico;Descripción;Unidad;Código Único;ubicacion_bodega
+Casa Matriz;GOMAS;CAT-A;0;0;10;0;RELAY CONTROL;UN;011-CON-OTH-01;RACK A1
+"""
+
+DEFO_11 = (
+    "CodArticulo;Descripci\xf3n Art\xedculo;CodBodega;Nombre Bodega;Saldo Stock;Unidad\r\n"
+    '"11-CON-OTH-01";"RELAY CONTROL";"BODEGACENTRAL";"BODEGA CENTRAL";"4";"UN"\r\n'
+)
+
+
+def _cargar_las_dos(empresa_id):
+    importar_qms(_fs(QMS_011.encode("utf-8"), "qms.csv"), empresa_id)
+    importar_defontana(_fs(DEFO_11.encode("utf-8"), "defontana.csv"), empresa_id)
+
+
+def test_la_unificacion_sobrevive_a_la_siguiente_importacion(db, empresa):
+    """Es el caso que la pantalla promete y no cumplía: 'lo que confirmes queda
+    guardado y se respeta en todas las importaciones siguientes'."""
+    _cargar_las_dos(empresa.id)
+    unificar_grupo(grupos_duplicados(empresa.id)[0])
+    db.session.commit()
+    assert ItemConteoInventario.query.count() == 1
+
+    _cargar_las_dos(empresa.id)  # las mismas dos planillas del mes que viene
+
+    assert ItemConteoInventario.query.count() == 1
+    assert grupos_duplicados(empresa.id) == []
+
+
+def test_la_linea_unificada_sigue_en_los_dos_sistemas_tras_reimportar(db, empresa):
+    """Si el código retirado no se redirigiera, su stock se iría a una línea
+    nueva y la que queda aparecería como 'Falta en Defontana'."""
+    _cargar_las_dos(empresa.id)
+    unificar_grupo(grupos_duplicados(empresa.id)[0])
+    db.session.commit()
+
+    _cargar_las_dos(empresa.id)
+
+    item = ItemConteoInventario.query.one()
+    assert (item.en_qms, item.en_defontana) == (True, True)
+    assert item.cantidad_qms == a_cantidad(10)
+    assert item.cantidad_defontana == a_cantidad(4)
+
+
+def test_la_unificacion_tambien_vale_dentro_de_un_mismo_sistema(db, empresa):
+    """Los dos códigos repetidos pueden venir los dos de QMS. Ahí no hay pareja
+    entre sistemas que confirmar, así que si el importador de QMS no mirara las
+    unificaciones este caso no tendría arreglo posible."""
+    qms = (
+        "﻿Sucursal;Linea Negocio;Categoria; Columna1 ; Valor Total Stock CLP ;"
+        "Stock;Stock Critico;Descripción;Unidad;Código Único;ubicacion_bodega\n"
+        "Casa Matriz;GOMAS;CAT-A;0;0;6;0;ESLINGA;UN;EST-002;RACK A1\n"
+        "Casa Matriz;GOMAS;CAT-A;0;0;3;0;ESLINGA;UN;EST-02;RACK A1\n"
+    )
+    importar_qms(_fs(qms.encode("utf-8"), "qms.csv"), empresa.id)
+    assert ItemConteoInventario.query.count() == 2
+
+    unificar_grupo(grupos_duplicados(empresa.id)[0])
+    db.session.commit()
+
+    importar_qms(_fs(qms.encode("utf-8"), "qms.csv"), empresa.id)
+
+    assert ItemConteoInventario.query.count() == 1
+
+
+def test_separar_devuelve_el_codigo_a_su_propia_linea(db, empresa):
+    """Unificar por error dejaba el código suprimido para siempre. Separar
+    quita la redirección; la línea la trae de vuelta la próxima importación."""
+    from app.models.codigo_unificado import CodigoUnificado
+
+    _cargar_las_dos(empresa.id)
+    unificar_grupo(grupos_duplicados(empresa.id)[0])
+    db.session.commit()
+
+    db.session.delete(CodigoUnificado.query.one())
+    db.session.commit()
+    _cargar_las_dos(empresa.id)
+
+    assert ItemConteoInventario.query.count() == 2
+
+
+def test_unir_lo_ya_unido_no_deja_una_cadena_colgando(db, empresa):
+    """A se unió a B y después B se unió a C. Los importadores resuelven un
+    solo salto, así que si A siguiera apuntando a B —que ya no existe— la
+    planilla volvería a crear A."""
+    from app.models.codigo_unificado import redirecciones
+
+    db.session.add_all([
+        ItemConteoInventario(empresa_id=empresa.id, codigo="0136-1005", nombre="X", en_qms=True),
+        ItemConteoInventario(empresa_id=empresa.id, codigo="136-1005", nombre="X", en_qms=True),
+    ])
+    db.session.commit()
+    queda = unificar_grupo(grupos_duplicados(empresa.id)[0])
+    db.session.commit()
+
+    # La que queda deja de venir en las planillas, así que en la segunda unión
+    # la que sobrevive es la otra: ahí es donde se forma la cadena.
+    queda.en_qms = False
+    queda.en_defontana = False
+    otro = ItemConteoInventario(empresa_id=empresa.id, codigo="136-1005-B", nombre="X", en_qms=True)
+    db.session.add(otro)
+    db.session.commit()
+    final = unificar_grupo([queda, otro])
+    db.session.commit()
+    assert final.codigo == "136-1005-B"
+
+    destinos = set(redirecciones(empresa.id).values())
+    assert destinos == {codigo_normalizado(final.codigo)}
+
+
+def test_unificar_no_guarda_una_redireccion_hacia_el_mismo_codigo(db, empresa):
+    """Dos líneas con el mismo código normalizado ya cruzan solas. Guardar una
+    redirección de un código hacia sí mismo dejaría basura en la pantalla."""
+    from app.models.codigo_unificado import CodigoUnificado
+
+    db.session.add_all([
+        ItemConteoInventario(empresa_id=empresa.id, codigo="COD 900", nombre="X", en_qms=True),
+        ItemConteoInventario(empresa_id=empresa.id, codigo="COD900", nombre="X", en_qms=True),
+    ])
+    db.session.commit()
+
+    unificar_grupo(grupos_duplicados(empresa.id)[0])
+    db.session.commit()
+
+    assert CodigoUnificado.query.count() == 0
+
+
+def test_la_pantalla_muestra_lo_ya_unificado(client, db, empresa, usuario_admin):
+    """Sin verlo en pantalla no habría forma de saber qué códigos quedaron
+    redirigidos, ni de deshacer uno hecho por error."""
+    _cargar_las_dos(empresa.id)
+    unificar_grupo(grupos_duplicados(empresa.id)[0], usuario_admin.id)
+    db.session.commit()
+    login(client, "admin@test.cl")
+
+    texto = client.get("/inventario/equivalencias").get_data(as_text=True)
+
+    # El código retirado, el que queda y quién lo hizo: sin los tres no se
+    # puede revisar la decisión. Se busca la fila entera y no cada código por
+    # su lado, porque "11-CON-OTH-01" es parte de "011-CON-OTH-01" y la
+    # comprobación pasaría sin que la fila existiera.
+    fila = re.search(
+        r"11-CON-OTH-01.*?011-CON-OTH-01.*?Separar", texto, re.S
+    )
+    assert "Líneas ya unificadas" in texto
+    assert fila is not None
+    assert usuario_admin.nombre_completo in texto
+
+
+def test_separar_desde_la_pantalla(client, db, empresa, usuario_admin):
+    from app.models.codigo_unificado import CodigoUnificado
+
+    _cargar_las_dos(empresa.id)
+    unificar_grupo(grupos_duplicados(empresa.id)[0], usuario_admin.id)
+    db.session.commit()
+    login(client, "admin@test.cl")
+    unificacion = CodigoUnificado.query.one()
+
+    respuesta = client.post(
+        f"/inventario/equivalencias/unificado/{unificacion.id}/separar", follow_redirects=True
+    )
+
+    assert respuesta.status_code == 200
+    assert CodigoUnificado.query.count() == 0
+
+
+def test_la_linea_unificada_no_queda_como_ausente_de_qms(db, empresa):
+    """La planilla puede traer sólo el código retirado. Su stock va a la línea
+    que queda —para eso es la redirección—, así que darla por ausente del
+    sistema justo después de actualizarle el stock diría 'Falta en QMS' de un
+    artículo que QMS sí trae."""
+    dos = (
+        "﻿Sucursal;Linea Negocio;Categoria; Columna1 ; Valor Total Stock CLP ;"
+        "Stock;Stock Critico;Descripción;Unidad;Código Único;ubicacion_bodega\n"
+        "Casa Matriz;GOMAS;CAT-A;0;0;6;0;ESLINGA;UN;EST-002;RACK A1\n"
+        "Casa Matriz;GOMAS;CAT-A;0;0;3;0;ESLINGA;UN;EST-02;RACK A1\n"
+    )
+    solo_el_retirado = (
+        "﻿Sucursal;Linea Negocio;Categoria; Columna1 ; Valor Total Stock CLP ;"
+        "Stock;Stock Critico;Descripción;Unidad;Código Único;ubicacion_bodega\n"
+        "Casa Matriz;GOMAS;CAT-A;0;0;9;0;ESLINGA;UN;EST-02;RACK A1\n"
+    )
+    importar_qms(_fs(dos.encode("utf-8"), "qms.csv"), empresa.id)
+    queda = unificar_grupo(grupos_duplicados(empresa.id)[0])
+    db.session.commit()
+    assert queda.codigo == "EST-002"
+
+    importar_qms(_fs(solo_el_retirado.encode("utf-8"), "qms.csv"), empresa.id)
+
+    item = ItemConteoInventario.query.one()
+    assert item.en_qms is True
+    assert item.cantidad_qms == a_cantidad(9)

@@ -241,4 +241,47 @@
 </div>
 {% endif %}
 
+{# ---------- Líneas ya unificadas ---------- #}
+<h2 class="h5 mt-4">Líneas ya unificadas <span class="text-muted">({{ unificados|length }})</span></h2>
+<p class="text-muted small mb-2">
+  Códigos que dejaron de tener línea propia: su artículo es el de al lado. Quedan
+  guardados para que la próxima importación no vuelva a separarlos.
+</p>
+{% if not unificados %}
+  <p class="text-muted">Todavía no has unificado ninguna línea repetida.</p>
+{% else %}
+<div class="table-card">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Código retirado</th>
+          <th>Pasó a ser</th>
+          <th>Quién y cuándo</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in unificados %}
+        <tr>
+          <td class="fw-semibold text-nowrap text-muted">{{ u.codigo_retirado }}</td>
+          <td class="fw-semibold text-nowrap">{{ u.codigo_vigente }}</td>
+          <td class="small text-muted text-nowrap">
+            {{ u.creado_en|fecha_hora }}{% if u.creado_por %} · {{ u.creado_por.nombre_completo }}{% endif %}
+          </td>
+          <td class="text-end">
+            <form method="post" action="{{ url_for('inventario.unificacion_separar', unificacion_id=u.id) }}"
+                  onsubmit="return confirm('¿Separar {{ u.codigo_retirado }} de {{ u.codigo_vigente }}?\n\nLa línea no vuelve sola: la crea de nuevo la próxima importación que traiga ese código.');">
+              {{ form.hidden_tag() }}
+              <button type="submit" class="btn btn-outline-secondary btn-sm">Separar</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
 {% endblock %}
