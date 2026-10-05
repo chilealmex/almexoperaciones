@@ -1,6 +1,7 @@
 """Submódulo Contabilidad > Provisión de Ingresos: importar acumulando y editar 4 columnas."""
 
 import io
+import pytest
 from datetime import date
 
 from openpyxl import Workbook
@@ -924,3 +925,97 @@ def test_el_choque_se_comprueba_con_el_texto_ya_recortado(client, usuario_admin,
 
     assert "Ya hay otra línea" in cuerpo
     assert ProvisionIngreso.query.filter_by(ot="7777").one() is not None
+
+
+# --- El mes se puede escribir con letras -------------------------------
+#
+# La columna se llama "Mes" y la aplicación muestra los meses por su nombre en
+# todas las pantallas, así que escribir "septiembre" es lo natural. Pedir el
+# número a secas rechazaba la planilla entera sin que se entendiera por qué: el
+# mensaje culpaba a las columnas corridas, que estaban perfectas.
+
+
+@pytest.mark.parametrize("escrito, esperado", [
+    ("septiembre", 9), ("Septiembre", 9), ("SEPTIEMBRE", 9),
+    ("sep", 9), ("sept", 9), ("Sep.", 9),
+    ("marzo", 3), ("dic", 12), ("may", 5),
+    (3, 3), ("3", 3), ("12", 12),
+])
+def test_el_mes_se_entiende_con_letras_o_con_numero(escrito, esperado):
+    from app.utils.provision_ingresos_excel import numero_de_mes
+
+    assert numero_de_mes(escrito) == esperado
+
+
+def test_una_fecha_en_la_columna_del_mes_tambien_sirve():
+    """Escribir "sep-26" hace que Excel lo guarde como fecha: la celda deja de
+    traer un mes y trae un día entero. Es el mismo tropiezo con otra forma."""
+    from datetime import datetime
+
+    from app.utils.provision_ingresos_excel import numero_de_mes
+
+    assert numero_de_mes(date(2026, 9, 1)) == 9
+    assert numero_de_mes(datetime(2026, 9, 1)) == 9
+
+
+@pytest.mark.parametrize("escrito", ["0", "13", "", None, "cualquier cosa", "x"])
+def test_lo_que_no_es_un_mes_no_se_inventa(escrito):
+    from app.utils.provision_ingresos_excel import numero_de_mes
+
+    assert numero_de_mes(escrito) is None
+
+
+def test_la_planilla_con_el_mes_en_letras_entra(client, usuario_admin, empresa, db):
+    """El caso real que no dejaba subir el archivo."""
+    login(client, "admin@test.cl")
+    filas = [
+        ["septiembre", 2026, 749, 6333, 3060000, None, None, None,
+         "POLIMIN COMERCIAL", "EMPNEGVTAVTACAU", "79760310-4", None, None],
+        ["septiembre", 2026, 749, 6339, 3420000, None, None, None,
+         "SOC. CONTRACTUAL MINERA", "EMPNEGVTAVTAOEM", "96701340-4", None, None],
+    ]
+
+    respuesta = client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla_mes_anio(filas), "p.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+
+    assert respuesta.status_code == 200
+    assert ProvisionIngreso.query.filter_by(empresa_id=empresa.id).count() == 2
+    assert ProvisionIngreso.query.filter_by(ot="6333").one().mes_ano == date(2026, 9, 1)
+
+
+def test_si_el_mes_no_se_entiende_el_mensaje_apunta_al_mes(client, usuario_admin, empresa, db):
+    """Antes culpaba a las columnas corridas y mandaba a revisar algo que
+    estaba bien: se perdía el tiempo buscando donde no era."""
+    login(client, "admin@test.cl")
+    filas = [["mes que no existe", 2026, 749, 6333, 3060000, None, None, None,
+              "CLIENTE", "CENTRO", "79760310-4", None, None]]
+
+    cuerpo = client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla_mes_anio(filas), "p.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    ).get_data(as_text=True)
+
+    assert "no se entendió el mes" in cuerpo
+    assert "septiembre" in cuerpo  # el mensaje muestra cómo escribirlo
+    assert "columnas que indican los títulos" not in cuerpo
+
+
+def test_si_de_verdad_faltan_las_columnas_el_mensaje_sigue_siendo_ese(
+    client, usuario_admin, empresa, db
+):
+    """El mensaje viejo sigue estando para el problema que sí describe."""
+    login(client, "admin@test.cl")
+    filas = [["septiembre", 2026, None, None, 3060000, None, None, None,
+              "CLIENTE", "CENTRO", "79760310-4", None, None]]
+
+    cuerpo = client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla_mes_anio(filas), "p.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    ).get_data(as_text=True)
+
+    assert "columnas que indican los títulos" in cuerpo
