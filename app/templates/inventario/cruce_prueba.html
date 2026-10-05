@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% import "partials/_tabla.html" as t with context %}
+{% import "partials/_graficos.html" as g %}
+{% block title %}Cruce de prueba{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <h1>Cruce de prueba</h1>
+    <p class="page-sub">Las dos planillas comparadas entre sí. Nada de esto está guardado en el sistema.</p>
+  </div>
+  <div class="d-flex gap-2">
+    <a href="{{ url_for('inventario.cruce_prueba_excel', **request.args) }}" class="btn btn-primary btn-sm">⬇ Excel</a>
+    <a href="{{ url_for('inventario.cruce_datos') }}" class="btn btn-outline-secondary btn-sm">← Cruce del sistema</a>
+  </div>
+</div>
+
+{# Lo primero que hay que poder contestar mirando esta pantalla es "¿esto que
+   veo es lo que tiene el sistema o lo que dicen estos dos archivos?". Por eso
+   el aviso va arriba de todo y dice los nombres de los archivos. #}
+<div class="alert alert-warning d-flex flex-wrap justify-content-between align-items-center gap-2">
+  <div>
+    <strong>Esto es sólo una comparación.</strong>
+    El maestro de artículos no se tocó: Stock y conteo, Ajuste inventario y el resto
+    siguen con lo que tenían. Para cargar de verdad hay que hacerlo desde
+    <a href="{{ url_for('inventario.conteo_importar') }}">Importar</a>.
+  </div>
+  <form method="post" action="{{ url_for('inventario.cruce_prueba_terminar') }}">
+    {{ form.hidden_tag() }}
+    <button type="submit" class="btn btn-outline-secondary btn-sm text-nowrap">Descartar la comparación</button>
+  </form>
+</div>
+
+<p class="text-muted small mb-3 d-flex flex-wrap gap-3 align-items-baseline">
+  <span><strong>QMS:</strong> {{ prueba.nombre_qms or 'archivo sin nombre' }}</span>
+  <span><strong>Defontana:</strong> {{ prueba.nombre_defontana or 'archivo sin nombre' }}</span>
+  <span>Comparadas el {{ prueba.creado_en|fecha_hora }}{% if prueba.usuario %} · {{ prueba.usuario.nombre_completo }}{% endif %}</span>
+</p>
+
+{# ---------- Indicadores ---------- #}
+<div class="row g-3 mb-3">
+  <div class="col-6 col-lg-3">{{ g.kpi('Artículos en total', totales.articulos) }}</div>
+  <div class="col-6 col-lg-3">{{ g.kpi('Diferencia de costo', totales.dif_costo, tono='warn' if totales.dif_costo else 'ok') }}</div>
+  <div class="col-6 col-lg-3">{{ g.kpi('Distinta unidad de medida', totales.dif_unidad, tono='danger' if totales.dif_unidad else 'ok') }}</div>
+  <div class="col-6 col-lg-3">{{ g.kpi('Sin costo cargado', totales.sin_costo, tono='warn' if totales.sin_costo else 'ok') }}</div>
+</div>
+
+{% set ruta = "inventario.cruce_prueba" %}
+{% set id_filtros = "filtros-prueba" %}
+{% include "partials/_cruce_tabla.html" %}
+
+<p class="text-muted small mt-2">
+  La desviación se calcula respecto al costo de Defontana. El impacto en stock es (costo QMS − costo Defontana) × stock QMS:
+  cuánta plata cambia la valorización según qué sistema se tome como referencia.
+</p>
+
+{% endblock %}

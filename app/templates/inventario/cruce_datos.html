@@ -18,27 +18,34 @@
 {% include "partials/_ultima_importacion.html" %}
 
 {% if puede('inventario', 'editar') %}
-{# Subir las planillas sin salir del cruce: arreglar un código y volver a
-   cargar es ida y vuelta a Importar cada vez, y al volver se pierde el filtro
-   que se traía. Viene cerrado porque la pantalla es para mirar el cruce, no
-   para importar; se abre cuando hace falta. #}
-<details class="card mb-3" {% if abrir_importar %}open{% endif %}>
+{# Comparar dos planillas sin cargarlas. El maestro es uno solo y lo miran
+   todos los submódulos de Inventario, así que escribir en él para poder ver un
+   cruce le cambia los datos a todos. Acá se leen, se comparan y no se guarda
+   nada; cargar de verdad sigue estando en Importar, que es donde lo dice.
+   Viene cerrado porque la pantalla es para mirar el cruce del sistema. #}
+<details class="card mb-3" {% if abrir_importar or prueba %}open{% endif %}>
   <summary class="card-body py-2 small fw-semibold" style="cursor: pointer;">
-    ⬆ Actualizar las planillas sin salir de acá
+    Comparar dos planillas sin cargarlas al sistema
   </summary>
   <div class="card-body pt-0">
-    <p class="text-muted small">
-      Sube uno de los dos o los dos juntos. Al terminar vuelves a esta misma
-      pantalla, con el filtro y la búsqueda que traías, para ver el arreglo al tiro.
+    {% if prueba %}
+    <p class="small mb-2">
+      Tienes una comparación hecha el {{ prueba.creado_en|fecha_hora }} con
+      <strong>{{ prueba.nombre_qms or 'un archivo' }}</strong> y
+      <strong>{{ prueba.nombre_defontana or 'otro' }}</strong>.
+      <a href="{{ url_for('inventario.cruce_prueba') }}">Verla →</a>
     </p>
-    <form method="post" action="{{ url_for('inventario.cruce_datos_importar') }}"
-          enctype="multipart/form-data" data-boton-ocupado="Importando, espera...">
+    {% endif %}
+    <p class="text-muted small">
+      Sube las dos planillas y se comparan entre sí, en una pantalla aparte.
+      <strong>No se guarda nada</strong>: el stock, los costos y los conteos del sistema
+      quedan como están. Sirve para mirar cómo quedaría el cruce antes de decidir.
+      Para cargarlas de verdad, usa
+      <a href="{{ url_for('inventario.conteo_importar') }}">Importar</a>.
+    </p>
+    <form method="post" action="{{ url_for('inventario.cruce_prueba_subir') }}"
+          enctype="multipart/form-data" data-boton-ocupado="Comparando, espera...">
       {{ form_importar.hidden_tag() }}
-      {# Lo que la pantalla traía puesto viaja con el archivo: si no, al volver
-         aparecerían de golpe los miles de artículos escondidos. #}
-      {% for clave, valor in request.args.items() %}
-      <input type="hidden" name="{{ clave }}" value="{{ valor }}">
-      {% endfor %}
       <div class="row g-2">
         <div class="col-12 col-md-5">
           <label class="form-label small mb-1" for="archivo-qms">Archivo QMS</label>
@@ -49,16 +56,12 @@
           {{ form_importar.archivo_defontana(class="form-control form-control-sm", id="archivo-defo") }}
         </div>
         <div class="col-12 col-md-2 d-flex align-items-end">
-          <button type="submit" class="btn btn-primary btn-sm w-100">Actualizar</button>
+          <button type="submit" class="btn btn-primary btn-sm w-100">Comparar</button>
         </div>
       </div>
-      <div class="form-check mt-2">
-        {{ form_importar.solo_no_contados(class="form-check-input") }}
-        {{ form_importar.solo_no_contados.label(class="form-check-label small") }}
-      </div>
       <div class="small text-muted mt-2" data-aviso-ocupado hidden>
-        Leyendo las planillas y actualizando el stock. Con varios miles de artículos puede
-        tardar hasta un minuto. <strong>No cierres ni recargues la página.</strong>
+        Leyendo las dos planillas. Con varios miles de artículos puede tardar unos segundos.
+        <strong>No cierres ni recargues la página.</strong>
       </div>
     </form>
   </div>
@@ -123,172 +126,8 @@
   </div>
 </div>
 
-{# ---------- Filtros ---------- #}
-<form method="get" id="filtros-cruce" class="row g-2 align-items-center mb-3">
-  <input type="hidden" name="filtro" value="{{ filtro }}">
-  <input type="hidden" name="orden" value="{{ orden }}">
-  <input type="hidden" name="dir" value="{{ direccion }}">
-  {# Sólo se arrastra cuando están a la vista: si se arrastrara el "esconder",
-     buscar un artículo vacío no lo encontraría nunca. #}
-  {% if not sin_vacios %}<input type="hidden" name="vacios" value="si">{% endif %}
-  <div class="col-12 col-md-5 col-lg-4">
-    <input type="search" name="q" value="{{ q }}" class="form-control" placeholder="Buscar por código o descripción...">
-  </div>
-  <div class="col-auto">
-    <button type="submit" class="btn btn-primary">Buscar</button>
-    {% if q or filtros_columna.values()|select|list %}
-    <a href="{{ url_for('inventario.cruce_datos', filtro=filtro) }}" class="btn btn-outline-secondary">Limpiar</a>
-    {% endif %}
-  </div>
-</form>
-
-<div class="filtro-pills mb-3">
-  {{ t.pill('Todos', 'todos', filtro, totales.articulos if filtro == 'todos' else None) }}
-  {{ t.pill('Diferencia de costo', 'dif_costo', filtro, totales.dif_costo if filtro == 'todos' else None) }}
-  {{ t.pill('Distinta unidad', 'dif_unidad', filtro, totales.dif_unidad if filtro == 'todos' else None) }}
-  {{ t.pill('Costo y unidad difieren', 'ambas', filtro, totales.ambas if filtro == 'todos' else None) }}
-  {{ t.pill('Sin costo cargado', 'sin_costo', filtro, totales.sin_costo if filtro == 'todos' else None) }}
-  {{ t.pill('Costo sin stock', 'costo_sin_stock', filtro, totales.costo_sin_stock if filtro == 'todos' else None) }}
-</div>
-
-{# El recorte de esta pantalla no es el mismo que el de Stock y conteo: acá se
-   conserva lo que tiene costo aunque no tenga stock, porque es justamente lo
-   que hay que revisar. #}
-{% if vacios %}
-<div class="d-flex flex-wrap align-items-baseline gap-2 mb-3 small">
-  {% if sin_vacios %}
-    <span class="text-muted">
-      Se están ocultando <strong>{{ vacios }}</strong> artículos sin stock y sin costo en
-      ninguno de los dos sistemas: no hay nada que cruzar en ellos.
-    </span>
-    <a href="{{ url_con(vacios='si', pagina=None) }}">Mostrarlos</a>
-  {% else %}
-    <span class="text-muted">Se están mostrando también los {{ vacios }} artículos sin stock ni costo.</span>
-    <a href="{{ url_con(vacios='no', pagina=None) }}">Ocultarlos</a>
-  {% endif %}
-  <span class="text-muted">· Buscar por código o descripción los encuentra igual.</span>
-</div>
-{% endif %}
-
-{% if pares_de_unidades %}
-<div class="card mb-3">
-  <div class="card-body">
-    <h2 class="h6 mb-1">Unidades que aún se cuentan como distintas</h2>
-    <p class="text-muted small mb-2">
-      Las equivalencias conocidas (M = MT, PK = PACK, L = LT, FT = PIE, RL = ROLLO, entre otras)
-      ya no aparecen como diferencia. Si en esta lista ves un par que en realidad es la misma
-      unidad, avísame y lo agrego a la tabla de equivalencias.
-    </p>
-    <div class="d-flex flex-wrap gap-2">
-      {% for par in pares_de_unidades %}
-      <span class="badge bg-light text-dark border">
-        {{ par.qms or '—' }} <span class="text-muted">≠</span> {{ par.defontana or '—' }}
-        <span class="text-muted">({{ par.articulos }})</span>
-      </span>
-      {% endfor %}
-    </div>
-  </div>
-</div>
-{% endif %}
-
-{# ---------- Tabla ---------- #}
-<div class="table-card">
-  <div class="table-responsive">
-    <table class="table table-hover align-middle mb-0">
-      <thead>
-        <tr>
-          {{ t.th('Código', 'codigo', orden, direccion) }}
-          {{ t.th('Descripción', 'nombre', orden, direccion) }}
-          {{ t.th('Un. QMS', 'unidad_qms', orden, direccion) }}
-          {{ t.th('Un. Defontana', 'unidad_defontana', orden, direccion) }}
-          {{ t.th('Costo QMS', 'costo_qms', orden, direccion, 'num') }}
-          {{ t.th('Costo Defontana', 'costo_defontana', orden, direccion, 'num') }}
-          <th class="num">Dif. costo</th>
-          <th class="num">Desviación</th>
-          <th class="num">Impacto en stock</th>
-          <th>Falta en</th>
-          <th>Costo sin stock</th>
-          {{ t.th('Categoría', 'categoria', orden, direccion, 'd-none d-xl-table-cell') }}
-        </tr>
-        <tr class="filtros-fila">
-          {{ t.filtro('f_codigo', filtros_columna, 'filtros-cruce', 'Código') }}
-          {{ t.filtro('f_nombre', filtros_columna, 'filtros-cruce', 'Descripción') }}
-          {{ t.filtro('f_unidad', filtros_columna, 'filtros-cruce', 'Unidad') }}
-          {{ t.sin_filtro() }}
-          {{ t.sin_filtro('num') }}
-          {{ t.sin_filtro('num') }}
-          {{ t.sin_filtro('num') }}
-          {{ t.sin_filtro('num') }}
-          {{ t.sin_filtro('num') }}
-          {{ t.sin_filtro() }}
-          {{ t.sin_filtro() }}
-          {{ t.filtro('f_categoria', filtros_columna, 'filtros-cruce', 'Categoría', 'd-none d-xl-table-cell') }}
-        </tr>
-      </thead>
-      <tbody>
-        {% for i in items %}
-        <tr>
-          <td class="text-nowrap fw-semibold">{{ i.codigo }}</td>
-          <td class="celda-nombre"><span class="texto-clamp-2" title="{{ i.nombre or '' }}">{{ i.nombre or '—' }}</span></td>
-          <td>{{ i.unidad_qms or '—' }}</td>
-          <td>
-            {% if i.unidades_coinciden %}
-            {{ i.unidad_defontana or '—' }}
-            {% else %}
-            <span class="badge bg-danger" title="Las unidades de medida no coinciden">{{ i.unidad_defontana }}</span>
-            {% endif %}
-          </td>
-          <td class="num">{{ i.costo_unitario_qms|clp if i.costo_unitario_qms is not none else '—' }}</td>
-          <td class="num">{{ i.costo_unitario_defontana|clp if i.costo_unitario_defontana is not none else '—' }}</td>
-          <td class="num">
-            {% if i.diferencia_costo_unitario is none %}
-            <span class="text-muted">—</span>
-            {% elif i.diferencia_costo_unitario == 0 %}
-            <span class="badge bg-success">0</span>
-            {% else %}
-            <span class="badge bg-danger">{{ i.diferencia_costo_unitario|clp }}</span>
-            {% endif %}
-          </td>
-          <td class="num">
-            {% if i.desviacion_costo_pct is none %}
-            <span class="text-muted">—</span>
-            {% else %}
-            <span class="{{ 'text-danger fw-semibold' if i.desviacion_costo_pct|abs > 5 else '' }}">{{ '%+.1f'|format(i.desviacion_costo_pct) }}%</span>
-            {% endif %}
-          </td>
-          <td class="num">
-            {% if i.impacto_diferencia_costo is none or i.impacto_diferencia_costo == 0 %}
-            <span class="text-muted">—</span>
-            {% else %}
-            {{ i.impacto_diferencia_costo|clp }}
-            {% endif %}
-          </td>
-          {# Cada aviso en su columna: son dos problemas distintos, que se
-             arreglan en lugares distintos y se filtran por separado. En una
-             sola celda, un "QMS" suelto no dejaba claro cuál de los dos era.
-             Van de colores distintos por lo mismo: que el artículo no exista en
-             un sistema no es lo mismo que tenga costo sin existencias. #}
-          <td class="text-nowrap">
-            {% if i.falta_en %}
-            <span class="badge bg-danger"
-                  title="El artículo no existe en {{ i.falta_en }}. No siempre es un dato mal cargado: muchas veces simplemente no está creado ahí.">Falta en {{ i.falta_en }}</span>
-            {% endif %}
-          </td>
-          <td class="text-nowrap">
-            {% if i.costo_sin_stock %}
-            <span class="badge bg-warning text-dark" title="Tiene costo cargado pero ningún sistema declara existencias: valoriza $0 igual.">Costo sin stock</span>
-            {% endif %}
-          </td>
-          <td class="d-none d-xl-table-cell">{{ i.categoria or '—' }}</td>
-        </tr>
-        {% else %}
-        <tr><td colspan="12" class="text-center text-muted py-4">Sin resultados con los filtros aplicados.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {{ t.paginacion(pagina, total_paginas, totales.articulos, 'artículos') }}
-</div>
+{% set ruta = "inventario.cruce_datos" %}
+{% include "partials/_cruce_tabla.html" %}
 
 <p class="text-muted small mt-2">
   La desviación se calcula respecto al costo de Defontana. El impacto en stock es (costo QMS − costo Defontana) × stock QMS:

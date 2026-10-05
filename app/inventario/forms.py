@@ -17,39 +17,28 @@ class ImportarCsvForm(FlaskForm):
     )
 
 
-class ImportarAmbosForm(FlaskForm):
-    """Los dos sistemas de una vez, para actualizar el cruce sin salir de él.
+class CruceDePruebaForm(FlaskForm):
+    """Las dos planillas que se comparan sin cargarlas al sistema.
 
-    Los dos archivos son opcionales por separado, pero hay que mandar al menos
-    uno: así sirve tanto para refrescar los dos lados como para volver a subir
-    sólo el que se arregló.
+    Los dos archivos son obligatorios: un cruce necesita los dos lados. Con uno
+    solo, todo lo del otro sistema aparecería como "falta", que no es un cruce
+    sino un listado mal leído.
     """
 
     archivo_qms = FileField(
         "Archivo QMS",
-        validators=[FileAllowed(["csv", "xlsx"], "Debe ser un archivo .csv o .xlsx")],
+        validators=[
+            DataRequired("Falta el archivo de QMS: un cruce necesita los dos lados."),
+            FileAllowed(["csv", "xlsx"], "Debe ser un archivo .csv o .xlsx"),
+        ],
     )
     archivo_defontana = FileField(
         "Archivo Defontana",
-        validators=[FileAllowed(["csv", "xlsx"], "Debe ser un archivo .csv o .xlsx")],
+        validators=[
+            DataRequired("Falta el archivo de Defontana: un cruce necesita los dos lados."),
+            FileAllowed(["csv", "xlsx"], "Debe ser un archivo .csv o .xlsx"),
+        ],
     )
-    # Marcado por defecto, igual que en Importar: durante una toma que dura
-    # varios días es lo que se quiere casi siempre, y desmarcarlo altera
-    # conteos ya hechos.
-    solo_no_contados = BooleanField(
-        "Actualizar solo los artículos que aún no se han contado",
-        default=True,
-    )
-
-    def validate(self, extra_validators=None):
-        if not super().validate(extra_validators):
-            return False
-        if not (self.archivo_qms.data or self.archivo_defontana.data):
-            self.archivo_qms.errors.append(
-                "Elige al menos uno de los dos archivos."
-            )
-            return False
-        return True
 
 
 class AccionForm(FlaskForm):

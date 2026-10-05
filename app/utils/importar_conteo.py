@@ -251,12 +251,12 @@ def _por_codigo_normalizado(items) -> dict:
     return por_codigo
 
 
-def importar_qms(file_storage, empresa_id: int, solo_no_contados: bool = False) -> dict:
-    """Archivo 'Distribución Valor Stock CLP' de QMS (.csv o .xlsx): código único, descripción,
-    stock, línea de negocio, categoría, unidad y costo unitario.
+def leer_qms(file_storage) -> dict:
+    """Lee la planilla de QMS y devuelve {código: datos}, sin tocar la base.
 
-    Con solo_no_contados=True no se toca el stock de los artículos que ya tienen
-    conteo físico registrado (ver _congela_el_stock).
+    Separada de importar_qms() para poder comparar dos planillas sin guardar
+    nada: si la lectura viviera dentro del importador, la única forma de ver un
+    cruce sería escribirlo antes en el maestro.
     """
     encabezados, reader = _leer_filas(file_storage)
 
@@ -299,6 +299,17 @@ def importar_qms(file_storage, empresa_id: int, solo_no_contados: bool = False) 
                 costo = round(total / cantidad)
         if costo and acumulado[codigo]["costo"] is None:
             acumulado[codigo]["costo"] = costo
+
+    return acumulado
+
+
+def importar_qms(file_storage, empresa_id: int, solo_no_contados: bool = False) -> dict:
+    """Carga en el maestro la planilla 'Distribución Valor Stock CLP' de QMS.
+
+    Con solo_no_contados=True no se toca el stock de los artículos que ya tienen
+    conteo físico registrado (ver _congela_el_stock).
+    """
+    acumulado = leer_qms(file_storage)
 
     items = _items_de_la_empresa(empresa_id)
     existentes = _por_codigo_normalizado(items)
@@ -360,9 +371,8 @@ def importar_qms(file_storage, empresa_id: int, solo_no_contados: bool = False) 
     }
 
 
-def importar_defontana(file_storage, empresa_id: int, solo_no_contados: bool = False) -> dict:
-    """Archivo de inventario por bodega de Defontana (.csv o .xlsx): CodArticulo, Descripción,
-    CodBodega, Nombre Bodega, Saldo Stock."""
+def leer_defontana(file_storage) -> dict:
+    """Lee la planilla de Defontana y devuelve {código: datos}, sin tocar la base."""
     encabezados, reader = _leer_filas(file_storage, codificaciones_csv=("cp1252", "latin-1", "utf-8-sig"))
 
     columna_codigo = next((c for c in encabezados if "codarticulo" in c.lower()), None)
@@ -410,6 +420,13 @@ def importar_defontana(file_storage, empresa_id: int, solo_no_contados: bool = F
                 costo = round(total / cantidad)
         if costo and acumulado[codigo]["costo"] is None:
             acumulado[codigo]["costo"] = costo
+
+    return acumulado
+
+
+def importar_defontana(file_storage, empresa_id: int, solo_no_contados: bool = False) -> dict:
+    """Carga en el maestro el inventario por bodega de Defontana."""
+    acumulado = leer_defontana(file_storage)
 
     items = _items_de_la_empresa(empresa_id)
     existentes = _por_codigo_normalizado(items)
