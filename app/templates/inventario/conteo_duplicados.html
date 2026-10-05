@@ -1,85 +1,25 @@
 {% extends "base.html" %}
-{% block title %}Depurar artículos del conteo{% endblock %}
+{% block title %}Dar de baja artículos{% endblock %}
 {% block content %}
 
 <div class="page-head">
   <div>
-    <h1>Depurar artículos</h1>
-    <p class="page-sub">Códigos repetidos y artículos que ya no existen en QMS ni en Defontana.</p>
+    <h1>Dar de baja artículos</h1>
+    <p class="page-sub">Los que ya no existen en QMS ni en Defontana.</p>
   </div>
   <div>
     <a href="{{ url_for('inventario.conteo_importar') }}" class="btn btn-outline-secondary btn-sm">← Volver a importar</a>
   </div>
 </div>
 
-{# ============ Códigos repetidos ============ #}
-<div class="card mb-4">
-  <div class="card-header">
-    Códigos repetidos
-    <span class="text-muted small">— el mismo código escrito con o sin espacios, o con acentos distintos</span>
-  </div>
-  <div class="card-body">
-    {% if grupos %}
-    <p class="text-muted small">
-      Al unificar se conserva una sola línea: se suman las cantidades de QMS y de Defontana, y el conteo
-      físico ya registrado se mantiene.
-    </p>
-
-    <form method="post" action="{{ url_for('inventario.conteo_unificar_duplicados') }}">
-      {{ form.hidden_tag() }}
-      <div class="table-responsive">
-        <table class="table table-sm align-middle mb-3">
-          <thead>
-            <tr>
-              <th>Código</th><th>Nombre</th>
-              <th class="num">QMS</th><th class="num">Defontana</th><th class="num">Físico</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for grupo in grupos %}
-            {% for item in grupo %}
-            <tr class="{{ 'border-top border-2' if loop.first else '' }}">
-              <td class="{{ 'fw-semibold' if loop.first else 'ps-4 text-muted' }}">
-                {{ item.codigo }}
-                {# Sin esto, dos códigos que sólo se diferencian en un carácter
-                   invisible se ven idénticos y no hay forma de entender por qué
-                   salen repetidos. #}
-                {% set rarezas = rarezas_del_codigo(item.codigo) %}
-                {% if rarezas %}
-                <span class="badge bg-warning text-dark fw-normal">{{ rarezas|join(', ') }}</span>
-                {% endif %}
-              </td>
-              <td>{{ item.nombre or '—' }}</td>
-              <td class="num">{{ item.cantidad_qms|cantidad }}</td>
-              <td class="num">{{ item.cantidad_defontana|cantidad }}</td>
-              <td class="num">
-                {% if item.cantidad_fisica is not none %}
-                <span class="badge bg-success">{{ item.cantidad_fisica|cantidad }}</span>
-                {% else %}<span class="text-muted">—</span>{% endif %}
-              </td>
-              {% if loop.first %}
-              <td class="text-end" rowspan="{{ grupo|length }}">
-                <button type="submit" name="clave" value="{{ codigo_normalizado(item.codigo) }}"
-                        class="btn btn-sm btn-outline-primary">Unificar</button>
-              </td>
-              {% endif %}
-            </tr>
-            {% endfor %}
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      <button type="submit" class="btn btn-primary btn-sm"
-              onclick="return confirm('¿Unificar todos los códigos repetidos?')">
-        Unificar todos ({{ grupos|length }})
-      </button>
-    </form>
-    {% else %}
-    <p class="text-muted mb-0">No hay códigos repetidos.</p>
-    {% endif %}
-  </div>
-</div>
+{# Los códigos repetidos se unen en "Unificar códigos": ahí está también el
+   caso del artículo que cada sistema creó con su propio código, y son la misma
+   pregunta para quien mira. Acá queda sólo dar de baja lo que ya no existe. #}
+<p>
+  <a href="{{ url_for('inventario.equivalencias_codigos') }}" class="btn btn-outline-primary btn-sm">
+    ¿Códigos repetidos? Se unen en Unificar códigos →
+  </a>
+</p>
 
 {# ============ Artículos que ya no están en ninguna planilla ============ #}
 <div class="card mb-4">

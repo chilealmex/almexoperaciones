@@ -159,6 +159,7 @@
           <th class="num">Desviación</th>
           <th class="num">Impacto en stock</th>
           <th>Falta en</th>
+          <th>Costo sin stock</th>
           {{ t.th('Categoría', 'categoria', orden, direccion, 'd-none d-xl-table-cell') }}
         </tr>
         <tr class="filtros-fila">
@@ -171,6 +172,7 @@
           {{ t.sin_filtro('num') }}
           {{ t.sin_filtro('num') }}
           {{ t.sin_filtro('num') }}
+          {{ t.sin_filtro() }}
           {{ t.sin_filtro() }}
           {{ t.filtro('f_categoria', filtros_columna, 'filtros-cruce', 'Categoría', 'd-none d-xl-table-cell') }}
         </tr>
@@ -213,10 +215,18 @@
             {{ i.impacto_diferencia_costo|clp }}
             {% endif %}
           </td>
-          {# Vacío cuando el artículo está en los dos sistemas: lo que hay que
-             mirar es sólo dónde falta. #}
+          {# Cada aviso en su columna: son dos problemas distintos, que se
+             arreglan en lugares distintos y se filtran por separado. En una
+             sola celda, un "QMS" suelto no dejaba claro cuál de los dos era.
+             Van de colores distintos por lo mismo: que el artículo no exista en
+             un sistema no es lo mismo que tenga costo sin existencias. #}
           <td class="text-nowrap">
-            {% if i.falta_en %}<span class="badge bg-warning text-dark">{{ i.falta_en }}</span>{% endif %}
+            {% if i.falta_en %}
+            <span class="badge bg-danger"
+                  title="El artículo no existe en {{ i.falta_en }}. No siempre es un dato mal cargado: muchas veces simplemente no está creado ahí.">Falta en {{ i.falta_en }}</span>
+            {% endif %}
+          </td>
+          <td class="text-nowrap">
             {% if i.costo_sin_stock %}
             <span class="badge bg-warning text-dark" title="Tiene costo cargado pero ningún sistema declara existencias: valoriza $0 igual.">Costo sin stock</span>
             {% endif %}
@@ -224,7 +234,7 @@
           <td class="d-none d-xl-table-cell">{{ i.categoria or '—' }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="10" class="text-center text-muted py-4">Sin resultados con los filtros aplicados.</td></tr>
+        <tr><td colspan="12" class="text-center text-muted py-4">Sin resultados con los filtros aplicados.</td></tr>
         {% endfor %}
       </tbody>
     </table>

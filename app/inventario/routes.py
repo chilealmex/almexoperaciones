@@ -20,6 +20,7 @@ from app.utils.decorators import require_permission
 from app.utils.equivalencias_codigos import proponer
 from app.utils.importar_conteo import (
     articulos_fuera_de_ambas_planillas,
+    clave_sin_ceros,
     codigo_normalizado,
     grupos_duplicados,
     importar_defontana,
@@ -1435,16 +1436,18 @@ def conteo_importar():
 @bp.route("/conteo/duplicados")
 @require_permission("inventario", "editar")
 def conteo_duplicados():
-    """Artículos repetidos: el mismo código escrito con o sin espacios/acentos."""
+    """Artículos que ya no vienen en ninguna de las dos planillas.
+
+    Los códigos repetidos se unen en "Unificar códigos": es la misma pregunta
+    —estos dos son el mismo artículo— y tenerla en dos pantallas obligaba a
+    saber de antemano en cuál de las dos estaba el caso que se tiene al frente.
+    """
     fuera = articulos_fuera_de_ambas_planillas(current_user.empresa_id)
     return render_template(
         "inventario/conteo_duplicados.html",
-        grupos=grupos_duplicados(current_user.empresa_id),
         fuera=fuera,
         fuera_contados=[i for i in fuera if i.cantidad_fisica is not None],
         form=AccionForm(),
-        codigo_normalizado=codigo_normalizado,
-        rarezas_del_codigo=rarezas_del_codigo,
     )
 
 
@@ -1458,7 +1461,9 @@ def conteo_unificar_duplicados():
     clave = (request.form.get("clave") or "").strip()
     grupos = grupos_duplicados(current_user.empresa_id)
     if clave:  # unificar solo el grupo pedido
-        grupos = [g for g in grupos if codigo_normalizado(g[0].codigo) == clave]
+        # La misma llave con que se arman los grupos: si acá se usara otra, el
+        # botón de una fila no encontraría su grupo y no unificaría nada.
+        grupos = [g for g in grupos if clave_sin_ceros(g[0].codigo) == clave]
 
     unificados = 0
     eliminados = 0
@@ -1472,7 +1477,7 @@ def conteo_unificar_duplicados():
         flash(f"Se unificaron {unificados} código(s); se juntaron {eliminados} línea(s) repetida(s).", "success")
     else:
         flash("No quedaban códigos repetidos por unificar.", "info")
-    return redirect(url_for("inventario.conteo_duplicados"))
+    return redirect(url_for("inventario.equivalencias_codigos"))
 
 
 @bp.route("/conteo/duplicados/eliminar-ausentes", methods=["POST"])
@@ -1685,7 +1690,15 @@ def estado_de_equivalencias(empresa_id) -> dict:
 @bp.route("/equivalencias")
 @require_permission("inventario", "editar")
 def equivalencias_codigos():
-    """Propone qué artículo de QMS es el mismo que cuál de Defontana."""
+    """Todo lo que es "el mismo artículo con dos códigos", en una sola pantalla.
+
+    Son dos casos distintos por dentro y uno solo para quien mira: o el código
+    quedó escrito de dos maneras en el maestro —"011-CON-OTH-01" y
+    "11-CON-OTH-01"— y hay que dejar una sola línea, o cada sistema lo creó con
+    su propio código y hay que enseñarle al cruce que son el mismo. Separarlos
+    en dos pantallas obligaba a saber de antemano en cuál de los dos casos
+    estaba el artículo que se tiene al frente.
+    """
     datos = estado_de_equivalencias(current_user.empresa_id)
     return render_template(
         "inventario/equivalencias.html",
@@ -1693,6 +1706,9 @@ def equivalencias_codigos():
         solo_qms=datos["pendientes_qms"],
         solo_defontana=datos["pendientes_defontana"],
         confirmadas=datos["confirmadas"],
+        grupos=grupos_duplicados(current_user.empresa_id),
+        clave_sin_ceros=clave_sin_ceros,
+        rarezas_del_codigo=rarezas_del_codigo,
         form=AccionForm(),
     )
 

@@ -57,6 +57,9 @@ MODULOS = (
                     "inventario.equivalencias_codigos",
                     "inventario.equivalencias_unir",
                     "inventario.equivalencias_deshacer",
+                    # Unir códigos repetidos del maestro se hace desde esta
+                    # misma pantalla, así que el menú tiene que seguir marcado.
+                    "inventario.conteo_unificar_duplicados",
                 ),
             },
             {

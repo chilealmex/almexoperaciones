@@ -7,7 +7,11 @@ from sqlalchemy import update
 
 from app.extensions import db
 from app.models.conteo_inventario import ItemConteoInventario
-from app.utils.codigos import codigo_normalizado, rarezas_del_codigo  # noqa: F401
+from app.utils.codigos import (  # noqa: F401
+    clave_sin_ceros,
+    codigo_normalizado,
+    rarezas_del_codigo,
+)
 from app.utils.cantidades import a_cantidad
 
 _ESPACIOS_RE = re.compile(r"\s+")
@@ -479,7 +483,14 @@ def articulos_fuera_de_ambas_planillas(empresa_id: int) -> list:
 
 
 def grupos_duplicados(empresa_id: int) -> list:
-    """Artículos cuyo código es el mismo si se le quitan espacios y acentos.
+    """Artículos cuyo código es el mismo escrito distinto.
+
+    Se agrupan sin espacios, acentos ni mayúsculas, y también sin los ceros de
+    relleno: "011-CON-OTH-01" y "11-CON-OTH-01" son el mismo artículo, y el
+    cero de adelante lo pone quien exporta.
+
+    Esto sólo *propone* el grupo. Unirlo lo decide una persona desde la
+    pantalla, que es la protección: la llave del importador no cambia.
 
     Devuelve una lista de grupos (2 o más artículos cada uno), ordenados por
     código, para poder revisarlos y unificarlos desde la pantalla.
@@ -488,7 +499,7 @@ def grupos_duplicados(empresa_id: int) -> list:
 
     por_clave = _dd(list)
     for item in ItemConteoInventario.query.filter_by(empresa_id=empresa_id).all():
-        por_clave[codigo_normalizado(item.codigo)].append(item)
+        por_clave[clave_sin_ceros(item.codigo)].append(item)
     grupos = [sorted(items, key=lambda i: i.id) for items in por_clave.values() if len(items) > 1]
     return sorted(grupos, key=lambda g: g[0].codigo)
 
@@ -500,19 +511,38 @@ def _primero(valores):
 def unificar_grupo(items: list) -> ItemConteoInventario:
     """Deja un solo artículo con la suma de los duplicados y borra el resto.
 
-    Se conserva la fila que ya tenía conteo físico (y entre iguales, la más
-    antigua), para no perder el trabajo de bodega. Las cantidades se suman,
-    porque cada fila era stock declarado por separado, y los datos de texto que
-    falten en la fila que queda se completan con los de las otras.
+    La fila que queda es la que todavía viene en alguna de las dos planillas.
+    Importa cuál: el importador reconoce al artículo por su código, así que si
+    quedara el código viejo —el que ya no trae ningún sistema— la próxima
+    importación no lo encontraría y volvería a crear el otro. El duplicado
+    reaparecería solo.
+
+    Entre las que vienen en una planilla, se prefiere la que tiene conteo
+    físico y, entre iguales, la más antigua. El conteo no se pierde en ningún
+    caso: se traspasa a la que queda, venga de donde venga.
+
+    Las cantidades se suman, porque cada fila era stock declarado por
+    separado, y los datos de texto que falten en la fila que queda se
+    completan con los de las otras.
     """
     if len(items) < 2:
         return items[0] if items else None
 
-    ordenados = sorted(items, key=lambda i: (i.cantidad_fisica is None, i.id))
+    ordenados = sorted(
+        items,
+        key=lambda i: (not (i.en_qms or i.en_defontana), i.cantidad_fisica is None, i.id),
+    )
     principal, resto = ordenados[0], ordenados[1:]
 
     principal.cantidad_qms = sum(i.cantidad_qms or 0 for i in ordenados)
     principal.cantidad_defontana = sum(i.cantidad_defontana or 0 for i in ordenados)
+    # Si cualquiera de las filas estaba en un sistema, la que queda lo está:
+    # es la misma mercadería. Importa cuando cada sistema escribió el código a
+    # su manera y cada fila quedó marcada en uno solo: sin esto, la fila unida
+    # diría "Falta en Defontana" aunque Defontana sí lo tenga, con el otro
+    # código.
+    principal.en_qms = any(i.en_qms for i in ordenados)
+    principal.en_defontana = any(i.en_defontana for i in ordenados)
 
     contadas = [i.cantidad_fisica for i in ordenados if i.cantidad_fisica is not None]
     principal.cantidad_fisica = sum(contadas) if contadas else None

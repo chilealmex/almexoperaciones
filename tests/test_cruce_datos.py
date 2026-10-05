@@ -357,3 +357,114 @@ def test_plan_paso_a_paso_en_excel_con_una_hoja_por_paso(client, db, empresa, us
     libro = load_workbook(io.BytesIO(respuesta.data))
     assert len(libro.sheetnames) == 6
     assert libro.sheetnames[0].startswith("Paso 1")
+
+
+# --- Los avisos de la fila: cada uno en su propia columna ---
+#
+# Antes compartían una celda, y un "QMS" suelto no dejaba claro si el artículo
+# faltaba ahí o si lo que pasaba era otra cosa. Son dos problemas distintos,
+# que se arreglan en lugares distintos y se filtran por separado.
+
+
+def _avisos_de(client, codigo):
+    texto = client.get("/inventario/cruce-datos?filtro=todos").get_data(as_text=True)
+    cuerpo = texto[texto.index("<tbody"):texto.index("</tbody>")]
+    fila = cuerpo[cuerpo.index(codigo):]
+    fila = fila[:fila.index("</tr>")]
+    return re.findall(r'<span class="badge[^"]*"[^>]*>([^<]+)</span>', fila), fila
+
+
+def test_el_aviso_dice_en_que_sistema_falta(client, db, empresa, usuario_admin):
+    """Lo que ella pidió: que diga si falta en QMS o si falta en Defontana."""
+    _item(db, empresa, "SOLO-QMS", en_defontana=False, cantidad_qms=5)
+    _item(db, empresa, "SOLO-DEFO", en_qms=False, cantidad_defontana=5)
+    login(client, "admin@test.cl")
+
+    assert _avisos_de(client, "SOLO-QMS")[0] == ["Falta en Defontana"]
+    assert _avisos_de(client, "SOLO-DEFO")[0] == ["Falta en QMS"]
+
+
+def test_cada_aviso_va_en_su_propia_columna(client, db, empresa, usuario_admin):
+    """Son dos problemas distintos, que se arreglan en lugares distintos y se
+    filtran por separado. Juntos en una celda, un "QMS" suelto no dejaba claro
+    cuál de los dos era."""
+    _item(db, empresa, "LOS-DOS", en_qms=False, costo_unitario_defontana=5509)
+    login(client, "admin@test.cl")
+
+    avisos, fila = _avisos_de(client, "LOS-DOS")
+
+    assert avisos == ["Falta en QMS", "Costo sin stock"]
+    # Cada insignia en su propia celda, no las dos en la misma
+    celdas_con_aviso = [c for c in fila.split("<td") if "badge" in c]
+    assert len(celdas_con_aviso) == 2
+
+
+def test_lo_que_esta_en_los_dos_sistemas_no_avisa_nada(client, db, empresa, usuario_admin):
+    _item(db, empresa, "NORMAL", cantidad_qms=3, cantidad_defontana=3)
+    login(client, "admin@test.cl")
+
+    assert _avisos_de(client, "NORMAL")[0] == []
+
+
+def test_los_dos_avisos_se_distinguen_a_simple_vista(client, db, empresa, usuario_admin):
+    """Son problemas distintos y se arreglan en lugares distintos: el mismo
+    color los hacía parecer lo mismo."""
+    _item(db, empresa, "LOS-DOS", en_qms=False, costo_unitario_defontana=5509)
+    login(client, "admin@test.cl")
+
+    _avisos, fila = _avisos_de(client, "LOS-DOS")
+
+    assert "bg-danger" in fila and "bg-warning" in fila
+
+
+def test_hay_una_columna_para_cada_aviso(client, db, empresa, usuario_admin):
+    _item(db, empresa, "CUALQUIERA", cantidad_qms=1, cantidad_defontana=1)
+    login(client, "admin@test.cl")
+
+    texto = client.get("/inventario/cruce-datos").get_data(as_text=True)
+    encabezado = texto[texto.index("<thead"):texto.index("</thead>")]
+
+    assert "<th>Falta en</th>" in encabezado
+    assert "<th>Costo sin stock</th>" in encabezado
+
+
+def test_las_columnas_de_titulos_filtros_y_datos_son_las_mismas(
+    client, db, empresa, usuario_admin
+):
+    """Agregar una columna y olvidar la fila de filtros corre todo un lugar:
+    los filtros quedan bajo el título equivocado y nadie lo nota enseguida."""
+    _item(db, empresa, "CUALQUIERA", cantidad_qms=1, cantidad_defontana=1)
+    login(client, "admin@test.cl")
+
+    texto = client.get("/inventario/cruce-datos?filtro=todos").get_data(as_text=True)
+    encabezado = texto[texto.index("<thead"):texto.index("</thead>")]
+    titulos, filtros = encabezado.split('<tr class="filtros-fila">')
+    cuerpo = texto[texto.index("<tbody"):texto.index("</tbody>")]
+    # Desde el <tr> y no desde el código: si no, el corte parte a mitad de la
+    # primera celda y esa no se cuenta.
+    hasta = cuerpo.index("CUALQUIERA")
+    fila = cuerpo[cuerpo.rindex("<tr", 0, hasta):].split("</tr>")[0]
+
+    cuantos = len(re.findall(r"<th[ >]", titulos))
+    assert cuantos == len(re.findall(r"<th[ >]", filtros)), "la fila de filtros quedó corrida"
+    assert cuantos == len(re.findall(r"<td[ >]", fila)), "las celdas no calzan con los títulos"
+
+    # Y la fila de "sin resultados" tiene que cruzar la tabla entera
+    vacio = client.get("/inventario/cruce-datos?q=NADADENADA").get_data(as_text=True)
+    assert f'colspan="{cuantos}"' in vacio
+
+
+def test_el_excel_sigue_diciendo_el_sistema_a_secas(client, db, empresa, usuario_admin):
+    """En el Excel la columna se llama "Falta en" y está sola, así que el
+    nombre del sistema basta: repetirlo sería ruido en cada celda."""
+    from openpyxl import load_workbook
+
+    _item(db, empresa, "SOLO-DEFO", en_qms=False, cantidad_defontana=5)
+    login(client, "admin@test.cl")
+
+    hoja = load_workbook(io.BytesIO(
+        client.get("/inventario/cruce-datos.xlsx").get_data())).active
+    valores = [c.value for fila in hoja.iter_rows() for c in fila]
+
+    assert "Falta en" in valores   # el título de la columna
+    assert "QMS" in valores        # y el valor, sin repetir el título

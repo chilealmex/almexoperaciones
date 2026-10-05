@@ -6,7 +6,7 @@
 <div class="page-head">
   <div>
     <h1>Unificar códigos</h1>
-    <p class="page-sub">El mismo artículo con un código distinto en QMS y en Defontana.</p>
+    <p class="page-sub">El mismo artículo escrito con dos códigos: repetido en el maestro, o distinto en QMS y en Defontana.</p>
   </div>
   <div class="d-flex gap-2">
     <a href="{{ url_for('inventario.equivalencias_excel') }}" class="btn btn-outline-secondary btn-sm"
@@ -20,12 +20,88 @@
 <div class="alert alert-info">
   El mismo artículo debería existir en los dos sistemas: en eso consiste el cruce. Cuando el
   código se creó distinto en cada uno —<code>GOL.PRE-5_8</code> contra <code>GOLPRE-58</code>—
-  el cruce por código no los encuentra y quedan dos filas sueltas.
+  el cruce por código no los encuentra y quedan dos filas sueltas. Y a veces el código es el
+  mismo, sólo escrito distinto —<code>011-CON-OTH-01</code> y <code>11-CON-OTH-01</code>—: eso
+  se resuelve en la primera lista, acá abajo.
   <br>
   <strong>Nada se une solo.</strong> Acá se proponen parejas y tú confirmas una por una: unir dos
   artículos distintos suma sus existencias y falsea el inventario. Lo que confirmes queda
   guardado y se respeta en todas las importaciones siguientes, así que se hace una sola vez.
 </div>
+
+{# ---------- El mismo código escrito de dos maneras ----------
+   Va primero porque es el caso más simple y el que más confunde: son dos
+   líneas del maestro, no dos artículos. Acá no hay nada que adivinar —el
+   código es el mismo— así que se unen de una, sin proponer ni puntuar. #}
+<h2 class="h5 mt-4">El mismo código escrito distinto <span class="text-muted">({{ grupos|length }})</span></h2>
+{% if not grupos %}
+  <p class="text-muted">No hay códigos repetidos en el maestro.</p>
+{% else %}
+<p class="text-muted small">
+  Son dos líneas del mismo artículo: el cero de relleno de adelante, un espacio
+  o un acento distinto alcanzan para que queden separadas.
+  <code>011-CON-OTH-01</code> y <code>11-CON-OTH-01</code> son el mismo.
+  Al unir queda una sola línea: se suman las cantidades de QMS y de Defontana.
+  El conteo físico no se pierde nunca —si se contó una sola de las dos líneas,
+  ese conteo pasa a la que queda; si se contaron las dos, se suman—, y si no se
+  contó ninguna, la línea sigue figurando como pendiente de contar.
+</p>
+
+<div class="table-card mb-4">
+  <form method="post" action="{{ url_for('inventario.conteo_unificar_duplicados') }}">
+    {{ form.hidden_tag() }}
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Código</th><th>Nombre</th>
+            <th class="num">QMS</th><th class="num">Defontana</th><th class="num">Físico</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for grupo in grupos %}
+          {% for item in grupo %}
+          <tr class="{{ 'border-top border-2' if loop.first else '' }}">
+            <td class="{{ 'fw-semibold' if loop.first else 'ps-4 text-muted' }}">
+              {{ item.codigo }}
+              {# Sin esto, dos códigos que sólo se diferencian en un carácter
+                 invisible se ven idénticos y no hay forma de entender por qué
+                 salen repetidos. #}
+              {% set rarezas = rarezas_del_codigo(item.codigo) %}
+              {% if rarezas %}
+              <span class="badge bg-warning text-dark fw-normal">{{ rarezas|join(', ') }}</span>
+              {% endif %}
+            </td>
+            <td>{{ item.nombre or '—' }}</td>
+            <td class="num">{{ item.cantidad_qms|cantidad }}</td>
+            <td class="num">{{ item.cantidad_defontana|cantidad }}</td>
+            <td class="num">
+              {% if item.cantidad_fisica is not none %}
+              <span class="badge bg-success">{{ item.cantidad_fisica|cantidad }}</span>
+              {% else %}<span class="text-muted">—</span>{% endif %}
+            </td>
+            {% if loop.first %}
+            <td class="text-end" rowspan="{{ grupo|length }}">
+              <button type="submit" name="clave" value="{{ clave_sin_ceros(item.codigo) }}"
+                      class="btn btn-sm btn-outline-primary">Unificar</button>
+            </td>
+            {% endif %}
+          </tr>
+          {% endfor %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="p-3 border-top">
+      <button type="submit" class="btn btn-primary btn-sm"
+              onclick="return confirm('¿Unificar los {{ grupos|length }} códigos repetidos?')">
+        Unificar todos ({{ grupos|length }})
+      </button>
+    </div>
+  </form>
+</div>
+{% endif %}
 
 {# ---------- Propuestas ---------- #}
 <h2 class="h5 mt-4">Parejas propuestas <span class="text-muted">({{ propuestas|length }})</span></h2>
