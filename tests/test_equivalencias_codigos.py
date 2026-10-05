@@ -287,7 +287,7 @@ def test_un_codigo_que_no_existe_se_rechaza(client, db, empresa, usuario_admin):
         "codigo_qms": "QMS-A", "codigo_defontana": "NO-EXISTE"},
         follow_redirects=True).get_data(as_text=True)
 
-    assert "No hay ningún artículo suelto en Defontana" in cuerpo
+    assert "No existe ningún artículo con el código" in cuerpo
     assert EquivalenciaCodigo.query.count() == 0
 
 
@@ -563,3 +563,105 @@ def test_el_boton_esta_en_la_pantalla(client, db, empresa, usuario_admin):
     login(client, "admin@test.cl")
     assert "/inventario/equivalencias.xlsx" in client.get(
         "/inventario/equivalencias").get_data(as_text=True)
+
+
+# --- Por qué no se puede unir a mano: cada causa, dicha con su nombre ---
+#
+# Que un código no esté entre los sueltos tiene causas muy distintas, y cada
+# una se arregla en otra parte. Un solo mensaje para todas obligaba a adivinar
+# cuál era, revisando a mano un maestro de miles de artículos.
+
+
+def _intentar_unir(client, qms, defontana):
+    return client.post(
+        "/inventario/equivalencias/unir",
+        data={"codigo_qms": qms, "codigo_defontana": defontana},
+        follow_redirects=True,
+    ).get_data(as_text=True)
+
+
+def _articulo(db, empresa, codigo, **campos):
+    item = ItemConteoInventario(empresa_id=empresa.id, codigo=codigo, **campos)
+    db.session.add(item)
+    db.session.commit()
+    return item
+
+
+def test_si_ya_cruzan_lo_dice_en_vez_de_mandar_a_revisar_la_escritura(
+    client, db, empresa, usuario_admin
+):
+    """El caso de ella: el mismo código en los dos sistemas. El cruce ya los
+    junta, así que no hay nada que unir, pero el mensaje mandaba a revisar
+    cómo estaba escrito."""
+    _articulo(db, empresa, "A2000ETQ-CATNOINFLAMABL", en_qms=True, en_defontana=True)
+    _articulo(db, empresa, "OTRO-SUELTO", en_qms=False, en_defontana=True)
+    login(client, "admin@test.cl")
+
+    cuerpo = _intentar_unir(client, "A2000ETQ-CATNOINFLAMABL", "OTRO-SUELTO")
+
+    assert "ya existe en los dos sistemas" in cuerpo
+    assert "no hay nada que unir" in cuerpo
+
+
+def test_si_el_codigo_esta_en_el_otro_sistema_lo_dice(client, db, empresa, usuario_admin):
+    """Poner los dos al revés es el error más fácil de cometer en esta pantalla."""
+    _articulo(db, empresa, "SOLO-EN-DEFO", en_qms=False, en_defontana=True)
+    _articulo(db, empresa, "SOLO-EN-QMS", en_qms=True, en_defontana=False)
+    login(client, "admin@test.cl")
+
+    cuerpo = _intentar_unir(client, "SOLO-EN-DEFO", "SOLO-EN-QMS")
+
+    assert "está en Defontana, no en QMS" in cuerpo
+    assert "al revés" in cuerpo
+
+
+def test_si_el_codigo_esta_dado_de_baja_lo_dice(client, db, empresa, usuario_admin):
+    _articulo(db, empresa, "YA-NO-VIENE", en_qms=False, en_defontana=False)
+    _articulo(db, empresa, "SUELTO-DEFO", en_qms=False, en_defontana=True)
+    login(client, "admin@test.cl")
+
+    cuerpo = _intentar_unir(client, "YA-NO-VIENE", "SUELTO-DEFO")
+
+    assert "ya no viene en ninguna de las dos planillas" in cuerpo
+
+
+def test_si_el_codigo_no_existe_muestra_los_parecidos(client, db, empresa, usuario_admin):
+    """Con miles de artículos, "revisa cómo está escrito" es media hora de
+    búsqueda; los parecidos lo resuelven en el mismo aviso."""
+    _articulo(db, empresa, "GOLPRE-58", en_qms=True, en_defontana=False)
+    _articulo(db, empresa, "GOLPRE-59", en_qms=True, en_defontana=False)
+    _articulo(db, empresa, "SUELTO-DEFO", en_qms=False, en_defontana=True)
+    login(client, "admin@test.cl")
+
+    cuerpo = _intentar_unir(client, "GOLPRE-5X8", "SUELTO-DEFO")
+
+    assert "No existe ningún artículo" in cuerpo
+    assert "GOLPRE-58" in cuerpo and "GOLPRE-59" in cuerpo
+
+
+def test_si_ya_estaba_unido_dice_con_cual(client, db, empresa, usuario_admin):
+    from app.models.equivalencia_codigo import crear_equivalencia
+
+    _articulo(db, empresa, "QMS-A", en_qms=True, en_defontana=False)
+    _articulo(db, empresa, "DEFO-A", en_qms=False, en_defontana=True)
+    _articulo(db, empresa, "DEFO-B", en_qms=False, en_defontana=True)
+    login(client, "admin@test.cl")
+    crear_equivalencia(empresa.id, "QMS-A", "DEFO-A", usuario_admin.id, 100, "a mano")
+    db.session.commit()
+    ItemConteoInventario.query.filter_by(codigo="DEFO-A").delete()
+    db.session.commit()
+
+    cuerpo = _intentar_unir(client, "QMS-A", "DEFO-A")
+
+    assert "ya está unido con" in cuerpo
+
+
+def test_unir_dos_sueltos_de_verdad_sigue_funcionando(client, db, empresa, usuario_admin):
+    """El camino bueno no puede romperse por mejorar los mensajes de error."""
+    _articulo(db, empresa, "GOL.PRE-5_8", en_qms=True, en_defontana=False)
+    _articulo(db, empresa, "GOLPRE-58", en_qms=False, en_defontana=True)
+    login(client, "admin@test.cl")
+
+    cuerpo = _intentar_unir(client, "GOL.PRE-5_8", "GOLPRE-58")
+
+    assert "quedaron unidos" in cuerpo

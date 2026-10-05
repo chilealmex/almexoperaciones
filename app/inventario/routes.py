@@ -540,6 +540,9 @@ def stock_excel():
         col("Unidad QMS", ancho=12),
         col("Unidad Defontana", ancho=17),
         col("Unidades coinciden", ancho=18),
+        col("Stock QMS", ancho=12, formato=CANTIDAD, total="suma"),
+        col("Stock Defontana", ancho=16, formato=CANTIDAD, total="suma"),
+        col("Dif. stock", ancho=12, formato=CANTIDAD, total="suma"),
         col("Costo unitario QMS", ancho=18, formato=CLP),
         col("Costo unitario Defontana", ancho=22, formato=CLP),
         col("Dif. costo unitario", ancho=18, formato=CLP),
@@ -562,6 +565,9 @@ def stock_excel():
             i.unidad_qms or "",
             i.unidad_defontana or "",
             "Sí" if i.unidades_coinciden else "NO",
+            i.cantidad_qms,
+            i.cantidad_defontana,
+            i.diferencia_sistemas,
             i.costo_unitario_qms,
             i.costo_unitario_defontana,
             i.diferencia_costo_unitario,
@@ -897,7 +903,7 @@ def ajuste_excel():
 # qué SKUs quedaron con distinta unidad de medida o distinto costo unitario cargado
 # en cada sistema, para poder corregirlos en el origen.
 
-FILTROS_CRUCE = ("todos", "dif_costo", "dif_unidad", "ambas", "sin_costo", "costo_sin_stock")
+FILTROS_CRUCE = ("todos", "dif_stock", "dif_costo", "dif_unidad", "ambas", "sin_costo", "costo_sin_stock")
 
 ETIQUETAS_ESTADO_MAESTRO = {
     "ok": "Costo y unidad coinciden",
@@ -913,6 +919,7 @@ ETIQUETAS_CRUCE = {
     "ambas": "Solo con costo y unidad distintos",
     "sin_costo": "Solo sin costo cargado",
     "costo_sin_stock": "Solo con costo cargado y sin stock",
+    "dif_stock": "Solo donde los dos sistemas declaran distinto stock",
     "f_codigo": "Código",
     "f_nombre": "Descripción",
     "f_unidad": "Unidad",
@@ -966,6 +973,8 @@ def _items_cruce_datos(args, esconder_vacios_por_defecto=False):
         items = [i for i in items if i.estado_maestro == filtro]
     elif filtro == "costo_sin_stock":
         items = [i for i in items if i.costo_sin_stock]
+    elif filtro == "dif_stock":
+        items = [i for i in items if i.diferencia_sistemas != 0]
 
     return items, busqueda, filtros_columna, filtro, orden, direccion, sin_vacios, vacios
 
@@ -978,6 +987,9 @@ def _totales_cruce(items):
         "articulos": len(items),
         "con_costo": sum(1 for i in items if i.tiene_costo),
         "costo_sin_stock": sum(1 for i in items if i.costo_sin_stock),
+        # Los dos sistemas deberían declarar el mismo stock: en eso consiste el
+        # cruce. Lo que no cuadra es lo que hay que mirar.
+        "dif_stock": sum(1 for i in items if i.diferencia_sistemas != 0),
         **por_estado,
     }
 
@@ -1094,6 +1106,9 @@ def _excel_del_cruce(items):
         col("Unidad QMS", ancho=12),
         col("Unidad Defontana", ancho=17),
         col("Unidades coinciden", ancho=18),
+        col("Stock QMS", ancho=12, formato=CANTIDAD, total="suma"),
+        col("Stock Defontana", ancho=16, formato=CANTIDAD, total="suma"),
+        col("Dif. stock", ancho=12, formato=CANTIDAD, total="suma"),
         col("Costo unitario QMS", ancho=18, formato=CLP),
         col("Costo unitario Defontana", ancho=22, formato=CLP),
         col("Dif. costo unitario", ancho=18, formato=CLP),
@@ -1113,12 +1128,17 @@ def _excel_del_cruce(items):
             i.unidad_qms or "",
             i.unidad_defontana or "",
             "Sí" if i.unidades_coinciden else "NO",
+            i.cantidad_qms,
+            i.cantidad_defontana,
+            i.diferencia_sistemas,
             i.costo_unitario_qms,
             i.costo_unitario_defontana,
             i.diferencia_costo_unitario,
             (i.desviacion_costo_pct / 100) if i.desviacion_costo_pct is not None else None,
             i.impacto_diferencia_costo,
-            i.falta_en,
+            # Igual que en pantalla: que ya no venga en ninguna planilla no es
+            # un cruce fallido, es un artículo dado de baja.
+            ("Ya no viene en ninguna" if not (i.en_qms or i.en_defontana) else i.falta_en),
             ETIQUETAS_ESTADO_MAESTRO[i.estado_maestro],
             "Sí" if i.costo_sin_stock else "",
             i.categoria or "",
@@ -1803,6 +1823,8 @@ def _items_de_la_prueba(prueba, args):
         items = [i for i in items if i.estado_maestro == filtro]
     elif filtro == "costo_sin_stock":
         items = [i for i in items if i.costo_sin_stock]
+    elif filtro == "dif_stock":
+        items = [i for i in items if i.diferencia_sistemas != 0]
 
     orden = args.get("orden") if args.get("orden") in ORDEN_PRUEBA else "codigo"
     direccion = "desc" if args.get("direccion") == "desc" else "asc"
@@ -1862,16 +1884,91 @@ def _sueltos(empresa_id):
 
 
 def _codigo_que_no_esta(codigo, sueltos, sistema) -> str:
-    """Mensaje de error si el código no está entre los sueltos de ese sistema."""
+    """Por qué no se puede unir ese código, dicho con precisión.
+
+    Que no esté entre los sueltos tiene varias causas muy distintas —ya cruza,
+    está en el otro sistema, está dado de baja, ya se unió, no existe— y cada
+    una se arregla en otra parte. Un solo mensaje para todas obligaba a
+    adivinar cuál era, revisando a mano un maestro de miles de artículos.
+    """
     if not codigo:
         return f"Falta el código de {sistema}."
+
     clave = codigo_normalizado(codigo)
     if any(codigo_normalizado(i.codigo) == clave for i in sueltos):
         return ""
-    return (
-        f'No hay ningún artículo suelto en {sistema} con el código "{codigo}". '
-        "Revisa cómo está escrito, o puede que ya cruce con el otro sistema."
+
+    otro = "Defontana" if sistema == "QMS" else "QMS"
+    item = next(
+        (i for i in _items_de_la_empresa_actual() if codigo_normalizado(i.codigo) == clave),
+        None,
     )
+
+    if item is None:
+        ya_unido = _donde_quedo_unido(clave)
+        if ya_unido:
+            return ya_unido
+        return (
+            f'No existe ningún artículo con el código "{codigo}". '
+            + _parecidos_a(codigo)
+        )
+
+    if item.en_qms and item.en_defontana:
+        return (
+            f'"{item.codigo}" ya existe en los dos sistemas con el mismo código, '
+            "así que el cruce ya los junta: es una sola línea y no hay nada que unir. "
+            "Lo ves así en Cruce de datos, sin ningún aviso de que falte."
+        )
+    if not item.en_qms and not item.en_defontana:
+        return (
+            f'"{item.codigo}" ya no viene en ninguna de las dos planillas, así que '
+            "no hay nada que cruzar. Si sobra, se da de baja en Importar → "
+            "Dar de baja los que ya no existen."
+        )
+    return (
+        f'"{item.codigo}" está en {otro}, no en {sistema}. '
+        "Revisa si pusiste los dos códigos al revés."
+    )
+
+
+def _items_de_la_empresa_actual():
+    return ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id).all()
+
+
+def _donde_quedo_unido(clave) -> str:
+    """Si ese código ya se unió con otro, decirlo con el nombre del otro."""
+    for e in EquivalenciaCodigo.query.filter_by(empresa_id=current_user.empresa_id).all():
+        if codigo_normalizado(e.codigo_defontana) == clave:
+            return (
+                f'"{e.codigo_defontana}" ya está unido con "{e.codigo_qms}" (QMS). '
+                "Para unirlo con otro, primero sepáralos más abajo."
+            )
+        if codigo_normalizado(e.codigo_qms) == clave:
+            return (
+                f'"{e.codigo_qms}" ya está unido con "{e.codigo_defontana}" (Defontana). '
+                "Para unirlo con otro, primero sepáralos más abajo."
+            )
+    for u in CodigoUnificado.query.filter_by(empresa_id=current_user.empresa_id).all():
+        if codigo_normalizado(u.codigo_retirado) == clave:
+            return (
+                f'"{u.codigo_retirado}" se unió con "{u.codigo_vigente}" al depurar '
+                "artículos repetidos, así que ya no es una línea aparte."
+            )
+    return ""
+
+
+def _parecidos_a(codigo, cuantos=5) -> str:
+    """Los códigos que más se le parecen, para no tener que buscarlos a mano."""
+    trozo = codigo_normalizado(codigo)[:6]
+    if not trozo:
+        return ""
+    parecidos = sorted(
+        {i.codigo for i in _items_de_la_empresa_actual()
+         if trozo in codigo_normalizado(i.codigo)}
+    )[:cuantos]
+    if not parecidos:
+        return "Tampoco hay ninguno que se le parezca."
+    return "Los que se le parecen: " + ", ".join(parecidos) + "."
 
 
 def estado_de_equivalencias(empresa_id) -> dict:

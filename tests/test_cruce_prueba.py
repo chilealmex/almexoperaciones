@@ -401,3 +401,45 @@ def test_el_cruce_del_sistema_no_muestra_la_prueba(client, db, empresa, usuario_
 
     assert _codigos(cuerpo) == ["SOLO-EN-EL-SISTEMA"]
     assert "COD-002" not in _codigos(cuerpo)
+
+
+# --- En la prueba, "ya no viene en ninguna" no puede existir ---
+
+
+def test_ningun_articulo_de_la_prueba_queda_fuera_de_las_dos_planillas(
+    client, db, empresa, usuario_admin
+):
+    """Cada fila de la prueba nace de al menos una de las dos planillas, así
+    que ninguna puede aparecer como dada de baja. Si apareciera, el cruce
+    estaría perdiendo el lado del que vino."""
+    login(client, "admin@test.cl")
+    _las_dos(client)
+
+    cuerpo = client.get("/inventario/cruce-datos/prueba?vacios=si").get_data(as_text=True)
+
+    assert "Ya no viene en ninguna" not in cuerpo
+
+
+def test_la_prueba_tambien_cruza_las_cantidades(client, db, empresa, usuario_admin):
+    login(client, "admin@test.cl")
+    _las_dos(client)
+
+    cuerpo = client.get("/inventario/cruce-datos/prueba?vacios=si").get_data(as_text=True)
+    encabezado = cuerpo[cuerpo.index("<thead"):cuerpo.index("</thead>")]
+
+    assert "Stock QMS" in encabezado and "Dif. stock" in encabezado
+    # COD-001: 10 en QMS contra 8 en Defontana
+    fila = cuerpo[cuerpo.index("COD-001"):]
+    fila = fila[:fila.index("</tr>")]
+    assert ">10<" in fila.replace(",", "") or ">10.0<" in fila
+
+
+def test_el_filtro_de_stock_distinto_funciona_en_la_prueba(client, db, empresa, usuario_admin):
+    login(client, "admin@test.cl")
+    _las_dos(client)
+
+    cuerpo = client.get("/inventario/cruce-datos/prueba?filtro=dif_stock").get_data(as_text=True)
+
+    # COD-001 tiene 10 contra 8; los otros dos están en un solo sistema, que
+    # también es una diferencia
+    assert "COD-001" in cuerpo
