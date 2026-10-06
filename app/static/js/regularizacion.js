@@ -505,16 +505,29 @@
 
     const names = new Map(rows.map(r => [r.key, r.name])), lineas = new Map(rows.map(r => [r.key, r.linea]));
     const zero = [];
+    // Lo que suele costar cada artículo, para reconocer el ingreso mal costeado
+    const habitualPorArt = new Map();
+    for (const [, all] of byKey) for (const m of all) {
+      const a = norm(m.art);
+      if (!habitualPorArt.has(a)) habitualPorArt.set(a, costoHabitual(all.filter(x => norm(x.art) === a)));
+    }
     for (const [k, all] of byKey) all.forEach(m => {
-      if (m._ajc || !inBod(m) || m.valor == null || Math.abs(m.valor) > EPS || m.qty <= EPS) return;
+      if (m._ajc || !inBod(m) || m.valor == null || m.qty <= EPS) return;
+      const aCero = Math.abs(m.valor) <= EPS;
+      // Un ingreso puede estar mal valorizado sin ser $0: a $1, o a 20 veces lo
+      // que cuesta siempre. No se nota mirando cantidades y ensucia la
+      // valorización de todo lo que salga después.
+      const raro = aCero ? null : costoAtipico(m, habitualPorArt.get(norm(m.art)));
+      if (!aCero && !raro) return;
       // cada código de Defontana lleva su propio saldo y PMP
       const docs = all.filter(x => norm(x.art) === norm(m.art)), j = docs.indexOf(m);
       const pm = pmpOf(docs, j - 1 >= 0 ? j - 1 : null);
       const edited = state.pmpEdit.has(k);
       const pmp = edited ? state.pmpEdit.get(k) : pm ? pm.v : null;
-      zero.push({key:k, m, code:m.art, name:m.desc || names.get(k) || '', linea: lineas.get(k) || '', pmp, edited,
-        pmpSrc: edited ? 'Ingresado a mano' : pm ? pm.src : 'Sin costo en Defontana', valor: pmp != null ? pmp * m.qty : null,
-        rev: zeroReview(m, docs, j, pmp)});
+      zero.push({key:k, m, code:m.art, name:m.desc || names.get(k) || '', linea: lineas.get(k) || '', pmp, edited, raro,
+        pmpSrc: edited ? 'Ingresado a mano' : pm ? pm.src : 'Sin costo en Defontana',
+        valor: raro ? (raro.habitual != null ? raro.habitual * m.qty : null) : (pmp != null ? pmp * m.qty : null),
+        rev: raro ? revisionDeCostoAtipico(m, raro, docs, j) : zeroReview(m, docs, j, pmp)});
     });
     return {rows, zero, orphan: [...byKey.keys()].filter(k => !seen.has(k)).length};
   }
@@ -651,6 +664,59 @@
     }
     return out;
   }
+  // ---------- Costos fuera de lo normal ----------
+  //
+  // Un ingreso puede estar mal valorizado sin ser $0: entró a $1, o a $20.000
+  // cuando el producto se compra a $1.000. Defontana valoriza cada salida
+  // posterior al PMP del momento, así que un ingreso mal costeado ensucia la
+  // valorización de todo lo que salga después, y no se nota mirando cantidades.
+  //
+  // El costo "normal" es la MEDIANA de lo que costaron los ingresos del
+  // artículo, no el promedio: el promedio se lo lleva justamente el ingreso
+  // raro que se está buscando, y entonces nada parece raro.
+  const VECES_FUERA_DE_RANGO = 3;      // 3 veces más caro o más barato de lo habitual
+  const MINIMO_INGRESOS = 3;           // con menos no se sabe cuál de los dos es el raro
+  const COSTO_IRRISORIO = 1;           // $1 o menos no es un costo, es un dato de relleno
+
+  const costoUnitario = m => m.kind === 'in' && m.qty > EPS && m.valor > EPS ? m.valor / m.qty : null;
+
+  function costoHabitual(docs){
+    const costos = docs.map(costoUnitario).filter(v => v != null && v > COSTO_IRRISORIO).sort((a, b) => a - b);
+    if (costos.length < MINIMO_INGRESOS) return null;
+    const medio = Math.floor(costos.length / 2);
+    return costos.length % 2 ? costos[medio] : (costos[medio - 1] + costos[medio]) / 2;
+  }
+
+  function costoAtipico(m, habitual){
+    const cu = costoUnitario(m);
+    if (cu == null) return null;
+    if (cu <= COSTO_IRRISORIO) return {cu, habitual, veces: null, barato: true, irrisorio: true};
+    if (habitual == null) return null;
+    const veces = cu / habitual;
+    if (veces >= VECES_FUERA_DE_RANGO) return {cu, habitual, veces, barato: false, irrisorio: false};
+    if (veces <= 1 / VECES_FUERA_DE_RANGO) return {cu, habitual, veces, barato: true, irrisorio: false};
+    return null;
+  }
+
+  function revisionDeCostoAtipico(m, raro, docs, j){
+    const r = refCost(docs, j);
+    const costo = {v: raro.habitual != null ? raro.habitual : (r ? r.v : null),
+                   src: raro.habitual != null ? 'Lo que suele costar (mediana de los ingresos)' : (r ? r.src : '')};
+    const cuanto = raro.irrisorio
+      ? `Entró a ${cuTxt(raro.cu)} c/u, que no es un costo real.`
+      : `Entró a ${cuTxt(raro.cu)} c/u y suele costar ${cuTxt(raro.habitual)}: ` +
+        (raro.barato ? `${fmt(Math.round(1 / raro.veces * 10) / 10)} veces más barato.`
+                     : `${fmt(Math.round(raro.veces * 10) / 10)} veces más caro.`);
+    const hacia = costo.v != null ? cuTxt(costo.v) : null;
+    return {
+      need: true, costo, corr: null,
+      txt: `Sí. ${cuanto} Defontana valoriza al PMP del momento, así que lo que salió después quedó mal valorizado.`,
+      hacer: hacia
+        ? `Corregir el costo del ingreso a ${hacia} c/u (${money(costo.v * m.qty)} en total), o confirmar con la factura que ese precio era el correcto.`
+        : 'Revisar el costo del ingreso contra la factura.',
+    };
+  }
+
   function zeroReview(m, docs, j, pmp){
     const antes = pmpAt(docs[j - 1]), r = refCost(docs, j);
     const costo = r ? {v: r.v, src: r.src} : null;
@@ -893,8 +959,10 @@
   ];
   const ZERO_FILTERS = [
     ['all', 'Todos', z => true, null],
-    ['in', 'Ingresos a $0', z => z.m.kind === 'in', 'var(--in)'],
-    ['out', 'Egresos a $0', z => z.m.kind === 'out', 'var(--out)'],
+    ['cero', 'A costo $0', z => !z.raro, 'var(--out)'],
+    ['raro', 'Costo fuera de lo normal', z => !!z.raro, 'var(--warn)'],
+    ['in', 'Ingresos', z => z.m.kind === 'in', 'var(--in)'],
+    ['out', 'Egresos', z => z.m.kind === 'out', 'var(--out)'],
     ['need', 'Revisar costo', z => z.rev.need, 'var(--warn)'],
     ['noneed', 'No hace falta', z => !z.rev.need, 'var(--muted)'],
     ['nopmp', 'Sin PMP', z => !(z.pmp > 0), 'var(--warn)']
@@ -966,6 +1034,8 @@
     ['kind', 'Tipo', '', z => z.m.kind],
     ['qty', 'Cantidad', 'num', z => z.m.qty],
     ['pmp', 'PMP', 'num', z => z.pmp],
+    ['cu', 'Costo unitario del documento', 'num', z => z.raro ? z.raro.cu : (z.m.valor != null && z.m.qty > EPS ? z.m.valor / z.m.qty : null)],
+    ['habitual', 'Lo que suele costar', 'num', z => z.raro ? z.raro.habitual : null],
     ['valor', 'Valor que debió tener', 'num', z => z.valor],
     ['rev', '¿Revisar costo?', '', z => z.rev.need ? 0 : 1],
     ['costo', 'Costo a usar', 'num', z => z.rev.costo && z.rev.need ? z.rev.costo.v : null],
@@ -1761,6 +1831,6 @@
   // puerta, la matemática que decide los ajustes de inventario no se puede
   // comprobar más que a ojo.
   if (typeof module !== 'undefined' && module.exports){
-    module.exports = {compute, ajusteDelConteo, pendiente, hoyDe, state};
+    module.exports = {compute, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, state};
   }
 })();

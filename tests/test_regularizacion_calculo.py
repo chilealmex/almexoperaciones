@@ -13,19 +13,27 @@ from pathlib import Path
 import pytest
 
 NODE = shutil.which("node")
-PRUEBA = Path(__file__).parent / "js" / "test_ajuste.js"
+JS = Path(__file__).parent / "js"
+PRUEBAS = {
+    "el ajuste se mide al momento de contar": JS / "test_ajuste.js",
+    "los costos fuera de lo normal se detectan": JS / "test_costos.js",
+}
 
 
 @pytest.mark.skipif(NODE is None, reason="hace falta node para correr el cálculo del navegador")
-def test_el_ajuste_se_mide_al_momento_de_contar():
+@pytest.mark.parametrize("que_prueba", sorted(PRUEBAS), ids=sorted(PRUEBAS))
+def test_el_calculo_del_navegador(que_prueba):
+    archivo = PRUEBAS[que_prueba]
     resultado = subprocess.run(
-        [NODE, str(PRUEBA)], capture_output=True, text=True, timeout=120,
-        cwd=str(PRUEBA.parent.parent.parent),
+        [NODE, str(archivo)], capture_output=True, text=True, timeout=120,
+        cwd=str(JS.parent.parent),
     )
     assert resultado.returncode == 0, resultado.stdout + resultado.stderr
 
 
 def test_las_comprobaciones_del_navegador_existen():
-    """Si el archivo se borra, la prueba de arriba pasaría sin comprobar nada."""
-    assert PRUEBA.exists()
-    assert "entrada por 2" in PRUEBA.read_text(encoding="utf-8")
+    """Si un archivo se borra, su prueba pasaría sin comprobar nada."""
+    for archivo in PRUEBAS.values():
+        assert archivo.exists(), archivo
+    assert "entrada por 2" in (JS / "test_ajuste.js").read_text(encoding="utf-8")
+    assert "20 veces" in (JS / "test_costos.js").read_text(encoding="utf-8")
