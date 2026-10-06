@@ -23,6 +23,7 @@ PRUEBAS = {
     "se detectan las valorizaciones imposibles": JS / "test_imposibles.js",
     "los costos malos entran al paso 2 del plan": JS / "test_plan.js",
     "cada paso se marca por su cuenta": JS / "test_marcas.js",
+    "el ajuste de costo se mide contra lo que Defontana tiene hoy": JS / "test_recosteo.js",
 }
 
 
@@ -49,3 +50,4 @@ def test_las_comprobaciones_del_navegador_existen():
     assert "no existe" in (JS / "test_imposibles.js").read_text(encoding="utf-8")
     assert "no se inventa uno malo" in (JS / "test_plan.js").read_text(encoding="utf-8")
     assert "no esconde el ajuste de cantidad" in (JS / "test_marcas.js").read_text(encoding="utf-8")
+    assert "revalorizó para arriba" in (JS / "test_recosteo.js").read_text(encoding="utf-8")
