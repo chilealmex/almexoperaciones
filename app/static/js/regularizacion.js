@@ -597,13 +597,17 @@
       const pmp = edited ? state.pmpEdit.get(k) : pm ? pm.v : null;
       const rev = raro ? revisionDeCostoAtipico(m, raro, docs, j, edited ? pmp : null)
                        : zeroReview(m, docs, j, pmp);
+      const hoyRaro = raro ? comoEstaHoy(docs, raro.habitual != null ? raro.habitual : (edited ? pmp : null)) : null;
       zero.push({key:k, m, code:m.art, name:m.desc || names.get(k) || '', linea: lineas.get(k) || '', pmp, edited, raro, rev,
         pmpSrc: edited ? 'Ingresado a mano' : pm ? pm.src : 'Sin costo en Defontana',
+        // El ajuste de costo se hace sobre lo que queda en bodega, así que el
+        // plan necesita saber cuánto queda y cuánto debería valer.
+        stockHoy: hoyRaro ? hoyRaro.stock : null,
+        valorHoy: hoyRaro ? hoyRaro.valor : null,
         // Para un costo fuera de lo normal, lo que debería valer es lo que
         // queda en bodega al costo habitual; para uno a $0, lo que debió valer
         // ese documento.
-        valor: raro ? comoEstaHoy(docs, raro.habitual != null ? raro.habitual : (edited ? pmp : null)).deberiaValer
-                    : (pmp != null ? pmp * m.qty : null)});
+        valor: hoyRaro ? hoyRaro.deberiaValer : (pmp != null ? pmp * m.qty : null)});
     });
     // Las valorizaciones imposibles van una por artículo, no por documento:
     // describen cómo quedó el producto, no qué documento lo dejó así.
@@ -617,6 +621,7 @@
         key: k, m: malo.m, code: malo.m.art, name: malo.m.desc || names.get(k) || '',
         linea: lineas.get(k) || '', pmp: pmpAt(malo.m), edited: false, raro: null,
         imposible: malo.cual, pmpSrc: 'Según el informe', valor: null,
+        stockHoy: malo.saldo, valorHoy: malo.valor,
         rev: {need: true, costo: null, corr: null,
               txt: `Sí. ${def.por(malo.saldo, malo.valor)}`, hacer: def.hacer},
       });
@@ -644,6 +649,19 @@
         ajusteCosto: null};
     }
 
+    // El paso 2 ("corregir costos") se arma desde las filas de productos, pero
+    // el costo fuera de lo normal y las valorizaciones imposibles se detectan
+    // por documento, acá abajo. Sin colgarlos del producto se veían en "Costos
+    // a revisar" y no entraban nunca al plan, que es lo que se sigue para
+    // regularizar: un producto que entró a $1 y nunca tuvo un movimiento a $0
+    // quedaba fuera del paso 2.
+    const porFila = new Map(rows.map(r => [r.key, r]));
+    for (const z of zero){
+      if (!z.rev || !z.rev.need || (!z.raro && !z.imposible)) continue;
+      const r = porFila.get(z.key);
+      if (!r || r.manual) continue;
+      (r.costExtra = r.costExtra || []).push(z);
+    }
     return {rows, zero, orphan: [...byKey.keys()].filter(k => !seen.has(k)).length};
   }
 
@@ -663,8 +681,11 @@
     const habitual = costoHabitual(docs);
     if (habitual != null) return {v: habitual, src: 'lo que suele costar (mediana de las compras)'};
 
+    // Una compra a $1 no sirve de referencia: es el mismo dato de relleno que
+    // se está corrigiendo. Si el producto no tiene ninguna compra con costo de
+    // verdad, no se inventa uno: se pide escribirlo a mano.
     const costed = [];
-    docs.forEach((m, i) => { if (m.kind === 'in' && m.valor > EPS && m.qty > EPS) costed.push([m, i]); });
+    docs.forEach((m, i) => { const cu = costoUnitario(m); if (cu != null && cu > COSTO_IRRISORIO) costed.push([m, i]); });
     const src = (m, extra) => `costo de ${m.tipo} #${m.folio} del ${fmtDate(m.fecha)}${extra}`;
     let prev = null;
     for (const c of costed) if (c[1] < j) prev = c;
@@ -984,6 +1005,7 @@
     if (r.st === 'done') add('none', 'Nada: ya se ajustó la cantidad');
     if (r.st === 'nofile') add('verify', 'Revisar por qué no está en el conteo');
     if (r.cost && r.cost.need) r.cost.hacer.forEach(h => add(h.k, h.txt));
+    if (r.costExtra) r.costExtra.forEach(z => add('cost', z.rev.hacer));
     const enCod = !r.arts ? '' : r.artAjuste ? ` en el código ${r.artAjuste}` : ' (antes deja el saldo en un solo código)';
     if (r.st === 'up' && r.cause !== 'um'){
       if (r.cause === 'egrnodesp') add('in', `Parte de Entrada por ${q}${enCod} (devolución), o anular la salida que no se despachó`);
@@ -1409,6 +1431,19 @@
           else plan.cost.push({r, doc:c.doc, qty:c.qty, v:c.v, src:c.src, corr:r.cost.corr});
         }
       }
+      // Costo fuera de lo normal y valorizaciones imposibles: el ajuste va
+      // sobre lo que queda en bodega hoy, no sobre el documento de entonces.
+      for (const z of r.costExtra || []){
+        const v = z.rev.costo ? z.rev.costo.v : null;
+        const ajuste = typeof z.rev.ajusteCosto === 'number' ? z.rev.ajusteCosto
+                     : z.imposible && z.valorHoy != null ? -z.valorHoy : null;
+        plan.cost.push({r, v, nota: z.rev.hacer,
+          qty: z.stockHoy != null ? z.stockHoy : (hoyDe(r) ?? 0),
+          doc: z.imposible ? VALORIZACIONES_IMPOSIBLES[z.imposible].titulo
+                           : `${z.m.tipo} #${z.m.folio} entró a ${cuTxt(z.raro.cu)} c/u`,
+          src: z.rev.costo ? z.rev.costo.src : 'falta el costo: escríbelo en la columna PMP de “Costos a revisar”',
+          corr: ajuste != null ? {ajuste, pmp: v != null ? v : 0} : null});
+      }
       if (r.st === 'up') plan.in.push({r, qty:r.pend ?? r.diff, v:r.pmp > 0 ? r.pmp : null, src:r.pmpSrc, motivo:r.cause ? CAUSES[r.cause] : 'Sobra en bodega'});
       if (r.st === 'down') plan.out.push({r, qty:-(r.pend ?? r.diff), v:r.pmp > 0 ? r.pmp : null, src:r.pmpSrc, motivo:r.cause ? CAUSES[r.cause] : 'Falta en bodega'});
     }
@@ -1637,7 +1672,7 @@
         <tbody>${P.um.map((x, i) => { const u = x.r.umInfo; return `<tr><td class="n">${i + 1}</td>${prod(x)}<td>${esc(u.a)}</td><td><b>${esc(u.de)}</b></td><td class="num">${u.f ? fmt(u.hoyDef) + ' ' + esc(u.a) : fmt(hoyDe(x.r)) + ' ' + esc(u.a)}</td><td class="num">${u.f ? '<b>' + fmt(u.hoyConv) + ' ' + esc(u.de) + '</b>' : (u.mismo ? '<span class="small">misma cantidad (sin convertir)</span>' : '<span class="small">sin conversión conocida</span>')}</td><td class="num">${fmt(x.r.s.stock)} ${esc(u.de)}</td><td class="num">${x.r.diff == null ? '—' : (Math.abs(x.r.diff) <= EPS ? '0' : sgn(Math.round(x.r.diff * 1000) / 1000)) + ' ' + esc(u.de)}</td></tr>`; }).join('')}</tbody></table></div></section>` : ''}
       ${sec(2, 'Corregir costos', 'Un ajuste de costo por producto. Los comprobantes ya emitidos no se tocan: corregirlos hacia atrás recalcula las salidas que salieron a ese PMP, incluidas las ya facturadas.', P.cost,
         '<th>Producto</th><th>Línea</th><th>Qué corregir</th><th class="num">Cantidad</th><th class="num">Costo a usar c/u</th><th class="num">Total</th><th class="num">Si no se puede: ajuste de valor</th>',
-        x => `${prod(x)}<td>${esc(x.doc)}</td><td class="num">${fmt(x.qty)}</td><td class="num">${costo(x)}</td><td class="num">${x.v != null ? money(x.v * x.qty) : '—'}</td><td class="num">${x.corr && Math.abs(x.corr.ajuste) > 0.5 ? money(x.corr.ajuste) + '<div class="small">PMP queda en ' + money(x.corr.pmp) + '</div>' : '—'}</td>`,
+        x => `${prod(x)}<td>${esc(x.doc)}${x.nota ? `<div class="small wrapsmall">${esc(x.nota)}</div>` : ''}</td><td class="num">${fmt(x.qty)}</td><td class="num">${costo(x)}</td><td class="num">${x.v != null ? money(x.v * x.qty) : '—'}</td><td class="num">${x.corr && Math.abs(x.corr.ajuste) > 0.5 ? money(x.corr.ajuste) + '<div class="small">PMP queda en ' + money(x.corr.pmp) + '</div>' : '—'}</td>`,
         `<td></td><td colspan="6"><b>Total</b></td><td class="num"><b>${money(tot(P.cost))}</b></td><td></td>`)}
       ${sec(3, 'Entradas (Parte de Entrada)', 'Una Parte de Entrada por ajuste de inventario con estas líneas.', P.in,
         '<th>Producto</th><th>Línea</th><th class="num">Debería tener hoy</th><th class="num">Tiene Defontana hoy</th><th class="num">Cantidad</th><th class="num">Costo c/u</th><th class="num">Total</th><th>Motivo</th>',
@@ -1655,7 +1690,7 @@
     const hoja = (nombre, filas) => XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filas.length ? filas : [{'': 'Nada en este paso'}]), nombre);
     hoja('1 Confirmar', P.verify.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Diferencia': x.qty, 'Motivo': x.motivo, 'Qué revisar': x.txt})));
     if (P.um.length) hoja('1b Unidades', P.um.map((x, i) => { const u = x.r.umInfo; return {'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Unidad en Defontana': u.a, 'Cambiar a': u.de, 'Saldo Defontana (su unidad)': u.f ? u.hoyDef : hoyDe(x.r) ?? '', 'Saldo convertido': u.f ? u.hoyConv : u.mismo ? 'misma cantidad (sin convertir)' : 'sin conversión conocida', 'Contado': x.r.s.stock, 'Ajuste después': x.r.diff ?? ''}; }));
-    hoja('2 Costos', P.cost.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Qué corregir': x.doc, 'Cantidad': x.qty, 'Costo a usar c/u': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Origen del costo': x.src, 'Ajuste de valor (si no se puede corregir)': x.corr ? Math.round(x.corr.ajuste) : '', 'PMP correcto hoy': x.corr ? r2(x.corr.pmp) : ''})));
+    hoja('2 Costos', P.cost.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Qué corregir': x.doc, 'Qué hacer': x.nota || '', 'Cantidad': x.qty, 'Costo a usar c/u': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Origen del costo': x.src, 'Ajuste de valor (si no se puede corregir)': x.corr ? Math.round(x.corr.ajuste) : '', 'PMP correcto hoy': x.corr ? r2(x.corr.pmp) : ''})));
     hoja('3 Entradas', P.in.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Debería tener hoy': x.r.realNow ?? '', 'Tiene Defontana hoy': hoyDe(x.r) ?? '', 'Cantidad': x.qty, 'Costo c/u': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Origen del costo': x.src, 'Motivo': x.motivo})));
     hoja('4 Salidas', P.out.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Debería tener hoy': x.r.realNow ?? '', 'Tiene Defontana hoy': hoyDe(x.r) ?? '', 'Cantidad': x.qty, 'PMP c/u (referencial)': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Motivo': x.motivo})));
     XLSX.writeFile(wb, 'plan-de-ajustes-' + fmtDate(new Date()) + '.xlsx');
@@ -2065,6 +2100,6 @@
   // puerta, la matemática que decide los ajustes de inventario no se puede
   // comprobar más que a ojo.
   if (typeof module !== 'undefined' && module.exports){
-    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, leerDeCualquierHoja, filasConLasColumnas, state};
+    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, state};
   }
 })();
