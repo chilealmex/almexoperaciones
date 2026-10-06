@@ -564,9 +564,30 @@
       const marcaVale = marca === null || (marca !== undefined && marca.fecha === (s.fecha ? +s.fecha : null) &&
         ((marca.sug == null && sugHoy == null) || (marca.sug != null && sugHoy != null && Math.abs(marca.sug - sugHoy) <= EPS)));
       if (marca !== undefined && !marcaVale) dx.obs.unshift('Estaba marcado como "Ya regularizado", pero con los archivos nuevos la diferencia cambió: revísalo de nuevo.');
-      const manual = !!s && marcaVale;
+      // Qué parte se dio por regularizada. Marcar el producto entero servía
+      // para la unidad de medida —se corrige en Defontana y no hay ajuste que
+      // hacer—, pero se llevaba por delante la cantidad y el costo, que sí
+      // había que ajustar y dejaban de pedirse. Cada paso se marca por su
+      // cuenta; una marca vieja, sin lista, sigue valiendo por el producto
+      // entero, que es lo que significaba cuando se guardó.
+      const hechos = new Set(!s || !marcaVale ? [] : (marca && marca.pasos ? marca.pasos : PASOS_MARCABLES));
+      const manual = !!s && marcaVale && PASOS_MARCABLES.every(p => hechos.has(p));
       if (manual){ st = 'done'; cost = null; dx.cause = null; dx.obs = ['Marcado a mano como ya regularizado.', ...dx.obs.filter(x => /^Ajuste de (cantidad|costo) ya hecho/.test(x))]; }
-      return {cause:dx.cause, obs:dx.obs, umRound: !!dx.umRound, umMaster: !!dx.umMaster, linea: s ? s.linea || '' : '', alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, umInfo, arts, artAjuste, pend, costDocs, manual, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs, sysCalc, toOther,
+      else {
+        // Confirmado lo dudoso, lo que quede de diferencia vuelve a pedirse
+        // como ajuste de cantidad: es justamente el paso siguiente.
+        if (hechos.has('confirmar')){
+          dx.obs.unshift(dx.cause === 'um' || dx.umMaster
+            ? 'Marcaste la unidad de medida como corregida en Defontana. Lo que quede de diferencia se pide ahora como ajuste de cantidad.'
+            : 'Marcaste la revisión como hecha. La diferencia se pide ahora como ajuste de cantidad: si el documento posterior al conteo ya la explicaba y no hay nada que ajustar, marca también la cantidad como regularizada.');
+          if (st === 'check') st = pend != null ? (Math.abs(pend) <= EPS ? 'done' : pend > 0 ? 'up' : 'down')
+                                                : diff > EPS ? 'up' : diff < -EPS ? 'down' : 'ok';
+          dx.cause = null;
+        }
+        if (hechos.has('costo')) cost = null;
+        if (hechos.has('cantidad') && (st === 'up' || st === 'down')) st = 'done';
+      }
+      return {cause:dx.cause, obs:dx.obs, hechos, umRound: !!dx.umRound, umMaster: !!dx.umMaster, linea: s ? s.linea || '' : '', alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, umInfo, arts, artAjuste, pend, costDocs, manual, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs, sysCalc, toOther,
         sysAtCount, sysNow, realNow, diff, st, pmp, edited, pmpSrc: edited ? 'Ingresado a mano' : pm ? pm.src : 'Sin costo en Defontana',
         valor: st === 'done' ? 0 : pend != null && pmp != null ? pend * pmp : diff != null && Math.abs(diff) > EPS && pmp != null ? diff * pmp : (st === 'ok' ? 0 : null), zeros, cost};
     };
@@ -659,13 +680,19 @@
     for (const z of zero){
       if (!z.rev || !z.rev.need || (!z.raro && !z.imposible)) continue;
       const r = porFila.get(z.key);
-      if (!r || r.manual) continue;
+      if (!r || r.manual || (r.hechos && r.hechos.has('costo'))) continue;
       (r.costExtra = r.costExtra || []).push(z);
     }
     return {rows, zero, orphan: [...byKey.keys()].filter(k => !seen.has(k)).length};
   }
 
   // ---------- Costo: productos que entraron o salieron a $0 ----------
+  // En Defontana el ajuste de costo se hace con un comprobante de ENTRADA
+  // cuando sube el valor del inventario, y de SALIDA cuando lo baja. Decirlo
+  // ahorra tener que deducirlo del signo a mano al cargar el comprobante.
+  const AJ_COSTO_IN = 'Ajuste de costo ENTRADA', AJ_COSTO_OUT = 'Ajuste de costo SALIDA';
+  const tipoAjCosto = v => v == null || Math.abs(v) <= 0.5 ? null : v > 0 ? AJ_COSTO_IN : AJ_COSTO_OUT;
+  const ajCostoTxt = v => `${tipoAjCosto(v)} por ${money(Math.abs(v))}`;
   const pmpAt = m => m && m.saldo > EPS && m.valorInv != null ? m.valorInv / m.saldo : null;
   // Costo unitario para corregir un documento a $0: el de la compra con costo más cercana (la última
   // anterior; si no hay, la primera posterior); si no hay compras con costo, el PMP que tenía antes.
@@ -777,7 +804,7 @@
       ins0 = [];
     }
     for (const {m, f} of yaCorregidos) txt.push(`Entró ${fmt(m.qty)} a $0 con ${m.tipo} #${m.folio} del ${fmtDate(m.fecha)}, pero el costo ya se corrigió: ${f}.`);
-    if (sinCostoHoy){ txt.push(`Hoy tiene ${fmt(saldoHoy)} sin costo en Defontana (PMP $0).`); hacer.push({k:'cost', txt:`Ajuste de valor: cargar el costo a las ${fmt(saldoHoy)} unidades`}); }
+    if (sinCostoHoy){ txt.push(`Hoy tiene ${fmt(saldoHoy)} sin costo en Defontana (PMP $0).`); hacer.push({k:'cost', txt:`${AJ_COSTO_IN}: cargar el costo a las ${fmt(saldoHoy)} unidades`}); }
     const costos = [];
     for (const m of ins0){
       const i = docs.indexOf(m), antes = pmpAt(docs[i - 1]), despues = pmpAt(m), r = refCost(docs, i);
@@ -793,7 +820,7 @@
     const corr = ins0.length ? correctedToday(docs) : null;
     if (corr && Math.abs(corr.ajuste) > 0.5) {
       const deQue = ins0.map(m => `${m.tipo} #${m.folio}`).join(', ');
-      hacer.push({k:'cost', txt:`Ajuste de costo por ${money(corr.ajuste)}: el PMP queda en ${money(corr.pmp)} (lo dejó así ${deQue})`});
+      hacer.push({k:'cost', txt:`${ajCostoTxt(corr.ajuste)}: el PMP queda en ${money(corr.pmp)} (lo dejó así ${deQue})`});
     }
     if (sinCostoHoy && !ins0.length){ const r = refCost(docs, docs.length); costos.push({doc: 'stock actual', qty: saldoHoy, v: r ? r.v : null, src: r ? r.src : 'no hay compras con costo en el informe: usa el costo de la factura'}); }
     const need = sinCostoHoy || ins0.length > 0;
@@ -898,10 +925,10 @@
     // tocar el documento viejo: el ingreso ya se consumió en parte y corregirlo
     // hacia atrás arrastra todas las salidas que salieron a ese PMP.
     const hacer = hoy.ajuste != null
-      ? `Ajuste de costo por ${money(hoy.ajuste)}: el valor del inventario pasa de ${money(hoy.valor)} a ${money(hoy.deberiaValer)} ` +
+      ? `${ajCostoTxt(hoy.ajuste)}: el valor del inventario pasa de ${money(hoy.valor)} a ${money(hoy.deberiaValer)} ` +
         `para las ${fmt(hoy.stock)} que quedan, y el PMP queda en ${aQue}.`
       : objetivo != null
-        ? `Ajuste de costo para dejar el PMP en ${aQue} c/u.`
+        ? `Ajuste de costo (entrada o salida, según si el valor sube o baja) para dejar el PMP en ${aQue} c/u.`
         : `Falta el costo: no hay con qué saber cuánto cuesta este producto` +
           (r ? ` (lo más parecido es ${cuTxt(r.v)}, del ${r.src.toLowerCase()})` : '') +
           `. Escríbelo en la columna PMP y se calcula el ajuste.`;
@@ -924,13 +951,13 @@
       titulo: 'Valor de inventario negativo',
       por: (saldo, valor) => `El inventario de este producto vale ${money(valor)}: un valor negativo no existe. ` +
         `Suele quedar así cuando salió más de lo que había y Defontana descontó valor que no estaba.`,
-      hacer: 'Ajuste de costo para dejar el valor en lo que corresponde a lo que hay en bodega.',
+      hacer: AJ_COSTO_IN + ': subir el valor a lo que corresponde a lo que hay en bodega (hoy está en negativo).',
     },
     valorSinStock: {
       titulo: 'Valor sin unidades',
       por: (saldo, valor) => `No quedan unidades y el inventario sigue valiendo ${money(valor)}. ` +
         `Ese valor no tiene a qué producto corresponder: queda inflando el inventario.`,
-      hacer: 'Ajuste de costo para dejar el valor en $0, ya que no hay unidades.',
+      hacer: AJ_COSTO_OUT + ': dejar el valor en $0, ya que no hay unidades.',
     },
     stockNegativo: {
       titulo: 'Stock negativo',
@@ -965,10 +992,10 @@
       // hacia atrás recalcula todas las salidas que salieron a ese PMP, y las
       // que ya se facturaron quedan con un costo distinto del que tuvieron.
       const hacer = corr && Math.abs(corr.ajuste) > 0.5
-        ? `Ajuste de costo por ${money(corr.ajuste)}: el PMP queda en ${money(corr.pmp)}` +
+        ? `${ajCostoTxt(corr.ajuste)}: el PMP queda en ${money(corr.pmp)}` +
           (r ? ` (el producto cuesta ${money(r.v)} c/u según ${r.src})` : '') + '.'
         : r
-          ? `Ajuste de costo para dejar el PMP en ${money(r.v)} c/u (${r.src}).`
+          ? `Ajuste de costo (entrada o salida, según si el valor sube o baja) para dejar el PMP en ${money(r.v)} c/u (${r.src}).`
           : 'Ajuste de costo con el costo real del producto (factura o importación).';
       return antes > EPS
         ? {need:true, costo, corr, txt:`Sí. Entró a $0 y el PMP bajó de ${money(antes)} a ${money(pmpAt(m))}.`, hacer}
@@ -978,7 +1005,7 @@
     const hoy = pmpAt(docs[docs.length - 1]);
     return hoy > EPS
       ? {need:false, txt:`No. Salió a $0 porque en ese momento no tenía costo, pero hoy su PMP es ${money(hoy)}.`, hacer:'Nada (solo la salida quedó sin costo)'}
-      : {need:true, costo, txt:'Sí. Salió a $0 porque el producto no tiene costo (PMP $0).', hacer: r ? `Ajuste de valor: cargar el costo del producto a ${money(r.v)} c/u` : 'Ajuste de valor: cargar el costo del producto con la factura'};
+      : {need:true, costo, txt:'Sí. Salió a $0 porque el producto no tiene costo (PMP $0).', hacer: r ? `${AJ_COSTO_IN}: cargar el costo del producto a ${money(r.v)} c/u` : `${AJ_COSTO_IN}: cargar el costo del producto con la factura`};
   }
 
   // ---------- Qué hacer, en orden ----------
@@ -990,20 +1017,28 @@
     verify:{n:1, label:'Confirmar', cls:'k-verify'}, unit:{n:1.5, label:'Unidad', cls:'k-verify'}, cost:{n:2, label:'Costo', cls:'k-cost'},
     in:{n:3, label:'Entrada', cls:'k-in'}, out:{n:4, label:'Salida', cls:'k-out'}, none:{n:9, label:'—', cls:'k-none'}
   };
+  // Cada paso se marca por su cuenta: dar por regularizada la unidad de medida
+  // no es dar por regularizada la cantidad ni el costo.
+  const PASOS_MARCABLES = ['confirmar', 'costo', 'cantidad'];
+  const PASO_DE = {verify:'confirmar', unit:'confirmar', cost:'costo', in:'cantidad', out:'cantidad', none:null};
+  const PASO_NOMBRE = {confirmar:'Confirmado (unidad / revisión)', costo:'Costo regularizado', cantidad:'Cantidad regularizada'};
   function docSteps(r){
     if (r._steps) return r._steps;
     const d = r.pend ?? r.diff, q = d != null ? fmt(Math.abs(d)) : '', steps = [];
     const add = (k, txt) => steps.push({k, txt});
     if (r.manual){ add('none', 'Nada: marcado como ya regularizado'); r._steps = steps; return steps; }
-    if (r.umInfo && r.umInfo.f && r.counted) add('unit', `Cambiar la unidad en Defontana de ${r.umInfo.a} a ${r.umInfo.de}: el saldo de ${fmt(r.umInfo.hoyDef)} ${r.umInfo.a} queda en ${fmt(r.umInfo.hoyConv)} ${r.umInfo.de}`);
-    if (r.umMaster) add('verify', `Corregir la unidad en el maestro de Defontana (${r.umInfo.a} → ${r.umInfo.de}) y confirmar en qué unidad están sus cantidades antes de ajustar`);
-    else if (r.umRound) add('none', 'Nada: la diferencia es solo el redondeo al convertir la unidad del conteo');
-    else if (r.cause === 'um') add('verify', 'Revisar la unidad de medida: el conteo parece estar en otra unidad. Convertir y recién después ajustar');
-    else if (r.st === 'check') add('verify', 'Volver a contar: la diferencia puede deberse a un documento registrado después del conteo. Si se confirma, no ajustar');
-    if (r.st === 'nodata') add('verify', 'Ver el saldo del producto en Defontana (no hay documentos en el informe)');
-    if (r.st === 'nocount') add('verify', 'Contar el producto');
-    if (r.st === 'done') add('none', 'Nada: ya se ajustó la cantidad');
-    if (r.st === 'nofile') add('verify', 'Revisar por qué no está en el conteo');
+    const hecho = p => !!(r.hechos && r.hechos.has(p));
+    if (!hecho('confirmar')){
+      if (r.umInfo && r.umInfo.f && r.counted) add('unit', `Cambiar la unidad en Defontana de ${r.umInfo.a} a ${r.umInfo.de}: el saldo de ${fmt(r.umInfo.hoyDef)} ${r.umInfo.a} queda en ${fmt(r.umInfo.hoyConv)} ${r.umInfo.de}`);
+      if (r.umMaster) add('verify', `Corregir la unidad en el maestro de Defontana (${r.umInfo.a} → ${r.umInfo.de}) y confirmar en qué unidad están sus cantidades antes de ajustar`);
+      else if (r.umRound) add('none', 'Nada: la diferencia es solo el redondeo al convertir la unidad del conteo');
+      else if (r.cause === 'um') add('verify', 'Revisar la unidad de medida: el conteo parece estar en otra unidad. Convertir y recién después ajustar');
+      else if (r.st === 'check') add('verify', 'Volver a contar: la diferencia puede deberse a un documento registrado después del conteo. Si se confirma, no ajustar');
+      if (r.st === 'nodata') add('verify', 'Ver el saldo del producto en Defontana (no hay documentos en el informe)');
+      if (r.st === 'nocount') add('verify', 'Contar el producto');
+      if (r.st === 'nofile') add('verify', 'Revisar por qué no está en el conteo');
+    }
+    if (r.st === 'done') add('none', hecho('cantidad') ? 'Nada: marcaste la cantidad como ya regularizada' : 'Nada: ya se ajustó la cantidad');
     if (r.cost && r.cost.need) r.cost.hacer.forEach(h => add(h.k, h.txt));
     if (r.costExtra) r.costExtra.forEach(z => add('cost', z.rev.hacer));
     const enCod = !r.arts ? '' : r.artAjuste ? ` en el código ${r.artAjuste}` : ' (antes deja el saldo en un solo código)';
@@ -1021,7 +1056,16 @@
     return steps;
   }
   const docToMake = r => docSteps(r).map(x => x.txt);
-  const stepsCell = steps => `<ol class="steps">${steps.map(x => `<li><span class="stepk ${STEP[x.k].cls}">${STEP[x.k].label}</span> ${esc(x.txt)}</li>`).join('')}</ol>`;
+  // Cada paso lleva su propio "Listo": marcar la unidad de medida no puede
+  // llevarse por delante el ajuste de cantidad ni el de costo.
+  const botonPaso = (r, p, txt, titulo) => `<button type="button" class="rx-btn ghost sm hecho" data-hecho="${esc(r.key)}" data-paso="${p}" title="${titulo}">${txt}</button>`;
+  const stepsCell = (steps, r) => `<ol class="steps">${steps.map(x => {
+    const p = PASO_DE[x.k];
+    return `<li><span class="stepk ${STEP[x.k].cls}">${STEP[x.k].label}</span> ${esc(x.txt)}` +
+      (p && r && r.s ? ' ' + botonPaso(r, p, '✓ Listo', 'Ya lo hiciste en Defontana: deja de pedir este paso') : '') + '</li>';
+  }).join('')}</ol>`;
+  const marcasCell = r => !r || !r.hechos || !r.hechos.size || r.manual ? '' :
+    `<div class="marcas">${[...r.hechos].map(p => `<span class="pill a-ok">✓ ${PASO_NOMBRE[p]}</span> ${botonPaso(r, p, 'Desmarcar', 'Volver a pedir este paso')}`).join(' ')}</div>`;
   const stepsText = r => docSteps(r).map((x, i) => `${i + 1}. ${STEP[x.k].label}: ${x.txt}`).join(' · ');
   function checkToMake(r){
     const g = r.gap, q = g != null ? fmt(Math.abs(g)) : '';
@@ -1342,7 +1386,7 @@
       <td class="num diff ${r.st === 'check' ? 'mut' : aj > EPS ? 'plus' : aj < -EPS ? 'minus' : 'mut'}">${aj == null ? '—' : Math.abs(aj) <= EPS ? '0' : r.st === 'check' ? '<span class="small">a confirmar</span><div class="small">(' + sgn(aj) + ' si no se explica)</div>' : sgn(aj)}</td>
       <td><span class="pill ${cls}">${label}${qty}</span>${comprobantesAj(r)}${r.sameDay && r.counted ? '<span class="flag" title="Hay documentos el mismo día del conteo">· mismo día</span>' : ''}</td>
       <td class="obs">${obsCell(r)}</td>
-      <td class="tomake">${stepsCell(docSteps(r))}${r.s && (r.manual || r.st === 'up' || r.st === 'down' || r.st === 'check') ? `<button type="button" class="rx-btn ghost sm hecho" data-hecho="${esc(r.key)}" title="${r.manual ? 'Volver a mostrarlo como pendiente' : 'Ya lo regularizaste en Defontana: deja de pedir ajuste'}">${r.manual ? 'Desmarcar' : '✓ Ya regularizado'}</button>` : ''}</td>
+      <td class="tomake">${stepsCell(docSteps(r), r)}${marcasCell(r)}${r.s ? botonPaso(r, 'todo', r.manual ? 'Desmarcar todo' : '✓ Todo regularizado', r.manual ? 'Volver a mostrarlo como pendiente' : 'Ya regularizaste todo este producto en Defontana') : ''}</td>
       <td class="num">${costCell(r)}</td>
       <td class="num">${r.st === 'up' || r.st === 'down' || r.st === 'check' ? pmpInput(r.key, r.pmp, r.edited, r.code) : '<span class="mut">' + (r.pmp != null ? money(r.pmp) : '—') + '</span>'}</td>
       <td class="num diff ${r.valor > 0.5 ? 'plus' : r.valor < -0.5 ? 'minus' : 'mut'}">${r.st === 'up' || r.st === 'down' || r.st === 'check' ? money(r.valor) : '—'}</td></tr>`;
@@ -1671,8 +1715,8 @@
         <div class="tablebox"><table class="plantable"><thead><tr><th class="n">#</th><th>Producto</th><th>Línea</th><th>Unidad en Defontana</th><th>Cambiar a</th><th class="num">Saldo Defontana</th><th class="num">Saldo convertido</th><th class="num">Contado</th><th class="num">Ajuste después</th></tr></thead>
         <tbody>${P.um.map((x, i) => { const u = x.r.umInfo; return `<tr><td class="n">${i + 1}</td>${prod(x)}<td>${esc(u.a)}</td><td><b>${esc(u.de)}</b></td><td class="num">${u.f ? fmt(u.hoyDef) + ' ' + esc(u.a) : fmt(hoyDe(x.r)) + ' ' + esc(u.a)}</td><td class="num">${u.f ? '<b>' + fmt(u.hoyConv) + ' ' + esc(u.de) + '</b>' : (u.mismo ? '<span class="small">misma cantidad (sin convertir)</span>' : '<span class="small">sin conversión conocida</span>')}</td><td class="num">${fmt(x.r.s.stock)} ${esc(u.de)}</td><td class="num">${x.r.diff == null ? '—' : (Math.abs(x.r.diff) <= EPS ? '0' : sgn(Math.round(x.r.diff * 1000) / 1000)) + ' ' + esc(u.de)}</td></tr>`; }).join('')}</tbody></table></div></section>` : ''}
       ${sec(2, 'Corregir costos', 'Un ajuste de costo por producto. Los comprobantes ya emitidos no se tocan: corregirlos hacia atrás recalcula las salidas que salieron a ese PMP, incluidas las ya facturadas.', P.cost,
-        '<th>Producto</th><th>Línea</th><th>Qué corregir</th><th class="num">Cantidad</th><th class="num">Costo a usar c/u</th><th class="num">Total</th><th class="num">Si no se puede: ajuste de valor</th>',
-        x => `${prod(x)}<td>${esc(x.doc)}${x.nota ? `<div class="small wrapsmall">${esc(x.nota)}</div>` : ''}</td><td class="num">${fmt(x.qty)}</td><td class="num">${costo(x)}</td><td class="num">${x.v != null ? money(x.v * x.qty) : '—'}</td><td class="num">${x.corr && Math.abs(x.corr.ajuste) > 0.5 ? money(x.corr.ajuste) + '<div class="small">PMP queda en ' + money(x.corr.pmp) + '</div>' : '—'}</td>`,
+        '<th>Producto</th><th>Línea</th><th>Qué corregir</th><th class="num">Cantidad</th><th class="num">Costo a usar c/u</th><th class="num">Total</th><th class="num">Ajuste de valor (entrada / salida)</th>',
+        x => `${prod(x)}<td>${esc(x.doc)}${x.nota ? `<div class="small wrapsmall">${esc(x.nota)}</div>` : ''}</td><td class="num">${fmt(x.qty)}</td><td class="num">${costo(x)}</td><td class="num">${x.v != null ? money(x.v * x.qty) : '—'}</td><td class="num">${x.corr && tipoAjCosto(x.corr.ajuste) ? '<b>' + tipoAjCosto(x.corr.ajuste) + '</b><div>' + money(Math.abs(x.corr.ajuste)) + '</div><div class="small">PMP queda en ' + money(x.corr.pmp) + '</div>' : '—'}</td>`,
         `<td></td><td colspan="6"><b>Total</b></td><td class="num"><b>${money(tot(P.cost))}</b></td><td></td>`)}
       ${sec(3, 'Entradas (Parte de Entrada)', 'Una Parte de Entrada por ajuste de inventario con estas líneas.', P.in,
         '<th>Producto</th><th>Línea</th><th class="num">Debería tener hoy</th><th class="num">Tiene Defontana hoy</th><th class="num">Cantidad</th><th class="num">Costo c/u</th><th class="num">Total</th><th>Motivo</th>',
@@ -1690,7 +1734,7 @@
     const hoja = (nombre, filas) => XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filas.length ? filas : [{'': 'Nada en este paso'}]), nombre);
     hoja('1 Confirmar', P.verify.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Diferencia': x.qty, 'Motivo': x.motivo, 'Qué revisar': x.txt})));
     if (P.um.length) hoja('1b Unidades', P.um.map((x, i) => { const u = x.r.umInfo; return {'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Unidad en Defontana': u.a, 'Cambiar a': u.de, 'Saldo Defontana (su unidad)': u.f ? u.hoyDef : hoyDe(x.r) ?? '', 'Saldo convertido': u.f ? u.hoyConv : u.mismo ? 'misma cantidad (sin convertir)' : 'sin conversión conocida', 'Contado': x.r.s.stock, 'Ajuste después': x.r.diff ?? ''}; }));
-    hoja('2 Costos', P.cost.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Qué corregir': x.doc, 'Qué hacer': x.nota || '', 'Cantidad': x.qty, 'Costo a usar c/u': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Origen del costo': x.src, 'Ajuste de valor (si no se puede corregir)': x.corr ? Math.round(x.corr.ajuste) : '', 'PMP correcto hoy': x.corr ? r2(x.corr.pmp) : ''})));
+    hoja('2 Costos', P.cost.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Qué corregir': x.doc, 'Qué hacer': x.nota || '', 'Cantidad': x.qty, 'Costo a usar c/u': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Origen del costo': x.src, 'Tipo de comprobante': x.corr ? (tipoAjCosto(x.corr.ajuste) || '') : '', 'Ajuste de valor': x.corr ? Math.round(x.corr.ajuste) : '', 'PMP correcto hoy': x.corr ? r2(x.corr.pmp) : ''})));
     hoja('3 Entradas', P.in.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Debería tener hoy': x.r.realNow ?? '', 'Tiene Defontana hoy': hoyDe(x.r) ?? '', 'Cantidad': x.qty, 'Costo c/u': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Origen del costo': x.src, 'Motivo': x.motivo})));
     hoja('4 Salidas', P.out.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Debería tener hoy': x.r.realNow ?? '', 'Tiene Defontana hoy': hoyDe(x.r) ?? '', 'Cantidad': x.qty, 'PMP c/u (referencial)': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Motivo': x.motivo})));
     XLSX.writeFile(wb, 'plan-de-ajustes-' + fmtDate(new Date()) + '.xlsx');
@@ -2029,8 +2073,16 @@
     const hb = e.target.closest('[data-hecho]');
     if (hb){
       const k = hb.dataset.hecho, r = state.rows.find(x => x.key === k);
-      if (r && r.manual) state.hechos.delete(k);
-      else if (r){ state.hechos.set(k, {sug: ajusteDelConteo(r), fecha: r.s && r.s.fecha ? +r.s.fecha : null}); }
+      if (r && r.s){
+        const paso = hb.dataset.paso || 'todo';
+        const pasos = new Set(r.hechos || []);
+        if (paso === 'todo'){
+          if (r.manual) pasos.clear(); else PASOS_MARCABLES.forEach(p => pasos.add(p));
+        } else if (pasos.has(paso)) pasos.delete(paso);
+        else pasos.add(paso);
+        if (!pasos.size) state.hechos.delete(k);
+        else state.hechos.set(k, {sug: ajusteDelConteo(r), fecha: r.s.fecha ? +r.s.fecha : null, pasos: [...pasos]});
+      }
       guardarEstado(); render(); return;
     }
     if (e.target.closest('input')) return; const tr = e.target.closest('tr.rx-row'); if (tr) toggle(tr); });
@@ -2100,6 +2152,6 @@
   // puerta, la matemática que decide los ajustes de inventario no se puede
   // comprobar más que a ojo.
   if (typeof module !== 'undefined' && module.exports){
-    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, state};
+    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, tipoAjCosto, state};
   }
 })();

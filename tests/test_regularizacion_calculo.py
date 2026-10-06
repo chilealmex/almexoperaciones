@@ -22,6 +22,7 @@ PRUEBAS = {
     "se respetan las parejas confirmadas en Unificar códigos": JS / "test_uniones.js",
     "se detectan las valorizaciones imposibles": JS / "test_imposibles.js",
     "los costos malos entran al paso 2 del plan": JS / "test_plan.js",
+    "cada paso se marca por su cuenta": JS / "test_marcas.js",
 }
 
 
@@ -47,3 +48,4 @@ def test_las_comprobaciones_del_navegador_existen():
     assert "partido en dos" in (JS / "test_uniones.js").read_text(encoding="utf-8")
     assert "no existe" in (JS / "test_imposibles.js").read_text(encoding="utf-8")
     assert "no se inventa uno malo" in (JS / "test_plan.js").read_text(encoding="utf-8")
+    assert "no esconde el ajuste de cantidad" in (JS / "test_marcas.js").read_text(encoding="utf-8")
