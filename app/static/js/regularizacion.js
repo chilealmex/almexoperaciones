@@ -692,7 +692,21 @@
   // ahorra tener que deducirlo del signo a mano al cargar el comprobante.
   const AJ_COSTO_IN = 'Ajuste de costo ENTRADA', AJ_COSTO_OUT = 'Ajuste de costo SALIDA';
   const tipoAjCosto = v => v == null || Math.abs(v) <= 0.5 ? null : v > 0 ? AJ_COSTO_IN : AJ_COSTO_OUT;
-  const ajCostoTxt = v => `${tipoAjCosto(v)} por ${money(Math.abs(v))}`;
+  // El comprobante en Defontana se carga por unidad, así que el monto unitario
+  // va junto al total: sin él hay que dividir a mano producto por producto.
+  const porUnidad = n => n == null || isNaN(n) ? '—' : (n < 0 ? '−$' : '$') + Math.abs(n).toLocaleString('es-CL', {maximumFractionDigits: 2});
+  // El comprobante de ajuste de costo en Defontana se carga por unidad, y su
+  // campo "Costo Unitario" es el costo con que debe QUEDAR el artículo, no el
+  // monto a sacarle. Defontana multiplica por el stock y arma el total sola.
+  //
+  // La diferencia no es de matiz: con 209 brochas valorizadas a $4.514 que
+  // deben quedar a $1.283, el ajuste es de $675.252 y el unitario a sacar
+  // serían $3.230,87. Al teclear $3.230,87 Defontana entiende "déjalas a
+  // $3.230,87" y mueve $268.196: menos de la mitad, y el inventario queda
+  // todavía al triple de lo que vale. Así que lo que se muestra es el costo
+  // que hay que dejar.
+  const ajCostoTxt = (v, u, pmp) => `${tipoAjCosto(v)} por ${money(Math.abs(v))}` +
+    (pmp != null && u > EPS ? `: en "Costo Unitario" de Defontana pon ${porUnidad(pmp)} —el costo con que debe quedar— y el total lo calcula Defontana por las ${fmt(u)} unidades` : '');
   const pmpAt = m => m && m.saldo > EPS && m.valorInv != null ? m.valorInv / m.saldo : null;
   // Costo unitario para corregir un documento a $0: el de la compra con costo más cercana (la última
   // anterior; si no hay, la primera posterior); si no hay compras con costo, el PMP que tenía antes.
@@ -760,7 +774,7 @@
     // el que revaloriza. Así que su Valor Inventario es lo que hay que mover.
     const u = docs[docs.length - 1];
     const hoy = u && u.valorInv != null && u.saldo > EPS ? u.valorInv : asi.valor;
-    return {pmp: bien.valor / bien.saldo, ajuste: bien.valor - hoy};
+    return {pmp: bien.valor / bien.saldo, ajuste: bien.valor - hoy, unidades: bien.saldo};
   }
 
   // ¿El costo de un ingreso a $0 ya se corrigió? Sí, si después hubo un documento que solo cambia el
@@ -835,7 +849,7 @@
     const corr = ins0.length ? correctedToday(docs) : null;
     if (corr && Math.abs(corr.ajuste) > 0.5) {
       const deQue = ins0.map(m => `${m.tipo} #${m.folio}`).join(', ');
-      hacer.push({k:'cost', txt:`${ajCostoTxt(corr.ajuste)}: el PMP queda en ${money(corr.pmp)} (lo dejó así ${deQue})`});
+      hacer.push({k:'cost', txt:`${ajCostoTxt(corr.ajuste, corr.unidades, corr.pmp)} (lo dejó así ${deQue})`});
     }
     if (sinCostoHoy && !ins0.length){ const r = refCost(docs, docs.length); costos.push({doc: 'stock actual', qty: saldoHoy, v: r ? r.v : null, src: r ? r.src : 'no hay compras con costo en el informe: usa el costo de la factura'}); }
     const need = sinCostoHoy || ins0.length > 0;
@@ -940,8 +954,7 @@
     // tocar el documento viejo: el ingreso ya se consumió en parte y corregirlo
     // hacia atrás arrastra todas las salidas que salieron a ese PMP.
     const hacer = hoy.ajuste != null
-      ? `${ajCostoTxt(hoy.ajuste)}: el valor del inventario pasa de ${money(hoy.valor)} a ${money(hoy.deberiaValer)} ` +
-        `para las ${fmt(hoy.stock)} que quedan, y el PMP queda en ${aQue}.`
+      ? `${ajCostoTxt(hoy.ajuste, hoy.stock, objetivo)}. El valor del inventario pasa de ${money(hoy.valor)} a ${money(hoy.deberiaValer)}.`
       : objetivo != null
         ? `Ajuste de costo (entrada o salida, según si el valor sube o baja) para dejar el PMP en ${aQue} c/u.`
         : `Falta el costo: no hay con qué saber cuánto cuesta este producto` +
@@ -1007,7 +1020,7 @@
       // hacia atrás recalcula todas las salidas que salieron a ese PMP, y las
       // que ya se facturaron quedan con un costo distinto del que tuvieron.
       const hacer = corr && Math.abs(corr.ajuste) > 0.5
-        ? `${ajCostoTxt(corr.ajuste)}: el PMP queda en ${money(corr.pmp)}` +
+        ? `${ajCostoTxt(corr.ajuste, corr.unidades, corr.pmp)}` +
           (r ? ` (el producto cuesta ${money(r.v)} c/u según ${r.src})` : '') + '.'
         : r
           ? `Ajuste de costo (entrada o salida, según si el valor sube o baja) para dejar el PMP en ${money(r.v)} c/u (${r.src}).`
@@ -1501,7 +1514,7 @@
           doc: z.imposible ? VALORIZACIONES_IMPOSIBLES[z.imposible].titulo
                            : `${z.m.tipo} #${z.m.folio} entró a ${cuTxt(z.raro.cu)} c/u`,
           src: z.rev.costo ? z.rev.costo.src : 'falta el costo: escríbelo en la columna PMP de “Costos a revisar”',
-          corr: ajuste != null ? {ajuste, pmp: v != null ? v : 0} : null});
+          corr: ajuste != null ? {ajuste, pmp: v != null ? v : 0, unidades: z.stockHoy != null ? z.stockHoy : (hoyDe(r) ?? 0)} : null});
       }
       if (r.st === 'up') plan.in.push({r, qty:r.pend ?? r.diff, v:r.pmp > 0 ? r.pmp : null, src:r.pmpSrc, motivo:r.cause ? CAUSES[r.cause] : 'Sobra en bodega'});
       if (r.st === 'down') plan.out.push({r, qty:-(r.pend ?? r.diff), v:r.pmp > 0 ? r.pmp : null, src:r.pmpSrc, motivo:r.cause ? CAUSES[r.cause] : 'Falta en bodega'});
@@ -1731,7 +1744,7 @@
         <tbody>${P.um.map((x, i) => { const u = x.r.umInfo; return `<tr><td class="n">${i + 1}</td>${prod(x)}<td>${esc(u.a)}</td><td><b>${esc(u.de)}</b></td><td class="num">${u.f ? fmt(u.hoyDef) + ' ' + esc(u.a) : fmt(hoyDe(x.r)) + ' ' + esc(u.a)}</td><td class="num">${u.f ? '<b>' + fmt(u.hoyConv) + ' ' + esc(u.de) + '</b>' : (u.mismo ? '<span class="small">misma cantidad (sin convertir)</span>' : '<span class="small">sin conversión conocida</span>')}</td><td class="num">${fmt(x.r.s.stock)} ${esc(u.de)}</td><td class="num">${x.r.diff == null ? '—' : (Math.abs(x.r.diff) <= EPS ? '0' : sgn(Math.round(x.r.diff * 1000) / 1000)) + ' ' + esc(u.de)}</td></tr>`; }).join('')}</tbody></table></div></section>` : ''}
       ${sec(2, 'Corregir costos', 'Un ajuste de costo por producto. Los comprobantes ya emitidos no se tocan: corregirlos hacia atrás recalcula las salidas que salieron a ese PMP, incluidas las ya facturadas.', P.cost,
         '<th>Producto</th><th>Línea</th><th>Qué corregir</th><th class="num">Cantidad</th><th class="num">Costo a usar c/u</th><th class="num">Total</th><th class="num">Ajuste de valor (entrada / salida)</th>',
-        x => `${prod(x)}<td>${esc(x.doc)}${x.nota ? `<div class="small wrapsmall">${esc(x.nota)}</div>` : ''}</td><td class="num">${fmt(x.qty)}</td><td class="num">${costo(x)}</td><td class="num">${x.v != null ? money(x.v * x.qty) : '—'}</td><td class="num">${x.corr && tipoAjCosto(x.corr.ajuste) ? '<b>' + tipoAjCosto(x.corr.ajuste) + '</b><div>' + money(Math.abs(x.corr.ajuste)) + '</div><div class="small">PMP queda en ' + money(x.corr.pmp) + '</div>' : '—'}</td>`,
+        x => `${prod(x)}<td>${esc(x.doc)}${x.nota ? `<div class="small wrapsmall">${esc(x.nota)}</div>` : ''}</td><td class="num">${fmt(x.qty)}</td><td class="num">${costo(x)}</td><td class="num">${x.v != null ? money(x.v * x.qty) : '—'}</td><td class="num">${x.corr && tipoAjCosto(x.corr.ajuste) ? '<b>' + tipoAjCosto(x.corr.ajuste) + '</b><div>' + money(Math.abs(x.corr.ajuste)) + '</div>' + '<div><b>' + porUnidad(x.corr.pmp) + '</b> <span class="small">en Costo Unitario</span></div><div class="small">por ' + fmt(x.corr.unidades) + ' unidades</div>' : '—'}</td>`,
         `<td></td><td colspan="6"><b>Total</b></td><td class="num"><b>${money(tot(P.cost))}</b></td><td></td>`)}
       ${sec(3, 'Entradas (Parte de Entrada)', 'Una Parte de Entrada por ajuste de inventario con estas líneas.', P.in,
         '<th>Producto</th><th>Línea</th><th class="num">Debería tener hoy</th><th class="num">Tiene Defontana hoy</th><th class="num">Cantidad</th><th class="num">Costo c/u</th><th class="num">Total</th><th>Motivo</th>',
@@ -1749,7 +1762,7 @@
     const hoja = (nombre, filas) => XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filas.length ? filas : [{'': 'Nada en este paso'}]), nombre);
     hoja('1 Confirmar', P.verify.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Diferencia': x.qty, 'Motivo': x.motivo, 'Qué revisar': x.txt})));
     if (P.um.length) hoja('1b Unidades', P.um.map((x, i) => { const u = x.r.umInfo; return {'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Unidad en Defontana': u.a, 'Cambiar a': u.de, 'Saldo Defontana (su unidad)': u.f ? u.hoyDef : hoyDe(x.r) ?? '', 'Saldo convertido': u.f ? u.hoyConv : u.mismo ? 'misma cantidad (sin convertir)' : 'sin conversión conocida', 'Contado': x.r.s.stock, 'Ajuste después': x.r.diff ?? ''}; }));
-    hoja('2 Costos', P.cost.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Qué corregir': x.doc, 'Qué hacer': x.nota || '', 'Cantidad': x.qty, 'Costo a usar c/u': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Origen del costo': x.src, 'Tipo de comprobante': x.corr ? (tipoAjCosto(x.corr.ajuste) || '') : '', 'Ajuste de valor': x.corr ? Math.round(x.corr.ajuste) : '', 'PMP correcto hoy': x.corr ? r2(x.corr.pmp) : ''})));
+    hoja('2 Costos', P.cost.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Qué corregir': x.doc, 'Qué hacer': x.nota || '', 'Cantidad': x.qty, 'Costo a usar c/u': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Origen del costo': x.src, 'Tipo de comprobante': x.corr ? (tipoAjCosto(x.corr.ajuste) || '') : '', 'Ajuste de valor': x.corr ? Math.round(x.corr.ajuste) : '', 'Costo Unitario a poner en Defontana': x.corr ? r2(x.corr.pmp) : '', 'Unidades del ajuste': x.corr && x.corr.unidades != null ? x.corr.unidades : ''})));
     hoja('3 Entradas', P.in.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Debería tener hoy': x.r.realNow ?? '', 'Tiene Defontana hoy': hoyDe(x.r) ?? '', 'Cantidad': x.qty, 'Costo c/u': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Origen del costo': x.src, 'Motivo': x.motivo})));
     hoja('4 Salidas', P.out.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Debería tener hoy': x.r.realNow ?? '', 'Tiene Defontana hoy': hoyDe(x.r) ?? '', 'Cantidad': x.qty, 'PMP c/u (referencial)': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Motivo': x.motivo})));
     XLSX.writeFile(wb, 'plan-de-ajustes-' + fmtDate(new Date()) + '.xlsx');
