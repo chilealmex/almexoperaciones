@@ -744,8 +744,23 @@
     };
     const bien = run(true), asi = run(false);
     if (!cambio || bien.saldo <= EPS) return null;
-    // el ajuste es lo que le falta al valor del inventario de hoy por haber entrado a $0
-    return {pmp: bien.valor / bien.saldo, ajuste: bien.valor - asi.valor};
+    // De dónde se parte: lo que Defontana tiene hoy es su propio Valor
+    // Inventario de la última fila, no el que sale de repetir los movimientos.
+    //
+    // Casi siempre dan igual. Dejan de darlo cuando Defontana revaloriza por su
+    // cuenta —un recosteo, la factura que llega después con otro costo—: ahí el
+    // acumulado se mueve sin que ningún documento del producto se vea mal, y
+    // medir el ajuste contra la repetición propone mover un valor que el
+    // sistema no tiene. En el caso de BRP-003: repitiendo da $259.719 y
+    // Defontana tiene $943.426; el ajuste calculado contra la repetición era de
+    // $2.943 y aplicarlo dejaba el inventario en $946.369, peor que antes.
+    //
+    // En su informe las cantidades cuadran en el 99,2% de los productos y el
+    // valor sólo en el 68%: al informe no le faltan movimientos, es Defontana
+    // el que revaloriza. Así que su Valor Inventario es lo que hay que mover.
+    const u = docs[docs.length - 1];
+    const hoy = u && u.valorInv != null && u.saldo > EPS ? u.valorInv : asi.valor;
+    return {pmp: bien.valor / bien.saldo, ajuste: bien.valor - hoy};
   }
 
   // ¿El costo de un ingreso a $0 ya se corrigió? Sí, si después hubo un documento que solo cambia el
