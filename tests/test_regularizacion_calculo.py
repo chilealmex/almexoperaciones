@@ -17,6 +17,7 @@ JS = Path(__file__).parent / "js"
 PRUEBAS = {
     "el ajuste se mide al momento de contar": JS / "test_ajuste.js",
     "los costos fuera de lo normal se detectan": JS / "test_costos.js",
+    "los datos se buscan en la hoja que los tenga": JS / "test_hojas.js",
 }
 
 
@@ -37,3 +38,4 @@ def test_las_comprobaciones_del_navegador_existen():
         assert archivo.exists(), archivo
     assert "entrada por 2" in (JS / "test_ajuste.js").read_text(encoding="utf-8")
     assert "20 veces" in (JS / "test_costos.js").read_text(encoding="utf-8")
+    assert "segunda hoja" in (JS / "test_hojas.js").read_text(encoding="utf-8")

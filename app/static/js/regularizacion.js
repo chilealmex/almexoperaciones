@@ -88,6 +88,35 @@
     return x && y && x[0] === y[0] ? x[1] / y[1] : null;
   }
 
+  function filasDeHoja(wb, nombre){
+    return XLSX.utils.sheet_to_json(wb.Sheets[nombre], {header:1, raw:true, defval:null, blankrows:false});
+  }
+
+  // Un informe exportado con una tabla dinámica adelante deja los datos en la
+  // segunda hoja. Leyendo sólo la primera, el archivo entero fallaba con "no
+  // encontré las columnas", que suena a archivo equivocado y no a hoja
+  // equivocada: no había forma de darse cuenta.
+  function leerDeCualquierHoja(wb, parser){
+    let primerError = null;
+    for (const nombre of wb.SheetNames){
+      try {
+        const datos = parser(filasDeHoja(wb, nombre));
+        if (datos.length) return datos;
+      } catch (e) { primerError = primerError || e; }
+    }
+    if (primerError) throw primerError;
+    throw new Error('El archivo no tiene filas con datos.');
+  }
+
+  // Las filas de la primera hoja que tenga las columnas pedidas.
+  function filasConLasColumnas(wb, columnas){
+    for (const nombre of wb.SheetNames){
+      const filas = filasDeHoja(wb, nombre);
+      if (readTable(filas, columnas)) return filas;
+    }
+    return filasDeHoja(wb, wb.SheetNames[0]);
+  }
+
   function parseMov(rows){
     const t = readTable(rows, ['ARTICULO', 'MOVIMIENTO']);
     if (!t) throw new Error('No encontré las columnas “Artículo” y “Movimiento”. ¿Es el Informe de Documentos de Defontana?');
@@ -524,11 +553,38 @@
       const pm = pmpOf(docs, j - 1 >= 0 ? j - 1 : null);
       const edited = state.pmpEdit.has(k);
       const pmp = edited ? state.pmpEdit.get(k) : pm ? pm.v : null;
-      zero.push({key:k, m, code:m.art, name:m.desc || names.get(k) || '', linea: lineas.get(k) || '', pmp, edited, raro,
+      const rev = raro ? revisionDeCostoAtipico(m, raro, docs, j, edited ? pmp : null)
+                       : zeroReview(m, docs, j, pmp);
+      zero.push({key:k, m, code:m.art, name:m.desc || names.get(k) || '', linea: lineas.get(k) || '', pmp, edited, raro, rev,
         pmpSrc: edited ? 'Ingresado a mano' : pm ? pm.src : 'Sin costo en Defontana',
-        valor: raro ? (raro.habitual != null ? raro.habitual * m.qty : null) : (pmp != null ? pmp * m.qty : null),
-        rev: raro ? revisionDeCostoAtipico(m, raro, docs, j) : zeroReview(m, docs, j, pmp)});
+        // Para un costo fuera de lo normal, lo que debería valer es lo que
+        // queda en bodega al costo habitual; para uno a $0, lo que debió valer
+        // ese documento.
+        valor: raro ? comoEstaHoy(docs, raro.habitual != null ? raro.habitual : (edited ? pmp : null)).deberiaValer
+                    : (pmp != null ? pmp * m.qty : null)});
     });
+    // El ajuste de costo es del PRODUCTO, no del documento: deja el valor de lo
+    // que queda en bodega en lo que corresponde. Si un producto tiene varios
+    // ingresos raros, el ajuste es uno solo; mostrarlo en cada fila llevaría a
+    // aplicarlo tantas veces como filas, y a descuadrar por el doble o el
+    // triple. Queda en la fila más desviada y las demás apuntan a ella.
+    const yaPropuesto = new Map();
+    for (const x of zero) {
+      if (!x.raro || !x.rev.need) continue;
+      const otra = yaPropuesto.get(x.key);
+      const cuanto = z => z.raro.veces != null ? Math.abs(Math.log(z.raro.veces)) : Infinity;
+      if (!otra || cuanto(x) > cuanto(otra)) yaPropuesto.set(x.key, x);
+    }
+    for (const x of zero) {
+      if (!x.raro || !x.rev.need) continue;
+      const principal = yaPropuesto.get(x.key);
+      if (principal === x) continue;
+      x.rev = {...x.rev, need: false,
+        txt: `${x.rev.txt} El ajuste de este producto se propone una sola vez, en ${x.m.tipo} #${x.m.folio}.`,
+        hacer: `Nada acá: el ajuste de costo de este producto va una sola vez (ver ${x.m.tipo} #${x.m.folio} del mismo producto)`,
+        ajusteCosto: null};
+    }
+
     return {rows, zero, orphan: [...byKey.keys()].filter(k => !seen.has(k)).length};
   }
 
@@ -687,8 +743,7 @@
     return costos.length % 2 ? costos[medio] : (costos[medio - 1] + costos[medio]) / 2;
   }
 
-  function costoAtipico(m, habitual){
-    const cu = costoUnitario(m);
+  function fueraDeRango(cu, habitual){
     if (cu == null) return null;
     if (cu <= COSTO_IRRISORIO) return {cu, habitual, veces: null, barato: true, irrisorio: true};
     if (habitual == null) return null;
@@ -698,22 +753,66 @@
     return null;
   }
 
-  function revisionDeCostoAtipico(m, raro, docs, j){
+  const costoAtipico = (m, habitual) => fueraDeRango(costoUnitario(m), habitual);
+
+  // Lo que queda hoy del artículo: sin unidades no hay nada que valorizar, y
+  // un PMP que ya volvió a su lugar tampoco pide ajuste aunque el ingreso que
+  // lo ensució siga en el informe.
+  function comoEstaHoy(docs, habitual){
+    const ultimo = docs[docs.length - 1];
+    const stock = ultimo && ultimo.saldo != null ? ultimo.saldo : null;
+    const pmp = pmpAt(ultimo);
+    const valor = ultimo ? ultimo.valorInv : null;
+    // El ajuste de costo: llevar el valor del inventario de hoy al que le
+    // corresponde a lo que queda en bodega, valorizado a lo que el producto
+    // suele costar. Positivo sube el valor, negativo lo baja.
+    const deberiaValer = stock != null && habitual != null ? stock * habitual : null;
+    const ajuste = deberiaValer != null && valor != null ? deberiaValer - valor : null;
+    return {stock, pmp, valor, deberiaValer, ajuste,
+            sinStock: stock != null && stock <= EPS, malo: fueraDeRango(pmp, habitual)};
+  }
+
+  function revisionDeCostoAtipico(m, raro, docs, j, costoAMano){
+    // Cuando no se sabe lo que suele costar —un solo ingreso, y a $1— el
+    // sistema no puede inventarlo: lo pide. Si ya se escribió uno a mano, ése
+    // manda.
+    const objetivo = raro.habitual != null ? raro.habitual : (costoAMano > 0 ? costoAMano : null);
+    const hoy = comoEstaHoy(docs, objetivo);
+    const aQue = objetivo != null ? cuTxt(objetivo) : null;
+    if (hoy.sinStock) return {
+      need: false, costo: null, corr: null,
+      txt: `No. Hoy no quedan unidades en Defontana: ese costo ya salió con las salidas y no queda nada que revalorizar.`,
+      hacer: 'Nada: no queda stock de este producto',
+    };
+    if (!hoy.malo) return {
+      need: false, costo: null, corr: null,
+      txt: `No. El ingreso entró mal costeado, pero el PMP de hoy (${cuTxt(hoy.pmp)}) ya está en lo normal${aQue ? ' (' + aQue + ')' : ''}: los movimientos posteriores lo acomodaron.`,
+      hacer: 'Nada: el PMP de hoy ya está bien',
+    };
     const r = refCost(docs, j);
-    const costo = {v: raro.habitual != null ? raro.habitual : (r ? r.v : null),
-                   src: raro.habitual != null ? 'Lo que suele costar (mediana de los ingresos)' : (r ? r.src : '')};
+    const costo = objetivo != null
+      ? {v: objetivo, src: raro.habitual != null ? 'Lo que suele costar (mediana de los ingresos)' : 'Ingresado a mano'}
+      : (r ? {v: r.v, src: r.src} : null);
     const cuanto = raro.irrisorio
       ? `Entró a ${cuTxt(raro.cu)} c/u, que no es un costo real.`
       : `Entró a ${cuTxt(raro.cu)} c/u y suele costar ${cuTxt(raro.habitual)}: ` +
         (raro.barato ? `${fmt(Math.round(1 / raro.veces * 10) / 10)} veces más barato.`
                      : `${fmt(Math.round(raro.veces * 10) / 10)} veces más caro.`);
-    const hacia = costo.v != null ? cuTxt(costo.v) : null;
+    // Lo que se propone es un ajuste de COSTO sobre lo que queda en bodega, no
+    // tocar el documento viejo: el ingreso ya se consumió en parte y corregirlo
+    // hacia atrás arrastra todas las salidas que salieron a ese PMP.
+    const hacer = hoy.ajuste != null
+      ? `Ajuste de costo por ${money(hoy.ajuste)}: el valor del inventario pasa de ${money(hoy.valor)} a ${money(hoy.deberiaValer)} ` +
+        `para las ${fmt(hoy.stock)} que quedan, y el PMP queda en ${aQue}.`
+      : objetivo != null
+        ? `Ajuste de costo para dejar el PMP en ${aQue} c/u.`
+        : `Falta el costo: no hay con qué saber cuánto cuesta este producto` +
+          (r ? ` (lo más parecido es ${cuTxt(r.v)}, del ${r.src.toLowerCase()})` : '') +
+          `. Escríbelo en la columna PMP y se calcula el ajuste.`;
     return {
-      need: true, costo, corr: null,
-      txt: `Sí. ${cuanto} Defontana valoriza al PMP del momento, así que lo que salió después quedó mal valorizado.`,
-      hacer: hacia
-        ? `Corregir el costo del ingreso a ${hacia} c/u (${money(costo.v * m.qty)} en total), o confirmar con la factura que ese precio era el correcto.`
-        : 'Revisar el costo del ingreso contra la factura.',
+      need: true, costo, corr: null, ajusteCosto: hoy.ajuste,
+      txt: `Sí. ${cuanto} El PMP de hoy quedó en ${cuTxt(hoy.pmp)} con ${fmt(hoy.stock)} en bodega, así que el inventario está mal valorizado ahora mismo.`,
+      hacer,
     };
   }
 
@@ -1614,7 +1713,7 @@
       st.textContent = 'Leyendo ' + file.name + '…';
       file.arrayBuffer().then(buf => {
         const wb = XLSX.read(buf, {type:'array'});
-        const data = parser(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header:1, raw:true, defval:null, blankrows:false}));
+        const data = leerDeCualquierHoja(wb, parser);
         if (!data.length) throw new Error('El archivo no tiene filas con datos.');
         state[key] = data;
         drop.classList.remove('err'); drop.classList.add('ok');
@@ -1654,7 +1753,7 @@
     const file = $('fileRecount').files[0]; $('fileRecount').value = ''; if (!file) return;
     file.arrayBuffer().then(buf => {
       const wb = XLSX.read(buf, {type:'array'});
-      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header:1, raw:true, defval:null, blankrows:false});
+      const rows = filasConLasColumnas(wb, ['ARTICULO', 'MOVIMIENTO']);
       // Si es un Informe de Documentos (con ajustes), va al espacio de ajustes hechos
       if (readTable(rows, ['ARTICULO', 'MOVIMIENTO'])){ $('stRecount').textContent = 'Ese archivo es un Informe de Documentos: se cargó como “Ajustes hechos en Defontana”.'; cargarAjustes(file); return; }
       const data = parseRecount(rows);
@@ -1792,7 +1891,7 @@
         const r = await fetch(urlDe(clave), {credentials:'same-origin'});
         if (!r.ok) throw new Error();
         const wb = XLSX.read(await r.arrayBuffer(), {type:'array'});
-        const data = parser(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header:1, raw:true, defval:null, blankrows:false}));
+        const data = leerDeCualquierHoja(wb, parser);
         state[key] = data;
         $(dropId).classList.add('ok');
         $(statusId).textContent = `${info.nombre} · ${fmt(data.length)} ${que} · guardado el ${info.fecha}${info.por ? ' por ' + info.por : ''}` + (CFG.historial ? '' : '. Sube otro para reemplazarlo.');
@@ -1831,6 +1930,6 @@
   // puerta, la matemática que decide los ajustes de inventario no se puede
   // comprobar más que a ojo.
   if (typeof module !== 'undefined' && module.exports){
-    module.exports = {compute, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, state};
+    module.exports = {compute, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, leerDeCualquierHoja, filasConLasColumnas, state};
   }
 })();
