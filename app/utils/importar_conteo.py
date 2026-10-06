@@ -3,6 +3,7 @@ import io
 import re
 import unicodedata
 
+from flask import current_app
 from sqlalchemy import update
 
 from app.extensions import db
@@ -127,6 +128,85 @@ def _filas_desde_xlsx(file_storage):
     return encabezados, generador()
 
 
+def _campos(linea: str, sin_comillas=False) -> list:
+    modo = {"quoting": csv.QUOTE_NONE} if sin_comillas else {}
+    fila = next(csv.reader([linea], delimiter=";", **modo), [])
+    if sin_comillas:
+        fila = [_sin_las_comillas_del_formato(c) for c in fila]
+    return fila
+
+
+def _sin_las_comillas_del_formato(campo: str) -> str:
+    """Saca las comillas que envuelven al campo, dejando las que son del dato.
+
+    Importa la diferencia: el código 'LAX Bar Set 96"' lleva una comilla al
+    final, y sacarla de más lo convierte en otro código que no cruza con el de
+    la planilla que vino bien escrita. Se quita una sola de cada extremo —las
+    que puso el formato— y las que quedaron duplicadas vuelven a una.
+    """
+    campo = campo.strip()
+    if len(campo) >= 2 and campo.startswith('"') and campo.endswith('"'):
+        campo = campo[1:-1]
+    return campo.replace('""', '"')
+
+
+def _comillas_sin_cerrar(texto: str) -> bool:
+    return texto.count('"') % 2 == 1
+
+
+def _filas_del_csv(contenido: str):
+    """Las filas de un .csv por punto y coma, recuperando las mal escritas.
+
+    Un campo que lleva comillas dentro —un código como 'LAX Bar Set 96"'— se
+    exporta mal cada tanto: la comilla no viene duplicada, y entonces el lector
+    se come el separador siguiente. El código se traga la descripción, todas
+    las columnas se corren una, y no falla nada: queda un artículo fantasma con
+    un código imposible y se pierde el de verdad, sin que nadie lo note.
+
+    Por eso se lee fila por fila y se comprueba que tenga tantas columnas como
+    el encabezado. La que no cuadra se vuelve a leer tratando las comillas como
+    texto corriente, que es lo que son cuando vienen mal escritas. Una fila que
+    quedó corta porque el campo sigue en la línea de abajo —comillas sin
+    cerrar— se junta con la siguiente, que es el caso legítimo y se ve igual.
+
+    Devuelve (encabezados, filas, cuántas hubo que recuperar).
+    """
+    lineas = contenido.splitlines()
+    while lineas and not lineas[0].strip():
+        lineas.pop(0)
+    if not lineas:
+        return [], [], 0
+
+    encabezados = _campos(lineas[0])
+    cuantas = len(encabezados)
+    filas, rotas = [], 0
+
+    pendiente = ""
+    for linea in lineas[1:]:
+        acumulado = f"{pendiente}\n{linea}" if pendiente else linea
+        if _comillas_sin_cerrar(acumulado):
+            # El campo sigue en la línea de abajo: es el caso legítimo.
+            pendiente = acumulado
+            continue
+        pendiente = ""
+        if not acumulado.strip():
+            continue
+        campos = _campos(acumulado)
+        if len(campos) != cuantas:
+            recuperada = _campos(acumulado, sin_comillas=True)
+            if len(recuperada) == cuantas:
+                campos, rotas = recuperada, rotas + 1
+        filas.append(dict(zip(encabezados, campos)))
+
+    if pendiente.strip():   # quedó abierta hasta el final: se lee como se pueda
+        campos = _campos(pendiente.replace("\n", " "), sin_comillas=True)
+        if len(campos) == cuantas:
+            rotas += 1
+        filas.append(dict(zip(encabezados, campos)))
+
+    return encabezados, filas, rotas
+
+
 def _filas_desde_csv(file_storage, codificaciones=("utf-8-sig",)):
     """(encabezados, filas) desde un .csv separado por punto y coma, con las codificaciones dadas en orden."""
     crudo = file_storage.stream.read()
@@ -139,8 +219,14 @@ def _filas_desde_csv(file_storage, codificaciones=("utf-8-sig",)):
     else:
         raise ValueError("No se pudo leer la codificación del archivo.")
 
-    reader = csv.DictReader(io.StringIO(contenido), delimiter=";")
-    return reader.fieldnames, reader
+    encabezados, filas, rotas = _filas_del_csv(contenido)
+    if rotas:
+        # Se avisa, aunque se hayan recuperado: el archivo viene mal y conviene
+        # saberlo antes de que alguien lo use para otra cosa.
+        current_app.logger.warning(
+            "El archivo traía %s fila(s) con comillas mal escritas; se leyeron igual.", rotas
+        )
+    return encabezados, filas
 
 
 def _leer_filas(file_storage, codificaciones_csv=("utf-8-sig",)):

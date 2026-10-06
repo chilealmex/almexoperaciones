@@ -58,5 +58,13 @@ jobs:
           print(f"Cabeza de migraciones: {cabeza}")
           FIN
 
+      - name: Preparar Node
+        # El cálculo de los ajustes de Regularización corre en el navegador.
+        # Sin node acá, esa prueba se saltaría en silencio y la matemática que
+        # decide cuánto ajustar el inventario quedaría sin comprobar.
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Correr las pruebas
         run: python -m pytest -q
