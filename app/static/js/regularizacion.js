@@ -753,8 +753,23 @@
   function fotoDe(docs){
     if (!state.articulos || !state.articulos.length || !docs || !docs.length) return null;
     if (!fotoPorKey || fotoPorKey._de !== state.articulos){
+      // El mismo producto puede venir en el stock valorizado con varios
+      // códigos —0506507001 y 506507001, o 42400-014 Rev.2 / 42400-014Rev.2 /
+      // 42400-014Rev2— y el stock repartido entre ellos. Hay que sumarlos: con
+      // quedarse con el primero, si ése es el que tiene 0, el producto parece
+      // sin unidades y se propone un ajuste que no corresponde. En sus
+      // archivos eso daba 4 falsas alarmas de 6.
       fotoPorKey = new Map();
-      for (const a of state.articulos) if (!fotoPorKey.has(a.key)) fotoPorKey.set(a.key, a);
+      for (const a of state.articulos){
+        const p = fotoPorKey.get(a.key);
+        if (!p) fotoPorKey.set(a.key, {key:a.key, art:a.art, name:a.name, stock:a.stock, valor:a.valor, costo:a.costo, codigos:[a.art]});
+        else {
+          p.stock += a.stock; p.valor += a.valor; p.codigos.push(a.art);
+          // El costo del conjunto es el promedio ponderado; sin unidades, el
+          // mayor de los que haya, que es el único dato de costo que queda.
+          p.costo = p.stock > EPS ? p.valor / p.stock : Math.max(p.costo, a.costo);
+        }
+      }
       fotoPorKey._de = state.articulos;
     }
     return fotoPorKey.get(keyOf(docs[0].art)) || null;

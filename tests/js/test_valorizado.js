@@ -172,6 +172,37 @@ escenario('Valor sin unidades: las unidades de la foto, el valor de la contabili
   state.articulos = null;
 });
 
+escenario('El mismo producto con varios códigos en la foto: se suman', () => {
+  // En su archivo el stock valorizado trae 0506507001 con 0 unidades y
+  // 506507001 con 2, o 42400-014 Rev.2 / 42400-014Rev.2 / 42400-014Rev2 con el
+  // stock en uno solo. Quedándose con el primero, si ése es el que tiene 0, el
+  // producto parece sin unidades: cuatro de las seis "valorizaciones
+  // imposibles" que salían eran eso.
+  const docs = docsDe(MOVS);
+  state.articulos = parseArticulos(hoja(
+    ['0AAA', 'PROD AAA', 0, 2699, 0],
+    ['AAA', 'PROD AAA', 2, 4278, 0]));
+  const hoy = comoEstaHoy(docs, 1000);
+  comprobar('las unidades se suman', 2, hoy.stock);
+  comprobar('y el valor también', 8556, Math.round(hoy.valor));
+  comprobar('el costo es el promedio ponderado', 4278, Math.round(hoy.pmp));
+  comprobar('no es una valorización imposible', null, valorizacionImposible(docs));
+  state.articulos = null;
+});
+
+escenario('Sin unidades en ninguno de sus códigos, el costo que queda es el que hay', () => {
+  const docs = docsDe(MOVS);
+  state.articulos = parseArticulos(hoja(
+    ['AAA-X', 'PROD AAA', 0, 0, 0],
+    ['AAA', 'PROD AAA', 0, 1193505, 0]));
+  const hoy = comoEstaHoy(docs, 1000);
+  comprobar('cero unidades', 0, hoy.stock);
+  // El informe de documentos todavía le tiene valor: eso sí está mal
+  const malo = valorizacionImposible(docs);
+  comprobar('y el inventario sigue valorizado: imposible', 'valorSinStock', (malo || {}).cual);
+  state.articulos = null;
+});
+
 escenario('Stock negativo según la foto', () => {
   const docs = docsDe(MOVS);
   state.articulos = foto(-3, 1000);
