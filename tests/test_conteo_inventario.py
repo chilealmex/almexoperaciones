@@ -1305,3 +1305,78 @@ def test_la_linea_unificada_no_queda_como_ausente_de_qms(db, empresa):
     item = ItemConteoInventario.query.one()
     assert item.en_qms is True
     assert item.cantidad_qms == a_cantidad(9)
+
+
+# --- El código guardado se limpia al reimportar ---
+#
+# Una fila creada antes de que existiera la limpieza de espacios se quedaba con
+# ellos para siempre: el importador la encuentra por la clave —que ya los
+# ignora— le actualiza el stock, y nunca le toca el código. Así, el Excel
+# seguía mostrando "AMS 4100 S" aunque el sistema ya guarde "AMS4100S", y al
+# quitarle los espacios a mano aparecía duplicado con su propia versión limpia.
+
+
+def _planilla_defontana(codigo, stock="7"):
+    return (
+        "CodArticulo;Descripci\xf3n Art\xedculo;CodBodega;Nombre Bodega;Saldo Stock;Unidad\r\n"
+        f'"{codigo}";"ARTICULO";"BC";"BODEGA CENTRAL";"{stock}";"UN"\r\n'
+    ).encode("cp1252")
+
+
+def test_al_reimportar_se_limpian_los_espacios_del_codigo_guardado(db, empresa):
+    db.session.add(ItemConteoInventario(empresa_id=empresa.id, codigo="AMS 4100 S",
+                                        nombre="ARTICULO", en_defontana=True))
+    db.session.commit()
+
+    importar_defontana(_fs(_planilla_defontana("AMS 4100 S"), "d.csv"), empresa.id)
+
+    assert ItemConteoInventario.query.one().codigo == "AMS4100S"
+
+
+def test_limpiar_el_codigo_no_pierde_el_conteo_fisico(db, empresa):
+    """Es una corrección de cómo se escribe, no un artículo distinto."""
+    db.session.add(ItemConteoInventario(empresa_id=empresa.id, codigo="AMS 4100 S",
+                                        nombre="ARTICULO", cantidad_fisica=4, en_defontana=True))
+    db.session.commit()
+
+    importar_defontana(_fs(_planilla_defontana("AMS 4100 S"), "d.csv"), empresa.id)
+
+    item = ItemConteoInventario.query.one()
+    assert item.cantidad_fisica == 4
+    assert item.cantidad_defontana == 7
+
+
+def test_no_se_crea_una_fila_nueva_al_limpiar(db, empresa):
+    """La clave no cambia al sacar espacios, así que sigue siendo el mismo
+    artículo: si se creara otra fila, el stock quedaría repartido en dos."""
+    db.session.add(ItemConteoInventario(empresa_id=empresa.id, codigo="AMS 4100 S",
+                                        nombre="ARTICULO", en_defontana=True))
+    db.session.commit()
+
+    importar_defontana(_fs(_planilla_defontana("AMS4100S"), "d.csv"), empresa.id)
+
+    assert ItemConteoInventario.query.count() == 1
+
+
+def test_tambien_se_limpia_desde_qms(db, empresa):
+    db.session.add(ItemConteoInventario(empresa_id=empresa.id, codigo="ROP- BCAN-M",
+                                        nombre="ARTICULO", en_qms=True))
+    db.session.commit()
+    planilla = (
+        "﻿Sucursal;Linea Negocio;Categoria;Stock;Descripción;Unidad;Código Único;ubicacion_bodega\r\n"
+        "Casa Matriz;GOMAS;CAT;5;ARTICULO;UN;ROP- BCAN-M;RACK\r\n"
+    ).encode("utf-8-sig")
+
+    importar_qms(_fs(planilla, "q.csv"), empresa.id)
+
+    assert ItemConteoInventario.query.one().codigo == "ROP-BCAN-M"
+
+
+def test_un_codigo_que_ya_estaba_limpio_no_se_toca(db, empresa):
+    db.session.add(ItemConteoInventario(empresa_id=empresa.id, codigo="COD-001",
+                                        nombre="ARTICULO", en_defontana=True))
+    db.session.commit()
+
+    importar_defontana(_fs(_planilla_defontana("COD-001"), "d.csv"), empresa.id)
+
+    assert ItemConteoInventario.query.one().codigo == "COD-001"

@@ -19,6 +19,10 @@ PRUEBAS = {
     "los costos fuera de lo normal se detectan": JS / "test_costos.js",
     "los datos se buscan en la hoja que los tenga": JS / "test_hojas.js",
     "los ajustes se verifican con el informe actualizado": JS / "test_verificar.js",
+    "se respetan las parejas confirmadas en Unificar códigos": JS / "test_uniones.js",
+    "se detectan las valorizaciones imposibles": JS / "test_imposibles.js",
+    "los costos malos entran al paso 2 del plan": JS / "test_plan.js",
+    "cada paso se marca por su cuenta": JS / "test_marcas.js",
 }
 
 
@@ -41,3 +45,7 @@ def test_las_comprobaciones_del_navegador_existen():
     assert "20 veces" in (JS / "test_costos.js").read_text(encoding="utf-8")
     assert "segunda hoja" in (JS / "test_hojas.js").read_text(encoding="utf-8")
     assert "mismo día del ajuste" in (JS / "test_verificar.js").read_text(encoding="utf-8")
+    assert "partido en dos" in (JS / "test_uniones.js").read_text(encoding="utf-8")
+    assert "no existe" in (JS / "test_imposibles.js").read_text(encoding="utf-8")
+    assert "no se inventa uno malo" in (JS / "test_plan.js").read_text(encoding="utf-8")
+    assert "no esconde el ajuste de cantidad" in (JS / "test_marcas.js").read_text(encoding="utf-8")

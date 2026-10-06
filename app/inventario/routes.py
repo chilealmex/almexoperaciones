@@ -1320,7 +1320,31 @@ def _pagina_regularizacion(registros, url_para, puede_guardar, historial=None, n
         url_patron=url_para("__CLAVE__"),
         historial=historial,
         n_historial=n_historial,
+        uniones=_uniones_confirmadas(current_user.empresa_id),
     )
+
+
+def _uniones_confirmadas(empresa_id) -> list:
+    """Las parejas que alguien confirmó, para que Regularización las respete.
+
+    Esta pantalla trabaja con los archivos que se suben en ella, no con el
+    maestro, así que cruza los códigos por su cuenta. Eso alcanza para los que
+    sólo cambian en signos o ceros, pero no sabe nada de las parejas que se
+    unieron a mano: ahí el mismo artículo quedaba partido en dos y aparecía
+    descuadrado por los dos lados.
+
+    Van como pares de códigos tal cual, no como claves: la pantalla normaliza
+    distinto que el importador y tiene que poder aplicar la suya.
+    """
+    pares = [
+        [e.codigo_defontana, e.codigo_qms]
+        for e in EquivalenciaCodigo.query.filter_by(empresa_id=empresa_id).all()
+    ]
+    pares += [
+        [u.codigo_retirado, u.codigo_vigente]
+        for u in CodigoUnificado.query.filter_by(empresa_id=empresa_id).all()
+    ]
+    return pares
 
 
 @bp.route("/regularizacion/archivar", methods=["POST"])

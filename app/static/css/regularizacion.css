@@ -135,6 +135,9 @@
 .regx .wrapsmall{white-space:normal;max-width:190px;margin-left:auto}
 .regx .steps{margin:0;padding-left:18px;font-size:12px}
 .regx .steps li{margin:0 0 4px}
+.regx .steps .rx-btn.sm{padding:1px 7px;font-size:11px;margin-left:4px;vertical-align:middle}
+.regx .marcas{display:flex;flex-wrap:wrap;gap:4px 6px;align-items:center;margin:6px 0 4px;font-size:11px}
+.regx .marcas .rx-btn.sm{padding:1px 7px;font-size:11px}
 .regx .stepk{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:1px 6px;border-radius:4px;margin-right:2px}
 .regx .k-verify{background:var(--warn-soft);color:var(--warn)}
 .regx .k-cost{background:var(--accent-soft);color:var(--accent)}

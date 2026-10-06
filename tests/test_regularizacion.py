@@ -243,3 +243,51 @@ def test_sin_permiso_de_edicion_no_se_puede_empezar_una_nueva(client, db, empres
     login(client, "bodega@test.cl")
     assert client.post("/inventario/regularizacion/archivar", data={}).status_code == 403
     assert client.get("/inventario/regularizacion/historial").status_code == 200
+
+
+# --- Las parejas confirmadas en Unificar códigos llegan a esta pantalla ---
+#
+# Regularización trabaja con los archivos que se suben en ella, no con el
+# maestro, así que cruza los códigos por su cuenta: ignora signos, acentos y
+# ceros de adelante. Eso no alcanza para dos códigos que no se parecen y que
+# alguien decidió que son el mismo artículo: sin pasárselas, ese artículo queda
+# partido en dos y aparece descuadrado por los dos lados.
+
+
+def test_la_pantalla_recibe_las_parejas_confirmadas(client, db, empresa, usuario_admin):
+    from app.models.conteo_inventario import ItemConteoInventario
+    from app.models.equivalencia_codigo import crear_equivalencia
+
+    db.session.add_all([
+        ItemConteoInventario(empresa_id=empresa.id, codigo="ABC-100", en_qms=True, en_defontana=False),
+        ItemConteoInventario(empresa_id=empresa.id, codigo="XYZ-7", en_qms=False, en_defontana=True),
+    ])
+    db.session.commit()
+    crear_equivalencia(empresa.id, "ABC-100", "XYZ-7", usuario_admin.id, 100, "a mano")
+    db.session.commit()
+
+    login(client, "admin@test.cl")
+    config = _config_de_la_pagina(client.get("/inventario/regularizacion").get_data(as_text=True))
+
+    assert ["XYZ-7", "ABC-100"] in config["uniones"]
+
+
+def test_tambien_llegan_los_codigos_unidos_por_repetidos(client, db, empresa, usuario_admin):
+    """Las dos vías de unir valen acá: la pareja entre sistemas y la línea
+    retirada al juntar dos códigos repetidos del maestro."""
+    from app.models.codigo_unificado import registrar_unificacion
+
+    registrar_unificacion(empresa.id, "11-AAA-01", "011-AAA-01", usuario_admin.id)
+    db.session.commit()
+
+    login(client, "admin@test.cl")
+    config = _config_de_la_pagina(client.get("/inventario/regularizacion").get_data(as_text=True))
+
+    assert ["011-AAA-01", "11-AAA-01"] in config["uniones"]
+
+
+def test_sin_uniones_la_lista_va_vacia(client, db, empresa, usuario_admin):
+    login(client, "admin@test.cl")
+    config = _config_de_la_pagina(client.get("/inventario/regularizacion").get_data(as_text=True))
+
+    assert config["uniones"] == []
