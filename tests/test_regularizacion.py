@@ -122,6 +122,31 @@ def test_guardar_y_quitar_el_archivo_de_ajustes_hechos(client, db, empresa, usua
     assert client.get("/inventario/regularizacion/guardado/ajustes").status_code == 404
 
 
+def test_guardar_y_quitar_el_stock_valorizado(client, db, empresa, usuario_admin):
+    """El Informe de Artículos se guarda como los demás, para no resubirlo cada vez."""
+    login(client, "admin@test.cl")
+    respuesta = client.post(
+        "/inventario/regularizacion/guardado/articulos",
+        data={"archivo": (io.BytesIO(b"stock valorizado"), "Informe_Articulo.xlsx")},
+        content_type="multipart/form-data",
+    )
+    assert respuesta.status_code == 200
+    config = _config_de_la_pagina(client.get("/inventario/regularizacion").get_data(as_text=True))
+    assert config["guardados"]["articulos"]["nombre"] == "Informe_Articulo.xlsx"
+    assert client.get("/inventario/regularizacion/guardado/articulos").data == b"stock valorizado"
+
+    assert client.post("/inventario/regularizacion/guardado/articulos", data={"borrar": "1"}).status_code == 200
+    assert client.get("/inventario/regularizacion/guardado/articulos").status_code == 404
+
+
+def test_la_pagina_ofrece_subir_el_stock_valorizado(client, db, empresa, usuario_admin):
+    """Sin la casilla en la página no hay dónde subirlo, por bien que lo lea el cálculo."""
+    login(client, "admin@test.cl")
+    html = client.get("/inventario/regularizacion").get_data(as_text=True)
+    assert 'id="fileArticulos"' in html
+    assert "Stock valorizado actualizado" in html
+
+
 def test_subir_de_nuevo_reemplaza_lo_guardado(client, db, empresa, usuario_admin):
     login(client, "admin@test.cl")
     for contenido in (b"primero", b"segundo"):

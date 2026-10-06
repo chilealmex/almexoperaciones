@@ -91,6 +91,46 @@
     return out;
   }
 
+  // ---------- Informe de Artículos: el stock valorizado a una hora ----------
+  //
+  // El Informe de Documentos son movimientos: el saldo y el valor de hoy salen
+  // de arrastrar la última fila. El Informe de Artículos es la foto que
+  // Defontana tiene de verdad en un momento —"Stock Disponible" y "Costo
+  // Vigente"— y trae la hora en que se sacó. Con sus archivos los dos coinciden
+  // en el 97,5% de las cantidades y el 97,6% de los valores; lo que vale es ese
+  // 2,4% restante, donde Defontana tiene stock o valor que los movimientos no
+  // explican, y la hora, para saber contra qué momento se está comparando.
+  function parseArticulos(rows){
+    const t = readTable(rows, ['ARTICULO', 'STOCK DISPONIBLE']);
+    if (!t) throw new Error('No encontré las columnas “Artículo” y “Stock Disponible”. ¿Es el Informe de Artículos de Defontana?');
+    const c = {art:t.col('Artículo'), desc:t.col('Descripción'), stock:t.col('Stock Disponible'),
+      costo:t.col('Costo Vigente'), repo:t.col('Costo Reposicion', 'Costo Reposición')};
+    if (c.costo < 0) throw new Error('No encontré la columna “Costo Vigente”.');
+    const out = [];
+    for (const r of t.rows){
+      const art = String(r[c.art] ?? '').trim(); if (!art) continue;
+      const stock = num(r[c.stock]), costo = num(r[c.costo]);
+      if (stock == null && costo == null) continue;
+      out.push({art, key:keyOf(art), name:c.desc >= 0 ? String(r[c.desc] ?? '').trim() : '',
+        stock: stock ?? 0, costo: costo ?? 0, valor: (stock ?? 0) * (costo ?? 0)});
+    }
+    if (!out.length) throw new Error('El Informe de Artículos no trae filas con datos.');
+    out.fecha = fechaDeGeneracion(rows);
+    return out;
+  }
+  // "Fecha de generación: 06-10-2026, 04:17 p. m." en las primeras filas.
+  // Es el dato que distingue una foto de otra, así que si no está se dice.
+  function fechaDeGeneracion(rows){
+    for (let i = 0; i < Math.min(rows.length, 30); i++){
+      for (const celda of rows[i]){
+        const txt = String(celda ?? '');
+        const m = /generaci[oó]n\s*:\s*(.+)$/i.exec(txt);
+        if (m) return m[1].trim();
+      }
+    }
+    return null;
+  }
+
   // ---------- Unidades de medida ----------
   // Mismos grupos que app/utils/unidades.py (M = MT = MTS…), más las de conversión conocida.
   const UM_GRUPOS = {
@@ -253,7 +293,7 @@
 
 
   // ---------- Estado ----------
-  const state = {stock:[], mov:[], view:'reg', filter:{reg:'all', zero:'all', check:'all'}, mov2:null, ajustes:null, hechos:new Map(), ajSi:new Set(), ajNo:new Set(), docGroupsMain:[], checkRows:[], docGroups:[],
+  const state = {stock:[], mov:[], view:'reg', filter:{reg:'all', zero:'all', check:'all'}, mov2:null, ajustes:null, articulos:null, hechos:new Map(), ajSi:new Set(), ajNo:new Set(), docGroupsMain:[], checkRows:[], docGroups:[],
     sort:{reg:{k:'code', d:1}, zero:{k:'fecha', d:1}, check:{k:'code', d:1}}, open:new Set(), pmpEdit:new Map(), recount:leerRecuentos(), rows:[], zero:[]};
 
   function fillBodegas(){
@@ -556,6 +596,26 @@
         if (pend != null) st = Math.abs(pend) <= EPS ? 'done' : pend > 0 ? 'up' : 'down';
         if (st === 'done'){ dx.cause = null; dx.obs = dx.obs.filter(x => /^Ajuste de (cantidad|costo) ya hecho/.test(x)); }
       }
+      // El stock valorizado contra lo que arrastran los movimientos. Entre dos
+      // fechas pueden haberse borrado comprobantes o metido ajustes: el
+      // arrastre no se entera y la foto sí, así que donde no coinciden hay algo
+      // que los movimientos no explican. Con sus archivos pasa en el 2,5% de
+      // las cantidades y el 2,4% de los valores, así que se avisa.
+      const foto = fotoDe(docs);
+      let fotoDifiere = null;
+      if (foto){
+        const hoyMov = sysCalc ?? sysNow, u = docs[docs.length - 1];
+        const valorMov = u && u.valorInv != null ? u.valorInv : null;
+        const cantMal = hoyMov != null && Math.abs(foto.stock - hoyMov) > Math.max(0.01, Math.abs(hoyMov) * 0.001);
+        const valMal = valorMov != null && Math.abs(foto.valor - valorMov) > Math.max(1, Math.abs(valorMov) * 0.005);
+        if (cantMal || valMal){
+          fotoDifiere = {stock: foto.stock, costo: foto.costo, valor: foto.valor, hoyMov, valorMov, cantMal, valMal};
+          dx.obs.unshift('El stock valorizado de Defontana no coincide con lo que dan los movimientos: ' +
+            (cantMal ? `tiene ${fmt(foto.stock)} y los movimientos dan ${fmt(hoyMov)}. ` : '') +
+            (valMal ? `Vale ${money(foto.valor)} y los movimientos dan ${money(valorMov)}. ` : '') +
+            'Puede que se haya borrado o modificado un comprobante entre medio. Para el costo manda el stock valorizado.');
+        }
+      }
       // Marcado a mano como ya regularizado (p. ej. se corrigió la unidad de medida en Defontana)
       // La marca "Ya regularizado" vale mientras el producto siga con la misma diferencia y el mismo conteo;
       // si una carga nueva la cambia, el producto vuelve a aparecer.
@@ -587,7 +647,7 @@
         if (hechos.has('costo')) cost = null;
         if (hechos.has('cantidad') && (st === 'up' || st === 'down')) st = 'done';
       }
-      return {cause:dx.cause, obs:dx.obs, hechos, umRound: !!dx.umRound, umMaster: !!dx.umMaster, linea: s ? s.linea || '' : '', alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, umInfo, arts, artAjuste, pend, costDocs, manual, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs, sysCalc, toOther,
+      return {cause:dx.cause, obs:dx.obs, hechos, foto, fotoDifiere, umRound: !!dx.umRound, umMaster: !!dx.umMaster, linea: s ? s.linea || '' : '', alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, umInfo, arts, artAjuste, pend, costDocs, manual, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs, sysCalc, toOther,
         sysAtCount, sysNow, realNow, diff, st, pmp, edited, pmpSrc: edited ? 'Ingresado a mano' : pm ? pm.src : 'Sin costo en Defontana',
         valor: st === 'done' ? 0 : pend != null && pmp != null ? pend * pmp : diff != null && Math.abs(diff) > EPS && pmp != null ? diff * pmp : (st === 'ok' ? 0 : null), zeros, cost};
     };
@@ -686,6 +746,20 @@
     return {rows, zero, orphan: [...byKey.keys()].filter(k => !seen.has(k)).length};
   }
 
+  // La foto del stock valorizado, por artículo. Cuando está, manda sobre lo que
+  // se arrastra de los movimientos: es lo que Defontana tiene de verdad, y es
+  // contra eso que hay que hacer el ajuste.
+  let fotoPorKey = null;
+  function fotoDe(docs){
+    if (!state.articulos || !state.articulos.length || !docs || !docs.length) return null;
+    if (!fotoPorKey || fotoPorKey._de !== state.articulos){
+      fotoPorKey = new Map();
+      for (const a of state.articulos) if (!fotoPorKey.has(a.key)) fotoPorKey.set(a.key, a);
+      fotoPorKey._de = state.articulos;
+    }
+    return fotoPorKey.get(keyOf(docs[0].art)) || null;
+  }
+
   // ---------- Costo: productos que entraron o salieron a $0 ----------
   // En Defontana el ajuste de costo se hace con un comprobante de ENTRADA
   // cuando sube el valor del inventario, y de SALIDA cuando lo baja. Decirlo
@@ -772,8 +846,9 @@
     // En su informe las cantidades cuadran en el 99,2% de los productos y el
     // valor sólo en el 68%: al informe no le faltan movimientos, es Defontana
     // el que revaloriza. Así que su Valor Inventario es lo que hay que mover.
-    const u = docs[docs.length - 1];
-    const hoy = u && u.valorInv != null && u.saldo > EPS ? u.valorInv : asi.valor;
+    const foto = fotoDe(docs), u = docs[docs.length - 1];
+    const hoy = foto ? foto.valor
+      : u && u.valorInv != null && u.saldo > EPS ? u.valorInv : asi.valor;
     return {pmp: bien.valor / bien.saldo, ajuste: bien.valor - hoy, unidades: bien.saldo};
   }
 
@@ -912,9 +987,12 @@
   // lo ensució siga en el informe.
   function comoEstaHoy(docs, habitual){
     const ultimo = docs[docs.length - 1];
-    const stock = ultimo && ultimo.saldo != null ? ultimo.saldo : null;
-    const pmp = pmpAt(ultimo);
-    const valor = ultimo ? ultimo.valorInv : null;
+    // Si hay foto del stock valorizado, es lo que Defontana tiene ahora: el
+    // saldo y el valor arrastrados de los movimientos son una reconstrucción.
+    const foto = fotoDe(docs);
+    const stock = foto ? foto.stock : ultimo && ultimo.saldo != null ? ultimo.saldo : null;
+    const valor = foto ? foto.valor : ultimo ? ultimo.valorInv : null;
+    const pmp = foto ? (foto.stock > EPS ? foto.costo : null) : pmpAt(ultimo);
     // El ajuste de costo: llevar el valor del inventario de hoy al que le
     // corresponde a lo que queda en bodega, valorizado a lo que el producto
     // suele costar. Positivo sube el valor, negativo lo baja.
@@ -996,9 +1074,15 @@
   };
 
   function valorizacionImposible(docs){
-    const ultimo = docs[docs.length - 1];
+    const ultimo = docs[docs.length - 1], foto = fotoDe(docs);
     if (!ultimo || ultimo.saldo == null || ultimo.valorInv == null) return null;
-    const saldo = ultimo.saldo, valor = ultimo.valorInv;
+    // Las unidades, de la foto cuando la hay: es lo que Defontana tiene ahora.
+    // El valor, en cambio, SIEMPRE del informe de documentos: en la foto el
+    // valor es stock por costo, así que con stock 0 da 0 por construcción y
+    // taparía justamente el caso que se busca —valor sin unidades—. La gracia
+    // de esta revisión es cruzar las dos fuentes: unidades reales contra valor
+    // contabilizado.
+    const saldo = foto ? foto.stock : ultimo.saldo, valor = ultimo.valorInv;
     const cual = valor < -EPS ? 'valorNegativo'
       : saldo < -EPS ? 'stockNegativo'
       : (saldo <= EPS && valor > EPS) ? 'valorSinStock'
@@ -1279,6 +1363,7 @@
     ['alias', 'Código escrito distinto', r => r.alias.length > 0 || r.viaName || r.nCounted > 1, 'var(--accent)'],
     ['cost', 'Revisar costo ($0)', r => !!(r.cost && r.cost.need), 'var(--warn)'],
     ['recount', 'Recontados', r => !!(r.s && r.s.recontado), 'var(--accent)'],
+    ['foto', 'No cuadra con el stock valorizado', r => !!r.fotoDifiere, 'var(--warn)'],
     ['p-verify', 'Paso 1: confirmar', r => !r.umRound && r.st === 'check' || (r.cause === 'um' && (r.st === 'up' || r.st === 'down')), 'var(--warn)', true],
     ['p-cost', 'Paso 2: corregir costos', r => docSteps(r).some(x => x.k === 'cost'), 'var(--warn)', true],
     ['p-in', 'Paso 3: entradas', r => docSteps(r).some(x => x.k === 'in'), 'var(--in)', true],
@@ -1966,7 +2051,14 @@
         if (key === 'mov2'){ if (!state.mov || !state.mov.length) { state.mov = data; fillBodegas(); } }
         render();
         if (key === 'ajustes') $('btnClearAjustes').hidden = false;
-        const clave = {stock:'conteo', mov:'informe', mov2:'informe_ajustes', ajustes:'ajustes'}[key];
+        if (key === 'articulos'){
+          $('btnClearArticulos').hidden = false;
+          // La hora es lo que distingue una foto de otra: sin ella no se sabe
+          // contra qué momento se está comparando.
+          st.textContent = file.name + ' · ' + fmt(data.length) + ' artículos con stock y costo · ' +
+            (data.fecha ? 'sacado de Defontana el ' + data.fecha : 'sin fecha de generación en el archivo');
+        }
+        const clave = {stock:'conteo', mov:'informe', mov2:'informe_ajustes', ajustes:'ajustes', articulos:'articulos'}[key];
         if (clave){ avisoGuardado(st, guardarArchivo(clave, file)); if (key === 'mov2') guardarEstado(); }
       }).catch(e => { drop.classList.remove('ok'); drop.classList.add('err'); st.textContent = e.message || 'No se pudo leer el archivo.'; });
     };
@@ -1980,6 +2072,14 @@
   setupLoader('fileMov', 'dropMov', 'stMov', parseMov, 'mov', 'líneas de documentos');
   setupLoader('fileMov2', 'dropMov2', 'stMov2', parseMov, 'mov2', 'líneas de documentos');
   const cargarAjustes = setupLoader('fileAjustes', 'dropAjustes', 'stAjustes', parseMov, 'ajustes', 'líneas de ajuste (se toman como regularización ya hecha)');
+  const SIN_ARTICULOS = 'Informe de Artículos de Defontana: el stock y el costo que tiene ahora. Manda sobre lo que se arrastra de los movimientos';
+  setupLoader('fileArticulos', 'dropArticulos', 'stArticulos', parseArticulos, 'articulos', 'artículos con stock y costo');
+  $('btnClearArticulos').addEventListener('click', () => {
+    state.articulos = null; $('btnClearArticulos').hidden = true; $('dropArticulos').classList.remove('ok');
+    $('stArticulos').textContent = SIN_ARTICULOS;
+    if (CFG && CFG.guardar){ const fd = new FormData(); fd.append('borrar', '1'); fetch(urlDe('articulos'), {method:'POST', body:fd, headers:{'X-CSRFToken': CFG.csrf}, credentials:'same-origin'}).catch(() => {}); }
+    render();
+  });
   $('btnClearAjustes').addEventListener('click', () => {
     state.ajustes = null; $('btnClearAjustes').hidden = true; $('dropAjustes').classList.remove('ok');
     $('stAjustes').textContent = 'Informe de Documentos solo con los comprobantes de ajuste (costo, entradas y salidas): se toman como la regularización ya hecha';
@@ -2058,7 +2158,18 @@
       ['PARTE DE SALIDA', 'Aprobado', 292, '29-09-2026', 'BODEGA CENTRAL', '', 'SALIDA', 'Egreso', '', '', '', 'EM-05', 'Otro producto', 1, 'UN', 0, 0, 0]],
       ayuda: [['', 'Es el mismo Informe de Documentos de Defontana, filtrado solo a los comprobantes de ajuste que hiciste después del conteo.'], ['Ajuste de costo', 'Líneas con cantidad 0 y valor (p. ej. AJUSTE COSTO ENTRADA / SALIDA): se dan por corregido el costo.'], ['Ajuste de cantidad', 'Entradas o salidas por la diferencia del conteo (p. ej. PARTE DE ENTRADA / PARTE DE SALIDA): no se cuentan como movimientos y el producto queda “Ya ajustado”.'], ['', 'Todos los comprobantes de este archivo se toman como ajustes. Puedes desmarcar alguno en “Comprobantes de ajuste ya hechos”.']]},
     recuentos: {archivo: 'ejemplo-recuentos.xlsx', filas: [['Código', 'Físico', 'Fecha'], ['INS-001', 11, fmtDate(new Date())], ['20006-220-1-1', 38, fmtDate(new Date())]],
-      ayuda: [['Columna', 'Qué va'], ['Código', 'Código del producto'], ['Físico', 'Lo que se volvió a contar hoy: reemplaza el conteo original'], ['Fecha', 'Opcional; si no va, se usa hoy']]}
+      ayuda: [['Columna', 'Qué va'], ['Código', 'Código del producto'], ['Físico', 'Lo que se volvió a contar hoy: reemplaza el conteo original'], ['Fecha', 'Opcional; si no va, se usa hoy']]},
+    articulos: {archivo: 'ejemplo-stock-valorizado.xlsx', filas: [
+      ['Informe de Articulos'], ['Empresa: Shaw Almex Chile SpA'],
+      ['Fecha de generación: ' + fmtDate(new Date()) + ', 04:17 p. m.'],
+      ['Filtros: Bodega: Todas  |  Artículo: Todos'], [],
+      ['Artículo', 'Descripción', 'Stock Disponible', 'Costo Vigente', 'Costo Reposicion'],
+      ['INS-001', 'Producto de ejemplo', 12, 5917.33, 0],
+      ['00-FSR-SCW-07', 'Otro producto', 19, 427, 0]],
+      ayuda: [['', 'Es el Informe de Artículos de Defontana, tal cual se descarga: el stock y el costo que el sistema tiene ahora.'],
+        ['Para qué sirve', 'El Informe de Documentos son movimientos, y el valor de hoy sale de arrastrarlos. Si entre medio se borró o se modificó un comprobante, el arrastre queda mal y esta foto no.'],
+        ['Fecha de generación', 'Se lee de la cabecera del archivo: es la hora a la que Defontana sacó la foto, y es contra ese momento que se compara.'],
+        ['Qué manda', 'Para el costo manda esta foto. Donde no coincide con los movimientos se avisa con el filtro “No cuadra con el stock valorizado”.']]}
   };
   $('plantillas').addEventListener('click', e => {
     const b = e.target.closest('[data-plantilla]'); if (!b) return;
@@ -2144,7 +2255,10 @@
         const data = leerDeCualquierHoja(wb, parser);
         state[key] = data;
         $(dropId).classList.add('ok');
-        $(statusId).textContent = `${info.nombre} · ${fmt(data.length)} ${que} · guardado el ${info.fecha}${info.por ? ' por ' + info.por : ''}` + (CFG.historial ? '' : '. Sube otro para reemplazarlo.');
+        // La foto del stock valorizado se identifica por cuándo se sacó de
+        // Defontana, no por cuándo se subió acá.
+        const sacado = data.fecha ? ` · sacado de Defontana el ${data.fecha}` : '';
+        $(statusId).textContent = `${info.nombre} · ${fmt(data.length)} ${que}${sacado} · guardado el ${info.fecha}${info.por ? ' por ' + info.por : ''}` + (CFG.historial ? '' : '. Sube otro para reemplazarlo.');
       } catch(_){ $(statusId).textContent = 'No se pudo cargar el archivo guardado; súbelo de nuevo.'; }
     };
     await leerInforme('conteo', 'stock', 'dropStock', 'stStock', parseStock, 'códigos');
@@ -2152,6 +2266,8 @@
     await leerInforme('informe_ajustes', 'mov2', 'dropMov2', 'stMov2');
     await leerInforme('ajustes', 'ajustes', 'dropAjustes', 'stAjustes');
     if (state.ajustes && !CFG.historial) $('btnClearAjustes').hidden = false;
+    await leerInforme('articulos', 'articulos', 'dropArticulos', 'stArticulos', parseArticulos, 'artículos con stock y costo');
+    if (state.articulos && !CFG.historial) $('btnClearArticulos').hidden = false;
     if (!state.mov.length && state.mov2) state.mov = state.mov2;
     if (g.estado){
       try {
@@ -2180,6 +2296,6 @@
   // puerta, la matemática que decide los ajustes de inventario no se puede
   // comprobar más que a ojo.
   if (typeof module !== 'undefined' && module.exports){
-    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, tipoAjCosto, state};
+    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, parseArticulos, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, tipoAjCosto, state};
   }
 })();
