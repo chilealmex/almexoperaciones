@@ -117,6 +117,21 @@
     return filasDeHoja(wb, wb.SheetNames[0]);
   }
 
+  // Hasta qué día llega el informe cargado. Un informe cortado al 29 de
+  // septiembre sirve para regularizar a ese día: llamarle "hoy" al saldo que
+  // trae hace creer que el archivo está viejo y que hay que subir otro, que es
+  // justo lo contrario de lo que se quiere.
+  function fechaDeCorte(){
+    let ultima = null;
+    for (const m of (state.mov || [])) if (m.fecha && (!ultima || m.fecha > ultima)) ultima = m.fecha;
+    return ultima;
+  }
+
+  const alCorte = (texto, conFecha) => {
+    const f = fechaDeCorte();
+    return f ? texto.replace('hoy', 'al ' + fmtDate(f)) : texto;
+  };
+
   function parseMov(rows){
     const t = readTable(rows, ['ARTICULO', 'MOVIMIENTO']);
     if (!t) throw new Error('No encontré las columnas “Artículo” y “Movimiento”. ¿Es el Informe de Documentos de Defontana?');
@@ -593,6 +608,17 @@
   // Costo unitario para corregir un documento a $0: el de la compra con costo más cercana (la última
   // anterior; si no hay, la primera posterior); si no hay compras con costo, el PMP que tenía antes.
   function refCost(docs, j){
+    // Lo que el producto suele costar manda sobre la compra más cercana.
+    //
+    // La compra más cercana parece lo más fiel al momento, pero cuando un
+    // producto tiene varios documentos malos seguidos —un ingreso a $0 y, tres
+    // días después, otro a un costo raro— la más cercana es justamente el otro
+    // documento malo: se corrige un dato malo apoyándose en otro, y el costo
+    // sale inflado. Con tres compras o más, la mediana no se deja arrastrar
+    // por una sola rara.
+    const habitual = costoHabitual(docs);
+    if (habitual != null) return {v: habitual, src: 'lo que suele costar (mediana de las compras)'};
+
     const costed = [];
     docs.forEach((m, i) => { if (m.kind === 'in' && m.valor > EPS && m.qty > EPS) costed.push([m, i]); });
     const src = (m, extra) => `costo de ${m.tipo} #${m.folio} del ${fmtDate(m.fecha)}${extra}`;
@@ -692,13 +718,18 @@
       const i = docs.indexOf(m), antes = pmpAt(docs[i - 1]), despues = pmpAt(m), r = refCost(docs, i);
       txt.push(`Entró ${fmt(m.qty)} a $0 con ${m.tipo} #${m.folio} del ${fmtDate(m.fecha)}` + (antes > EPS && despues != null ? `: el PMP bajó de ${money(antes)} a ${money(despues)}.` : '.'));
       costos.push({doc: `${m.tipo} #${m.folio}`, qty: m.qty, v: r ? r.v : null, src: r ? r.src : 'no hay compras con costo en el informe: usa el costo de la factura'});
-      hacer.push({k:'cost', txt: r ? `Corregir el costo de ${m.tipo} #${m.folio}: ${fmt(m.qty)} a ${money(r.v)} c/u` : `Corregir el costo de ${m.tipo} #${m.folio} con el valor de la factura`});
     }
     // Salidas sin stock: la cantidad la corrige el ajuste por conteo (no se agrega otra entrada);
     // solo se avisa a qué costo hacer la entrada si el plan pide una.
     if (outsSinStock.length){ const r = refCost(docs, docs.indexOf(outsSinStock[0])); txt.push(`Salió ${fmt(outsSinStock.reduce((a, m) => a + m.qty, 0))} sin tener stock (${outsSinStock.map(m => m.tipo + ' #' + m.folio).join(', ')}): quedó sin costo. La cantidad se corrige con el ajuste por conteo` + (r ? `; si hay entrada, hazla a ${money(r.v)} c/u.` : '; si hay entrada, usa el costo de la factura.')); }
+    // Un ajuste de costo, no editar los comprobantes de entonces: un documento
+    // ya emitido no se toca, y corregirlo hacia atrás recalcula todas las
+    // salidas que salieron a ese PMP —incluidas las ya facturadas.
     const corr = ins0.length ? correctedToday(docs) : null;
-    if (corr && Math.abs(corr.ajuste) > 0.5) hacer.push({k:'cost', txt:`Si no se puede corregir el ingreso: ajuste de valor por ${money(corr.ajuste)} (el PMP queda en ${money(corr.pmp)})`});
+    if (corr && Math.abs(corr.ajuste) > 0.5) {
+      const deQue = ins0.map(m => `${m.tipo} #${m.folio}`).join(', ');
+      hacer.push({k:'cost', txt:`Ajuste de costo por ${money(corr.ajuste)}: el PMP queda en ${money(corr.pmp)} (lo dejó así ${deQue})`});
+    }
     if (sinCostoHoy && !ins0.length){ const r = refCost(docs, docs.length); costos.push({doc: 'stock actual', qty: saldoHoy, v: r ? r.v : null, src: r ? r.src : 'no hay compras con costo en el informe: usa el costo de la factura'}); }
     const need = sinCostoHoy || ins0.length > 0;
     if (!need && !yaCorregidos.length) txt.push(`Tuvo salidas a $0, pero hoy ya tiene costo (PMP ${money(pmpHoy)}). No hace falta corregir.`);
@@ -825,10 +856,19 @@
       if (f) return {need:false, costo, corr:null, txt:`No. El costo ya se corrigió: ${f}.`, hacer:'Nada: el costo ya está corregido'};
       const saldoFin = docs[docs.length - 1].saldo;
       if (!(saldoFin > EPS)) return {need:false, costo, corr:null, txt:'No se puede. Hoy no quedan unidades en Defontana: el costo de este ingreso ya salió en las salidas.', hacer: r ? `Nada que corregir; si haces una entrada de ajuste, hazla a ${money(r.v)} c/u` : 'Nada que corregir; si haces una entrada de ajuste, usa el costo de la factura'};
-      const extra = corr && Math.abs(corr.ajuste) > 0.5 ? ` Si no se puede corregir: ajuste de valor por ${money(corr.ajuste)} (PMP queda en ${money(corr.pmp)})` : '';
+      // Lo que se propone es un ajuste de costo nuevo, no editar el comprobante
+      // de entonces: un documento ya emitido no se toca. Además, corregirlo
+      // hacia atrás recalcula todas las salidas que salieron a ese PMP, y las
+      // que ya se facturaron quedan con un costo distinto del que tuvieron.
+      const hacer = corr && Math.abs(corr.ajuste) > 0.5
+        ? `Ajuste de costo por ${money(corr.ajuste)}: el PMP queda en ${money(corr.pmp)}` +
+          (r ? ` (el producto cuesta ${money(r.v)} c/u según ${r.src})` : '') + '.'
+        : r
+          ? `Ajuste de costo para dejar el PMP en ${money(r.v)} c/u (${r.src}).`
+          : 'Ajuste de costo con el costo real del producto (factura o importación).';
       return antes > EPS
-        ? {need:true, costo, corr, txt:`Sí. Entró a $0 y el PMP bajó de ${money(antes)} a ${money(pmpAt(m))}.`, hacer: (r ? `Corregir el costo del ingreso a ${money(r.v)} c/u (${money(r.v * m.qty)} en total).` : 'Corregir el costo del ingreso con la factura.') + extra}
-        : {need:true, costo, corr, txt:'Sí. El producto entró sin costo y no tenía costo antes.', hacer: (r ? `Corregir el costo del ingreso a ${money(r.v)} c/u (${money(r.v * m.qty)} en total).` : 'Cargar el costo real (factura o importación).') + extra};
+        ? {need:true, costo, corr, txt:`Sí. Entró a $0 y el PMP bajó de ${money(antes)} a ${money(pmpAt(m))}.`, hacer}
+        : {need:true, costo, corr, txt:'Sí. El producto entró sin costo y no tenía costo antes.', hacer};
     }
     if (m.saldo != null && m.saldo + m.qty <= EPS) return {need:false, costo, txt:'No. Salió sin tener stock en Defontana, por eso quedó sin costo. La cantidad se corrige con el ajuste por conteo.', hacer: r ? `Si el plan pide una entrada, hazla a ${money(r.v)} c/u` : 'Si el plan pide una entrada, usa el costo de la factura'};
     const hoy = pmpAt(docs[docs.length - 1]);
@@ -1022,6 +1062,17 @@
         cobs.push(`Se ajustó ${sgn(r.aj)} con ${ajTxt}, pero había que ajustar ${sgn(need)}. ${dirTxt(gap)}`);
       }
       if (r.sysNow != null && Math.abs(r.sysNow - actual) > EPS) cobs.push(`Ojo: la última fila del informe muestra saldo ${fmt(r.sysNow)}, pero sumando los documentos da ${fmt(actual)}. Pasa cuando el informe trae documentos del mismo día en otro orden, o documentos no aprobados. Confirma el saldo del producto en Defontana.`);
+      // Movimientos del mismo día del ajuste: la cantidad igual queda bien
+      // —sumar o restar no depende del orden— pero el PMP sí, porque Defontana
+      // valoriza cada movimiento al costo que había en ese momento. Según si la
+      // entrada se procesó antes o después del ajuste, el costo queda distinto.
+      const diasDeAjuste = new Set(r.ajDocs.map(m => m.fecha && dayKey(m.fecha)).filter(Boolean));
+      const mismoDia = r.docs.filter(m => !m._aj && !m._ajc && m.fecha && diasDeAjuste.has(dayKey(m.fecha)));
+      if (mismoDia.length) cobs.push(
+        `Hubo ${mismoDia.length === 1 ? 'un movimiento' : fmt(mismoDia.length) + ' movimientos'} el mismo día del ajuste ` +
+        `(${[...new Set(mismoDia.map(m => m.tipo + ' #' + m.folio))].join(', ')}). La cantidad queda bien igual, ` +
+        `porque sumar o restar no depende del orden. El costo sí: Defontana valoriza cada movimiento al PMP del momento, ` +
+        `así que según si se procesó antes o después del ajuste el PMP queda distinto. Revisa el costo de este producto.`);
       if (r.toOther > EPS) cobs.push(`${fmt(r.toOther)} se traspasaron a otra bodega después del conteo: siguen en el saldo de Defontana, pero no en esta bodega.`);
       if (r.ins || r.outs) cobs.push(`Movimientos después del conteo (sin contar ajustes): ${r.ins ? '+' + fmt(r.ins) : ''}${r.ins && r.outs ? ' ' : ''}${r.outs ? '−' + fmt(r.outs) : ''}.`);
       const aj0 = r.ajDocs.filter(m => m.valor != null && Math.abs(m.valor) < EPS && m.qty > EPS);
@@ -1115,9 +1166,9 @@
     ['linea', 'Línea', '', r => r.linea || null],
     ['contado', 'Contado', 'num', r => r.s ? r.s.stock : null],
     ['movs', 'Movimientos desde el conteo', 'num', r => r.counted ? r.ins - r.outs : null],
-    ['real', 'Debería tener Defontana hoy', 'num', r => r.realNow],
-    ['now', 'Tiene Defontana hoy', 'num', r => hoyDe(r)],
-    ['diff', 'Ajuste a hacer hoy', 'num', r => ajusteHoy(r)],
+    ['real', alCorte('Debería tener Defontana hoy'), 'num', r => r.realNow],
+    ['now', alCorte('Tiene Defontana hoy'), 'num', r => hoyDe(r)],
+    ['diff', 'Ajuste a hacer', 'num', r => ajusteHoy(r)],
     ['st', 'Qué hacer', '', r => r.st],
     ['obs', 'Por qué está descuadrado', '', r => r.cause ? CAUSES[r.cause] : null],
     ['make', 'Qué hacer, en orden', '', r => STEP[docSteps(r)[0].k].n],
@@ -1500,7 +1551,7 @@
       ${P.um.length ? `<section class="plansec"><div class="planhead"><span class="pnum">1b</span><div><h3>Cambiar la unidad en Defontana <span class="pcount">${fmt(P.um.length)} productos</span></h3><p class="pwhy">Se contaron en otra unidad que la del maestro de Defontana. Lo contado es la referencia: primero cambia la unidad del producto en Defontana (con su saldo convertido) y después haz las entradas y salidas del plan, que ya están en la unidad del conteo.</p></div></div>
         <div class="tablebox"><table class="plantable"><thead><tr><th class="n">#</th><th>Producto</th><th>Línea</th><th>Unidad en Defontana</th><th>Cambiar a</th><th class="num">Saldo Defontana</th><th class="num">Saldo convertido</th><th class="num">Contado</th><th class="num">Ajuste después</th></tr></thead>
         <tbody>${P.um.map((x, i) => { const u = x.r.umInfo; return `<tr><td class="n">${i + 1}</td>${prod(x)}<td>${esc(u.a)}</td><td><b>${esc(u.de)}</b></td><td class="num">${u.f ? fmt(u.hoyDef) + ' ' + esc(u.a) : fmt(hoyDe(x.r)) + ' ' + esc(u.a)}</td><td class="num">${u.f ? '<b>' + fmt(u.hoyConv) + ' ' + esc(u.de) + '</b>' : (u.mismo ? '<span class="small">misma cantidad (sin convertir)</span>' : '<span class="small">sin conversión conocida</span>')}</td><td class="num">${fmt(x.r.s.stock)} ${esc(u.de)}</td><td class="num">${x.r.diff == null ? '—' : (Math.abs(x.r.diff) <= EPS ? '0' : sgn(Math.round(x.r.diff * 1000) / 1000)) + ' ' + esc(u.de)}</td></tr>`; }).join('')}</tbody></table></div></section>` : ''}
-      ${sec(2, 'Corregir costos', 'Corrige el costo del documento indicado. Si Defontana no deja modificarlo, haz el ajuste de valor.', P.cost,
+      ${sec(2, 'Corregir costos', 'Un ajuste de costo por producto. Los comprobantes ya emitidos no se tocan: corregirlos hacia atrás recalcula las salidas que salieron a ese PMP, incluidas las ya facturadas.', P.cost,
         '<th>Producto</th><th>Línea</th><th>Qué corregir</th><th class="num">Cantidad</th><th class="num">Costo a usar c/u</th><th class="num">Total</th><th class="num">Si no se puede: ajuste de valor</th>',
         x => `${prod(x)}<td>${esc(x.doc)}</td><td class="num">${fmt(x.qty)}</td><td class="num">${costo(x)}</td><td class="num">${x.v != null ? money(x.v * x.qty) : '—'}</td><td class="num">${x.corr && Math.abs(x.corr.ajuste) > 0.5 ? money(x.corr.ajuste) + '<div class="small">PMP queda en ' + money(x.corr.pmp) + '</div>' : '—'}</td>`,
         `<td></td><td colspan="6"><b>Total</b></td><td class="num"><b>${money(tot(P.cost))}</b></td><td></td>`)}
@@ -1930,6 +1981,6 @@
   // puerta, la matemática que decide los ajustes de inventario no se puede
   // comprobar más que a ojo.
   if (typeof module !== 'undefined' && module.exports){
-    module.exports = {compute, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, leerDeCualquierHoja, filasConLasColumnas, state};
+    module.exports = {compute, computeCheck, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, leerDeCualquierHoja, filasConLasColumnas, state};
   }
 })();

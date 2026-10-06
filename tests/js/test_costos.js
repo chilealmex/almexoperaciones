@@ -159,5 +159,51 @@ escenario('Un producto con varios ingresos raros: el ajuste va una sola vez', ()
             /50/.test(String(Math.round(z.find(x => x.rev.need).raro.cu / 1000))));
 });
 
+// --- A qué costo corregir un ingreso a $0 ---
+
+escenario('No se corrige un dato malo apoyándose en otro dato malo', () => {
+  // El caso real de BRP-003: un ingreso a $0 el 10-12 y, ocho días después,
+  // otro a $2.390 cuando el producto se compra a $1.271. Tomando "la compra
+  // más cercana" se corregía el primero a $2.390 y el costo salía inflado al
+  // doble.
+  const z = enPantalla([ingreso(6, 0, 1), ingreso(6, 2390, 2),
+                        ingreso(100, 1271, 3), ingreso(100, 1271, 4), ingreso(50, 1271, 5)]);
+  const aCero = z.find(x => !x.raro && x.m.kind === 'in');
+  comprobar('el ingreso a $0 aparece', true, !!aCero);
+  comprobar('se corrige al costo habitual, no al del vecino raro', 1271, Math.round(aCero.rev.costo.v));
+  comprobar('y lo dice', true, /suele costar/.test(aCero.rev.costo.src));
+});
+
+escenario('Sin suficientes compras, se sigue usando la más cercana', () => {
+  // Con una o dos compras no hay "lo habitual": la vecina es lo mejor que hay.
+  const z = enPantalla([ingreso(6, 0, 1), ingreso(10, 5000, 2)]);
+  const aCero = z.find(x => !x.raro && x.m.kind === 'in');
+  comprobar('usa la compra que hay', 5000, Math.round(aCero.rev.costo.v));
+  comprobar('y dice de qué documento salió', true, /costo de/.test(aCero.rev.costo.src));
+});
+
+// --- Nunca se propone tocar un comprobante ya emitido ---
+
+function planDe(lista) {
+  state.stock = [{code:'ART-1', key:'ART1', name:'ARTICULO', stock:10, fecha:DIA(2026, 8, 20),
+                  por:'B', estado:'Contado', um:'', linea:''}];
+  state.recount = new Map(); state.manual = new Set(); state.hechos = new Map(); state.pmpEdit = new Map();
+  porId.set('optBodega', Object.assign(porId.get('optBodega') || {}, {value: '*'}));
+  porId.set('optAprob', Object.assign(porId.get('optAprob') || {}, {checked: false}));
+  const r = compute(docsDe(lista)).rows[0];
+  return r.cost && r.cost.need ? r.cost.hacer.map(h => h.txt) : [];
+}
+
+escenario('Un ingreso a $0 se arregla con un ajuste de costo, no editando el documento', () => {
+  // Un comprobante ya emitido no se toca: corregirlo hacia atrás recalcula
+  // todas las salidas que salieron a ese PMP, incluidas las ya facturadas.
+  const pasos = planDe([ingreso(6, 0, 1), ingreso(100, 1271, 2), ingreso(100, 1271, 3),
+                        ingreso(50, 1271, 4), egreso(240, 5)]);
+  comprobar('hay un paso de costo', true, pasos.length > 0);
+  comprobar('propone un ajuste de costo', true, pasos.some(t => /Ajuste de costo/.test(t)));
+  comprobar('y no propone corregir el comprobante', false, pasos.some(t => /Corregir el costo de/.test(t)));
+  comprobar('tampoco como alternativa', false, pasos.some(t => /no se puede corregir/.test(t)));
+});
+
 console.log(`\n${hechas - fallas} de ${hechas} comprobaciones pasaron`);
 process.exit(fallas ? 1 : 0);
