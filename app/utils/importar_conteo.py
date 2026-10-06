@@ -434,6 +434,12 @@ def importar_qms(file_storage, empresa_id: int, solo_no_contados: bool = False) 
         # cuando la planilla no trae dato) para que salga en una sola sentencia.
         cambios.append({
             "id": item.id,
+            # El código guardado también se limpia. Una fila creada antes de que
+            # existiera esta limpieza se queda con sus espacios para siempre: el
+            # importador la encuentra por la clave —que ya los ignora— y le
+            # actualiza el stock, pero nunca le toca el código. Limpiarlo no
+            # mueve la clave, así que el artículo sigue siendo el mismo.
+            "codigo": _normalizar_codigo(item.codigo),
             "cantidad_qms": item.cantidad_qms if congelado else datos["cantidad"],
             "nombre": datos["nombre"] or item.nombre,
             "linea_negocio": datos["linea_negocio"] or item.linea_negocio,
@@ -550,6 +556,9 @@ def importar_defontana(file_storage, empresa_id: int, solo_no_contados: bool = F
             filas_actualizadas += 1
         cambios.append({
             "id": item.id,
+            # Igual que en QMS: se limpia el código guardado, que de otro modo
+            # se queda con los espacios con que se creó.
+            "codigo": _normalizar_codigo(item.codigo),
             "cantidad_defontana": item.cantidad_defontana if congelado else datos["cantidad"],
             "nombre": item.nombre or datos["nombre"] or item.nombre,
             "ubicacion": item.ubicacion or bodegas or item.ubicacion,

@@ -7,7 +7,34 @@
   const EPS = 1e-9;
   const norm = v => String(v ?? '').trim().toUpperCase();
   // Clave para cruzar códigos: sin tildes, sin espacios, puntos, guiones, guiones bajos ni ceros a la izquierda
-  const keyOf = v => String(v ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^0+(?=.)/, '');
+  const claveCruda = v => String(v ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^0+(?=.)/, '');
+
+  // Las parejas que alguien confirmó en Unificar códigos. Esta pantalla cruza
+  // por su cuenta, lo que alcanza para los códigos que sólo cambian en signos o
+  // ceros, pero no sabe de las uniones hechas a mano: sin esto, el mismo
+  // artículo queda partido en dos y aparece descuadrado por los dos lados.
+  //
+  // Se encadenan porque un código puede dar dos saltos: la pareja confirmada lo
+  // lleva al de QMS, y si esa línea se unió después con otra, sigue.
+  const unionesConfirmadas = (() => {
+    const mapa = new Map();
+    try {
+      const el = document.getElementById('regx-config');
+      const pares = (el ? (JSON.parse(el.textContent).uniones || []) : []);
+      for (const [de, a] of pares){
+        const origen = claveCruda(de), destino = claveCruda(a);
+        if (origen && destino && origen !== destino) mapa.set(origen, destino);
+      }
+    } catch (_) {}
+    return mapa;
+  })();
+
+  function keyOf(v){
+    let k = claveCruda(v);
+    const vistas = new Set();
+    while (unionesConfirmadas.has(k) && !vistas.has(k)){ vistas.add(k); k = unionesConfirmadas.get(k); }
+    return k;
+  }
   const strip = s => norm(s).normalize('NFD').replace(/[̀-ͯ]/g,'');
   const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   const fmt = n => n == null || n === '' || isNaN(n) ? '—' : Number(n).toLocaleString('es-CL', {maximumFractionDigits: 3});
@@ -578,6 +605,23 @@
         valor: raro ? comoEstaHoy(docs, raro.habitual != null ? raro.habitual : (edited ? pmp : null)).deberiaValer
                     : (pmp != null ? pmp * m.qty : null)});
     });
+    // Las valorizaciones imposibles van una por artículo, no por documento:
+    // describen cómo quedó el producto, no qué documento lo dejó así.
+    for (const [k, all] of byKey) {
+      const docs = all.filter(inBod);
+      if (!docs.length) continue;
+      const malo = valorizacionImposible(docs);
+      if (!malo) continue;
+      const def = VALORIZACIONES_IMPOSIBLES[malo.cual];
+      zero.push({
+        key: k, m: malo.m, code: malo.m.art, name: malo.m.desc || names.get(k) || '',
+        linea: lineas.get(k) || '', pmp: pmpAt(malo.m), edited: false, raro: null,
+        imposible: malo.cual, pmpSrc: 'Según el informe', valor: null,
+        rev: {need: true, costo: null, corr: null,
+              txt: `Sí. ${def.por(malo.saldo, malo.valor)}`, hacer: def.hacer},
+      });
+    }
+
     // El ajuste de costo es del PRODUCTO, no del documento: deja el valor de lo
     // que queda en bodega en lo que corresponde. Si un producto tiene varios
     // ingresos raros, el ajuste es uno solo; mostrarlo en cada fila llevaría a
@@ -847,6 +891,45 @@
     };
   }
 
+  // ---------- Valorizaciones imposibles ----------
+  //
+  // Hay tres estados en que un artículo no puede quedar, y que no se notan
+  // mirando cantidades: valor negativo, valor sin unidades, y stock negativo.
+  // Ninguno es "un costo distinto del esperado": son cuentas que no cierran, y
+  // casi siempre las deja un ajuste mal hecho o una salida registrada sin que
+  // hubiera stock. Se miran al final de todo, que es como queda el artículo.
+  const VALORIZACIONES_IMPOSIBLES = {
+    valorNegativo: {
+      titulo: 'Valor de inventario negativo',
+      por: (saldo, valor) => `El inventario de este producto vale ${money(valor)}: un valor negativo no existe. ` +
+        `Suele quedar así cuando salió más de lo que había y Defontana descontó valor que no estaba.`,
+      hacer: 'Ajuste de costo para dejar el valor en lo que corresponde a lo que hay en bodega.',
+    },
+    valorSinStock: {
+      titulo: 'Valor sin unidades',
+      por: (saldo, valor) => `No quedan unidades y el inventario sigue valiendo ${money(valor)}. ` +
+        `Ese valor no tiene a qué producto corresponder: queda inflando el inventario.`,
+      hacer: 'Ajuste de costo para dejar el valor en $0, ya que no hay unidades.',
+    },
+    stockNegativo: {
+      titulo: 'Stock negativo',
+      por: (saldo, valor) => `Defontana tiene ${fmt(saldo)} unidades: un stock negativo no existe. ` +
+        `Faltó registrar una entrada, o se registró una salida de más.`,
+      hacer: 'Primero la cantidad: registrar la entrada que falta. El costo se revisa después.',
+    },
+  };
+
+  function valorizacionImposible(docs){
+    const ultimo = docs[docs.length - 1];
+    if (!ultimo || ultimo.saldo == null || ultimo.valorInv == null) return null;
+    const saldo = ultimo.saldo, valor = ultimo.valorInv;
+    const cual = valor < -EPS ? 'valorNegativo'
+      : saldo < -EPS ? 'stockNegativo'
+      : (saldo <= EPS && valor > EPS) ? 'valorSinStock'
+      : null;
+    return cual ? {cual, saldo, valor, m: ultimo} : null;
+  }
+
   function zeroReview(m, docs, j, pmp){
     const antes = pmpAt(docs[j - 1]), r = refCost(docs, j);
     const costo = r ? {v: r.v, src: r.src} : null;
@@ -1111,6 +1194,7 @@
     ['all', 'Todos', z => true, null],
     ['cero', 'A costo $0', z => !z.raro, 'var(--out)'],
     ['raro', 'Costo fuera de lo normal', z => !!z.raro, 'var(--warn)'],
+    ['imposible', 'Valorización imposible', z => !!z.imposible, 'var(--out)'],
     ['in', 'Ingresos', z => z.m.kind === 'in', 'var(--in)'],
     ['out', 'Egresos', z => z.m.kind === 'out', 'var(--out)'],
     ['need', 'Revisar costo', z => z.rev.need, 'var(--warn)'],
@@ -1981,6 +2065,6 @@
   // puerta, la matemática que decide los ajustes de inventario no se puede
   // comprobar más que a ojo.
   if (typeof module !== 'undefined' && module.exports){
-    module.exports = {compute, computeCheck, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, leerDeCualquierHoja, filasConLasColumnas, state};
+    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, leerDeCualquierHoja, filasConLasColumnas, state};
   }
 })();
