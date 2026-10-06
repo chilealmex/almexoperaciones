@@ -405,8 +405,20 @@
       const own = s ? new Set(s.variants.map(norm)) : new Set();
       const alias = [...(s ? s.variants.filter(v => norm(v) !== norm(s.code)) : []), ...[...byArt.keys()].filter(a => !own.has(a) && (s || a !== norm(docs[0].art)))];
       const viaName = docs.some(m => m._byName);
-      const realNow = counted ? s.stock + ins - outs : null;
       const diff = counted && sysAtCount != null ? s.stock - sysAtCount : null;
+      // Lo que Defontana debería mostrar hoy: su saldo de hoy más la diferencia
+      // que quedó al contar. Da lo mismo que sumarle los movimientos al conteo
+      // —contado + entradas − salidas— mientras el informe los traiga todos; la
+      // diferencia es que así las tres columnas de la pantalla siguen cuadrando
+      // (debería tener − tiene = ajuste) aunque alguno no entre en la cuenta
+      // por la bodega, por no estar aprobado o por venir sin fecha.
+      const saldoHoy = sysCalc ?? sysNow;
+      // Se suma lo que FALTA ajustar, no el ajuste entero: si ya se registró,
+      // el saldo de hoy ya lo trae y sumarlo de nuevo diría que debería haber
+      // más de lo que hay.
+      const realNow = counted
+        ? (diff != null && saldoHoy != null ? saldoHoy + (diff - aj) : s.stock + ins - outs)
+        : null;
       const key = s ? s.key : docs[0].key;
       // Con varios códigos en Defontana, el PMP es el del código que tiene el saldo
       const base = porArt.length > 1 ? porArt.reduce((a, x) => x.hoy > a.hoy ? x : a) : null;
@@ -715,9 +727,27 @@
     const corr = r.cost.corr ? `<div class="small wrapsmall">PMP correcto hoy: <b>${money(r.cost.corr.pmp)}</b></div>` : '';
     return items + corr;
   }
-  // Saldo de Defontana hoy (todos los documentos del informe) y lo que falta para llegar al stock real
+  // Saldo de Defontana hoy (todos los documentos del informe)
   const hoyDe = r => r.sysCalc ?? r.sysNow;
-  const ajusteHoy = r => r.manual ? null : r.counted && r.realNow != null && hoyDe(r) != null ? r.realNow - hoyDe(r) : null;
+  // Lo que hay que ajustar: la diferencia AL MOMENTO DE CONTAR, no contra el
+  // saldo de hoy.
+  //
+  // Son el mismo número cuando el informe trae todos los movimientos
+  // posteriores, porque se suman arriba y se restan abajo. Dejan de serlo
+  // cuando alguno no entra en la cuenta —otra bodega, un documento sin
+  // aprobar, una fila sin fecha— y entonces medir contra el saldo de hoy pide
+  // ajustar también por ese movimiento, que ya estaba bien.
+  //
+  // El ejemplo que lo deja claro: se contaron 5, Defontana decía 3 a esa fecha
+  // y después entraron 10. Falta ingresar 2 y nada más. Si se mide contra el
+  // saldo de hoy sin contar esa entrada, se pide una salida de 8 para "llegar
+  // a 5" —y en bodega hay 15—, dejándolo peor que antes.
+  const ajusteDelConteo = r => r.manual ? null : r.counted && r.diff != null ? r.diff : null;
+  // Y lo que falta por hacer: el ajuste del conteo menos lo que ya se ajustó.
+  // Sin restar lo ya hecho se volvería a pedir el mismo ajuste en cada carga,
+  // y aplicarlo dos veces descuadra por el doble.
+  const pendiente = r => { const a = ajusteDelConteo(r); return a == null ? null : a - (r.aj || 0); };
+  const ajusteHoy = pendiente;
   const makeCell = list => list.length ? `<ul class="make">${list.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '';
 
   // ---------- Comprobantes de ajuste ----------
@@ -1141,7 +1171,9 @@
       }
       // Redondeo: las restas con decimales dejan restos como 7,1e-15 que en el Excel parecen diferencias
       const r4 = x => { const v = Math.round(x * 1e4) / 1e4; return Math.abs(v) <= EPS ? 0 : v; };
-      const sug = r4(r.realNow - (hoy - aj)), dif = r4(sug - aj);
+      const sugerido = ajusteDelConteo(r);
+      if (sugerido == null) continue;
+      const sug = r4(sugerido), dif = r4(sug - aj);
       if (Math.abs(sug) <= EPS && !hayAj) continue;   // no había nada que ajustar
       // Marcado a mano como regularizado: se muestra aparte, porque el programa ya no pide nada por él
       // aunque la cantidad ajustada no calce con la sugerida.
@@ -1659,7 +1691,7 @@
     if (hb){
       const k = hb.dataset.hecho, r = state.rows.find(x => x.key === k);
       if (r && r.manual) state.hechos.delete(k);
-      else if (r){ const hoy = hoyDe(r); state.hechos.set(k, {sug: r.counted && r.realNow != null && hoy != null ? r.realNow - (hoy - (r.aj || 0)) : null, fecha: r.s && r.s.fecha ? +r.s.fecha : null}); }
+      else if (r){ state.hechos.set(k, {sug: ajusteDelConteo(r), fecha: r.s && r.s.fecha ? +r.s.fecha : null}); }
       guardarEstado(); render(); return;
     }
     if (e.target.closest('input')) return; const tr = e.target.closest('tr.rx-row'); if (tr) toggle(tr); });
@@ -1723,4 +1755,12 @@
   render();
   refreshRecountStatus();
   cargarGuardado();
+
+  // Para poder probar el cálculo fuera del navegador: acá `module` no existe,
+  // así que esto no cambia nada de lo que corre en la pantalla. Sin esta
+  // puerta, la matemática que decide los ajustes de inventario no se puede
+  // comprobar más que a ojo.
+  if (typeof module !== 'undefined' && module.exports){
+    module.exports = {compute, ajusteDelConteo, pendiente, hoyDe, state};
+  }
 })();
