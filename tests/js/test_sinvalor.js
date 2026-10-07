@@ -38,9 +38,10 @@ const INV = (...filas) => [
   ['Código Artículo', 'Descripción', 'Bodega', 'Saldo', 'Unidad', 'Valor unidad', 'Total'], ...filas,
 ];
 
-function plan(docs, inventario) {
+function plan(docs, inventario, costoAMano) {
   state.stock = []; state.recount = new Map(); state.manual = new Set();
-  state.hechos = new Map(); state.pmpEdit = new Map(); state.ajustes = [];
+  state.hechos = new Map(); state.ajustes = [];
+  state.pmpEdit = costoAMano == null ? new Map() : new Map([['AAA', costoAMano]]);
   state.articulos = inventario || null;
   porId.set('optBodega', Object.assign(porId.get('optBodega') || {}, {value: '*'}));
   porId.set('optAprob', Object.assign(porId.get('optAprob') || {}, {checked: false}));
@@ -181,6 +182,201 @@ escenario('El 40080-004: no entró a $1, eso lo decía la columna mala', () => {
   comprobar('ni como sin valor: Defontana le tiene valor', 0, P.sinValor.length);
   comprobar('el PMP de hoy es el del inventario', 570240,
             Math.round(docs[2].valorInv / docs[2].saldo));
+});
+
+// --- Juzgar todas las compras, tengan la historia que tengan ---
+
+escenario('Una sola compra, y a $1: se revisa igual', () => {
+  // No hace falta tener con qué comparar: $1 la unidad no es un costo, punto.
+  // Y la regla vale aunque el producto tenga una única compra en su historia.
+  const docs = docsDe([ing(20, 1, 1)]);
+  const {P} = plan(docs, parseArticulos(INV(['AAA', 'PROD AAA', 'BODEGA CENTRAL', 20, 'UN', 1, 20])));
+  comprobar('se muestra', 1, P.cost.length);
+  comprobar('sin inventar un monto', null, P.cost[0].corr);
+});
+
+escenario('Una sola compra a precio normal: no se inventa un problema', () => {
+  const docs = docsDe([ing(20, 5000, 1)]);
+  const {P} = plan(docs, parseArticulos(INV(['AAA', 'PROD AAA', 'BODEGA CENTRAL', 20, 'UN', 5000, 100000])));
+  comprobar('no se muestra', 0, P.cost.length);
+  comprobar('ni como sin valor', 0, P.sinValor.length);
+});
+
+escenario('Dos compras muy distintas: no se sabe cuál es la buena, se pregunta', () => {
+  // Con dos no hay mediana, así que el producto no se juzga. Pero sí se pueden
+  // comparar entre ellas: si una cuesta siete veces la otra, algo pasó.
+  const docs = docsDe([ing(10, 978, 1), ing(10, 6800, 2)]);
+  const {P, r} = plan(docs, parseArticulos(INV(['AAA', 'PROD AAA', 'BODEGA CENTRAL', 20, 'UN', 3889, 77780])));
+  comprobar('se muestra', 1, P.cost.length);
+  comprobar('como "dos compras a precios muy distintos"', 'Dos compras a precios muy distintos', P.cost[0].doc);
+  comprobar('sin proponer monto', null, P.cost[0].corr);
+  const z = (r.costExtra || [])[0];
+  comprobar('dice cuántas veces', true, /7 veces la otra/.test(z.rev.txt));
+  comprobar('y nombra las dos compras', true, /\$978 c\/u.*\$6\.800 c\/u/.test(z.rev.txt));
+  comprobar('y que no se sabe cuál es la buena', true, /no se sabe cuál es la buena/.test(z.rev.txt));
+});
+
+escenario('Dos compras muy distintas: al escribir el costo sale el ajuste', () => {
+  // Preguntar cuál de las dos compras es la buena no cuadra nada por sí solo:
+  // una vez que ella decide y escribe el costo, el paso tiene que decir el
+  // monto del ajuste y si es entrada o salida. Si no, hay que sacar la cuenta
+  // a mano cada vez.
+  const docs = docsDe([ing(10, 978, 1), ing(10, 6800, 2)]);
+  const inv = parseArticulos(INV(['AAA', 'PROD AAA', 'BODEGA CENTRAL', 20, 'UN', 3889, 77780]));
+
+  const sin = plan(docs, inv);
+  const zSin = (sin.r.costExtra || [])[0];
+  comprobar('sin costo escrito, sólo se muestra', true, zSin.rev.soloRevisar);
+  comprobar('y no hay monto', null, zSin.rev.ajusteCosto);
+  comprobar('pide escribir el costo', true, /escribe el costo en la columna PMP/i.test(zSin.rev.hacer));
+
+  // 20 unidades a $6.800 son $136.000 y hoy el inventario vale $77.780
+  const caro = plan(docs, inv, 6800);
+  const zCaro = (caro.r.costExtra || [])[0];
+  comprobar('con el costo caro ya no es sólo revisar', false, zCaro.rev.soloRevisar);
+  comprobar('el ajuste sube el valor', 58220, Math.round(zCaro.rev.ajusteCosto));
+  comprobar('y es una entrada de costo', true, /Ajuste de costo ENTRADA por \$58\.220/.test(zCaro.rev.hacer));
+  comprobar('dice qué poner en Defontana', true, /"Costo Unitario".*\$6\.800/.test(zCaro.rev.hacer));
+  comprobar('y de cuánto a cuánto pasa el inventario', true, /\$77\.780 a \$136\.000/.test(zCaro.rev.hacer));
+
+  // Al revés: 20 a $978 son $19.560, hay que sacarle $58.220
+  const barato = plan(docs, inv, 978);
+  const zBarato = (barato.r.costExtra || [])[0];
+  comprobar('con el costo barato el ajuste baja el valor', -58220, Math.round(zBarato.rev.ajusteCosto));
+  comprobar('y es una salida de costo', true, /Ajuste de costo SALIDA por \$58\.220/.test(zBarato.rev.hacer));
+
+  // Y el plan lo lleva con su monto, que es lo que ella sigue para cuadrar
+  comprobar('el plan lo pide igual', 1, caro.P.cost.length);
+  comprobar('con el costo escrito', 6800, caro.P.cost[0].v);
+});
+
+escenario('Dos compras parecidas: nada que revisar', () => {
+  const docs = docsDe([ing(10, 1000, 1), ing(10, 1200, 2)]);
+  const {P} = plan(docs, parseArticulos(INV(['AAA', 'PROD AAA', 'BODEGA CENTRAL', 20, 'UN', 1100, 22000])));
+  comprobar('no se muestra', 0, P.cost.length);
+});
+
+escenario('Dos compras distintas pero sin stock: nada que hacer', () => {
+  const docs = docsDe([ing(10, 978, 1), ing(10, 6800, 2), {kind: 'out', qty: 20, cu: 0, fecha: DIA(2026, 8, 3)}]);
+  const {P} = plan(docs, parseArticulos(INV(['OTRO', 'OTRO', 'BODEGA CENTRAL', 5, 'UN', 100, 500])));
+  comprobar('no se muestra', 0, P.cost.filter(x => x.doc === 'Dos compras a precios muy distintos').length);
+});
+
+// --- Verse todos los movimientos, sin excepción ---
+//
+// Para poder revisar la historia completa de un producto no basta con listar
+// los movimientos marcados: hay que ver todo lo que entró y salió, aunque no
+// pida nada. Si no, hay que creer que lo que no se muestra está bien.
+
+function vistaMovimientos(docs, inventario) {
+  state.view = 'zero';
+  const r = plan(docs, inventario);
+  state.view = 'reg';
+  return r;
+}
+
+escenario('La vista de movimientos los lista todos', () => {
+  // Tres compras normales: ninguna pide nada, y las tres tienen que verse
+  const docs = docsDe([ing(10, 1000, 1), ing(10, 1000, 2), ing(10, 1000, 3)]);
+  const sinVer = plan(docs, null);
+  comprobar('en Productos no se arman: nadie los mira', 0, sinVer.r.docs.length && state.zero.length);
+
+  const { } = vistaMovimientos(docs, null);
+  comprobar('en la vista de movimientos están los tres', 3, state.zero.length);
+  comprobar('ninguno pide nada', 0, state.zero.filter(z => z.rev.need).length);
+  comprobar('van marcados como normales', 3, state.zero.filter(z => z.normal).length);
+});
+
+escenario('Cada movimiento muestra su PMP y cómo quedó el inventario', () => {
+  const docs = docsDe([ing(10, 1000, 1), ing(10, 3000, 2)]);
+  vistaMovimientos(docs, null);
+  const segundo = state.zero.find(z => z.m.folio === '101');
+  comprobar('el PMP de esa fila', 2000, Math.round(segundo.pmp));
+  comprobar('y lo dice en el texto', true, /20 unidades/.test(segundo.rev.txt));
+  comprobar('con el valor del inventario', true, /\$40\.000/.test(segundo.rev.txt));
+});
+
+escenario('Los marcados no se duplican al listar todos', () => {
+  // Un ingreso a $1 ya está en la lista por estar marcado: no puede aparecer
+  // dos veces, una como problema y otra como movimiento normal.
+  const docs = docsDe([ing(20, 1, 1)]);
+  vistaMovimientos(docs, parseArticulos(INV(['AAA', 'PROD AAA', 'BODEGA CENTRAL', 20, 'UN', 1, 20])));
+  comprobar('una sola fila para ese movimiento', 1, state.zero.filter(z => z.m.folio === '100').length);
+  comprobar('y es la que pide revisarlo', true, state.zero.find(z => z.m.folio === '100').rev.need);
+});
+
+escenario('Un producto que ya no tiene stock no se lista', () => {
+  // Entraron 10 y salieron las 10: hoy no hay unidades ni valor. Esos
+  // movimientos no se pueden arreglar —el costo se fue con la salida— así que
+  // mostrarlos sólo obliga a descartarlos a mano. En su informe son 2.387
+  // filas de 9.307.
+  const docs = docsDe([ing(10, 1000, 1), {kind: 'out', qty: 10, cu: 0, fecha: DIA(2026, 8, 2)}]);
+  vistaMovimientos(docs, null);
+  comprobar('ni la entrada ni la salida', 0, state.zero.length);
+
+  // Pero si sigue teniendo unidades, se ven las dos
+  const quedan = docsDe([ing(10, 1000, 1), {kind: 'out', qty: 4, cu: 0, fecha: DIA(2026, 8, 2)}]);
+  vistaMovimientos(quedan, null);
+  comprobar('con stock se listan las dos', 2, state.zero.length);
+});
+
+escenario('Sin stock pero con valor sí se lista: eso hay que sacarlo', () => {
+  // Salieron todas las unidades y el inventario quedó valiendo $5.000. Es el
+  // caso que sí hay que arreglar, así que el filtro no se lo puede comer: se
+  // muestra el producto con toda su historia.
+  //
+  // Y el valor hay que mirarlo en el informe de documentos cuando el producto
+  // no viene en el stock valorizado —que es lo que pasa con los dos suyos: el
+  // valorizado no los trae—. Si se diera por agotado por no estar ahí, los
+  // $5.000 que hay que sacar no se verían nunca.
+  const docs = docsDe([ing(10, 1000, 1)]);
+  docs.push({...docs[0], folio: '200', fecha: DIA(2026, 8, 2), kind: 'out', qty: 10,
+             valor: 5000, saldo: 0, valorInv: 5000});
+  vistaMovimientos(docs, parseArticulos(INV(['OTRO', 'PROD OTRO', 'BODEGA CENTRAL', 5, 'UN', 100, 500])));
+  comprobar('se lista', true, state.zero.length > 0);
+  comprobar('con la valorización imposible', true, state.zero.some(z => z.imposible === 'valorSinStock'));
+  comprobar('y también sus movimientos', true, state.zero.some(z => z.normal));
+});
+
+escenario('El stock que manda es el del inventario, no el arrastrado', () => {
+  // El saldo que se arrastra fila a fila del informe de documentos es una
+  // reconstrucción; el stock valorizado es lo que Defontana tiene ahora. Si se
+  // esconde por el arrastre, se esconde un producto que sí tiene unidades.
+  const docs = docsDe([ing(10, 1000, 1), {kind: 'out', qty: 10, cu: 0, fecha: DIA(2026, 8, 2)}]);
+  vistaMovimientos(docs, parseArticulos(INV(['AAA', 'PROD AAA', 'BODEGA CENTRAL', 4, 'UN', 1000, 4000])));
+  comprobar('el arrastre dice 0 pero el inventario dice 4: se lista', 2, state.zero.length);
+
+  // Y al revés: si el inventario dice que no queda nada, no se lista aunque el
+  // arrastre crea que sí
+  const quedan = docsDe([ing(10, 1000, 1)]);
+  vistaMovimientos(quedan, parseArticulos(INV(['AAA', 'PROD AAA', 'BODEGA CENTRAL', 0, 'UN', 0, 0])));
+  comprobar('el arrastre dice 10 pero el inventario dice 0: no se lista', 0, state.zero.length);
+});
+
+escenario('Con el informe viejo, el valor sigue saliendo de los documentos', () => {
+  // El Informe de Artículos no trae la columna Total: su valor es stock por
+  // costo, así que sin unidades da $0 siempre. Si el filtro se apoyara en eso,
+  // el valor sin unidades quedaría escondido justo con el informe en que no se
+  // puede ver de otra forma.
+  const ART = [['Informe de Articulos'], ['Empresa: X'],
+    ['Fecha de generación: 07-10-2026, 09:20 a. m.'], [],
+    ['Artículo', 'Descripción', 'Stock Disponible', 'Costo Vigente', 'Costo Reposicion'],
+    ['AAA', 'PROD AAA', 0, 0, 0]];
+  const docs = docsDe([ing(10, 1000, 1)]);
+  docs.push({...docs[0], folio: '200', fecha: DIA(2026, 8, 2), kind: 'out', qty: 10,
+             valor: 5000, saldo: 0, valorInv: 5000});
+  vistaMovimientos(docs, parseArticulos(ART));
+  comprobar('se lista igual', true, state.zero.length > 0);
+  comprobar('como valor sin unidades', true, state.zero.some(z => z.imposible === 'valorSinStock'));
+});
+
+escenario('Si el informe no trae el saldo, no se esconde todo', () => {
+  // Sin saber el stock no se puede afirmar que no quede nada. Esconder por las
+  // dudas dejaría la pantalla en blanco con un informe al que le falta una
+  // columna, y parecería que no hay nada que regularizar.
+  const docs = docsDe([ing(10, 1000, 1)]).map(m => ({...m, saldo: null, valorInv: null}));
+  vistaMovimientos(docs, null);
+  comprobar('el movimiento se lista', 1, state.zero.length);
 });
 
 console.log(`\n${hechas - fallas} de ${hechas} comprobaciones pasaron`);

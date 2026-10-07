@@ -739,7 +739,7 @@
     for (const [k, docs] of byKey) if (!seen.has(k) && docs.some(inBod)) rows.push(build(null, docs));
 
     const names = new Map(rows.map(r => [r.key, r.name])), lineas = new Map(rows.map(r => [r.key, r.linea]));
-    const zero = [];
+    let zero = [];
     // Lo que suele costar cada artículo, para reconocer el ingreso mal costeado
     const habitualPorArt = new Map();
     for (const [, all] of byKey) for (const m of all) {
@@ -773,6 +773,68 @@
         // ese documento.
         valor: hoyRaro ? hoyRaro.deberiaValer : (pmp != null ? pmp * m.qty : null)});
     });
+    // Todos los movimientos, sin excepción. Los de arriba son los que piden
+    // algo; éstos son el resto, para que la vista liste de verdad todo lo que
+    // entró y salió y no haya que creer que lo no mostrado está bien. Van con
+    // su PMP y su costo unitario, que es con lo que se revisa a ojo.
+    // Sólo se arman cuando se van a mirar: son más de nueve mil y construirlos
+    // en cada clic de la pantalla de Productos la pondría medio segundo más
+    // lenta sin que nadie los vea.
+    const yaEnLista = new Set(zero.map(z => z.m));
+    if (state.view === 'zero') for (const [k, all] of byKey) for (const m of all) {
+      if (m._ajc || !inBod(m) || yaEnLista.has(m) || m.qty <= EPS) continue;
+      zero.push({key:k, m, code:m.art, name:m.desc || names.get(k) || '', linea: lineas.get(k) || '',
+        pmp: pmpAt(m), edited: false, raro: null, normal: true, valor: null,
+        pmpSrc: 'Según el informe',
+        rev: {need: false, costo: null, corr: null,
+          txt: `No. ${m.kind === 'in' ? 'Entró' : 'Salió'} ${fmt(m.qty)} y el inventario quedó en ${money(m.valorInv)} por ${fmt(m.saldo)} unidades${pmpAt(m) != null ? ` (${cuTxt(pmpAt(m))} c/u)` : ''}.`,
+          hacer: 'Nada'}});
+    }
+    // Con dos compras no hay mediana —no se sabe cuál de las dos es la rara— y
+    // por eso el producto no se juzga. Pero sí se pueden comparar entre ellas:
+    // si una cuesta tres veces la otra, algo pasó, aunque no se sepa cuál es la
+    // buena. Se muestra para que lo decida quien sabe, sin proponer monto.
+    //
+    // Con sus archivos son 2 de 309 productos de dos compras: los otros 307
+    // tienen sus dos compras coherentes, que es evidencia de estar bien y no
+    // ignorancia.
+    for (const [k, all] of byKey) {
+      const docs = all.filter(inBod);
+      if (!docs.length || costoHabitual(docs) != null) continue;
+      const ultimo = docs[docs.length - 1];
+      if (!ultimo || !(ultimo.saldo > EPS)) continue;           // sin stock no hay nada que hacer
+      const compras = docs.filter(m => costoUnitario(m) != null && costoUnitario(m) > COSTO_IRRISORIO);
+      if (compras.length !== 2) continue;
+      const cu = compras.map(costoUnitario).sort((x, y) => x - y);
+      if (cu[0] <= 0 || cu[1] / cu[0] < VECES_FUERA_DE_RANGO) continue;
+      const cara = compras.find(m => costoUnitario(m) === cu[1]);
+      const barata = compras.find(m => costoUnitario(m) === cu[0]);
+      const pmpHoy = pmpAt(ultimo);
+      // Cuando ya decidió cuál de las dos compras es la buena y escribió el
+      // costo, esto deja de ser una duda y pasa a ser un ajuste con su monto:
+      // sin eso habría que sacar la cuenta a mano y el paso no serviría para
+      // cuadrar nada.
+      const aMano = state.pmpEdit.has(k) ? state.pmpEdit.get(k) : null;
+      const hoy = aMano > 0 ? comoEstaHoy(docs, aMano) : null;
+      const conMonto = hoy && hoy.ajuste != null && Math.abs(hoy.ajuste) > 0.5;
+      zero.push({
+        key: k, m: cara, code: cara.art, name: cara.desc || names.get(k) || '',
+        linea: lineas.get(k) || '', pmp: pmpHoy, edited: aMano > 0, raro: null, dosCompras: true,
+        pmpSrc: aMano > 0 ? 'Ingresado a mano' : 'Según el informe',
+        valor: hoy ? hoy.deberiaValer : null,
+        rev: {need: true, corr: null, soloRevisar: !conMonto,
+          costo: aMano > 0 ? {v: aMano, src: 'Ingresado a mano'} : null,
+          ajusteCosto: conMonto ? hoy.ajuste : null,
+          txt: `Sólo tiene dos compras y una cuesta ${fmt(Math.round(cu[1] / cu[0] * 10) / 10)} veces la otra: ` +
+            `${cuTxt(cu[0])} c/u con ${barata.tipo} #${barata.folio} del ${fmtDate(barata.fecha)} y ` +
+            `${cuTxt(cu[1])} c/u con ${cara.tipo} #${cara.folio} del ${fmtDate(cara.fecha)}. ` +
+            `Con dos no se sabe cuál es la buena.`,
+          hacer: conMonto
+            ? `${ajCostoTxt(hoy.ajuste, hoy.stock, aMano)}. El valor del inventario pasa de ${money(hoy.valor)} a ${money(hoy.deberiaValer)}.`
+            : `Revisar cuál de las dos compras tiene el costo correcto. Hoy quedan ${fmt(ultimo.saldo)} unidades ` +
+              `a ${cuTxt(pmpHoy)} c/u. Si hay que corregir, escribe el costo en la columna PMP y se calcula el ajuste.`},
+      });
+    }
     // Las valorizaciones imposibles van una por artículo, no por documento:
     // describen cómo quedó el producto, no qué documento lo dejó así.
     for (const [k, all] of byKey) {
@@ -790,6 +852,32 @@
               txt: `Sí. ${def.por(malo.saldo, malo.valor)}`, hacer: def.hacer},
       });
     }
+
+    // Si hoy no quedan unidades ni valor, no hay nada que ajustar: el costo de
+    // esos movimientos ya salió con las salidas, y el inventario no los cuenta.
+    // Mostrarlos obliga a descartar a mano uno por uno algo que ya se sabe que
+    // no se puede arreglar: en su informe son 2.387 filas de 9.307.
+    //
+    // El valor se mira además del stock, con las mismas dos fuentes que usa la
+    // revisión de valorizaciones imposibles: si el producto no está en el stock
+    // valorizado, el valor sale del informe de documentos. Si no, el caso que
+    // sí hay que arreglar —valor sin unidades— quedaría escondido justamente
+    // por no tener unidades: son 41015-042 por $1.193.505 y AA-BRP-50100.
+    const hayQueHacerAlgo = new Map();
+    function quedaAlgo(k){
+      if (hayQueHacerAlgo.has(k)) return hayQueHacerAlgo.get(k);
+      const docs = (byKey.get(k) || []).filter(inBod), ultimo = docs[docs.length - 1];
+      const foto = fotoDe(docs);
+      const stock = foto ? foto.stock : ultimo && ultimo.saldo != null ? ultimo.saldo : null;
+      const valor = foto && foto.valorReal ? foto.valor : ultimo ? ultimo.valorInv : null;
+      // Se esconde sólo lo que quedó en nada: ni unidades ni valor. Un stock
+      // negativo no es "sin stock" —es un imposible que hay que arreglar— y
+      // tiene que seguir viéndose.
+      const r = stock == null || Math.abs(stock) > EPS || (valor != null && Math.abs(valor) > EPS);
+      hayQueHacerAlgo.set(k, r);
+      return r;
+    }
+    zero = zero.filter(z => quedaAlgo(z.key));
 
     // El ajuste de costo es del PRODUCTO, no del documento: deja el valor de lo
     // que queda en bodega en lo que corresponde. Si un producto tiene varios
@@ -821,7 +909,7 @@
     // quedaba fuera del paso 2.
     const porFila = new Map(rows.map(r => [r.key, r]));
     for (const z of zero){
-      if (!z.rev || !z.rev.need || (!z.raro && !z.imposible)) continue;
+      if (!z.rev || !z.rev.need || (!z.raro && !z.imposible && !z.dosCompras)) continue;
       const r = porFila.get(z.key);
       if (!r || r.manual || (r.hechos && r.hechos.has('costo'))) continue;
       (r.costExtra = r.costExtra || []).push(z);
@@ -1865,6 +1953,7 @@
         plan.cost.push({r, v, nota: z.rev.hacer,
           qty: z.stockHoy != null ? z.stockHoy : (hoyDe(r) ?? 0),
           doc: z.imposible ? VALORIZACIONES_IMPOSIBLES[z.imposible].titulo
+                           : z.dosCompras ? 'Dos compras a precios muy distintos'
                            : `${z.m.tipo} #${z.m.folio} entró a ${cuTxt(z.raro.cu)} c/u`,
           src: z.rev.costo ? z.rev.costo.src : 'falta el costo: escríbelo en la columna PMP de “Costos a revisar”',
           corr: ajuste != null ? {ajuste, pmp: v != null ? v : 0, unidades: z.stockHoy != null ? z.stockHoy : (hoyDe(r) ?? 0)} : null});

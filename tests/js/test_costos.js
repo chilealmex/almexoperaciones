@@ -160,13 +160,13 @@ escenario('Sin un costo escrito, se muestran las cifras pero no se propone un mo
   comprobar('el costo que muestra va marcado como referencia', true, /de referencia/.test(rev.costo.src));
 });
 
-escenario('Sin stock hoy: no se propone nada', () => {
-  // Las 13 unidades salieron: ese costo ya se fue con las salidas y no queda
-  // nada que revalorizar. Proponer un ajuste acá es inventar un movimiento.
+escenario('Sin stock hoy: no se muestra', () => {
+  // Las 13 unidades salieron y el inventario quedó en $0: ese costo ya se fue
+  // con las salidas y no queda nada que revalorizar. Antes la fila se mostraba
+  // diciendo "no se puede"; eso obliga a descartar a mano, uno por uno, algo
+  // que ya se sabe que no se puede arreglar —en su informe, 2.387 filas—.
   const z = enPantalla([...MALO_HOY, egreso(13, 5)]);
-  comprobar('la fila sigue apareciendo, para poder verla', 1, z.length);
-  comprobar('pero no hay que ajustar', false, z[0].rev.need);
-  comprobar('y dice por qué', true, /no quedan unidades/.test(z[0].rev.txt));
+  comprobar('no se muestra', 0, z.length);
 });
 
 escenario('Con stock pero el PMP ya se acomodó: tampoco', () => {
