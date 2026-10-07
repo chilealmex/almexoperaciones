@@ -590,7 +590,8 @@
       else if (diff == null) st = 'nodata';
       else st = diff > EPS ? 'up' : diff < -EPS ? 'down' : 'ok';
       const zeros = docs.filter(m => !m._ajc && m.valor != null && Math.abs(m.valor) < EPS && m.qty > EPS).length;
-      let cost = porArt.length > 1 ? costReviewArts(porArt) : costReview(docs, sysCalc);
+      const costoEscrito = edited && pmp > 0 ? pmp : null;
+      let cost = porArt.length > 1 ? costReviewArts(porArt, costoEscrito) : costReview(docs, sysCalc, costoEscrito);
       if (cost && !cost.need && costDocs.length) cost = null;   // el costo ya se ajustó: no hace falta otro aviso
       const dx = counted ? diagnose(s, docs.filter(m => !m._aj && !m._ajc), after, diff, sysAtCount, sameNet, zeros) : {cause:null, obs:[]};
       if (counted && umInfo && sysAtCount != null){
@@ -931,7 +932,7 @@
   }
   // Valor y PMP que tendría hoy el producto si los ingresos a $0 se hubieran registrado con su costo.
   // Se recalcula el promedio ponderado documento por documento, con las salidas al PMP de cada momento.
-  function correctedToday(docs){
+  function correctedToday(docs, costoAMano){
     const f = docs[0];
     if (!f || f.saldo == null || f.valorInv == null) return null;
     let cambio = false;
@@ -941,7 +942,7 @@
       docs.forEach((m, j) => {
         if (m.kind === 'in'){
           let v = m.valor || 0;
-          if (corregir && Math.abs(v) < EPS && m.qty > EPS){ const r = refCost(docs, j); if (r){ v = r.v * m.qty; cambio = true; } }
+          if (corregir && Math.abs(v) < EPS && m.qty > EPS && costoAMano > 0){ v = costoAMano * m.qty; cambio = true; }
           valor += v; saldo += m.qty;
         } else {
           valor -= (saldo > EPS ? valor / saldo : 0) * m.qty; saldo -= m.qty;
@@ -1000,7 +1001,7 @@
     }
     return {saldo, valor, pmp: saldo > EPS && valor > EPS ? valor / saldo : null};
   }
-  function costReview(docs, saldoHoy){
+  function costReview(docs, saldoHoy, costoAMano){
     const zeros = docs.filter(m => !m._ajc && m.valor != null && Math.abs(m.valor) < EPS && m.qty > EPS);
     const last = docs[docs.length - 1];
     const calc = valorDocs(docs);
@@ -1011,7 +1012,7 @@
     const notaFila = filaSinValor && !sinCostoHoy ? `La última fila del informe muestra Valor Inventario $0, pero según los movimientos tiene costo (PMP ${money(calc.pmp)}). No hace falta ajuste de valor; si en Defontana el producto aparece a $0, confírmalo.` : null;
     let ins0 = zeros.filter(m => m.kind === 'in');
     // Ingresos a $0 cuyo costo ya se corrigió: se informan, pero no se piden de nuevo
-    const corr0 = ins0.length ? correctedToday(docs) : null;
+    const corr0 = ins0.length ? correctedToday(docs, costoAMano) : null;
     const yaCorregidos = [];
     ins0 = ins0.filter(m => { const f = costFixed(docs, docs.indexOf(m), corr0); if (f){ yaCorregidos.push({m, f}); return false; } return true; });
     const outsSinStock = zeros.filter(m => m.kind === 'out' && m.saldo != null && m.saldo + m.qty <= EPS);
@@ -1040,10 +1041,19 @@
     // Un ajuste de costo, no editar los comprobantes de entonces: un documento
     // ya emitido no se toca, y corregirlo hacia atrás recalcula todas las
     // salidas que salieron a ese PMP —incluidas las ya facturadas.
-    const corr = ins0.length ? correctedToday(docs) : null;
+    // El monto del ajuste sale SOLO del costo que ella escriba. Sin eso habría
+    // que sacarlo de una referencia —la compra más cercana, la mediana—, y un
+    // comprobante contable no se hace con una estimación: se muestran las
+    // cifras exactas y se pide el costo.
+    const corr = ins0.length ? correctedToday(docs, costoAMano) : null;
+    const deQue = ins0.length ? ins0.map(m => `${m.tipo} #${m.folio}`).join(', ') : '';
     if (corr && Math.abs(corr.ajuste) > 0.5) {
-      const deQue = ins0.map(m => `${m.tipo} #${m.folio}`).join(', ');
       hacer.push({k:'cost', txt:`${ajCostoTxt(corr.ajuste, corr.unidades, corr.pmp)} (lo dejó así ${deQue})`});
+    } else if (ins0.length) {
+      const uds = ins0.reduce((a, m) => a + m.qty, 0);
+      hacer.push({k:'cost', txt:`Revisar el costo: entró ${fmt(uds)} a $0 con ${deQue}` +
+        (pmpHoy > EPS ? `, y hoy el PMP es ${cuTxt(pmpHoy)}` : '') +
+        `. Escribe el costo en la columna PMP y se calcula el ajuste.`});
     }
     if (sinCostoHoy && !ins0.length){ const r = refCost(docs, docs.length); costos.push({doc: 'stock actual', qty: saldoHoy, v: r ? r.v : null, src: r ? r.src : 'no hay compras con costo en el informe: usa el costo de la factura'}); }
     const need = sinCostoHoy || ins0.length > 0;
@@ -1052,8 +1062,8 @@
     return {need, txt, hacer, costos, corr};
   }
   // Mismo producto con varios códigos en Defontana: se revisa cada código con su propio saldo y PMP
-  function costReviewArts(porArt){
-    const res = porArt.map(x => ({x, c: costReview(x.list, x.hoy)})).filter(o => o.c);
+  function costReviewArts(porArt, costoAMano){
+    const res = porArt.map(x => ({x, c: costReview(x.list, x.hoy, costoAMano)})).filter(o => o.c);
     if (!res.length) return null;
     if (res.length === 1 && porArt.length === 1) return res[0].c;
     const out = {need: false, txt: [], hacer: [], costos: [], corr: null};
@@ -1140,7 +1150,12 @@
     // Cuando no se sabe lo que suele costar —un solo ingreso, y a $1— el
     // sistema no puede inventarlo: lo pide. Si ya se escribió uno a mano, ése
     // manda.
-    const objetivo = raro.habitual != null ? raro.habitual : (costoAMano > 0 ? costoAMano : null);
+    // "Lo que suele costar" sirve para RECONOCER el ingreso raro y para
+    // mostrarlo como referencia, pero no para poner el monto del ajuste: es una
+    // mediana, una estimación, y un comprobante contable no se hace con una
+    // estimación. El monto sale sólo del costo que ella escriba.
+    const aMano = costoAMano > 0 ? costoAMano : null;
+    const objetivo = aMano != null ? aMano : raro.habitual;
     const hoy = comoEstaHoy(docs, objetivo);
     const aQue = objetivo != null ? cuTxt(objetivo) : null;
     if (hoy.sinStock) return {
@@ -1154,9 +1169,11 @@
       hacer: 'Nada: el PMP de hoy ya está bien',
     };
     const r = refCost(docs, j);
-    const costo = objetivo != null
-      ? {v: objetivo, src: raro.habitual != null ? 'Lo que suele costar (mediana de los ingresos)' : 'Ingresado a mano'}
-      : (r ? {v: r.v, src: r.src} : null);
+    const costo = aMano != null
+      ? {v: aMano, src: 'Ingresado a mano'}
+      : raro.habitual != null
+        ? {v: raro.habitual, src: 'Lo que suele costar (mediana de los ingresos) — de referencia'}
+        : (r ? {v: r.v, src: r.src + ' — de referencia'} : null);
     const cuanto = raro.irrisorio
       ? `Entró a ${cuTxt(raro.cu)} c/u, que no es un costo real.`
       : `Entró a ${cuTxt(raro.cu)} c/u y suele costar ${cuTxt(raro.habitual)}: ` +
@@ -1165,15 +1182,14 @@
     // Lo que se propone es un ajuste de COSTO sobre lo que queda en bodega, no
     // tocar el documento viejo: el ingreso ya se consumió en parte y corregirlo
     // hacia atrás arrastra todas las salidas que salieron a ese PMP.
-    const hacer = hoy.ajuste != null
-      ? `${ajCostoTxt(hoy.ajuste, hoy.stock, objetivo)}. El valor del inventario pasa de ${money(hoy.valor)} a ${money(hoy.deberiaValer)}.`
-      : objetivo != null
-        ? `Ajuste de costo (entrada o salida, según si el valor sube o baja) para dejar el PMP en ${aQue} c/u.`
-        : `Falta el costo: no hay con qué saber cuánto cuesta este producto` +
-          (r ? ` (lo más parecido es ${cuTxt(r.v)}, del ${r.src.toLowerCase()})` : '') +
-          `. Escríbelo en la columna PMP y se calcula el ajuste.`;
+    const hacer = aMano != null && hoy.ajuste != null
+      ? `${ajCostoTxt(hoy.ajuste, hoy.stock, aMano)}. El valor del inventario pasa de ${money(hoy.valor)} a ${money(hoy.deberiaValer)}.`
+      : `Revisar el costo: hoy son ${fmt(hoy.stock)} unidades valorizadas en ${money(hoy.valor)} (${cuTxt(hoy.pmp)} c/u)` +
+        (raro.habitual != null ? `, y sus compras suelen ser de ${cuTxt(raro.habitual)} c/u` : '') +
+        (raro.habitual == null && r ? ` (lo más parecido es ${cuTxt(r.v)}, del ${r.src.toLowerCase()})` : '') +
+        `. Escribe el costo en la columna PMP y se calcula el ajuste.`;
     return {
-      need: true, costo, corr: null, ajusteCosto: hoy.ajuste,
+      need: true, costo, corr: null, ajusteCosto: aMano != null ? hoy.ajuste : null,
       txt: `Sí. ${cuanto} El PMP de hoy quedó en ${cuTxt(hoy.pmp)} con ${fmt(hoy.stock)} en bodega, así que el inventario está mal valorizado ahora mismo.`,
       hacer,
     };

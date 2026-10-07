@@ -91,7 +91,9 @@ const MOVS = [ing(10, 0, 1), ing(20, 1000, 2)];
 
 function pantalla(foto) {
   state.stock = []; state.recount = new Map(); state.manual = new Set();
-  state.hechos = new Map(); state.pmpEdit = new Map(); state.ajustes = [];
+  // El monto del ajuste de costo sale del costo escrito a mano: sin eso sólo
+  // se muestran las cifras. Estas pruebas lo escriben para comprobar el monto.
+  state.hechos = new Map(); state.pmpEdit = new Map([['AAA', 1000]]); state.ajustes = [];
   state.articulos = foto || null;
   porId.set('optBodega', Object.assign(porId.get('optBodega') || {}, {value: '*'}));
   porId.set('optAprob', Object.assign(porId.get('optAprob') || {}, {checked: false}));

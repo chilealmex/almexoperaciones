@@ -45,9 +45,11 @@ function docsDe(lista) {
 }
 
 // Arma la pantalla completa: las filas, la vista de costos y el plan.
-function pantalla(lista, conteo, hechos) {
+function pantalla(lista, conteo, hechos, costoAMano = 1000) {
   state.stock = conteo || []; state.recount = new Map(); state.manual = new Set();
-  state.hechos = hechos || new Map(); state.pmpEdit = new Map(); state.ajustes = [];
+  // El monto del ajuste de costo sale del costo escrito a mano: sin eso sólo
+  // se muestran las cifras. Estas pruebas lo escriben para comprobar el monto.
+  state.hechos = hechos || new Map(); state.pmpEdit = costoAMano == null ? new Map() : new Map([['AAA', costoAMano], ['BBB', costoAMano]]); state.ajustes = [];
   porId.set('optBodega', Object.assign(porId.get('optBodega') || {}, {value: '*'}));
   porId.set('optAprob', Object.assign(porId.get('optAprob') || {}, {checked: false}));
   porId.set('optLinea', Object.assign(porId.get('optLinea') || {}, {value: ''}));
@@ -121,7 +123,7 @@ escenario('Una valorización imposible también entra al paso 2', () => {
   mov.push({...mov[1], folio: '200', fecha: DIA(2026, 8, 3), kind: 'out', qty: 20,
             valor: 5000, saldo: 0, valorInv: 5000});
   state.stock = []; state.recount = new Map(); state.manual = new Set();
-  state.hechos = new Map(); state.pmpEdit = new Map(); state.ajustes = []; state.mov = mov;
+  state.hechos = new Map(); state.pmpEdit = new Map([['AAA', 1000]]); state.ajustes = []; state.mov = mov;
   const out = compute(mov);
   state.rows = out.rows; state.zero = out.zero;
   const p = {rows: out.rows, zero: out.zero, plan: buildPlan()};
@@ -138,12 +140,12 @@ escenario('Si no se sabe el costo, no se inventa uno malo', () => {
   // comparar. La compra anterior más cercana al segundo ingreso es el primero,
   // que es el mismo dato de relleno que está mal; apoyarse en él es corregir
   // un $1 con otro $1. Y como son sólo dos, tampoco hay mediana.
-  const p = pantalla([ingreso('AAA', 2, 1, 1), ingreso('AAA', 3, 1, 2)]);
+  const p = pantalla([ingreso('AAA', 2, 1, 1), ingreso('AAA', 3, 1, 2)], undefined, undefined, null);
   comprobar('entra al paso 2', true, enPaso2(p).has('AAA'));
   comprobar('una línea por producto', 1, p.plan.cost.length);
   const x = p.plan.cost[0];
   comprobar('no propone un costo', null, x.v);
-  comprobar('y pide escribirlo a mano', true, /Escríbelo en la columna PMP/.test(x.nota));
+  comprobar('y pide escribirlo a mano', true, /Escribe el costo en la columna PMP/.test(x.nota));
   comprobar('sin inventar un ajuste de valor', null, x.corr);
 });
 

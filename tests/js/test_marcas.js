@@ -46,10 +46,12 @@ const MOV = [ing(1, 1000, 1), ing(1, 1000, 2), ing(1, 1000, 3), ing(10, 20000, 4
 const CONTEO = [{key: 'AAA', code: 'AAA', name: 'PROD AAA', stock: 20, fecha: DIA(2026, 8, 5),
                  linea: '', um: '', por: '', estado: ''}];
 
-function pantalla(marca, caso) {
+function pantalla(marca, caso, costoAMano = 1000) {
   const c = caso || {mov: MOV, conteo: CONTEO};
   state.stock = c.conteo; state.recount = new Map(); state.manual = new Set();
-  state.pmpEdit = new Map(); state.ajustes = [];
+  // El monto del ajuste de costo sale del costo escrito a mano: sin eso sólo
+  // se muestran las cifras. Estas pruebas lo escriben para comprobar el monto.
+  state.pmpEdit = costoAMano == null ? new Map() : new Map([['AAA', costoAMano]]); state.ajustes = [];
   state.hechos = marca === undefined ? new Map() : new Map([['AAA', marca]]);
   porId.set('optBodega', Object.assign(porId.get('optBodega') || {}, {value: '*'}));
   porId.set('optAprob', Object.assign(porId.get('optAprob') || {}, {checked: false}));
@@ -174,7 +176,7 @@ escenario('El ajuste de costo dice si es entrada o salida', () => {
 });
 
 escenario('Si el costo no se sabe, no inventa el sentido del comprobante', () => {
-  const p = pantalla(undefined, {mov: [ing(2, 1, 1), ing(3, 1, 2)], conteo: CONTEO});
+  const p = pantalla(undefined, {mov: [ing(2, 1, 1), ing(3, 1, 2)], conteo: CONTEO}, null);
   const x = p.plan.cost[0];
   comprobar('no hay ajuste calculado', null, x.corr);
   comprobar('no dice ni entrada ni salida', false, /ENTRADA|SALIDA/.test(x.nota));
