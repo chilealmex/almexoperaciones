@@ -739,7 +739,7 @@
     for (const [k, docs] of byKey) if (!seen.has(k) && docs.some(inBod)) rows.push(build(null, docs));
 
     const names = new Map(rows.map(r => [r.key, r.name])), lineas = new Map(rows.map(r => [r.key, r.linea]));
-    const zero = [];
+    let zero = [];
     // Lo que suele costar cada artículo, para reconocer el ingreso mal costeado
     const habitualPorArt = new Map();
     for (const [, all] of byKey) for (const m of all) {
@@ -852,6 +852,32 @@
               txt: `Sí. ${def.por(malo.saldo, malo.valor)}`, hacer: def.hacer},
       });
     }
+
+    // Si hoy no quedan unidades ni valor, no hay nada que ajustar: el costo de
+    // esos movimientos ya salió con las salidas, y el inventario no los cuenta.
+    // Mostrarlos obliga a descartar a mano uno por uno algo que ya se sabe que
+    // no se puede arreglar: en su informe son 2.387 filas de 9.307.
+    //
+    // El valor se mira además del stock, con las mismas dos fuentes que usa la
+    // revisión de valorizaciones imposibles: si el producto no está en el stock
+    // valorizado, el valor sale del informe de documentos. Si no, el caso que
+    // sí hay que arreglar —valor sin unidades— quedaría escondido justamente
+    // por no tener unidades: son 41015-042 por $1.193.505 y AA-BRP-50100.
+    const hayQueHacerAlgo = new Map();
+    function quedaAlgo(k){
+      if (hayQueHacerAlgo.has(k)) return hayQueHacerAlgo.get(k);
+      const docs = (byKey.get(k) || []).filter(inBod), ultimo = docs[docs.length - 1];
+      const foto = fotoDe(docs);
+      const stock = foto ? foto.stock : ultimo && ultimo.saldo != null ? ultimo.saldo : null;
+      const valor = foto && foto.valorReal ? foto.valor : ultimo ? ultimo.valorInv : null;
+      // Se esconde sólo lo que quedó en nada: ni unidades ni valor. Un stock
+      // negativo no es "sin stock" —es un imposible que hay que arreglar— y
+      // tiene que seguir viéndose.
+      const r = stock == null || Math.abs(stock) > EPS || (valor != null && Math.abs(valor) > EPS);
+      hayQueHacerAlgo.set(k, r);
+      return r;
+    }
+    zero = zero.filter(z => quedaAlgo(z.key));
 
     // El ajuste de costo es del PRODUCTO, no del documento: deja el valor de lo
     // que queda en bodega en lo que corresponde. Si un producto tiene varios

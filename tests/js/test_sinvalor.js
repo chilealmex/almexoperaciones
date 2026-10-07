@@ -305,5 +305,79 @@ escenario('Los marcados no se duplican al listar todos', () => {
   comprobar('y es la que pide revisarlo', true, state.zero.find(z => z.m.folio === '100').rev.need);
 });
 
+escenario('Un producto que ya no tiene stock no se lista', () => {
+  // Entraron 10 y salieron las 10: hoy no hay unidades ni valor. Esos
+  // movimientos no se pueden arreglar —el costo se fue con la salida— así que
+  // mostrarlos sólo obliga a descartarlos a mano. En su informe son 2.387
+  // filas de 9.307.
+  const docs = docsDe([ing(10, 1000, 1), {kind: 'out', qty: 10, cu: 0, fecha: DIA(2026, 8, 2)}]);
+  vistaMovimientos(docs, null);
+  comprobar('ni la entrada ni la salida', 0, state.zero.length);
+
+  // Pero si sigue teniendo unidades, se ven las dos
+  const quedan = docsDe([ing(10, 1000, 1), {kind: 'out', qty: 4, cu: 0, fecha: DIA(2026, 8, 2)}]);
+  vistaMovimientos(quedan, null);
+  comprobar('con stock se listan las dos', 2, state.zero.length);
+});
+
+escenario('Sin stock pero con valor sí se lista: eso hay que sacarlo', () => {
+  // Salieron todas las unidades y el inventario quedó valiendo $5.000. Es el
+  // caso que sí hay que arreglar, así que el filtro no se lo puede comer: se
+  // muestra el producto con toda su historia.
+  //
+  // Y el valor hay que mirarlo en el informe de documentos cuando el producto
+  // no viene en el stock valorizado —que es lo que pasa con los dos suyos: el
+  // valorizado no los trae—. Si se diera por agotado por no estar ahí, los
+  // $5.000 que hay que sacar no se verían nunca.
+  const docs = docsDe([ing(10, 1000, 1)]);
+  docs.push({...docs[0], folio: '200', fecha: DIA(2026, 8, 2), kind: 'out', qty: 10,
+             valor: 5000, saldo: 0, valorInv: 5000});
+  vistaMovimientos(docs, parseArticulos(INV(['OTRO', 'PROD OTRO', 'BODEGA CENTRAL', 5, 'UN', 100, 500])));
+  comprobar('se lista', true, state.zero.length > 0);
+  comprobar('con la valorización imposible', true, state.zero.some(z => z.imposible === 'valorSinStock'));
+  comprobar('y también sus movimientos', true, state.zero.some(z => z.normal));
+});
+
+escenario('El stock que manda es el del inventario, no el arrastrado', () => {
+  // El saldo que se arrastra fila a fila del informe de documentos es una
+  // reconstrucción; el stock valorizado es lo que Defontana tiene ahora. Si se
+  // esconde por el arrastre, se esconde un producto que sí tiene unidades.
+  const docs = docsDe([ing(10, 1000, 1), {kind: 'out', qty: 10, cu: 0, fecha: DIA(2026, 8, 2)}]);
+  vistaMovimientos(docs, parseArticulos(INV(['AAA', 'PROD AAA', 'BODEGA CENTRAL', 4, 'UN', 1000, 4000])));
+  comprobar('el arrastre dice 0 pero el inventario dice 4: se lista', 2, state.zero.length);
+
+  // Y al revés: si el inventario dice que no queda nada, no se lista aunque el
+  // arrastre crea que sí
+  const quedan = docsDe([ing(10, 1000, 1)]);
+  vistaMovimientos(quedan, parseArticulos(INV(['AAA', 'PROD AAA', 'BODEGA CENTRAL', 0, 'UN', 0, 0])));
+  comprobar('el arrastre dice 10 pero el inventario dice 0: no se lista', 0, state.zero.length);
+});
+
+escenario('Con el informe viejo, el valor sigue saliendo de los documentos', () => {
+  // El Informe de Artículos no trae la columna Total: su valor es stock por
+  // costo, así que sin unidades da $0 siempre. Si el filtro se apoyara en eso,
+  // el valor sin unidades quedaría escondido justo con el informe en que no se
+  // puede ver de otra forma.
+  const ART = [['Informe de Articulos'], ['Empresa: X'],
+    ['Fecha de generación: 07-10-2026, 09:20 a. m.'], [],
+    ['Artículo', 'Descripción', 'Stock Disponible', 'Costo Vigente', 'Costo Reposicion'],
+    ['AAA', 'PROD AAA', 0, 0, 0]];
+  const docs = docsDe([ing(10, 1000, 1)]);
+  docs.push({...docs[0], folio: '200', fecha: DIA(2026, 8, 2), kind: 'out', qty: 10,
+             valor: 5000, saldo: 0, valorInv: 5000});
+  vistaMovimientos(docs, parseArticulos(ART));
+  comprobar('se lista igual', true, state.zero.length > 0);
+  comprobar('como valor sin unidades', true, state.zero.some(z => z.imposible === 'valorSinStock'));
+});
+
+escenario('Si el informe no trae el saldo, no se esconde todo', () => {
+  // Sin saber el stock no se puede afirmar que no quede nada. Esconder por las
+  // dudas dejaría la pantalla en blanco con un informe al que le falta una
+  // columna, y parecería que no hay nada que regularizar.
+  const docs = docsDe([ing(10, 1000, 1)]).map(m => ({...m, saldo: null, valorInv: null}));
+  vistaMovimientos(docs, null);
+  comprobar('el movimiento se lista', 1, state.zero.length);
+});
+
 console.log(`\n${hechas - fallas} de ${hechas} comprobaciones pasaron`);
 process.exit(fallas ? 1 : 0);

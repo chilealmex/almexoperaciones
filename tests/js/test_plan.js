@@ -84,8 +84,8 @@ escenario('Un costo fuera de lo normal entra al paso 2 del plan', () => {
 
 escenario('Sin stock hoy no entra: ese costo ya salió con las salidas', () => {
   const p = pantalla([...MALO('AAA'), egreso('AAA', 13, 5)]);
-  comprobar('la vista de costos igual lo muestra', true, p.zero.some(z => z.raro));
-  comprobar('pero el plan no lo pide', 0, p.plan.cost.length);
+  comprobar('no se muestra en la vista de costos', false, p.zero.some(z => z.raro));
+  comprobar('y el plan no lo pide', 0, p.plan.cost.length);
   comprobar('y el panel tampoco', 0, cuentaDelPanel(p));
 });
 
