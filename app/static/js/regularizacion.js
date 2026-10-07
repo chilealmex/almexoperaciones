@@ -773,6 +773,56 @@
         // ese documento.
         valor: hoyRaro ? hoyRaro.deberiaValer : (pmp != null ? pmp * m.qty : null)});
     });
+    // Todos los movimientos, sin excepción. Los de arriba son los que piden
+    // algo; éstos son el resto, para que la vista liste de verdad todo lo que
+    // entró y salió y no haya que creer que lo no mostrado está bien. Van con
+    // su PMP y su costo unitario, que es con lo que se revisa a ojo.
+    // Sólo se arman cuando se van a mirar: son más de nueve mil y construirlos
+    // en cada clic de la pantalla de Productos la pondría medio segundo más
+    // lenta sin que nadie los vea.
+    const yaEnLista = new Set(zero.map(z => z.m));
+    if (state.view === 'zero') for (const [k, all] of byKey) for (const m of all) {
+      if (m._ajc || !inBod(m) || yaEnLista.has(m) || m.qty <= EPS) continue;
+      zero.push({key:k, m, code:m.art, name:m.desc || names.get(k) || '', linea: lineas.get(k) || '',
+        pmp: pmpAt(m), edited: false, raro: null, normal: true, valor: null,
+        pmpSrc: 'Según el informe',
+        rev: {need: false, costo: null, corr: null,
+          txt: `No. ${m.kind === 'in' ? 'Entró' : 'Salió'} ${fmt(m.qty)} y el inventario quedó en ${money(m.valorInv)} por ${fmt(m.saldo)} unidades${pmpAt(m) != null ? ` (${cuTxt(pmpAt(m))} c/u)` : ''}.`,
+          hacer: 'Nada'}});
+    }
+    // Con dos compras no hay mediana —no se sabe cuál de las dos es la rara— y
+    // por eso el producto no se juzga. Pero sí se pueden comparar entre ellas:
+    // si una cuesta tres veces la otra, algo pasó, aunque no se sepa cuál es la
+    // buena. Se muestra para que lo decida quien sabe, sin proponer monto.
+    //
+    // Con sus archivos son 2 de 309 productos de dos compras: los otros 307
+    // tienen sus dos compras coherentes, que es evidencia de estar bien y no
+    // ignorancia.
+    for (const [k, all] of byKey) {
+      const docs = all.filter(inBod);
+      if (!docs.length || costoHabitual(docs) != null) continue;
+      const ultimo = docs[docs.length - 1];
+      if (!ultimo || !(ultimo.saldo > EPS)) continue;           // sin stock no hay nada que hacer
+      const compras = docs.filter(m => costoUnitario(m) != null && costoUnitario(m) > COSTO_IRRISORIO);
+      if (compras.length !== 2) continue;
+      const cu = compras.map(costoUnitario).sort((x, y) => x - y);
+      if (cu[0] <= 0 || cu[1] / cu[0] < VECES_FUERA_DE_RANGO) continue;
+      const cara = compras.find(m => costoUnitario(m) === cu[1]);
+      const barata = compras.find(m => costoUnitario(m) === cu[0]);
+      const pmpHoy = pmpAt(ultimo);
+      zero.push({
+        key: k, m: cara, code: cara.art, name: cara.desc || names.get(k) || '',
+        linea: lineas.get(k) || '', pmp: pmpHoy, edited: false, raro: null, dosCompras: true,
+        pmpSrc: 'Según el informe', valor: null,
+        rev: {need: true, costo: null, corr: null, ajusteCosto: null, soloRevisar: true,
+          txt: `Sólo tiene dos compras y una cuesta ${fmt(Math.round(cu[1] / cu[0] * 10) / 10)} veces la otra: ` +
+            `${cuTxt(cu[0])} c/u con ${barata.tipo} #${barata.folio} del ${fmtDate(barata.fecha)} y ` +
+            `${cuTxt(cu[1])} c/u con ${cara.tipo} #${cara.folio} del ${fmtDate(cara.fecha)}. ` +
+            `Con dos no se sabe cuál es la buena.`,
+          hacer: `Revisar cuál de las dos compras tiene el costo correcto. Hoy quedan ${fmt(ultimo.saldo)} unidades ` +
+            `a ${cuTxt(pmpHoy)} c/u. Si hay que corregir, escribe el costo en la columna PMP.`},
+      });
+    }
     // Las valorizaciones imposibles van una por artículo, no por documento:
     // describen cómo quedó el producto, no qué documento lo dejó así.
     for (const [k, all] of byKey) {
@@ -821,7 +871,7 @@
     // quedaba fuera del paso 2.
     const porFila = new Map(rows.map(r => [r.key, r]));
     for (const z of zero){
-      if (!z.rev || !z.rev.need || (!z.raro && !z.imposible)) continue;
+      if (!z.rev || !z.rev.need || (!z.raro && !z.imposible && !z.dosCompras)) continue;
       const r = porFila.get(z.key);
       if (!r || r.manual || (r.hechos && r.hechos.has('costo'))) continue;
       (r.costExtra = r.costExtra || []).push(z);
@@ -1865,6 +1915,7 @@
         plan.cost.push({r, v, nota: z.rev.hacer,
           qty: z.stockHoy != null ? z.stockHoy : (hoyDe(r) ?? 0),
           doc: z.imposible ? VALORIZACIONES_IMPOSIBLES[z.imposible].titulo
+                           : z.dosCompras ? 'Dos compras a precios muy distintos'
                            : `${z.m.tipo} #${z.m.folio} entró a ${cuTxt(z.raro.cu)} c/u`,
           src: z.rev.costo ? z.rev.costo.src : 'falta el costo: escríbelo en la columna PMP de “Costos a revisar”',
           corr: ajuste != null ? {ajuste, pmp: v != null ? v : 0, unidades: z.stockHoy != null ? z.stockHoy : (hoyDe(r) ?? 0)} : null});
