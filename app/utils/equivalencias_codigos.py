@@ -20,6 +20,8 @@ import re
 import unicodedata
 from difflib import SequenceMatcher
 
+from app.utils.codigos import sin_cero_de_relleno
+
 # Lo que separa un código de otro son sus letras y números, no los signos con
 # que cada sistema los adorna. "GOL.PRE-5_8" y "GOLPRE-58" comparten todo salvo
 # el punto, el guion y el guion bajo.
@@ -36,24 +38,26 @@ def esqueleto(codigo) -> str:
 
 
 def esqueleto_sin_ceros(codigo) -> str:
-    """Además sin los ceros de relleno de cada tramo: "00-FSR-SCW-05" -> "FSRSCW5".
+    """Además sin los ceros con que empieza cada tramo: "A-005" -> "A5".
 
-    Un sistema exporta "00-FSR-SCW-05" y el otro "FSR-SCW-5": el cero de
-    relleno es decisión del exportador, no parte del código.
+    Un sistema exporta "0136-1005" y el otro "136-1005": el cero de relleno es
+    decisión del exportador, no parte del código.
+
+    Vale aunque el tramo siga con letras: "0870AP2" y "870AP2" son el mismo
+    artículo. Se usa la misma limpieza que clave_sin_ceros() para que lo que la
+    pantalla propone como repetido y lo que acá se mide como parecido no sean
+    dos criterios distintos.
+
+    Un tramo de puros ceros queda en un cero, no desaparece, así que
+    "00-FSR-SCW-05" da "0FSRSCW5" y no llega a "FSRSCW5": ese par lo junta el
+    parecido carácter a carácter, no esta limpieza.
     """
     texto = str(codigo or "").strip().upper()
     sin_acentos = "".join(
         c for c in unicodedata.normalize("NFD", texto) if unicodedata.category(c) != "Mn"
     )
     tramos = re.split(r"[^0-9A-Z]+", sin_acentos)
-    limpios = []
-    for tramo in tramos:
-        if tramo.isdigit():
-            # Un tramo de puros ceros es un cero, no la cadena vacía.
-            limpios.append(tramo.lstrip("0") or "0")
-        else:
-            limpios.append(tramo)
-    return "".join(limpios)
+    return "".join(sin_cero_de_relleno(t) for t in tramos)
 
 
 def _parecido(a: str, b: str) -> float:

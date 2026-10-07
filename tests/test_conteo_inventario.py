@@ -883,11 +883,34 @@ def test_si_la_importacion_falla_se_avisa_en_vez_de_mostrar_un_error_500(client,
     ("011-CON-OTH-01", "11-CON-OTH-01"),
     ("0136-1005", "136-1005"),
     ("A-007", "A-7"),
+    # Códigos de puros números: el cero de adelante es el formato con que el
+    # sistema los muestra, no parte del código.
+    ("052075", "52075"),
+    ("053024", "53024"),
+    ("06-032-06", "6-32-6"),
+    # El cero se saca aunque el tramo siga con letras. Antes sólo se limpiaba
+    # el tramo que era todo dígitos, así que estos dos no caían en el mismo
+    # grupo y Unificar códigos no llegaba a proponerlos nunca.
+    ("0870AP2", "870AP2"),
+    ("0506507001", "506507001"),
 ])
 def test_el_cero_de_relleno_no_separa_dos_codigos(uno, otro):
     from app.utils.codigos import clave_sin_ceros
 
     assert clave_sin_ceros(uno) == clave_sin_ceros(otro)
+
+
+@pytest.mark.parametrize("uno, otro", [
+    ("0870AP2", "870AP2"),
+    ("052075", "52075"),
+])
+def test_el_parecido_tambien_ignora_ese_cero(uno, otro):
+    """Lo que la pantalla propone como repetido y lo que el buscador de parejas
+    mide como parecido tienen que usar el mismo criterio: si no, un código se
+    propone en una lista y no en la otra."""
+    from app.utils.equivalencias_codigos import esqueleto_sin_ceros
+
+    assert esqueleto_sin_ceros(uno) == esqueleto_sin_ceros(otro)
 
 
 @pytest.mark.parametrize("uno, otro", [
