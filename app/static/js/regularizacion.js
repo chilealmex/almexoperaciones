@@ -362,11 +362,11 @@
   function pmpOf(list, upto){
     const lim = upto == null ? list.length - 1 : upto;
     for (let j = lim; j >= 0; j--){ const m = list[j]; if (m.saldo > EPS && m.valorInv > EPS) return {v:m.valorInv / m.saldo, src:'PMP Defontana al ' + fmtDate(m.fecha)}; }
-    for (let j = lim; j >= 0; j--){ const m = list[j]; if (m.qty > EPS && m.valor > EPS) return {v:m.valor / m.qty, src:'Costo doc. del ' + fmtDate(m.fecha)}; }
+    for (let j = lim; j >= 0; j--){ const m = list[j]; if (m.qty > EPS && valorReal(m) > EPS) return {v:valorReal(m) / m.qty, src:'Costo doc. del ' + fmtDate(m.fecha)}; }
     for (let j = lim + 1; j < list.length; j++){
       const m = list[j];
       if (m.saldo > EPS && m.valorInv > EPS) return {v:m.valorInv / m.saldo, src:'PMP Defontana al ' + fmtDate(m.fecha)};
-      if (m.qty > EPS && m.valor > EPS) return {v:m.valor / m.qty, src:'Costo doc. del ' + fmtDate(m.fecha)};
+      if (m.qty > EPS && valorReal(m) > EPS) return {v:valorReal(m) / m.qty, src:'Costo doc. del ' + fmtDate(m.fecha)};
     }
     return null;
   }
@@ -478,7 +478,35 @@
     }
     return m;
   }
+  // Cuánto movió de verdad cada documento. La columna "Valor Movimiento" del
+  // informe no es fiable: en el suyo no coincide con el salto del Valor
+  // Inventario en el 13,5% de los ingresos, y por mucho —AA-STG-080 dice
+  // $7.875 c/u donde el inventario subió $207.346 c/u—. Las que sí sirven son
+  // Saldo Inventario, Valor Inventario y Cant. Movimiento, así que el valor de
+  // un movimiento es lo que movió el Valor Inventario entre su fila y la
+  // anterior del mismo artículo.
+  //
+  // El primero de cada artículo no tiene fila anterior con que comparar: ahí
+  // queda lo que diga la columna, que es lo único que hay.
+  function valorarMovimientos(movList){
+    const porArt = new Map();
+    for (const m of movList){
+      const a = norm(m.art);
+      if (!porArt.has(a)) porArt.set(a, []);
+      porArt.get(a).push(m);
+    }
+    for (const L of porArt.values()){
+      L.sort((x, y) => (x.fecha || 0) - (y.fecha || 0) || x.i - y.i);
+      let prev = null;
+      for (const m of L){
+        const d = m.valorInv != null && prev != null ? m.valorInv - prev : null;
+        m._v = d != null ? (m.kind === 'in' ? d : -d) : (m.valor != null ? m.valor : null);
+        if (m.valorInv != null) prev = m.valorInv;
+      }
+    }
+  }
   function compute(movList){
+    valorarMovimientos(movList);
     const unidadReciente = unidadesRecientes();
     const bod = $('optBodega').value, sameAfter = $('optSame').value === 'after', onlyAprob = $('optAprob').checked;
     // El mismo código puede venir escrito de varias formas: se agrupa por la clave normalizada
@@ -607,7 +635,7 @@
       else if (!counted) st = 'nocount';
       else if (diff == null) st = 'nodata';
       else st = diff > EPS ? 'up' : diff < -EPS ? 'down' : 'ok';
-      const zeros = docs.filter(m => !m._ajc && m.valor != null && Math.abs(m.valor) < EPS && m.qty > EPS).length;
+      const zeros = docs.filter(m => !m._ajc && valorReal(m) != null && Math.abs(valorReal(m)) < EPS && m.qty > EPS).length;
       const costoEscrito = edited && pmp > 0 ? pmp : null;
       let cost = porArt.length > 1 ? costReviewArts(porArt, costoEscrito) : costReview(docs, sysCalc, costoEscrito);
       if (cost && !cost.need && costDocs.length) cost = null;   // el costo ya se ajustó: no hace falta otro aviso
@@ -719,8 +747,8 @@
       if (!habitualPorArt.has(a)) habitualPorArt.set(a, costoHabitual(all.filter(x => norm(x.art) === a)));
     }
     for (const [k, all] of byKey) all.forEach(m => {
-      if (m._ajc || !inBod(m) || m.valor == null || m.qty <= EPS) return;
-      const aCero = Math.abs(m.valor) <= EPS;
+      if (m._ajc || !inBod(m) || valorReal(m) == null || m.qty <= EPS) return;
+      const aCero = Math.abs(valorReal(m)) <= EPS;
       // Un ingreso puede estar mal valorizado sin ser $0: a $1, o a 20 veces lo
       // que cuesta siempre. No se nota mirando cantidades y ensucia la
       // valorización de todo lo que salga después.
@@ -970,14 +998,17 @@
     let cambio = false;
     const run = corregir => {
       let saldo = f.saldo - (f.kind === 'in' ? f.qty : -f.qty);
-      let valor = f.valorInv - (f.kind === 'in' ? 1 : -1) * (f.valor || 0);
+      let valor = f.valorInv - (f.kind === 'in' ? 1 : -1) * (valorReal(f) || 0);
       docs.forEach((m, j) => {
         if (m.kind === 'in'){
-          let v = m.valor || 0;
+          let v = valorReal(m) || 0;
           if (corregir && Math.abs(v) < EPS && m.qty > EPS && costoAMano > 0){ v = costoAMano * m.qty; cambio = true; }
           valor += v; saldo += m.qty;
         } else {
-          valor -= (saldo > EPS ? valor / saldo : 0) * m.qty; saldo -= m.qty;
+          // La salida también vale lo que movió el inventario, no lo que diga
+          // la columna ni el PMP recalculado: así la repetición reproduce el
+          // Valor Inventario de Defontana en vez de una versión paralela.
+          valor -= valorReal(m) || 0; saldo -= m.qty;
         }
       });
       return {saldo, valor};
@@ -1009,7 +1040,7 @@
   function costFixed(docs, j, corr){
     const aj = docs.slice(j + 1).find(m => m._ajc);
     if (aj) return `se hizo el ajuste de costo (${aj.tipo} #${aj.folio} del ${fmtDate(aj.fecha)})`;
-    const adj = docs.slice(j + 1).find(m => m.qty <= EPS && Math.abs(m.valor || 0) > EPS);
+    const adj = docs.slice(j + 1).find(m => m.qty <= EPS && Math.abs(valorReal(m) || 0) > EPS);
     if (adj) return `se registró un ajuste de valor (${adj.tipo} #${adj.folio} del ${fmtDate(adj.fecha)} por ${money(adj.valor)})`;
     const hoy = pmpAt(docs[docs.length - 1]);
     if (corr && hoy > EPS && corr.pmp > EPS && Math.abs(hoy - corr.pmp) / corr.pmp <= 0.02) return `el PMP de hoy (${money(hoy)}) ya coincide con el correcto (${money(corr.pmp)})`;
@@ -1027,14 +1058,14 @@
     let valor = f.valorInv != null ? Math.max(0, f.valorInv - (f.kind === 'in' ? 1 : -1) * (f.valor || 0)) : 0;
     if (!(saldo > EPS)) valor = 0;
     for (const m of docs){
-      if (m.kind === 'in'){ valor += m.valor || 0; saldo += m.qty; }
-      else { valor -= (saldo > EPS ? valor / saldo : 0) * m.qty; saldo -= m.qty; }
+      if (m.kind === 'in'){ valor += valorReal(m) || 0; saldo += m.qty; }
+      else { valor -= valorReal(m) || 0; saldo -= m.qty; }
       if (!(saldo > EPS)) valor = 0;
     }
     return {saldo, valor, pmp: saldo > EPS && valor > EPS ? valor / saldo : null};
   }
   function costReview(docs, saldoHoy, costoAMano){
-    const zeros = docs.filter(m => !m._ajc && m.valor != null && Math.abs(m.valor) < EPS && m.qty > EPS);
+    const zeros = docs.filter(m => !m._ajc && valorReal(m) != null && Math.abs(valorReal(m)) < EPS && m.qty > EPS);
     const last = docs[docs.length - 1];
     const calc = valorDocs(docs);
     const pmpHoy = pmpAt(last) || (calc && calc.pmp);
@@ -1150,7 +1181,8 @@
   const MINIMO_INGRESOS = 3;           // con menos no se sabe cuál de los dos es el raro
   const COSTO_IRRISORIO = 1;           // $1 o menos no es un costo, es un dato de relleno
 
-  const costoUnitario = m => m.kind === 'in' && m.qty > EPS && m.valor > EPS ? m.valor / m.qty : null;
+  const valorReal = m => m._v != null ? m._v : m.valor;
+  const costoUnitario = m => m.kind === 'in' && m.qty > EPS && valorReal(m) > EPS ? valorReal(m) / m.qty : null;
 
   function costoHabitual(docs){
     const costos = docs.map(costoUnitario).filter(v => v != null && v > COSTO_IRRISORIO).sort((a, b) => a - b);
@@ -1231,21 +1263,14 @@
     // costo, el valor cuadra por eso y no porque la entrada mala fuera
     // inofensiva. Decirlo cambia lo que hay que revisar.
     const yaAjustado = docs.filter(m => m._ajc);
-    // Tercera causa, y la que más confunde: Defontana puede haber contabilizado
-    // contra el documento malo un valor distinto del que el documento dice.
-    // 40080-004 entró 15 a $1 —$15 en total— y Defontana le anotó $8.553.600,
-    // que es lo que costaron en su compra anterior. El valor de hoy cuadra, y
-    // no es por movimientos posteriores: no hay ninguno.
-    const anterior = j > 0 ? docs[j - 1] : null;
-    const contabilizado = m.valorInv != null && anterior && anterior.valorInv != null
-      ? m.valorInv - anterior.valorInv : (j === 0 && m.valorInv != null ? m.valorInv : null);
-    const otroValor = contabilizado != null && m.valor != null &&
-      Math.abs(contabilizado - m.valor) > Math.max(1, Math.abs(m.valor) * 0.01);
+    // Antes había una tercera causa: "el documento dice X pero Defontana
+    // contabilizó Y". Se cayó al dejar de usar la columna "Valor Movimiento",
+    // que no es fiable: esa comparación era contra el dato malo, no contra el
+    // producto. 40080-004 no entró a $1 —eso lo decía esa columna—: entró a
+    // $570.240, que es lo que movió el Valor Inventario.
     const porQue = yaAjustado.length
       ? `ya se le hizo un ajuste de costo (${[...new Set(yaAjustado.map(x => `${x.tipo} #${x.folio}`))].join(', ')}): el valor cuadra por eso`
-      : otroValor
-        ? `el documento dice ${money(m.valor)} pero Defontana le contabilizó ${money(contabilizado)} (${cuTxt(contabilizado / m.qty)} c/u): el valor cuadra por eso, no por el documento`
-        : 'los movimientos posteriores lo acomodaron';
+      : 'los movimientos posteriores lo acomodaron';
     if (!hoy.malo) return raro.irrisorio ? {
       need: true, costo: null, corr: null, ajusteCosto: null, soloRevisar: true,
       txt: `Entró a ${cuTxt(raro.cu)} c/u, que no es un costo real. El PMP de hoy (${cuTxt(hoy.pmp)}) se ve bien${aQue ? ' (' + aQue + ')' : ''}: ${porQue}.`,
@@ -1486,7 +1511,7 @@
     movList.forEach(m => { m._aj = false; m._ajc = false; m._par = false; });
     const pre = compute(movList).rows;
     const groups = new Map();
-    const unit = m => m.qty > EPS && m.valor != null ? m.valor / m.qty : null;
+    const unit = m => m.qty > EPS && valorReal(m) != null ? valorReal(m) / m.qty : null;
     for (const r of pre){
       if (!r.counted) continue;
       const ck = dayKey(r.s.fecha);
@@ -1505,7 +1530,7 @@
         let g = groups.get(id);
           if (!g){ g = {id, tipo:m.tipo, folio:m.folio, fecha:m.fecha, motivo:m.motivo || '', tercero:false, lines:0, match:0, cost:0, valor:0}; groups.set(id, g); }
         if (m.tercero) g.tercero = true;
-        if (m._par || (m.qty <= EPS && Math.abs(m.valor || 0) > EPS)) g.cost++;
+        if (m._par || (m.qty <= EPS && Math.abs(valorReal(m) || 0) > EPS)) g.cost++;
         else if (r.diff != null && near(m.qty, Math.abs(r.diff)) && ((r.diff < 0 && m.kind === 'out') || (r.diff > 0 && m.kind === 'in'))) g.match++;
       }
     }
@@ -1517,7 +1542,7 @@
     }
     const list = [...groups.values()];
     const tot = new Map();
-    for (const m of movList){ const t = tot.get(docId(m)) || {lines:0, valor:0, q0:0}; t.lines++; if (m.qty <= EPS) t.q0++; t.valor += (m.kind === 'in' ? 1 : -1) * (m.valor || 0); tot.set(docId(m), t); }
+    for (const m of movList){ const t = tot.get(docId(m)) || {lines:0, valor:0, q0:0}; t.lines++; if (m.qty <= EPS) t.q0++; t.valor += (m.kind === 'in' ? 1 : -1) * (valorReal(m) || 0); tot.set(docId(m), t); }
     list.forEach(g => {
       const t = tot.get(g.id); if (t){ g.lines = t.lines; g.valor = t.valor; }
       g.kind = (g.cost > 0 && g.cost >= g.match) || (t && t.q0 / t.lines >= 0.6) ? 'costo' : 'cantidad';
@@ -1529,7 +1554,7 @@
     const marcados = new Set(list.filter(ajMarcado).map(g => g.id));
     movList.forEach(m => {
       if (!marcados.has(docId(m))) return;
-      if (m._par || (m.qty <= EPS && Math.abs(m.valor || 0) > EPS)) m._ajc = true; else m._aj = true;
+      if (m._par || (m.qty <= EPS && Math.abs(valorReal(m) || 0) > EPS)) m._ajc = true; else m._aj = true;
     });
     return list;
   }
@@ -1689,7 +1714,7 @@
     ['kind', 'Tipo', '', z => z.m.kind],
     ['qty', 'Cantidad', 'num', z => z.m.qty],
     ['pmp', 'PMP', 'num', z => z.pmp],
-    ['cu', 'Costo unitario del documento', 'num', z => z.raro ? z.raro.cu : (z.m.valor != null && z.m.qty > EPS ? z.m.valor / z.m.qty : null)],
+    ['cu', 'Costo unitario del documento', 'num', z => z.raro ? z.raro.cu : (valorReal(z.m) != null && z.m.qty > EPS ? valorReal(z.m) / z.m.qty : null)],
     ['habitual', 'Lo que suele costar', 'num', z => z.raro ? z.raro.habitual : null],
     ['valor', 'Valor que debió tener', 'num', z => z.valor],
     ['rev', '¿Revisar costo?', '', z => z.rev.need ? 0 : 1],
@@ -1767,11 +1792,11 @@
     const ck = r.counted ? dayKey(r.s.fecha) : null, sameAfter = $('optSame').value === 'after';
     const when = m => { if (m._aj) return 'Ajuste'; if (ck == null) return ''; const dk = dayKey(m.fecha); return dk < ck ? 'Antes' : dk > ck ? 'Después' : sameAfter ? 'Mismo día (después)' : 'Mismo día (antes)'; };
     const rows = r.docs.map(m => {
-      const w = when(m), zero = m.valor != null && Math.abs(m.valor) < EPS && m.qty > EPS;
+      const w = when(m), zero = valorReal(m) != null && Math.abs(valorReal(m)) < EPS && m.qty > EPS;
       return `<tr class="${zero ? 'zero' : w.startsWith('Antes') || w === 'Mismo día (antes)' ? 'pre' : 'after'}">
         <td>${fmtDate(m.fecha)}</td><td>${esc(m.tipo)} <span class="small">#${esc(m.folio)}${(m.kind === 'in' ? m.dest : m.orig) && !/CENTRAL/i.test(m.kind === 'in' ? m.dest : m.orig) ? ' · ' + esc(m.kind === 'in' ? m.dest : m.orig) : ''}${norm(m.art) !== norm(r.code) ? ' · ' + esc(m.art) : ''}</span></td><td>${esc(m.ref)}</td>
         <td class="num ${m.kind === 'in' ? 'plus' : 'minus'}">${m.kind === 'in' ? '+' : '−'}${fmt(m.qty)}</td>
-        <td class="num">${money(m.valor)}${zero ? ' <span class="flag">$0</span>' : ''}</td>
+        <td class="num">${money(valorReal(m))}${zero ? ' <span class="flag">$0</span>' : ''}</td>
         <td class="num">${fmt(m.saldo)}</td>
         <td class="num">${m.saldo > EPS && m.valorInv != null ? money(m.valorInv / m.saldo) : '—'}</td>
         <td>${w}</td></tr>`;

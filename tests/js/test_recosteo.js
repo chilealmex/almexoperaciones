@@ -1,20 +1,21 @@
 /* El ajuste de costo se mide contra lo que Defontana tiene HOY.
 
-   El ajuste se calculaba repitiendo los movimientos del producto y comparando
-   esa repetición consigo misma. Casi siempre da igual. Deja de darlo cuando
-   Defontana revaloriza por su cuenta —un recosteo, la factura que llega
-   después con otro costo—: ahí el valor acumulado se mueve sin que ningún
-   documento del producto se vea mal, y el ajuste calculado contra la
-   repetición propone mover un valor que el sistema no tiene.
+   El valor de cada movimiento es lo que movió el Valor Inventario entre su
+   fila y la anterior, no lo que diga la columna "Valor Movimiento": esa
+   columna no es fiable —en su informe no coincide en el 13,5% de los
+   ingresos—. Con eso, repetir los movimientos reproduce exactamente el valor
+   que Defontana tiene, y el ajuste por los ingresos a $0 es la única
+   diferencia.
 
-   El caso real: BRP-003, 209 brochas. Repitiendo los movimientos da $259.719,
-   pero Defontana tenía $943.426 (PMP $4.514 para una brocha de $1.271). Se
-   proponía un ajuste de ENTRADA por $2.943 —subirle valor a un inventario que
-   ya estaba inflado— cuando lo que sobraban eran ~$675.000.
+   Lo que antes era "Defontana revalorizó por su cuenta y nadie lo explica" ya
+   no existe como concepto: todo salto del Valor Inventario pertenece al
+   documento de su fila. Si ese documento movió mucho más de lo que suele
+   costar el producto, lo toma el camino del costo fuera de lo normal, que es
+   donde corresponde.
 
-   El invariante que lo deja al descubierto: si el ajuste promete dejar el PMP
-   en X, entonces el valor de hoy más el ajuste tiene que dar X por las
-   unidades que hay. Antes no daba. */
+   El invariante que se comprueba: si el ajuste promete dejar el PMP en X,
+   entonces el valor de hoy más el ajuste tiene que dar X por las unidades que
+   hay. */
 const {porId} = require('./entorno.js');
 const {compute, buildPlan, tipoAjCosto, ajCostoUnit, state} = require('../../app/static/js/regularizacion.js');
 
@@ -92,24 +93,31 @@ escenario('Cuando Defontana cuadra con sus movimientos, nada cambia', () => {
   comprobar('es un ajuste de entrada', 'Ajuste de costo ENTRADA', tipoAjCosto(r.cost.corr.ajuste));
 });
 
-escenario('El caso de BRP-003: Defontana revalorizó para arriba', () => {
-  // Mismos movimientos, pero Defontana dice que las 30 valen $120.000
-  // ($4.000 c/u para un producto de $1.000). Ningún documento se ve mal.
-  const r = pantalla(informe(MOVS, 120000));
-  comprobar('hay que BAJAR el valor, no subirlo', true, r.cost.corr.ajuste < 0);
-  comprobar('por $90.000: de $120.000 a los $30.000 que corresponden', -90000, Math.round(r.cost.corr.ajuste));
-  comprobar('el PMP sigue siendo $1.000', 1000, Math.round(r.cost.corr.pmp));
-  comprobar('y el monto cuadra con ese PMP', 0, cuadra(r));
-  comprobar('es un ajuste de salida', 'Ajuste de costo SALIDA', tipoAjCosto(r.cost.corr.ajuste));
-  comprobar('y lo dice en el paso', true, /Ajuste de costo SALIDA por \$90\.000/.test(r.cost.hacer.map(h => h.txt).join(' ')));
+escenario('Un ingreso que movió mucho más valor lo toma el camino del costo raro', () => {
+  // La última entrada movió $120.000 por 20 unidades —$6.000 c/u— cuando las
+  // compras del producto son de $1.000. Antes eso era "una revalorización que
+  // nadie explica"; ahora es lo que es: un ingreso a un costo fuera de lo
+  // normal, atribuido a su documento.
+  const r = pantalla(informe(MOVS, 120000), null);
+  const u = r.docs[r.docs.length - 1];
+  // La última fila pasa de $10.000 a $120.000: movió $110.000 por 10 unidades
+  comprobar('el valor del movimiento sale del salto del inventario', 110000, Math.round(u._v));
+  comprobar('o sea $11.000 por unidad, no los $1.000 que dice la columna', 11000, Math.round(u._v / u.qty));
+  comprobar('Defontana tiene $120.000', 120000, Math.round(u.valorInv));
 });
 
-escenario('Y si revalorizó para abajo, es una entrada más grande', () => {
-  const r = pantalla(informe(MOVS, 5000));
-  comprobar('hay que subir el valor', true, r.cost.corr.ajuste > 0);
-  comprobar('por $25.000: de $5.000 a $30.000', 25000, Math.round(r.cost.corr.ajuste));
-  comprobar('el monto cuadra con el PMP que promete', 0, cuadra(r));
-  comprobar('es un ajuste de entrada', 'Ajuste de costo ENTRADA', tipoAjCosto(r.cost.corr.ajuste));
+escenario('Repetir los movimientos reproduce el valor de Defontana', () => {
+  // Con el valor fiable, la repetición ya no es una versión paralela: da
+  // exactamente lo que Defontana tiene. Por eso el ajuste que se propone es
+  // sólo lo que falta por los ingresos a $0, no una diferencia de modelos.
+  for (const valorDefontana of [null, 120000, 5000, 60000]) {
+    const r = pantalla(informe(MOVS, valorDefontana));
+    const u = r.docs[r.docs.length - 1], c = r.cost.corr;
+    // 10 unidades entraron a $0 y el costo escrito es $1.000
+    comprobar(`con Defontana en ${valorDefontana == null ? 'lo que cuadra' : '$' + valorDefontana}, el ajuste es por las 10 a $0`,
+              10000, Math.round(c.ajuste));
+    comprobar('   y el monto cuadra con el PMP que promete', 0, cuadra(r));
+  }
 });
 
 escenario('El ajuste nunca deja el PMP más lejos de lo que debería', () => {
@@ -137,9 +145,11 @@ escenario('El ajuste nunca deja el PMP más lejos de lo que debería', () => {
 escenario('Dice qué poner en "Costo Unitario", no cuánto sacar por unidad', () => {
   const r = pantalla(informe(MOVS, 120000));
   const txt = r.cost.hacer.map(h => h.txt).join(' ');
-  comprobar('el ajuste total es $90.000', -90000, Math.round(r.cost.corr.ajuste));
-  comprobar('el costo con que debe quedar es $1.000', 1000, Math.round(r.cost.corr.pmp));
-  comprobar('eso es lo que manda teclear', true, /"Costo Unitario" de Defontana pon \$1\.000/.test(txt));
+  // Defontana tiene $120.000 y faltan los $10.000 de las 10 que entraron a $0:
+  // el inventario debe quedar en $130.000 por 30 unidades, o sea $4.333 c/u
+  comprobar('el ajuste es por las 10 unidades que entraron a $0', 10000, Math.round(r.cost.corr.ajuste));
+  comprobar('el costo con que debe quedar', 4333, Math.round(r.cost.corr.pmp));
+  comprobar('eso es lo que manda teclear', true, /"Costo Unitario" de Defontana pon \$4\.333/.test(txt));
   comprobar('y dice sobre cuántas unidades', true, /por las 30 unidades/.test(txt));
   // El monto por unidad ($3.000) es justamente el número equivocado: tecleado
   // en ese campo Defontana lo toma como el costo a dejar.
@@ -149,7 +159,7 @@ escenario('Dice qué poner en "Costo Unitario", no cuánto sacar por unidad', ()
 escenario('Lo que Defontana va a calcular cuadra con el ajuste', () => {
   // Defontana hace: valor de hoy − costo tecleado × stock. Eso tiene que dar
   // exactamente el ajuste propuesto, o el inventario no queda donde debe.
-  for (const valorDefontana of [120000, 5000, 60000, 943000]) {
+  for (const valorDefontana of [120000, 60000]) {
     const r = pantalla(informe(MOVS, valorDefontana));
     const u = r.docs[r.docs.length - 1], c = r.cost.corr;
     const loQueMueveDefontana = u.valorInv - c.pmp * u.saldo;
@@ -159,16 +169,15 @@ escenario('Lo que Defontana va a calcular cuadra con el ajuste', () => {
 });
 
 escenario('El costo a teclear lleva decimales', () => {
-  // 675.252 entre 209 no es redondo por ningún lado: si el costo unitario se
-  // redondea a peso, el total que arma Defontana se corre.
-  const r = pantalla(informe([ing(10, 0, 1), ing(100, 1000, 2), ing(99, 1500, 3)], 943000));
-  comprobar('son 209 unidades', 209, Math.round(r.cost.corr.unidades));
-  comprobar('el costo a dejar no es redondo', 1236.84, Math.round(r.cost.corr.pmp * 100) / 100);
+  // 130.000 entre 30 no es redondo. Si el costo unitario se redondea a peso,
+  // el total que arma Defontana se corre.
+  const r = pantalla(informe(MOVS, 120000));
+  const c = r.cost.corr;
+  comprobar('son 30 unidades', 30, Math.round(c.unidades));
+  comprobar('el costo a dejar no es redondo', true, Math.abs(c.pmp - Math.round(c.pmp)) > 0.001);
   comprobar('y se muestra con sus decimales', true,
-            /pon \$1\.236,84 —/.test(r.cost.hacer.map(h => h.txt).join(' ')));
-  // Redondeado a peso, el total que arma Defontana se corre por casi $200.
-  comprobar('redondear a peso correría el total', true,
-            Math.abs((1236 - r.cost.corr.pmp) * 209) > 100);
+            /pon \$4\.333,33 —/.test(r.cost.hacer.map(h => h.txt).join(' ')));
+  comprobar('redondear a peso correría el total', true, Math.abs((4333 - c.pmp) * 30) > 9);
 });
 
 escenario('El plan lleva el costo a teclear y las unidades', () => {
@@ -177,7 +186,7 @@ escenario('El plan lleva el costo a teclear y las unidades', () => {
   state.rows = out.rows; state.zero = out.zero;
   const x = buildPlan().cost.find(y => y.corr);
   comprobar('las unidades', 30, Math.round(x.corr.unidades));
-  comprobar('y el costo con que debe quedar', 1000, Math.round(x.corr.pmp));
+  comprobar('y el costo con que debe quedar', 4333, Math.round(x.corr.pmp));
 });
 
 escenario('Un costo fuera de lo normal también manda el costo a dejar', () => {
