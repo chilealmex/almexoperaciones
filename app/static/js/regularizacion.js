@@ -165,6 +165,24 @@
     return d;
   }
 
+  // El Excel del plan vuelve con la columna de costos llena: se leen de ahí y
+  // se usan igual que si se hubieran escrito en la pantalla.
+  function parseCostos(rows){
+    const t = readTable(rows, ['CODIGO']);
+    if (!t) throw new Error('No encontré la columna “Código”. ¿Es la hoja “2 Costos” del plan descargado?');
+    const c = {code:t.col('Código'), costo:t.col('ESCRIBE AQUÍ el costo a usar', 'Costo a usar', 'Costo')};
+    if (c.costo < 0) throw new Error('No encontré la columna “ESCRIBE AQUÍ el costo a usar”. Descarga el plan en Excel, llena esa columna y súbelo.');
+    const out = [];
+    for (const r of t.rows){
+      const code = String(r[c.code] ?? '').trim(); if (!code) continue;
+      const v = num(r[c.costo]);
+      if (v == null || !(v > 0)) continue;
+      out.push({code, key:keyOf(code), costo:v});
+    }
+    if (!out.length) throw new Error('Ninguna fila trae un costo escrito en la columna “ESCRIBE AQUÍ el costo a usar”.');
+    return out;
+  }
+
   // ---------- Unidades de medida ----------
   // Mismos grupos que app/utils/unidades.py (M = MT = MTS…), más las de conversión conocida.
   const UM_GRUPOS = {
@@ -1969,9 +1987,18 @@
     </section>`;
     const hoyCells = x => /^Salió sin stock/.test(x.motivo) ? '<td class="num mut">—</td><td class="num mut">—</td>' : `<td class="num"><b>${fmt(x.r.realNow)}</b></td><td class="num">${fmt(hoyDe(x.r))}</td>`;
     const costo = x => x.v != null ? `<b>${money(x.v)}</b><div class="small wrapsmall">${esc(x.src || '')}</div>` : '<span class="small">Poner costo (factura)</span>';
+    // Cuántos costos faltan por escribir: es el trabajo que queda en el paso 2
+    const faltan = new Set(P.cost.filter(x => !x.corr || Math.abs(x.corr.ajuste) <= 0.5).map(x => x.r.key)).size;
+    const escritos = new Set(P.cost.map(x => x.r.key)).size - faltan;
+    const notaCostos = state.avisoCostos || (faltan
+      ? `Descarga el Excel, llena la columna “ESCRIBE AQUÍ el costo a usar” y súbelo: faltan ${fmt(faltan)} ${faltan === 1 ? 'costo' : 'costos'}${escritos ? ` (${fmt(escritos)} ya escritos)` : ''}.`
+      : escritos ? `Los ${fmt(escritos)} costos están escritos.` : '');
     box.innerHTML = `
       <div class="planintro"><b>Hazlo en este orden.</b> Defontana valoriza cada entrada y salida al PMP del momento: si se corrige el costo después, las salidas ya quedaron mal valorizadas. Las entradas van antes que las salidas para que el saldo nunca quede negativo.
-      <button type="button" class="rx-btn" id="btnPlanXlsx">Descargar plan en Excel</button></div>
+      <button type="button" class="rx-btn" id="btnPlanXlsx">Descargar plan en Excel</button>
+      <label class="rx-btn ghost" for="fileCostos">Subir los costos llenados</label>
+      <input type="file" id="fileCostos" accept=".xlsx,.xls,.csv" hidden aria-label="Excel del plan con la columna de costos llena">
+      <span class="note" id="stCostos">${esc(notaCostos)}</span></div>
       ${sec(1, 'Confirmar antes de ajustar', 'Recontar o revisar. No hagas ajustes de estos productos hasta confirmarlos.', P.verify,
         '<th>Producto</th><th>Línea</th><th class="num">Diferencia</th><th>Motivo</th><th>Qué revisar</th>',
         x => `${prod(x)}<td class="num diff ${x.qty > 0 ? 'plus' : 'minus'}">${sgn(x.qty)}</td><td>${esc(x.motivo)}</td><td class="wide">${esc(x.txt)}</td>`)}
@@ -1998,7 +2025,11 @@
     const hoja = (nombre, filas) => XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filas.length ? filas : [{'': 'Nada en este paso'}]), nombre);
     hoja('1 Confirmar', P.verify.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Diferencia': x.qty, 'Motivo': x.motivo, 'Qué revisar': x.txt})));
     if (P.um.length) hoja('1b Unidades', P.um.map((x, i) => { const u = x.r.umInfo; return {'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Unidad en Defontana': u.a, 'Cambiar a': u.de, 'Saldo Defontana (su unidad)': u.f ? u.hoyDef : hoyDe(x.r) ?? '', 'Saldo convertido': u.f ? u.hoyConv : u.mismo ? 'misma cantidad (sin convertir)' : 'sin conversión conocida', 'Contado': x.r.s.stock, 'Ajuste después': x.r.diff ?? ''}; }));
-    hoja('2 Costos', P.cost.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Qué corregir': x.doc, 'Qué hacer': x.nota || '', 'Cantidad': x.qty, 'Costo a usar c/u': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Origen del costo': x.src, 'Tipo de comprobante': x.corr ? (tipoAjCosto(x.corr.ajuste) || '') : '', 'Ajuste de valor': x.corr ? Math.round(x.corr.ajuste) : '', 'Costo Unitario a poner en Defontana': x.corr ? r2(x.corr.pmp) : '', 'Unidades del ajuste': x.corr && x.corr.unidades != null ? x.corr.unidades : ''})));
+    hoja('2 Costos', P.cost.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name,
+      // Columna para llenar y volver a subir: así los costos se escriben todos
+      // de una pasada en el Excel, en vez de uno por uno en la pantalla.
+      'ESCRIBE AQUÍ el costo a usar': state.pmpEdit.has(x.r.key) ? r2(state.pmpEdit.get(x.r.key)) : '',
+      'Línea': x.r.linea || '', 'Qué corregir': x.doc, 'Qué hacer': x.nota || '', 'Cantidad': x.qty, 'Costo a usar c/u': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Origen del costo': x.src, 'Tipo de comprobante': x.corr ? (tipoAjCosto(x.corr.ajuste) || '') : '', 'Ajuste de valor': x.corr ? Math.round(x.corr.ajuste) : '', 'Costo Unitario a poner en Defontana': x.corr ? r2(x.corr.pmp) : '', 'Unidades del ajuste': x.corr && x.corr.unidades != null ? x.corr.unidades : ''})));
     hoja('3 Entradas', P.in.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Debería tener hoy': x.r.realNow ?? '', 'Tiene Defontana hoy': hoyDe(x.r) ?? '', 'Cantidad': x.qty, 'Costo c/u': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Origen del costo': x.src, 'Motivo': x.motivo})));
     hoja('4 Salidas', P.out.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Debería tener hoy': x.r.realNow ?? '', 'Tiene Defontana hoy': hoyDe(x.r) ?? '', 'Cantidad': x.qty, 'PMP c/u (referencial)': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Motivo': x.motivo})));
     XLSX.writeFile(wb, 'plan-de-ajustes-' + fmtDate(new Date()) + '.xlsx');
@@ -2339,6 +2370,25 @@
     state.view = b.dataset.view; state.open.clear(); render();
   });
   $('planBox').addEventListener('click', e => { if (e.target.closest('#btnPlanXlsx')) planExcel(); });
+  // El Excel del plan vuelve con los costos llenos: se leen y pasan a ser los
+  // costos escritos a mano, igual que si se hubieran tecleado en la pantalla.
+  $('planBox').addEventListener('change', e => {
+    const inp = e.target.closest('#fileCostos'); if (!inp || !inp.files[0]) return;
+    const file = inp.files[0]; inp.value = '';
+    state.avisoCostos = 'Leyendo ' + file.name + '…'; render();
+    file.arrayBuffer().then(buf => {
+      const filas = leerDeCualquierHoja(XLSX.read(buf, {type:'array'}), parseCostos);
+      let nuevos = 0, cambiados = 0;
+      for (const c of filas){
+        const antes = state.pmpEdit.get(c.key);
+        if (antes == null) nuevos++; else if (Math.abs(antes - c.costo) > 0.005) cambiados++;
+        state.pmpEdit.set(c.key, c.costo);
+      }
+      state.avisoCostos = `${file.name}: ${fmt(nuevos)} ${nuevos === 1 ? 'costo nuevo' : 'costos nuevos'}` +
+        (cambiados ? ` y ${fmt(cambiados)} ${cambiados === 1 ? 'cambiado' : 'cambiados'}` : '') + '.';
+      guardarEstado(); render();
+    }).catch(err => { state.avisoCostos = err.message || 'No se pudo leer el archivo.'; render(); });
+  });
   $('dashBox').addEventListener('click', e => {
     if (e.target.closest('#btnDashXlsx')) dashExcel();
     const cf = e.target.closest('[data-cmp]'); if (cf){ state.cmpFiltro = cf.dataset.cmp; renderDash(); return; }
@@ -2450,6 +2500,6 @@
   // puerta, la matemática que decide los ajustes de inventario no se puede
   // comprobar más que a ojo.
   if (typeof module !== 'undefined' && module.exports){
-    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, parseArticulos, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, tipoAjCosto, avisoDeFechas, detectarAjustes, conAjustes, state};
+    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, parseArticulos, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, tipoAjCosto, avisoDeFechas, detectarAjustes, conAjustes, parseCostos, state};
   }
 })();

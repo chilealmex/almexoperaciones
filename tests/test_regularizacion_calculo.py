@@ -25,6 +25,7 @@ PRUEBAS = {
     "cada paso se marca por su cuenta": JS / "test_marcas.js",
     "el ajuste de costo se mide contra lo que Defontana tiene hoy": JS / "test_recosteo.js",
     "el stock valorizado manda sobre lo que arrastran los movimientos": JS / "test_valorizado.js",
+    "los costos se llenan en el Excel y se suben de vuelta": JS / "test_costos_excel.js",
 }
 
 
@@ -53,3 +54,4 @@ def test_las_comprobaciones_del_navegador_existen():
     assert "no esconde el ajuste de cantidad" in (JS / "test_marcas.js").read_text(encoding="utf-8")
     assert "revalorizó para arriba" in (JS / "test_recosteo.js").read_text(encoding="utf-8")
     assert "manda la foto" in (JS / "test_valorizado.js").read_text(encoding="utf-8")
+    assert "se suben de vuelta" in (JS / "test_costos_excel.js").read_text(encoding="utf-8")
