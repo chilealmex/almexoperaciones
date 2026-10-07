@@ -101,21 +101,40 @@
   // 2,4% restante, donde Defontana tiene stock o valor que los movimientos no
   // explican, y la hora, para saber contra qué momento se está comparando.
   function parseArticulos(rows){
-    const t = readTable(rows, ['ARTICULO', 'STOCK DISPONIBLE']);
-    if (!t) throw new Error('No encontré las columnas “Artículo” y “Stock Disponible”. ¿Es el Informe de Artículos de Defontana?');
-    const c = {art:t.col('Artículo'), desc:t.col('Descripción'), stock:t.col('Stock Disponible'),
-      costo:t.col('Costo Vigente'), repo:t.col('Costo Reposicion', 'Costo Reposición')};
-    if (c.costo < 0) throw new Error('No encontré la columna “Costo Vigente”.');
+    // Defontana da dos informes de stock valorizado y sirven los dos:
+    //   - Informe de Inventario: Código Artículo / Bodega / Saldo / Valor unidad
+    //     / Total. Una fila por bodega, y el Total es el valorizado de verdad.
+    //   - Informe de Artículos: Artículo / Stock Disponible / Costo Vigente, sin
+    //     bodega y sin total, así que el valor hay que multiplicarlo.
+    // El primero es mejor: el Total es el número que Defontana tiene, no uno
+    // reconstruido, y con él se ve el caso "no quedan unidades pero sigue
+    // valorizado", que multiplicando siempre da cero.
+    const inv = readTable(rows, ['CODIGO ARTICULO', 'SALDO']);
+    const t = inv || readTable(rows, ['ARTICULO', 'STOCK DISPONIBLE']);
+    if (!t) throw new Error('No encontré las columnas del stock valorizado. ¿Es el Informe de Inventario (Código Artículo, Saldo, Valor unidad, Total) o el de Artículos (Artículo, Stock Disponible, Costo Vigente) de Defontana?');
+    const c = inv
+      ? {art:t.col('Código Artículo'), desc:t.col('Descripción'), bod:t.col('Bodega'),
+         stock:t.col('Saldo'), costo:t.col('Valor unidad'), total:t.col('Total')}
+      : {art:t.col('Artículo'), desc:t.col('Descripción'), bod:-1,
+         stock:t.col('Stock Disponible'), costo:t.col('Costo Vigente'), total:-1};
+    if (c.costo < 0) throw new Error(inv ? 'No encontré la columna “Valor unidad”.' : 'No encontré la columna “Costo Vigente”.');
     const out = [];
     for (const r of t.rows){
       const art = String(r[c.art] ?? '').trim(); if (!art) continue;
       const stock = num(r[c.stock]), costo = num(r[c.costo]);
-      if (stock == null && costo == null) continue;
+      const total = c.total >= 0 ? num(r[c.total]) : null;
+      if (stock == null && costo == null && total == null) continue;
       out.push({art, key:keyOf(art), name:c.desc >= 0 ? String(r[c.desc] ?? '').trim() : '',
-        stock: stock ?? 0, costo: costo ?? 0, valor: (stock ?? 0) * (costo ?? 0)});
+        bodega: c.bod >= 0 ? String(r[c.bod] ?? '').trim() : '',
+        stock: stock ?? 0, costo: costo ?? 0,
+        valor: total != null ? total : (stock ?? 0) * (costo ?? 0)});
     }
-    if (!out.length) throw new Error('El Informe de Artículos no trae filas con datos.');
+    if (!out.length) throw new Error('El informe no trae filas con datos.');
     out.fecha = fechaDeGeneracion(rows);
+    // Con la columna Total el valor es el que Defontana tiene; sin ella es
+    // stock por costo, que con stock 0 da 0 y no sirve para ver el valor que
+    // quedó sin unidades.
+    out.valorReal = c.total >= 0;
     return out;
   }
   // "Fecha de generación: 06-10-2026, 04:17 p. m." en las primeras filas.
@@ -762,7 +781,7 @@
       fotoPorKey = new Map();
       for (const a of state.articulos){
         const p = fotoPorKey.get(a.key);
-        if (!p) fotoPorKey.set(a.key, {key:a.key, art:a.art, name:a.name, stock:a.stock, valor:a.valor, costo:a.costo, codigos:[a.art]});
+        if (!p) fotoPorKey.set(a.key, {key:a.key, art:a.art, name:a.name, stock:a.stock, valor:a.valor, costo:a.costo, valorReal: !!state.articulos.valorReal, codigos:[a.art]});
         else {
           p.stock += a.stock; p.valor += a.valor; p.codigos.push(a.art);
           // El costo del conjunto es el promedio ponderado; sin unidades, el
@@ -772,7 +791,39 @@
       }
       fotoPorKey._de = state.articulos;
     }
-    return fotoPorKey.get(keyOf(docs[0].art)) || null;
+    // El producto puede estar en el informe de documentos con varios códigos
+    // —DURALUMINIO-6082 y N-DURALUMINIO-6082 son el mismo— y en el inventario
+    // bajo uno solo. Hay que sumar lo que haya de cada uno: mirando sólo el
+    // del primer documento, si ése no está, el producto parece agotado y se
+    // propone un ajuste que no corresponde.
+    const vistas = new Set();
+    let total = null;
+    for (const m of docs){
+      const k = keyOf(m.art);
+      if (vistas.has(k)) continue;
+      vistas.add(k);
+      const f = fotoPorKey.get(k);
+      if (!f) continue;
+      if (!total) total = {...f, codigos:[...f.codigos]};
+      else {
+        total.stock += f.stock; total.valor += f.valor; total.codigos.push(...f.codigos);
+        total.costo = total.stock > EPS ? total.valor / total.stock : Math.max(total.costo, f.costo);
+      }
+    }
+    return total;
+  }
+  // El Informe de Inventario sólo lista lo que tiene stock, así que un artículo
+  // que no está en él es un artículo que Defontana da por agotado. Eso sólo se
+  // usa para la revisión de valorizaciones imposibles —"sigue valorizado y no
+  // quedan unidades"—, nunca para calcular un ajuste: si alguna vez el informe
+  // viniera filtrado, dar por agotado lo que falta propondría ajustes que no
+  // corresponden. En sus archivos hay 613 ausentes y sólo 2 con saldo o valor:
+  // los dos casos de verdad, sin ruido.
+  function stockSegunFoto(docs){
+    if (!state.articulos || !state.articulos.length || !docs || !docs.length) return null;
+    const f = fotoDe(docs);
+    return f ? {stock: f.stock, valor: f.valor, valorReal: f.valorReal, ausente: false}
+             : {stock: 0, valor: 0, valorReal: false, ausente: true};
   }
 
   // ---------- Costo: productos que entraron o salieron a $0 ----------
@@ -1089,7 +1140,7 @@
   };
 
   function valorizacionImposible(docs){
-    const ultimo = docs[docs.length - 1], foto = fotoDe(docs);
+    const ultimo = docs[docs.length - 1], foto = stockSegunFoto(docs);
     if (!ultimo || ultimo.saldo == null || ultimo.valorInv == null) return null;
     // Las unidades, de la foto cuando la hay: es lo que Defontana tiene ahora.
     // El valor, en cambio, SIEMPRE del informe de documentos: en la foto el
@@ -1097,7 +1148,8 @@
     // taparía justamente el caso que se busca —valor sin unidades—. La gracia
     // de esta revisión es cruzar las dos fuentes: unidades reales contra valor
     // contabilizado.
-    const saldo = foto ? foto.stock : ultimo.saldo, valor = ultimo.valorInv;
+    const saldo = foto ? foto.stock : ultimo.saldo;
+    const valor = foto && foto.valorReal ? foto.valor : ultimo.valorInv;
     const cual = valor < -EPS ? 'valorNegativo'
       : saldo < -EPS ? 'stockNegativo'
       : (saldo <= EPS && valor > EPS) ? 'valorSinStock'
@@ -2087,8 +2139,8 @@
   setupLoader('fileMov', 'dropMov', 'stMov', parseMov, 'mov', 'líneas de documentos');
   setupLoader('fileMov2', 'dropMov2', 'stMov2', parseMov, 'mov2', 'líneas de documentos');
   const cargarAjustes = setupLoader('fileAjustes', 'dropAjustes', 'stAjustes', parseMov, 'ajustes', 'líneas de ajuste (se toman como regularización ya hecha)');
-  const SIN_ARTICULOS = 'Informe de Artículos de Defontana: el stock y el costo que tiene ahora. Manda sobre lo que se arrastra de los movimientos';
-  setupLoader('fileArticulos', 'dropArticulos', 'stArticulos', parseArticulos, 'articulos', 'artículos con stock y costo');
+  const SIN_ARTICULOS = 'Informe de Inventario de Defontana: el saldo y el valor que tiene ahora. Manda sobre lo que se arrastra de los movimientos';
+  setupLoader('fileArticulos', 'dropArticulos', 'stArticulos', parseArticulos, 'articulos', 'artículos con saldo y valor');
   $('btnClearArticulos').addEventListener('click', () => {
     state.articulos = null; $('btnClearArticulos').hidden = true; $('dropArticulos').classList.remove('ok');
     $('stArticulos').textContent = SIN_ARTICULOS;
@@ -2175,16 +2227,16 @@
     recuentos: {archivo: 'ejemplo-recuentos.xlsx', filas: [['Código', 'Físico', 'Fecha'], ['INS-001', 11, fmtDate(new Date())], ['20006-220-1-1', 38, fmtDate(new Date())]],
       ayuda: [['Columna', 'Qué va'], ['Código', 'Código del producto'], ['Físico', 'Lo que se volvió a contar hoy: reemplaza el conteo original'], ['Fecha', 'Opcional; si no va, se usa hoy']]},
     articulos: {archivo: 'ejemplo-stock-valorizado.xlsx', filas: [
-      ['Informe de Articulos'], ['Empresa: Shaw Almex Chile SpA'],
-      ['Fecha de generación: ' + fmtDate(new Date()) + ', 04:17 p. m.'],
-      ['Filtros: Bodega: Todas  |  Artículo: Todos'], [],
-      ['Artículo', 'Descripción', 'Stock Disponible', 'Costo Vigente', 'Costo Reposicion'],
-      ['INS-001', 'Producto de ejemplo', 12, 5917.33, 0],
-      ['00-FSR-SCW-07', 'Otro producto', 19, 427, 0]],
-      ayuda: [['', 'Es el Informe de Artículos de Defontana, tal cual se descarga: el stock y el costo que el sistema tiene ahora.'],
+      ['Informe de Inventario'], ['Empresa: Shaw Almex Chile SpA'],
+      ['Fecha de generación: ' + fmtDate(new Date()) + ', 09:20 a. m.'], [],
+      ['Código Artículo', 'Descripción', 'Bodega', 'Saldo', 'Unidad', 'Valor unidad', 'Total'],
+      ['INS-001', 'Producto de ejemplo', 'BODEGA CENTRAL', 12, 'UN', 5917.33, 71008],
+      ['00-FSR-SCW-07', 'Otro producto', 'BODEGA CENTRAL', 19, 'UN', 427, 8113]],
+      ayuda: [['', 'Es el Informe de Inventario de Defontana, tal cual se descarga: el saldo y el valor que el sistema tiene ahora. También sirve el Informe de Artículos, pero éste es mejor: trae el Total valorizado de verdad en vez de tener que multiplicar.'],
         ['Para qué sirve', 'El Informe de Documentos son movimientos, y el valor de hoy sale de arrastrarlos. Si entre medio se borró o se modificó un comprobante, el arrastre queda mal y esta foto no.'],
         ['Fecha de generación', 'Se lee de la cabecera del archivo: es la hora a la que Defontana sacó la foto, y es contra ese momento que se compara.'],
-        ['Qué manda', 'Para el costo manda esta foto. Donde no coincide con los movimientos se avisa con el filtro “No cuadra con el stock valorizado”.']]}
+        ['Qué manda', 'Para el costo manda esta foto. Donde no coincide con los movimientos se avisa con el filtro “No cuadra con el stock valorizado”.'],
+        ['Bodegas', 'Si un artículo aparece en varias bodegas, se suman sus saldos y sus totales.']]}
   };
   $('plantillas').addEventListener('click', e => {
     const b = e.target.closest('[data-plantilla]'); if (!b) return;
@@ -2281,7 +2333,7 @@
     await leerInforme('informe_ajustes', 'mov2', 'dropMov2', 'stMov2');
     await leerInforme('ajustes', 'ajustes', 'dropAjustes', 'stAjustes');
     if (state.ajustes && !CFG.historial) $('btnClearAjustes').hidden = false;
-    await leerInforme('articulos', 'articulos', 'dropArticulos', 'stArticulos', parseArticulos, 'artículos con stock y costo');
+    await leerInforme('articulos', 'articulos', 'dropArticulos', 'stArticulos', parseArticulos, 'artículos con saldo y valor');
     if (state.articulos && !CFG.historial) $('btnClearArticulos').hidden = false;
     if (!state.mov.length && state.mov2) state.mov = state.mov2;
     if (g.estado){

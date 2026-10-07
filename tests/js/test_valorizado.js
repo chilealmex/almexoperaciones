@@ -210,5 +210,89 @@ escenario('Stock negativo según la foto', () => {
   state.articulos = null;
 });
 
+// --- El Informe de Inventario ---
+//
+// Defontana da dos informes de stock valorizado. El de Inventario es mejor:
+// trae el Total valorizado de verdad y la bodega, en vez de obligar a
+// multiplicar stock por costo. Pero sólo lista lo que tiene stock.
+
+const INV = (...filas) => [
+  ['Informe de Inventario'], ['Empresa: Shaw Almex Chile SpA'],
+  ['Fecha de generación: 07-10-2026, 09:20 a. m.'], [],
+  ['Código Artículo', 'Descripción', 'Bodega', 'Saldo', 'Unidad', 'Valor unidad', 'Total'],
+  ...filas,
+];
+
+escenario('Lee el Informe de Inventario, con su bodega y su Total', () => {
+  const a = parseArticulos(INV(['BRP-003', 'BROCHA 3"', 'BODEGA CENTRAL', 209, 'UN', 1233.82, 257867.45]));
+  comprobar('un artículo', 1, a.length);
+  comprobar('el saldo', 209, a[0].stock);
+  comprobar('el valor unidad', 1233.82, a[0].costo);
+  comprobar('la bodega', 'BODEGA CENTRAL', a[0].bodega);
+  comprobar('el valor es el Total, no saldo por costo', 257867.45, a[0].valor);
+  comprobar('y se sabe que el valor es de verdad', true, a.valorReal);
+  comprobar('la hora', '07-10-2026, 09:20 a. m.', a.fecha);
+});
+
+escenario('El de Artículos sigue sirviendo, pero su valor es calculado', () => {
+  const a = parseArticulos(hoja(['AAA', 'PROD AAA', 30, 1000, 0]));
+  comprobar('lo lee igual', 30, a[0].stock);
+  comprobar('pero el valor es stock por costo', false, a.valorReal);
+});
+
+escenario('Un artículo en varias bodegas se suma', () => {
+  const docs = docsDe(MOVS);
+  state.articulos = parseArticulos(INV(
+    ['AAA', 'PROD AAA', 'BODEGA CENTRAL', 20, 'UN', 1000, 20000],
+    ['AAA', 'PROD AAA', 'BODEGA INSUMOS', 10, 'UN', 1500, 15000]));
+  const hoy = comoEstaHoy(docs, 1000);
+  comprobar('las unidades de las dos bodegas', 30, hoy.stock);
+  comprobar('y los totales', 35000, Math.round(hoy.valor));
+  comprobar('el costo es el promedio ponderado', 1167, Math.round(hoy.pmp));
+  state.articulos = null;
+});
+
+escenario('Con el Total de verdad se ve el valor sin unidades', () => {
+  // Con el de Artículos esto es invisible: el valor es saldo por costo y con
+  // saldo 0 siempre da 0. Con el Total de Defontana se ve directo.
+  const docs = docsDe(MOVS);
+  state.articulos = parseArticulos(INV(['AAA', 'PROD AAA', 'BODEGA CENTRAL', 0, 'UN', 0, 7500]));
+  const malo = valorizacionImposible(docs);
+  comprobar('se marca', 'valorSinStock', (malo || {}).cual);
+  comprobar('con el Total que trae el informe', 7500, Math.round(malo.valor));
+  state.articulos = null;
+});
+
+escenario('Lo que no está en el Informe de Inventario, Defontana lo da por agotado', () => {
+  // Ese informe sólo lista lo que tiene stock. Si el producto no está pero la
+  // contabilidad le tiene valor, es justo el caso "valorizado sin unidades".
+  const docs = docsDe(MOVS);
+  state.articulos = parseArticulos(INV(['OTRO', 'OTRO PRODUCTO', 'BODEGA CENTRAL', 5, 'UN', 100, 500]));
+  const malo = valorizacionImposible(docs);
+  comprobar('se marca', 'valorSinStock', (malo || {}).cual);
+  comprobar('con el valor de la contabilidad', 20000, Math.round(malo.valor));
+  // Pero eso NO se usa para calcular ajustes: ahí sigue mandando el arrastre.
+  // Dando por agotado lo que falta, el ajuste saldría por todo el valor del
+  // producto, y si el informe viniera filtrado se propondría eso en masa.
+  comprobar('el valor de hoy no se calcula sobre un stock inventado', 20000,
+            Math.round(comoEstaHoy(docs, 1000).valor));
+  const r = pantalla(parseArticulos(INV(['OTRO', 'OTRO PRODUCTO', 'BODEGA CENTRAL', 5, 'UN', 100, 500]))).r;
+  comprobar('y el ajuste de costo tampoco: se mide contra el arrastre',
+            10000, Math.round(r.cost.corr.ajuste));
+  state.articulos = null;
+});
+
+escenario('Un producto con dos códigos, y el inventario bajo uno solo', () => {
+  // DURALUMINIO-6082 y N-DURALUMINIO-6082 son el mismo producto: el informe de
+  // documentos trae los dos y el de inventario sólo el segundo. Mirando el
+  // código del primer documento, el producto parecía agotado y salía como
+  // valorizado sin unidades, cuando tiene 14 unidades por $161.954.
+  const docs = docsDe(MOVS).map((m, i) => i === 0 ? {...m, art: 'X-AAA', key: 'XAAA'} : m);
+  state.articulos = parseArticulos(INV(['AAA', 'PROD AAA', 'BODEGA CENTRAL', 30, 'UN', 1000, 30000]));
+  comprobar('encuentra el stock por el otro código', 30, comoEstaHoy(docs, 1000).stock);
+  comprobar('y no lo da por agotado', null, valorizacionImposible(docs));
+  state.articulos = null;
+});
+
 console.log(`\n${hechas - fallas} de ${hechas} comprobaciones pasaron`);
 process.exit(fallas ? 1 : 0);

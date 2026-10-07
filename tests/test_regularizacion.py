@@ -145,6 +145,7 @@ def test_la_pagina_ofrece_subir_el_stock_valorizado(client, db, empresa, usuario
     html = client.get("/inventario/regularizacion").get_data(as_text=True)
     assert 'id="fileArticulos"' in html
     assert "Stock valorizado actualizado" in html
+    assert "Informe de Inventario de Defontana" in html
 
 
 def test_subir_de_nuevo_reemplaza_lo_guardado(client, db, empresa, usuario_admin):
