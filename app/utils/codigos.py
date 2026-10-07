@@ -91,6 +91,12 @@ def clave_sin_ceros(codigo) -> str:
     adelante lo pone quien exporta, no distingue nada. Lo mismo con
     "0136-1005" y "136-1005".
 
+    El cero se saca aunque el tramo siga con letras. "0870AP2" y "870AP2" son
+    el mismo artículo igual que "052075" y "52075", pero antes sólo se limpiaba
+    el tramo que era todo dígitos: el cero de "0870AP2" quedaba puesto, los dos
+    códigos no caían en el mismo grupo y la pantalla de Unificar códigos no
+    llegaba a proponerlos nunca.
+
     No reemplaza a codigo_normalizado(): esa es la llave con que el importador
     reconoce al artículo, y cambiarla movería la identidad de todo el maestro.
     Ésta sirve para *sospechar* que dos códigos son el mismo y proponérselo a
@@ -100,9 +106,17 @@ def clave_sin_ceros(codigo) -> str:
     if not normalizado:
         return ""
     # Se parten los tramos conservando los separadores: lo que cambia es sólo
-    # el relleno de los tramos numéricos.
+    # el relleno con que empieza cada tramo.
     partes = re.split(r"([^0-9A-Z])", normalizado)
-    return "".join(
-        (p.lstrip("0") or "0") if p.isdigit() else p
-        for p in partes
-    )
+    return "".join(sin_cero_de_relleno(p) for p in partes)
+
+
+def sin_cero_de_relleno(tramo: str) -> str:
+    """Un tramo del código sin los ceros con que empieza.
+
+    Un tramo de puros ceros es un cero, no la cadena vacía: si no, "A-00" y
+    "A" quedarían en el mismo grupo.
+    """
+    if not tramo.startswith("0"):
+        return tramo
+    return tramo.lstrip("0") or "0"
