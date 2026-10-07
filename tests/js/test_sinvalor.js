@@ -77,6 +77,48 @@ escenario('Si Defontana lo tiene a $0, se pide cargar el costo', () => {
   comprobar('el paso se llama distinto', true, docSteps(r).some(s => s.k === 'sinvalor'));
 });
 
+escenario('A $1 la unidad también está sin costo', () => {
+  // Lo que se mira es el valor de UNA unidad, no el total: 355 unidades a $1
+  // valorizan $355, que es mayor que cero, y el producto se daba por costeado.
+  // Pero $1 es el relleno con que se creó el artículo, no un costo —la misma
+  // regla que ya valía para los ingresos—. En su informe eran 16 productos.
+  const {P, r} = plan(COMPRADO, parseArticulos(INV(['AAA', 'PROD AAA', 'BODEGA CENTRAL', 12, 'UN', 1, 12])));
+  comprobar('entra al paso 2a', 1, P.sinValor.length);
+  comprobar('por las 12 unidades', 12, P.sinValor[0].qty);
+  comprobar('al costo de su compra', 5919, P.sinValor[0].v);
+  comprobar('y el paso lo marca', true, docSteps(r).some(s => s.k === 'sinvalor'));
+  // El aviso dice con qué valor están, no "en $0" a secas: a $1 eso se leía
+  // como un error, porque en Defontana el producto no aparece en cero.
+  comprobar('dice con qué valor unitario están', true,
+    JSON.stringify(r).includes('valorizadas en $1 c/u'));
+});
+
+escenario('A $2 la unidad ya es un costo: no entra', () => {
+  // El corte está en $1. Si fuera "poco valor" habría que elegir cuánto es
+  // poco, y eso ya sería estimar.
+  const {P} = plan(COMPRADO, parseArticulos(INV(['AAA', 'PROD AAA', 'BODEGA CENTRAL', 12, 'UN', 2, 24])));
+  comprobar('no entra al paso 2a', 0, P.sinValor.length);
+});
+
+escenario('Sin el informe de inventario, la última fila manda igual', () => {
+  // Cuando no está cargado el stock valorizado, lo que queda es la última fila
+  // del informe de documentos. Ahí vale la misma regla: 10 unidades por $10 es
+  // $1 la unidad, y eso es estar sin costo aunque el total no sea cero.
+  const docs = docsDe([ing(10, 1000, 1)]);
+  const ultima = {...docs[0], folio: '200', fecha: DIA(2026, 8, 2), kind: 'out', qty: 0,
+                  valor: 9990, saldo: 10, valorInv: 10};
+  const {P} = plan([...docs, ultima], null);
+  comprobar('entra al paso 2a', 1, P.sinValor.length);
+  comprobar('por las 10 unidades', 10, P.sinValor[0].qty);
+});
+
+escenario('Sin unidades, el valor unitario no dice nada', () => {
+  // Con stock 0 no hay unidades a las que cargarles costo, y además dividir
+  // por cero daría cualquier cosa.
+  const {P} = plan(COMPRADO, parseArticulos(INV(['AAA', 'PROD AAA', 'BODEGA CENTRAL', 0, 'UN', 0, 0])));
+  comprobar('no entra al paso 2a', 0, P.sinValor.length);
+});
+
 escenario('El costo es el de SU compra, no la mediana de sus compras', () => {
   // Con tres compras a $1.000 y la última a $5.000, la mediana da $1.000. Pero
   // el producto entró a $5.000 y a ese costo quedaron las unidades que hay: el

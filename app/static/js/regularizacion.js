@@ -1166,10 +1166,18 @@
     // Importaba: 21 de sus productos tienen stock y están a $0 en Defontana
     // —21 unidades de BZA-003, 24 de BZA-004, 45 de DES-PU-B20— y el plan no
     // los pedía porque la repetición les daba costo.
+    // Lo que se mira es el valor de UNA unidad, no el total: 355 unidades a $1
+    // valorizan $355, que es mayor que cero, y el producto se daba por
+    // costeado. Pero $1 no es un costo, es el relleno con que se creó el
+    // artículo —la misma regla que COSTO_IRRISORIO aplica a los ingresos—, y
+    // esas unidades no valen nada en el inventario. En su informe eran 16
+    // productos a $1 que el paso 2a no pedía nunca.
     const foto = fotoDe(docs);
-    const filaSinValor = saldoHoy > EPS && last && last.valorInv != null && last.valorInv <= EPS;
-    const sinCostoHoy = foto ? (foto.stock > EPS && !(foto.valor > EPS))
-                             : (filaSinValor && !(calc && calc.pmp > EPS));
+    const unitarioIrrisorio = (valor, stock) =>
+      stock > EPS && valor != null && valor / stock <= COSTO_IRRISORIO;
+    const filaSinValor = last && last.valorInv != null && unitarioIrrisorio(last.valorInv, saldoHoy);
+    const sinCostoHoy = foto ? unitarioIrrisorio(foto.valor, foto.stock)
+                             : (filaSinValor && !(calc && calc.pmp > COSTO_IRRISORIO));
     const notaFila = !foto && filaSinValor && !sinCostoHoy ? `La última fila del informe muestra Valor Inventario $0, pero según los movimientos tiene costo (PMP ${money(calc.pmp)}). No hace falta ajuste de valor; si en Defontana el producto aparece a $0, confírmalo.` : null;
     let ins0 = zeros.filter(m => m.kind === 'in');
     // Ingresos a $0 cuyo costo ya se corrigió: se informan, pero no se piden de nuevo
@@ -1195,7 +1203,12 @@
       // costo con que entró suele estar en su propia compra.
       const suyo = costoDeSuCompra(docs);
       const uds = foto ? foto.stock : saldoHoy;
-      txt.push(`Defontana tiene ${fmt(uds)} unidades de este producto valorizadas en $0.`);
+      // Se dice el valor unitario con que están, no "en $0" a secas: a $1 el
+      // aviso se leía como un error, porque en Defontana el producto no
+      // aparece en cero.
+      const cuHoy = foto ? (foto.stock > EPS ? foto.valor / foto.stock : 0)
+                         : (saldoHoy > EPS && last && last.valorInv != null ? last.valorInv / saldoHoy : 0);
+      txt.push(`Defontana tiene ${fmt(uds)} unidades de este producto valorizadas en ${cuTxt(cuHoy)} c/u.`);
       hacer.push({k:'sinvalor', txt:`${AJ_COSTO_IN}: cargar el costo a las ${fmt(uds)} unidades` +
         (suyo ? `. Entró a ${cuTxt(suyo.v)} c/u con ${suyo.doc} del ${fmtDate(suyo.fecha)}` : ', que nunca tuvo una compra con costo') + '.'});
     }
@@ -2197,7 +2210,7 @@
         <div class="tablebox"><table class="plantable"><thead><tr><th class="n">#</th><th>Producto</th><th>Línea</th><th>Unidad en Defontana</th><th>Cambiar a</th><th class="num">Saldo Defontana</th><th class="num">Saldo convertido</th><th class="num">Contado</th><th class="num">Ajuste después</th></tr></thead>
         <tbody>${P.um.map((x, i) => { const u = x.r.umInfo; return `<tr><td class="n">${i + 1}</td>${prod(x)}<td>${esc(u.a)}</td><td><b>${esc(u.de)}</b></td><td class="num">${u.f ? fmt(u.hoyDef) + ' ' + esc(u.a) : fmt(hoyDe(x.r)) + ' ' + esc(u.a)}</td><td class="num">${u.f ? '<b>' + fmt(u.hoyConv) + ' ' + esc(u.de) + '</b>' : (u.mismo ? '<span class="small">misma cantidad (sin convertir)</span>' : '<span class="small">sin conversión conocida</span>')}</td><td class="num">${fmt(x.r.s.stock)} ${esc(u.de)}</td><td class="num">${x.r.diff == null ? '—' : (Math.abs(x.r.diff) <= EPS ? '0' : sgn(Math.round(x.r.diff * 1000) / 1000)) + ' ' + esc(u.de)}</td></tr>`; }).join('')}</tbody></table></div></section>` : ''}
       ${P.sinValor.length ? sec('2a', 'Cargar el costo de lo que no vale nada',
-        'Defontana tiene estas unidades valorizadas en $0. El costo es el de la propia compra del producto, no una estimación: va el monto del documento con que entró. Ordenados por lo que pesan, para poder cortar donde convenga.', P.sinValor,
+        'Defontana tiene estas unidades valorizadas en $0 o en $1 la unidad, que es lo mismo que nada: $1 es el relleno con que se creó el artículo, no un costo. El costo es el de la propia compra del producto, no una estimación: va el monto del documento con que entró. Ordenados por lo que pesan, para poder cortar donde convenga.', P.sinValor,
         '<th>Producto</th><th>Línea</th><th class="num">Unidades</th><th class="num">Costo a cargar c/u</th><th class="num">Valor que falta</th><th>De dónde sale ese costo</th>',
         x => `${prod(x)}<td class="num">${fmt(x.qty)}</td><td class="num">${x.v != null ? '<b>' + porUnidad(x.v) + '</b>' : '<span class="small">Escríbelo</span>'}</td><td class="num">${x.v != null ? money(x.v * x.qty) : '—'}</td><td class="wrapsmall">${esc(x.src)}</td>`,
         `<td></td><td colspan="3"><b>Total</b></td><td class="num"><b>${money(P.sinValor.reduce((a, x) => a + (x.v != null ? x.v * x.qty : 0), 0))}</b></td><td></td>`) : ''}
