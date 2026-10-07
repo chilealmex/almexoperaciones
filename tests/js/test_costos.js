@@ -84,6 +84,20 @@ escenario('Un ingreso mucho más barato de lo normal también', () => {
   comprobar('y dice que es más barato', true, raro && raro.barato);
 });
 
+escenario('Dos grupos de precios lejanos: no hay un costo normal que inventar', () => {
+  // El caso de 11-STR-ENC-09: 840 unidades compradas entre $382 y $414, y 30
+  // entre $8.280 y $9.869. Con seis compras, las dos del medio son $414 y
+  // $8.280 y su promedio —$4.347— no es el costo de ninguna. Proponiendo ése
+  // se pedía revalorizar las 246 que quedan, hoy a $406, por $969.322.
+  const docs = docsDe([ingreso(400, 382, 1), ingreso(240, 397, 2), ingreso(200, 414, 3),
+                       ingreso(8, 8280, 4), ingreso(2, 9303, 5), ingreso(20, 9869, 6)]);
+  comprobar('no se inventa un costo normal', null, costoHabitual(docs));
+
+  // Y si las dos del medio se parecen, la mediana sigue valiendo
+  const parejas = docsDe([ingreso(10, 1000, 1), ingreso(10, 1100, 2), ingreso(10, 1200, 3), ingreso(10, 9000, 4)]);
+  comprobar('con las del medio parecidas, sí', 1150, costoHabitual(parejas));
+});
+
 escenario('Lo que NO se marca, para no llenar de avisos falsos', () => {
   const subeDeAPoco = docsDe([ingreso(10, 1000, 1), ingreso(10, 1200, 2), ingreso(10, 1400, 3), ingreso(10, 1800, 4)]);
   comprobar('un alza normal de precios no es un error',

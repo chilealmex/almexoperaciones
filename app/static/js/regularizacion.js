@@ -1086,7 +1086,22 @@
     const costos = docs.map(costoUnitario).filter(v => v != null && v > COSTO_IRRISORIO).sort((a, b) => a - b);
     if (costos.length < MINIMO_INGRESOS) return null;
     const medio = Math.floor(costos.length / 2);
-    return costos.length % 2 ? costos[medio] : (costos[medio - 1] + costos[medio]) / 2;
+    if (costos.length % 2) return costos[medio];
+    // Con un número par de compras la mediana es el promedio de las dos del
+    // medio. Eso vale mientras las dos se parezcan; cuando no, el promedio es
+    // un número que no costó nada.
+    //
+    // 11-STR-ENC-09 compró 840 unidades entre $382 y $414 y 30 entre $8.280 y
+    // $9.869: las dos del medio son $414 y $8.280, y su promedio —$4.347— no es
+    // el costo de ninguna de sus compras. Con eso se proponía revalorizar las
+    // 246 que quedan, hoy a $406, con una entrada de $969.322.
+    //
+    // No hay un costo normal que valga para los dos grupos, así que no se
+    // inventa uno: se pide escribirlo, que es lo que ella pidió para cuando no
+    // se sabe cuánto cuesta.
+    const [a, b] = [costos[medio - 1], costos[medio]];
+    if (a > 0 && b / a >= VECES_FUERA_DE_RANGO) return null;
+    return (a + b) / 2;
   }
 
   function fueraDeRango(cu, habitual){
