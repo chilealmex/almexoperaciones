@@ -78,13 +78,22 @@
       <span class="txt"><span class="t">Recuentos de hoy (opcional)</span><span class="s" id="stRecount">Excel con el código y el físico contado hoy: reemplaza el conteo de esos productos</span></span>
     </div>
     <button type="button" class="rx-btn ghost sm" id="btnClearRecount" hidden>Quitar recuentos</button>
+    <div class="drop" id="dropArticulos">
+      <input type="file" id="fileArticulos" accept=".xlsx,.xls,.csv" aria-label="Informe de Inventario de Defontana con el stock valorizado">
+      <span class="num">+</span>
+      <span class="txt"><span class="t">Stock valorizado actualizado (opcional)</span><span class="s" id="stArticulos">Informe de Inventario de Defontana: el saldo y el valor que tiene ahora. Manda sobre lo que se arrastra de los movimientos</span></span>
+    </div>
+    <button type="button" class="rx-btn ghost sm" id="btnClearArticulos" hidden>Quitar stock valorizado</button>
   </section>
+
+  <p class="note warnline" id="avisoFechas" hidden></p>
 
   <p class="plantillas" id="plantillas">¿No sabes qué subir? Descarga un ejemplo de cada archivo:
     <button type="button" class="rx-btn ghost sm" data-plantilla="conteo">Conteo físico</button>
     <button type="button" class="rx-btn ghost sm" data-plantilla="informe">Informe de Documentos</button>
     <button type="button" class="rx-btn ghost sm" data-plantilla="ajustes">Ajustes hechos</button>
     <button type="button" class="rx-btn ghost sm" data-plantilla="recuentos">Recuentos de hoy</button>
+    <button type="button" class="rx-btn ghost sm" data-plantilla="articulos">Informe de Inventario</button>
   </p>
 
   <section class="checkpanel" id="checkPanel" hidden>

@@ -16,7 +16,7 @@
    en X, entonces el valor de hoy más el ajuste tiene que dar X por las
    unidades que hay. Antes no daba. */
 const {porId} = require('./entorno.js');
-const {compute, tipoAjCosto, state} = require('../../app/static/js/regularizacion.js');
+const {compute, buildPlan, tipoAjCosto, ajCostoUnit, state} = require('../../app/static/js/regularizacion.js');
 
 let fallas = 0, hechas = 0;
 
@@ -115,6 +115,77 @@ escenario('El ajuste nunca deja el PMP más lejos de lo que debería', () => {
     comprobar(`con Defontana en ${valorDefontana == null ? 'lo que cuadra' : '$' + valorDefontana}, acerca el PMP`,
               true, despues <= antes + 0.001);
   }
+});
+
+// --- Qué se teclea en Defontana ---
+//
+// El comprobante se carga por unidad, y el campo "Costo Unitario" de Defontana
+// es el costo con que debe QUEDAR el artículo, no el monto a sacarle: Defontana
+// multiplica por el stock y arma el total sola.
+//
+// Decirle el monto por unidad la hizo teclear $3.230,87 para 209 brochas que
+// debían quedar en $1.283,23: Defontana entendió "déjalas a $3.230,87" y movió
+// $268.196 en vez de $675.252, dejando el inventario al triple de lo que vale.
+
+escenario('Dice qué poner en "Costo Unitario", no cuánto sacar por unidad', () => {
+  const r = pantalla(informe(MOVS, 120000));
+  const txt = r.cost.hacer.map(h => h.txt).join(' ');
+  comprobar('el ajuste total es $90.000', -90000, Math.round(r.cost.corr.ajuste));
+  comprobar('el costo con que debe quedar es $1.000', 1000, Math.round(r.cost.corr.pmp));
+  comprobar('eso es lo que manda teclear', true, /"Costo Unitario" de Defontana pon \$1\.000/.test(txt));
+  comprobar('y dice sobre cuántas unidades', true, /por las 30 unidades/.test(txt));
+  // El monto por unidad ($3.000) es justamente el número equivocado: tecleado
+  // en ese campo Defontana lo toma como el costo a dejar.
+  comprobar('NO manda teclear el monto por unidad', false, /Costo Unitario" de Defontana pon \$3\.000/.test(txt));
+});
+
+escenario('Lo que Defontana va a calcular cuadra con el ajuste', () => {
+  // Defontana hace: valor de hoy − costo tecleado × stock. Eso tiene que dar
+  // exactamente el ajuste propuesto, o el inventario no queda donde debe.
+  for (const valorDefontana of [120000, 5000, 60000, 943000]) {
+    const r = pantalla(informe(MOVS, valorDefontana));
+    const u = r.docs[r.docs.length - 1], c = r.cost.corr;
+    const loQueMueveDefontana = u.valorInv - c.pmp * u.saldo;
+    comprobar(`con Defontana en $${valorDefontana}, mueve lo propuesto`,
+              Math.round(-c.ajuste), Math.round(loQueMueveDefontana));
+  }
+});
+
+escenario('El costo a teclear lleva decimales', () => {
+  // 675.252 entre 209 no es redondo por ningún lado: si el costo unitario se
+  // redondea a peso, el total que arma Defontana se corre.
+  const r = pantalla(informe([ing(10, 0, 1), ing(100, 1000, 2), ing(99, 1500, 3)], 943000));
+  comprobar('son 209 unidades', 209, Math.round(r.cost.corr.unidades));
+  comprobar('el costo a dejar no es redondo', 1236.84, Math.round(r.cost.corr.pmp * 100) / 100);
+  comprobar('y se muestra con sus decimales', true,
+            /pon \$1\.236,84 —/.test(r.cost.hacer.map(h => h.txt).join(' ')));
+  // Redondeado a peso, el total que arma Defontana se corre por casi $200.
+  comprobar('redondear a peso correría el total', true,
+            Math.abs((1236 - r.cost.corr.pmp) * 209) > 100);
+});
+
+escenario('El plan lleva el costo a teclear y las unidades', () => {
+  const docs = informe(MOVS, 120000);
+  const out = compute(docs);
+  state.rows = out.rows; state.zero = out.zero;
+  const x = buildPlan().cost.find(y => y.corr);
+  comprobar('las unidades', 30, Math.round(x.corr.unidades));
+  comprobar('y el costo con que debe quedar', 1000, Math.round(x.corr.pmp));
+});
+
+escenario('Un costo fuera de lo normal también manda el costo a dejar', () => {
+  // Otro camino distinto del de los $0: acá el objetivo es lo que suele costar.
+  const malo = [ing(1, 1000, 1), ing(1, 1000, 2), ing(1, 1000, 3), ing(10, 20000, 4)];
+  const r = pantalla(informe(malo));
+  const out = compute(informe(malo));
+  state.rows = out.rows; state.zero = out.zero;
+  const x = buildPlan().cost.find(y => y.corr);
+  comprobar('hay una línea con ajuste', true, !!x);
+  if (!x) return;
+  comprobar('las unidades son las 13 que quedan', 13, Math.round(x.corr.unidades));
+  comprobar('el costo a dejar es el habitual', 1000, Math.round(x.corr.pmp));
+  comprobar('y el paso lo dice', true,
+            /"Costo Unitario" de Defontana pon \$1\.000/.test(out.rows[0].costExtra[0].rev.hacer));
 });
 
 console.log(`\n${hechas - fallas} de ${hechas} comprobaciones pasaron`);

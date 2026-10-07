@@ -91,6 +91,80 @@
     return out;
   }
 
+  // ---------- Informe de Artículos: el stock valorizado a una hora ----------
+  //
+  // El Informe de Documentos son movimientos: el saldo y el valor de hoy salen
+  // de arrastrar la última fila. El Informe de Artículos es la foto que
+  // Defontana tiene de verdad en un momento —"Stock Disponible" y "Costo
+  // Vigente"— y trae la hora en que se sacó. Con sus archivos los dos coinciden
+  // en el 97,5% de las cantidades y el 97,6% de los valores; lo que vale es ese
+  // 2,4% restante, donde Defontana tiene stock o valor que los movimientos no
+  // explican, y la hora, para saber contra qué momento se está comparando.
+  function parseArticulos(rows){
+    // Defontana da dos informes de stock valorizado y sirven los dos:
+    //   - Informe de Inventario: Código Artículo / Bodega / Saldo / Valor unidad
+    //     / Total. Una fila por bodega, y el Total es el valorizado de verdad.
+    //   - Informe de Artículos: Artículo / Stock Disponible / Costo Vigente, sin
+    //     bodega y sin total, así que el valor hay que multiplicarlo.
+    // El primero es mejor: el Total es el número que Defontana tiene, no uno
+    // reconstruido, y con él se ve el caso "no quedan unidades pero sigue
+    // valorizado", que multiplicando siempre da cero.
+    const inv = readTable(rows, ['CODIGO ARTICULO', 'SALDO']);
+    const t = inv || readTable(rows, ['ARTICULO', 'STOCK DISPONIBLE']);
+    if (!t) throw new Error('No encontré las columnas del stock valorizado. ¿Es el Informe de Inventario (Código Artículo, Saldo, Valor unidad, Total) o el de Artículos (Artículo, Stock Disponible, Costo Vigente) de Defontana?');
+    const c = inv
+      ? {art:t.col('Código Artículo'), desc:t.col('Descripción'), bod:t.col('Bodega'),
+         stock:t.col('Saldo'), costo:t.col('Valor unidad'), total:t.col('Total')}
+      : {art:t.col('Artículo'), desc:t.col('Descripción'), bod:-1,
+         stock:t.col('Stock Disponible'), costo:t.col('Costo Vigente'), total:-1};
+    if (c.costo < 0) throw new Error(inv ? 'No encontré la columna “Valor unidad”.' : 'No encontré la columna “Costo Vigente”.');
+    const out = [];
+    for (const r of t.rows){
+      const art = String(r[c.art] ?? '').trim(); if (!art) continue;
+      const stock = num(r[c.stock]), costo = num(r[c.costo]);
+      const total = c.total >= 0 ? num(r[c.total]) : null;
+      if (stock == null && costo == null && total == null) continue;
+      out.push({art, key:keyOf(art), name:c.desc >= 0 ? String(r[c.desc] ?? '').trim() : '',
+        bodega: c.bod >= 0 ? String(r[c.bod] ?? '').trim() : '',
+        stock: stock ?? 0, costo: costo ?? 0,
+        valor: total != null ? total : (stock ?? 0) * (costo ?? 0)});
+    }
+    if (!out.length) throw new Error('El informe no trae filas con datos.');
+    out.fecha = fechaDeGeneracion(rows);
+    out.fechaGen = fechaGenerada(out.fecha);
+    // Con la columna Total el valor es el que Defontana tiene; sin ella es
+    // stock por costo, que con stock 0 da 0 y no sirve para ver el valor que
+    // quedó sin unidades.
+    out.valorReal = c.total >= 0;
+    return out;
+  }
+  // "Fecha de generación: 06-10-2026, 04:17 p. m." en las primeras filas.
+  // Es el dato que distingue una foto de otra, así que si no está se dice.
+  function fechaDeGeneracion(rows){
+    for (let i = 0; i < Math.min(rows.length, 30); i++){
+      for (const celda of rows[i]){
+        const txt = String(celda ?? '');
+        const m = /generaci[oó]n\s*:\s*(.+)$/i.exec(txt);
+        if (m) return m[1].trim();
+      }
+    }
+    return null;
+  }
+  // "25-09-2026, 09:01 a. m." como fecha. Defontana escribe la tarde con
+  // "p. m.", y sin mirarlo un informe de las 4 de la tarde quedaría a las 4 de
+  // la mañana: doce horas de diferencia alcanzan para comparar mal dos
+  // informes del mismo día.
+  function fechaGenerada(txt){
+    if (!txt) return null;
+    const d = parseDate(txt);
+    if (!d) return null;
+    const pm = /p\.?\s*m\.?/i.test(txt), am = /a\.?\s*m\.?/i.test(txt);
+    const h = d.getHours();
+    if (pm && h < 12) d.setHours(h + 12);
+    else if (am && h === 12) d.setHours(0);
+    return d;
+  }
+
   // ---------- Unidades de medida ----------
   // Mismos grupos que app/utils/unidades.py (M = MT = MTS…), más las de conversión conocida.
   const UM_GRUPOS = {
@@ -181,6 +255,8 @@
         valor:c.valor >= 0 ? num(at(r,'valor')) : null, saldo:num(at(r,'saldo')), valorInv:c.valorInv >= 0 ? num(at(r,'valorInv')) : null});
     });
     out.sort((a,b) => (a.fecha||0) - (b.fecha||0) || a.i - b.i);
+    out.fecha = fechaDeGeneracion(rows);
+    out.fechaGen = fechaGenerada(out.fecha);
     return out;
   }
 
@@ -253,7 +329,7 @@
 
 
   // ---------- Estado ----------
-  const state = {stock:[], mov:[], view:'reg', filter:{reg:'all', zero:'all', check:'all'}, mov2:null, ajustes:null, hechos:new Map(), ajSi:new Set(), ajNo:new Set(), docGroupsMain:[], checkRows:[], docGroups:[],
+  const state = {stock:[], mov:[], view:'reg', filter:{reg:'all', zero:'all', check:'all'}, mov2:null, ajustes:null, articulos:null, hechos:new Map(), ajSi:new Set(), ajNo:new Set(), docGroupsMain:[], checkRows:[], docGroups:[],
     sort:{reg:{k:'code', d:1}, zero:{k:'fecha', d:1}, check:{k:'code', d:1}}, open:new Set(), pmpEdit:new Map(), recount:leerRecuentos(), rows:[], zero:[]};
 
   function fillBodegas(){
@@ -556,6 +632,26 @@
         if (pend != null) st = Math.abs(pend) <= EPS ? 'done' : pend > 0 ? 'up' : 'down';
         if (st === 'done'){ dx.cause = null; dx.obs = dx.obs.filter(x => /^Ajuste de (cantidad|costo) ya hecho/.test(x)); }
       }
+      // El stock valorizado contra lo que arrastran los movimientos. Entre dos
+      // fechas pueden haberse borrado comprobantes o metido ajustes: el
+      // arrastre no se entera y la foto sí, así que donde no coinciden hay algo
+      // que los movimientos no explican. Con sus archivos pasa en el 2,5% de
+      // las cantidades y el 2,4% de los valores, así que se avisa.
+      const foto = fotoDe(docs);
+      let fotoDifiere = null;
+      if (foto){
+        const hoyMov = sysCalc ?? sysNow, u = docs[docs.length - 1];
+        const valorMov = u && u.valorInv != null ? u.valorInv : null;
+        const cantMal = hoyMov != null && Math.abs(foto.stock - hoyMov) > Math.max(0.01, Math.abs(hoyMov) * 0.001);
+        const valMal = valorMov != null && Math.abs(foto.valor - valorMov) > Math.max(1, Math.abs(valorMov) * 0.005);
+        if (cantMal || valMal){
+          fotoDifiere = {stock: foto.stock, costo: foto.costo, valor: foto.valor, hoyMov, valorMov, cantMal, valMal};
+          dx.obs.unshift('El stock valorizado de Defontana no coincide con lo que dan los movimientos: ' +
+            (cantMal ? `tiene ${fmt(foto.stock)} y los movimientos dan ${fmt(hoyMov)}. ` : '') +
+            (valMal ? `Vale ${money(foto.valor)} y los movimientos dan ${money(valorMov)}. ` : '') +
+            'Puede que se haya borrado o modificado un comprobante entre medio. Para el costo manda el stock valorizado.');
+        }
+      }
       // Marcado a mano como ya regularizado (p. ej. se corrigió la unidad de medida en Defontana)
       // La marca "Ya regularizado" vale mientras el producto siga con la misma diferencia y el mismo conteo;
       // si una carga nueva la cambia, el producto vuelve a aparecer.
@@ -587,7 +683,7 @@
         if (hechos.has('costo')) cost = null;
         if (hechos.has('cantidad') && (st === 'up' || st === 'down')) st = 'done';
       }
-      return {cause:dx.cause, obs:dx.obs, hechos, umRound: !!dx.umRound, umMaster: !!dx.umMaster, linea: s ? s.linea || '' : '', alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, umInfo, arts, artAjuste, pend, costDocs, manual, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs, sysCalc, toOther,
+      return {cause:dx.cause, obs:dx.obs, hechos, foto, fotoDifiere, umRound: !!dx.umRound, umMaster: !!dx.umMaster, linea: s ? s.linea || '' : '', alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, umInfo, arts, artAjuste, pend, costDocs, manual, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs, sysCalc, toOther,
         sysAtCount, sysNow, realNow, diff, st, pmp, edited, pmpSrc: edited ? 'Ingresado a mano' : pm ? pm.src : 'Sin costo en Defontana',
         valor: st === 'done' ? 0 : pend != null && pmp != null ? pend * pmp : diff != null && Math.abs(diff) > EPS && pmp != null ? diff * pmp : (st === 'ok' ? 0 : null), zeros, cost};
     };
@@ -686,13 +782,124 @@
     return {rows, zero, orphan: [...byKey.keys()].filter(k => !seen.has(k)).length};
   }
 
+  // Los dos informes se bajan por separado y es fácil que queden de días
+  // distintos. Si el de documentos es más viejo que el inventario, le faltan
+  // los movimientos de esos días, y los productos que "no cuadran" pueden ser
+  // sólo eso: no hay cómo saberlo desde acá, así que se avisa antes de que se
+  // persiga un descuadre que no existe.
+  const DIA_MS = 86400000;
+  // Hasta cuándo llega de verdad el informe de documentos. La "Fecha de
+  // generación" de la cabecera no sirve sola: cuando los datos se pegan en un
+  // Excel que ya existía, esa línea se queda con la fecha del archivo viejo y
+  // dice el 25 de septiembre un informe que trae movimientos de octubre. El
+  // último movimiento no miente, y entre los dos vale el que llegue más lejos:
+  // los dos dicen "al menos hasta acá".
+  function hastaCuandoLlega(mov){
+    if (!mov || !mov.length) return null;
+    let ultimo = null;
+    for (const m of mov) if (m.fecha && (!ultimo || m.fecha > ultimo)) ultimo = m.fecha;
+    if (mov.fechaGen && (!ultimo || mov.fechaGen > ultimo)) return mov.fechaGen;
+    return ultimo;
+  }
+  function avisoDeFechas(){
+    const a = state.articulos, m = state.mov;
+    if (!a || !a.length || !m || !m.length || !a.fechaGen) return null;
+    const hasta = hastaCuandoLlega(m);
+    if (!hasta) return null;
+    // Por día, no por hora: los movimientos no traen hora, así que comparar
+    // timestamps haría parecer atrasado un informe del mismo día.
+    const soloDia = d => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const dias = Math.round((soloDia(a.fechaGen) - soloDia(hasta)) / DIA_MS);
+    if (dias < 1) return null;
+    const cuanto = dias === 1 ? 'un día' : `${dias} días`;
+    return `El Informe de Documentos llega hasta el ${fmtDate(hasta)} y el de Inventario es del ${a.fecha}: ` +
+      `${cuanto} de diferencia. Al de documentos le faltan los movimientos de esos días, así que ` +
+      `parte de los productos que no cuadran puede ser sólo eso. Vuelve a bajarlo para que los dos ` +
+      `queden al mismo momento.`;
+  }
+
+  // La foto del stock valorizado, por artículo. Cuando está, manda sobre lo que
+  // se arrastra de los movimientos: es lo que Defontana tiene de verdad, y es
+  // contra eso que hay que hacer el ajuste.
+  let fotoPorKey = null;
+  function fotoDe(docs){
+    if (!state.articulos || !state.articulos.length || !docs || !docs.length) return null;
+    if (!fotoPorKey || fotoPorKey._de !== state.articulos){
+      // El mismo producto puede venir en el stock valorizado con varios
+      // códigos —0506507001 y 506507001, o 42400-014 Rev.2 / 42400-014Rev.2 /
+      // 42400-014Rev2— y el stock repartido entre ellos. Hay que sumarlos: con
+      // quedarse con el primero, si ése es el que tiene 0, el producto parece
+      // sin unidades y se propone un ajuste que no corresponde. En sus
+      // archivos eso daba 4 falsas alarmas de 6.
+      fotoPorKey = new Map();
+      for (const a of state.articulos){
+        const p = fotoPorKey.get(a.key);
+        if (!p) fotoPorKey.set(a.key, {key:a.key, art:a.art, name:a.name, stock:a.stock, valor:a.valor, costo:a.costo, valorReal: !!state.articulos.valorReal, codigos:[a.art]});
+        else {
+          p.stock += a.stock; p.valor += a.valor; p.codigos.push(a.art);
+          // El costo del conjunto es el promedio ponderado; sin unidades, el
+          // mayor de los que haya, que es el único dato de costo que queda.
+          p.costo = p.stock > EPS ? p.valor / p.stock : Math.max(p.costo, a.costo);
+        }
+      }
+      fotoPorKey._de = state.articulos;
+    }
+    // El producto puede estar en el informe de documentos con varios códigos
+    // —DURALUMINIO-6082 y N-DURALUMINIO-6082 son el mismo— y en el inventario
+    // bajo uno solo. Hay que sumar lo que haya de cada uno: mirando sólo el
+    // del primer documento, si ése no está, el producto parece agotado y se
+    // propone un ajuste que no corresponde.
+    const vistas = new Set();
+    let total = null;
+    for (const m of docs){
+      const k = keyOf(m.art);
+      if (vistas.has(k)) continue;
+      vistas.add(k);
+      const f = fotoPorKey.get(k);
+      if (!f) continue;
+      if (!total) total = {...f, codigos:[...f.codigos]};
+      else {
+        total.stock += f.stock; total.valor += f.valor; total.codigos.push(...f.codigos);
+        total.costo = total.stock > EPS ? total.valor / total.stock : Math.max(total.costo, f.costo);
+      }
+    }
+    return total;
+  }
+  // El Informe de Inventario sólo lista lo que tiene stock, así que un artículo
+  // que no está en él es un artículo que Defontana da por agotado. Eso sólo se
+  // usa para la revisión de valorizaciones imposibles —"sigue valorizado y no
+  // quedan unidades"—, nunca para calcular un ajuste: si alguna vez el informe
+  // viniera filtrado, dar por agotado lo que falta propondría ajustes que no
+  // corresponden. En sus archivos hay 613 ausentes y sólo 2 con saldo o valor:
+  // los dos casos de verdad, sin ruido.
+  function stockSegunFoto(docs){
+    if (!state.articulos || !state.articulos.length || !docs || !docs.length) return null;
+    const f = fotoDe(docs);
+    return f ? {stock: f.stock, valor: f.valor, valorReal: f.valorReal, ausente: false}
+             : {stock: 0, valor: 0, valorReal: false, ausente: true};
+  }
+
   // ---------- Costo: productos que entraron o salieron a $0 ----------
   // En Defontana el ajuste de costo se hace con un comprobante de ENTRADA
   // cuando sube el valor del inventario, y de SALIDA cuando lo baja. Decirlo
   // ahorra tener que deducirlo del signo a mano al cargar el comprobante.
   const AJ_COSTO_IN = 'Ajuste de costo ENTRADA', AJ_COSTO_OUT = 'Ajuste de costo SALIDA';
   const tipoAjCosto = v => v == null || Math.abs(v) <= 0.5 ? null : v > 0 ? AJ_COSTO_IN : AJ_COSTO_OUT;
-  const ajCostoTxt = v => `${tipoAjCosto(v)} por ${money(Math.abs(v))}`;
+  // El comprobante en Defontana se carga por unidad, así que el monto unitario
+  // va junto al total: sin él hay que dividir a mano producto por producto.
+  const porUnidad = n => n == null || isNaN(n) ? '—' : (n < 0 ? '−$' : '$') + Math.abs(n).toLocaleString('es-CL', {maximumFractionDigits: 2});
+  // El comprobante de ajuste de costo en Defontana se carga por unidad, y su
+  // campo "Costo Unitario" es el costo con que debe QUEDAR el artículo, no el
+  // monto a sacarle. Defontana multiplica por el stock y arma el total sola.
+  //
+  // La diferencia no es de matiz: con 209 brochas valorizadas a $4.514 que
+  // deben quedar a $1.283, el ajuste es de $675.252 y el unitario a sacar
+  // serían $3.230,87. Al teclear $3.230,87 Defontana entiende "déjalas a
+  // $3.230,87" y mueve $268.196: menos de la mitad, y el inventario queda
+  // todavía al triple de lo que vale. Así que lo que se muestra es el costo
+  // que hay que dejar.
+  const ajCostoTxt = (v, u, pmp) => `${tipoAjCosto(v)} por ${money(Math.abs(v))}` +
+    (pmp != null && u > EPS ? `: en "Costo Unitario" de Defontana pon ${porUnidad(pmp)} —el costo con que debe quedar— y el total lo calcula Defontana por las ${fmt(u)} unidades` : '');
   const pmpAt = m => m && m.saldo > EPS && m.valorInv != null ? m.valorInv / m.saldo : null;
   // Costo unitario para corregir un documento a $0: el de la compra con costo más cercana (la última
   // anterior; si no hay, la primera posterior); si no hay compras con costo, el PMP que tenía antes.
@@ -758,9 +965,10 @@
     // En su informe las cantidades cuadran en el 99,2% de los productos y el
     // valor sólo en el 68%: al informe no le faltan movimientos, es Defontana
     // el que revaloriza. Así que su Valor Inventario es lo que hay que mover.
-    const u = docs[docs.length - 1];
-    const hoy = u && u.valorInv != null && u.saldo > EPS ? u.valorInv : asi.valor;
-    return {pmp: bien.valor / bien.saldo, ajuste: bien.valor - hoy};
+    const foto = fotoDe(docs), u = docs[docs.length - 1];
+    const hoy = foto ? foto.valor
+      : u && u.valorInv != null && u.saldo > EPS ? u.valorInv : asi.valor;
+    return {pmp: bien.valor / bien.saldo, ajuste: bien.valor - hoy, unidades: bien.saldo};
   }
 
   // ¿El costo de un ingreso a $0 ya se corrigió? Sí, si después hubo un documento que solo cambia el
@@ -835,7 +1043,7 @@
     const corr = ins0.length ? correctedToday(docs) : null;
     if (corr && Math.abs(corr.ajuste) > 0.5) {
       const deQue = ins0.map(m => `${m.tipo} #${m.folio}`).join(', ');
-      hacer.push({k:'cost', txt:`${ajCostoTxt(corr.ajuste)}: el PMP queda en ${money(corr.pmp)} (lo dejó así ${deQue})`});
+      hacer.push({k:'cost', txt:`${ajCostoTxt(corr.ajuste, corr.unidades, corr.pmp)} (lo dejó así ${deQue})`});
     }
     if (sinCostoHoy && !ins0.length){ const r = refCost(docs, docs.length); costos.push({doc: 'stock actual', qty: saldoHoy, v: r ? r.v : null, src: r ? r.src : 'no hay compras con costo en el informe: usa el costo de la factura'}); }
     const need = sinCostoHoy || ins0.length > 0;
@@ -898,9 +1106,12 @@
   // lo ensució siga en el informe.
   function comoEstaHoy(docs, habitual){
     const ultimo = docs[docs.length - 1];
-    const stock = ultimo && ultimo.saldo != null ? ultimo.saldo : null;
-    const pmp = pmpAt(ultimo);
-    const valor = ultimo ? ultimo.valorInv : null;
+    // Si hay foto del stock valorizado, es lo que Defontana tiene ahora: el
+    // saldo y el valor arrastrados de los movimientos son una reconstrucción.
+    const foto = fotoDe(docs);
+    const stock = foto ? foto.stock : ultimo && ultimo.saldo != null ? ultimo.saldo : null;
+    const valor = foto ? foto.valor : ultimo ? ultimo.valorInv : null;
+    const pmp = foto ? (foto.stock > EPS ? foto.costo : null) : pmpAt(ultimo);
     // El ajuste de costo: llevar el valor del inventario de hoy al que le
     // corresponde a lo que queda en bodega, valorizado a lo que el producto
     // suele costar. Positivo sube el valor, negativo lo baja.
@@ -940,8 +1151,7 @@
     // tocar el documento viejo: el ingreso ya se consumió en parte y corregirlo
     // hacia atrás arrastra todas las salidas que salieron a ese PMP.
     const hacer = hoy.ajuste != null
-      ? `${ajCostoTxt(hoy.ajuste)}: el valor del inventario pasa de ${money(hoy.valor)} a ${money(hoy.deberiaValer)} ` +
-        `para las ${fmt(hoy.stock)} que quedan, y el PMP queda en ${aQue}.`
+      ? `${ajCostoTxt(hoy.ajuste, hoy.stock, objetivo)}. El valor del inventario pasa de ${money(hoy.valor)} a ${money(hoy.deberiaValer)}.`
       : objetivo != null
         ? `Ajuste de costo (entrada o salida, según si el valor sube o baja) para dejar el PMP en ${aQue} c/u.`
         : `Falta el costo: no hay con qué saber cuánto cuesta este producto` +
@@ -983,9 +1193,16 @@
   };
 
   function valorizacionImposible(docs){
-    const ultimo = docs[docs.length - 1];
+    const ultimo = docs[docs.length - 1], foto = stockSegunFoto(docs);
     if (!ultimo || ultimo.saldo == null || ultimo.valorInv == null) return null;
-    const saldo = ultimo.saldo, valor = ultimo.valorInv;
+    // Las unidades, de la foto cuando la hay: es lo que Defontana tiene ahora.
+    // El valor, en cambio, SIEMPRE del informe de documentos: en la foto el
+    // valor es stock por costo, así que con stock 0 da 0 por construcción y
+    // taparía justamente el caso que se busca —valor sin unidades—. La gracia
+    // de esta revisión es cruzar las dos fuentes: unidades reales contra valor
+    // contabilizado.
+    const saldo = foto ? foto.stock : ultimo.saldo;
+    const valor = foto && foto.valorReal ? foto.valor : ultimo.valorInv;
     const cual = valor < -EPS ? 'valorNegativo'
       : saldo < -EPS ? 'stockNegativo'
       : (saldo <= EPS && valor > EPS) ? 'valorSinStock'
@@ -1007,7 +1224,7 @@
       // hacia atrás recalcula todas las salidas que salieron a ese PMP, y las
       // que ya se facturaron quedan con un costo distinto del que tuvieron.
       const hacer = corr && Math.abs(corr.ajuste) > 0.5
-        ? `${ajCostoTxt(corr.ajuste)}: el PMP queda en ${money(corr.pmp)}` +
+        ? `${ajCostoTxt(corr.ajuste, corr.unidades, corr.pmp)}` +
           (r ? ` (el producto cuesta ${money(r.v)} c/u según ${r.src})` : '') + '.'
         : r
           ? `Ajuste de costo (entrada o salida, según si el valor sube o baja) para dejar el PMP en ${money(r.v)} c/u (${r.src}).`
@@ -1266,6 +1483,7 @@
     ['alias', 'Código escrito distinto', r => r.alias.length > 0 || r.viaName || r.nCounted > 1, 'var(--accent)'],
     ['cost', 'Revisar costo ($0)', r => !!(r.cost && r.cost.need), 'var(--warn)'],
     ['recount', 'Recontados', r => !!(r.s && r.s.recontado), 'var(--accent)'],
+    ['foto', 'No cuadra con el stock valorizado', r => !!r.fotoDifiere, 'var(--warn)'],
     ['p-verify', 'Paso 1: confirmar', r => !r.umRound && r.st === 'check' || (r.cause === 'um' && (r.st === 'up' || r.st === 'down')), 'var(--warn)', true],
     ['p-cost', 'Paso 2: corregir costos', r => docSteps(r).some(x => x.k === 'cost'), 'var(--warn)', true],
     ['p-in', 'Paso 3: entradas', r => docSteps(r).some(x => x.k === 'in'), 'var(--in)', true],
@@ -1501,7 +1719,7 @@
           doc: z.imposible ? VALORIZACIONES_IMPOSIBLES[z.imposible].titulo
                            : `${z.m.tipo} #${z.m.folio} entró a ${cuTxt(z.raro.cu)} c/u`,
           src: z.rev.costo ? z.rev.costo.src : 'falta el costo: escríbelo en la columna PMP de “Costos a revisar”',
-          corr: ajuste != null ? {ajuste, pmp: v != null ? v : 0} : null});
+          corr: ajuste != null ? {ajuste, pmp: v != null ? v : 0, unidades: z.stockHoy != null ? z.stockHoy : (hoyDe(r) ?? 0)} : null});
       }
       if (r.st === 'up') plan.in.push({r, qty:r.pend ?? r.diff, v:r.pmp > 0 ? r.pmp : null, src:r.pmpSrc, motivo:r.cause ? CAUSES[r.cause] : 'Sobra en bodega'});
       if (r.st === 'down') plan.out.push({r, qty:-(r.pend ?? r.diff), v:r.pmp > 0 ? r.pmp : null, src:r.pmpSrc, motivo:r.cause ? CAUSES[r.cause] : 'Falta en bodega'});
@@ -1731,7 +1949,7 @@
         <tbody>${P.um.map((x, i) => { const u = x.r.umInfo; return `<tr><td class="n">${i + 1}</td>${prod(x)}<td>${esc(u.a)}</td><td><b>${esc(u.de)}</b></td><td class="num">${u.f ? fmt(u.hoyDef) + ' ' + esc(u.a) : fmt(hoyDe(x.r)) + ' ' + esc(u.a)}</td><td class="num">${u.f ? '<b>' + fmt(u.hoyConv) + ' ' + esc(u.de) + '</b>' : (u.mismo ? '<span class="small">misma cantidad (sin convertir)</span>' : '<span class="small">sin conversión conocida</span>')}</td><td class="num">${fmt(x.r.s.stock)} ${esc(u.de)}</td><td class="num">${x.r.diff == null ? '—' : (Math.abs(x.r.diff) <= EPS ? '0' : sgn(Math.round(x.r.diff * 1000) / 1000)) + ' ' + esc(u.de)}</td></tr>`; }).join('')}</tbody></table></div></section>` : ''}
       ${sec(2, 'Corregir costos', 'Un ajuste de costo por producto. Los comprobantes ya emitidos no se tocan: corregirlos hacia atrás recalcula las salidas que salieron a ese PMP, incluidas las ya facturadas.', P.cost,
         '<th>Producto</th><th>Línea</th><th>Qué corregir</th><th class="num">Cantidad</th><th class="num">Costo a usar c/u</th><th class="num">Total</th><th class="num">Ajuste de valor (entrada / salida)</th>',
-        x => `${prod(x)}<td>${esc(x.doc)}${x.nota ? `<div class="small wrapsmall">${esc(x.nota)}</div>` : ''}</td><td class="num">${fmt(x.qty)}</td><td class="num">${costo(x)}</td><td class="num">${x.v != null ? money(x.v * x.qty) : '—'}</td><td class="num">${x.corr && tipoAjCosto(x.corr.ajuste) ? '<b>' + tipoAjCosto(x.corr.ajuste) + '</b><div>' + money(Math.abs(x.corr.ajuste)) + '</div><div class="small">PMP queda en ' + money(x.corr.pmp) + '</div>' : '—'}</td>`,
+        x => `${prod(x)}<td>${esc(x.doc)}${x.nota ? `<div class="small wrapsmall">${esc(x.nota)}</div>` : ''}</td><td class="num">${fmt(x.qty)}</td><td class="num">${costo(x)}</td><td class="num">${x.v != null ? money(x.v * x.qty) : '—'}</td><td class="num">${x.corr && tipoAjCosto(x.corr.ajuste) ? '<b>' + tipoAjCosto(x.corr.ajuste) + '</b><div>' + money(Math.abs(x.corr.ajuste)) + '</div>' + '<div><b>' + porUnidad(x.corr.pmp) + '</b> <span class="small">en Costo Unitario</span></div><div class="small">por ' + fmt(x.corr.unidades) + ' unidades</div>' : '—'}</td>`,
         `<td></td><td colspan="6"><b>Total</b></td><td class="num"><b>${money(tot(P.cost))}</b></td><td></td>`)}
       ${sec(3, 'Entradas (Parte de Entrada)', 'Una Parte de Entrada por ajuste de inventario con estas líneas.', P.in,
         '<th>Producto</th><th>Línea</th><th class="num">Debería tener hoy</th><th class="num">Tiene Defontana hoy</th><th class="num">Cantidad</th><th class="num">Costo c/u</th><th class="num">Total</th><th>Motivo</th>',
@@ -1749,7 +1967,7 @@
     const hoja = (nombre, filas) => XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filas.length ? filas : [{'': 'Nada en este paso'}]), nombre);
     hoja('1 Confirmar', P.verify.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Diferencia': x.qty, 'Motivo': x.motivo, 'Qué revisar': x.txt})));
     if (P.um.length) hoja('1b Unidades', P.um.map((x, i) => { const u = x.r.umInfo; return {'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Unidad en Defontana': u.a, 'Cambiar a': u.de, 'Saldo Defontana (su unidad)': u.f ? u.hoyDef : hoyDe(x.r) ?? '', 'Saldo convertido': u.f ? u.hoyConv : u.mismo ? 'misma cantidad (sin convertir)' : 'sin conversión conocida', 'Contado': x.r.s.stock, 'Ajuste después': x.r.diff ?? ''}; }));
-    hoja('2 Costos', P.cost.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Qué corregir': x.doc, 'Qué hacer': x.nota || '', 'Cantidad': x.qty, 'Costo a usar c/u': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Origen del costo': x.src, 'Tipo de comprobante': x.corr ? (tipoAjCosto(x.corr.ajuste) || '') : '', 'Ajuste de valor': x.corr ? Math.round(x.corr.ajuste) : '', 'PMP correcto hoy': x.corr ? r2(x.corr.pmp) : ''})));
+    hoja('2 Costos', P.cost.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Qué corregir': x.doc, 'Qué hacer': x.nota || '', 'Cantidad': x.qty, 'Costo a usar c/u': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Origen del costo': x.src, 'Tipo de comprobante': x.corr ? (tipoAjCosto(x.corr.ajuste) || '') : '', 'Ajuste de valor': x.corr ? Math.round(x.corr.ajuste) : '', 'Costo Unitario a poner en Defontana': x.corr ? r2(x.corr.pmp) : '', 'Unidades del ajuste': x.corr && x.corr.unidades != null ? x.corr.unidades : ''})));
     hoja('3 Entradas', P.in.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Debería tener hoy': x.r.realNow ?? '', 'Tiene Defontana hoy': hoyDe(x.r) ?? '', 'Cantidad': x.qty, 'Costo c/u': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Origen del costo': x.src, 'Motivo': x.motivo})));
     hoja('4 Salidas', P.out.map((x, i) => ({'#': i + 1, 'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Debería tener hoy': x.r.realNow ?? '', 'Tiene Defontana hoy': hoyDe(x.r) ?? '', 'Cantidad': x.qty, 'PMP c/u (referencial)': r2(x.v), 'Total': x.v != null ? Math.round(x.v * x.qty) : '', 'Motivo': x.motivo})));
     XLSX.writeFile(wb, 'plan-de-ajustes-' + fmtDate(new Date()) + '.xlsx');
@@ -1793,6 +2011,9 @@
     document.querySelectorAll('.view').forEach(b => b.setAttribute('aria-selected', b.dataset.view === state.view));
     $('checkPanel').hidden = !chk;
     renderStepsPanel(reg);
+    const aviso = avisoDeFechas();
+    $('avisoFechas').textContent = aviso || '';
+    $('avisoFechas').hidden = !aviso;
     const dash = state.view === 'dash', plan = state.view === 'plan' || dash;
     $('planBox').hidden = state.view !== 'plan'; $('dashBox').hidden = !dash;
     $('filtersBar').hidden = plan; $('tablebox').hidden = plan; $('summary').hidden = plan; $('copyNote').hidden = plan;
@@ -1953,7 +2174,14 @@
         if (key === 'mov2'){ if (!state.mov || !state.mov.length) { state.mov = data; fillBodegas(); } }
         render();
         if (key === 'ajustes') $('btnClearAjustes').hidden = false;
-        const clave = {stock:'conteo', mov:'informe', mov2:'informe_ajustes', ajustes:'ajustes'}[key];
+        if (key === 'articulos'){
+          $('btnClearArticulos').hidden = false;
+          // La hora es lo que distingue una foto de otra: sin ella no se sabe
+          // contra qué momento se está comparando.
+          st.textContent = file.name + ' · ' + fmt(data.length) + ' artículos con stock y costo · ' +
+            (data.fecha ? 'sacado de Defontana el ' + data.fecha : 'sin fecha de generación en el archivo');
+        }
+        const clave = {stock:'conteo', mov:'informe', mov2:'informe_ajustes', ajustes:'ajustes', articulos:'articulos'}[key];
         if (clave){ avisoGuardado(st, guardarArchivo(clave, file)); if (key === 'mov2') guardarEstado(); }
       }).catch(e => { drop.classList.remove('ok'); drop.classList.add('err'); st.textContent = e.message || 'No se pudo leer el archivo.'; });
     };
@@ -1967,6 +2195,14 @@
   setupLoader('fileMov', 'dropMov', 'stMov', parseMov, 'mov', 'líneas de documentos');
   setupLoader('fileMov2', 'dropMov2', 'stMov2', parseMov, 'mov2', 'líneas de documentos');
   const cargarAjustes = setupLoader('fileAjustes', 'dropAjustes', 'stAjustes', parseMov, 'ajustes', 'líneas de ajuste (se toman como regularización ya hecha)');
+  const SIN_ARTICULOS = 'Informe de Inventario de Defontana: el saldo y el valor que tiene ahora. Manda sobre lo que se arrastra de los movimientos';
+  setupLoader('fileArticulos', 'dropArticulos', 'stArticulos', parseArticulos, 'articulos', 'artículos con saldo y valor');
+  $('btnClearArticulos').addEventListener('click', () => {
+    state.articulos = null; $('btnClearArticulos').hidden = true; $('dropArticulos').classList.remove('ok');
+    $('stArticulos').textContent = SIN_ARTICULOS;
+    if (CFG && CFG.guardar){ const fd = new FormData(); fd.append('borrar', '1'); fetch(urlDe('articulos'), {method:'POST', body:fd, headers:{'X-CSRFToken': CFG.csrf}, credentials:'same-origin'}).catch(() => {}); }
+    render();
+  });
   $('btnClearAjustes').addEventListener('click', () => {
     state.ajustes = null; $('btnClearAjustes').hidden = true; $('dropAjustes').classList.remove('ok');
     $('stAjustes').textContent = 'Informe de Documentos solo con los comprobantes de ajuste (costo, entradas y salidas): se toman como la regularización ya hecha';
@@ -2045,7 +2281,18 @@
       ['PARTE DE SALIDA', 'Aprobado', 292, '29-09-2026', 'BODEGA CENTRAL', '', 'SALIDA', 'Egreso', '', '', '', 'EM-05', 'Otro producto', 1, 'UN', 0, 0, 0]],
       ayuda: [['', 'Es el mismo Informe de Documentos de Defontana, filtrado solo a los comprobantes de ajuste que hiciste después del conteo.'], ['Ajuste de costo', 'Líneas con cantidad 0 y valor (p. ej. AJUSTE COSTO ENTRADA / SALIDA): se dan por corregido el costo.'], ['Ajuste de cantidad', 'Entradas o salidas por la diferencia del conteo (p. ej. PARTE DE ENTRADA / PARTE DE SALIDA): no se cuentan como movimientos y el producto queda “Ya ajustado”.'], ['', 'Todos los comprobantes de este archivo se toman como ajustes. Puedes desmarcar alguno en “Comprobantes de ajuste ya hechos”.']]},
     recuentos: {archivo: 'ejemplo-recuentos.xlsx', filas: [['Código', 'Físico', 'Fecha'], ['INS-001', 11, fmtDate(new Date())], ['20006-220-1-1', 38, fmtDate(new Date())]],
-      ayuda: [['Columna', 'Qué va'], ['Código', 'Código del producto'], ['Físico', 'Lo que se volvió a contar hoy: reemplaza el conteo original'], ['Fecha', 'Opcional; si no va, se usa hoy']]}
+      ayuda: [['Columna', 'Qué va'], ['Código', 'Código del producto'], ['Físico', 'Lo que se volvió a contar hoy: reemplaza el conteo original'], ['Fecha', 'Opcional; si no va, se usa hoy']]},
+    articulos: {archivo: 'ejemplo-stock-valorizado.xlsx', filas: [
+      ['Informe de Inventario'], ['Empresa: Shaw Almex Chile SpA'],
+      ['Fecha de generación: ' + fmtDate(new Date()) + ', 09:20 a. m.'], [],
+      ['Código Artículo', 'Descripción', 'Bodega', 'Saldo', 'Unidad', 'Valor unidad', 'Total'],
+      ['INS-001', 'Producto de ejemplo', 'BODEGA CENTRAL', 12, 'UN', 5917.33, 71008],
+      ['00-FSR-SCW-07', 'Otro producto', 'BODEGA CENTRAL', 19, 'UN', 427, 8113]],
+      ayuda: [['', 'Es el Informe de Inventario de Defontana, tal cual se descarga: el saldo y el valor que el sistema tiene ahora. También sirve el Informe de Artículos, pero éste es mejor: trae el Total valorizado de verdad en vez de tener que multiplicar.'],
+        ['Para qué sirve', 'El Informe de Documentos son movimientos, y el valor de hoy sale de arrastrarlos. Si entre medio se borró o se modificó un comprobante, el arrastre queda mal y esta foto no.'],
+        ['Fecha de generación', 'Se lee de la cabecera del archivo: es la hora a la que Defontana sacó la foto, y es contra ese momento que se compara.'],
+        ['Qué manda', 'Para el costo manda esta foto. Donde no coincide con los movimientos se avisa con el filtro “No cuadra con el stock valorizado”.'],
+        ['Bodegas', 'Si un artículo aparece en varias bodegas, se suman sus saldos y sus totales.']]}
   };
   $('plantillas').addEventListener('click', e => {
     const b = e.target.closest('[data-plantilla]'); if (!b) return;
@@ -2131,7 +2378,10 @@
         const data = leerDeCualquierHoja(wb, parser);
         state[key] = data;
         $(dropId).classList.add('ok');
-        $(statusId).textContent = `${info.nombre} · ${fmt(data.length)} ${que} · guardado el ${info.fecha}${info.por ? ' por ' + info.por : ''}` + (CFG.historial ? '' : '. Sube otro para reemplazarlo.');
+        // La foto del stock valorizado se identifica por cuándo se sacó de
+        // Defontana, no por cuándo se subió acá.
+        const sacado = data.fecha ? ` · sacado de Defontana el ${data.fecha}` : '';
+        $(statusId).textContent = `${info.nombre} · ${fmt(data.length)} ${que}${sacado} · guardado el ${info.fecha}${info.por ? ' por ' + info.por : ''}` + (CFG.historial ? '' : '. Sube otro para reemplazarlo.');
       } catch(_){ $(statusId).textContent = 'No se pudo cargar el archivo guardado; súbelo de nuevo.'; }
     };
     await leerInforme('conteo', 'stock', 'dropStock', 'stStock', parseStock, 'códigos');
@@ -2139,6 +2389,8 @@
     await leerInforme('informe_ajustes', 'mov2', 'dropMov2', 'stMov2');
     await leerInforme('ajustes', 'ajustes', 'dropAjustes', 'stAjustes');
     if (state.ajustes && !CFG.historial) $('btnClearAjustes').hidden = false;
+    await leerInforme('articulos', 'articulos', 'dropArticulos', 'stArticulos', parseArticulos, 'artículos con saldo y valor');
+    if (state.articulos && !CFG.historial) $('btnClearArticulos').hidden = false;
     if (!state.mov.length && state.mov2) state.mov = state.mov2;
     if (g.estado){
       try {
@@ -2167,6 +2419,6 @@
   // puerta, la matemática que decide los ajustes de inventario no se puede
   // comprobar más que a ojo.
   if (typeof module !== 'undefined' && module.exports){
-    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, tipoAjCosto, state};
+    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, parseArticulos, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, tipoAjCosto, avisoDeFechas, state};
   }
 })();
