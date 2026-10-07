@@ -1481,15 +1481,22 @@
     // contabilizado.
     const saldo = foto ? foto.stock : ultimo.saldo;
     const valor = foto && foto.valorReal ? foto.valor : ultimo.valorInv;
-    // Si el producto no viene en el stock valorizado, Defontana hoy no le
-    // tiene ni unidades ni valor, y eso es lo que vale: el valor que arrastra
-    // el informe de documentos es una reconstrucción. Pedir un ajuste de costo
-    // ahí es pedir un comprobante para dejar en $0 algo que ya está en $0.
-    // Sólo vale cuando el informe está completo: ver stockSegunFoto().
-    const ausenteDelValorizado = !!(foto && foto.ausente && foto.completo);
-    const cual = valor < -EPS && !ausenteDelValorizado ? 'valorNegativo'
+    // "Valor sin unidades" se marca sólo cuando lo dice el stock valorizado:
+    // el producto listado, con 0 unidades y un valorizado que no es cero. Eso
+    // es Defontana afirmando que tiene valor sin unidades, y hay que sacarlo.
+    //
+    // Si el producto no está en el informe, o el informe no trae el valorizado
+    // de verdad, lo único que queda es el valor que arrastra el informe de
+    // documentos, que es una reconstrucción. Proponer un ajuste con eso es
+    // pedir un comprobante para dejar en $0 algo que en Defontana ya está en
+    // $0, y ese comprobante sacaría valor que no está: con 41015-042 eran
+    // $1.193.505. Sin unidades hoy no hay ajuste de costo que hacer.
+    // Un producto ausente del informe viene con valorReal en falso, así que
+    // con mirar eso alcanza: ver stockSegunFoto().
+    const loDiceElValorizado = !!(foto && foto.valorReal);
+    const cual = valor < -EPS && loDiceElValorizado ? 'valorNegativo'
       : saldo < -EPS ? 'stockNegativo'
-      : (saldo <= EPS && valor > EPS && !ausenteDelValorizado) ? 'valorSinStock'
+      : (saldo <= EPS && valor > EPS && loDiceElValorizado) ? 'valorSinStock'
       : null;
     return cual ? {cual, saldo, valor, m: ultimo} : null;
   }

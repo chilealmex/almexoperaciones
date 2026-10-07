@@ -157,19 +157,27 @@ escenario('El stock y el costo de hoy salen de la foto', () => {
   state.articulos = null;
 });
 
-escenario('Valor sin unidades: las unidades de la foto, el valor de la contabilidad', () => {
-  // En la foto el valor es stock por costo, así que con stock 0 siempre da 0.
-  // Si se tomara el valor de ahí, este caso no se vería nunca: hay que cruzar
-  // las unidades reales con el valor contabilizado del informe de documentos.
+escenario('El valor sin unidades lo tiene que decir el valorizado', () => {
+  // El Informe de Artículos no trae el valorizado: su valor es stock por
+  // costo, así que con stock 0 siempre da 0 y no puede afirmar que haya valor
+  // sin unidades. El valor que arrastra el informe de documentos tampoco
+  // sirve para afirmarlo: es una reconstrucción, y el ajuste que se propondría
+  // sacaría de Defontana valor que no está ahí. Con 41015-042 eran $1.193.505.
   const docs = docsDe(MOVS);
   state.articulos = null;
-  comprobar('según los movimientos las 30 unidades valen algo: nada raro',
-            null, valorizacionImposible(docs));
-  // Defontana ya no tiene unidades, pero el inventario sigue valorizado
+  comprobar('sin foto no se concluye nada', null, valorizacionImposible(docs));
   state.articulos = foto(0, 0);
+  comprobar('con el Informe de Artículos tampoco', null, valorizacionImposible(docs));
+
+  // Con el Informe de Inventario sí: trae el producto en 0 unidades y un
+  // valorizado que no es cero. Eso es Defontana diciéndolo.
+  state.articulos = parseArticulos([
+    ['Informe de Inventario'], ['Empresa: X'], ['Fecha de generación: 07-10-2026, 10:37 a. m.'], [],
+    ['Código Artículo', 'Descripción', 'Bodega', 'Saldo', 'Unidad', 'Valor Unidad', 'Total'],
+    ['AAA', 'PROD AAA', 'BODEGA CENTRAL', 0, 'UN', 0, 20000]]);
   const malo = valorizacionImposible(docs);
-  comprobar('con la foto aparece el valor sin unidades', 'valorSinStock', (malo || {}).cual);
-  comprobar('con el valor que trae la contabilidad', 20000, Math.round((malo || {}).valor));
+  comprobar('lo marca', 'valorSinStock', (malo || {}).cual);
+  comprobar('con el valor que trae el informe', 20000, Math.round((malo || {}).valor));
   comprobar('y sin unidades', 0, (malo || {}).saldo);
   state.articulos = null;
 });
@@ -199,9 +207,10 @@ escenario('Sin unidades en ninguno de sus códigos, el costo que queda es el que
     ['AAA', 'PROD AAA', 0, 1193505, 0]));
   const hoy = comoEstaHoy(docs, 1000);
   comprobar('cero unidades', 0, hoy.stock);
-  // El informe de documentos todavía le tiene valor: eso sí está mal
-  const malo = valorizacionImposible(docs);
-  comprobar('y el inventario sigue valorizado: imposible', 'valorSinStock', (malo || {}).cual);
+  // El informe de documentos todavía le tiene valor, pero el de Artículos no
+  // puede afirmarlo: no trae el valorizado de Defontana. Sin eso no se propone
+  // ningún ajuste.
+  comprobar('no se propone sacarle valor', null, valorizacionImposible(docs));
   state.articulos = null;
 });
 
@@ -317,11 +326,9 @@ escenario('Lo que no está en el Informe de Inventario no pide ajuste de costo',
   state.articulos = parseArticulos(completo);
   comprobar('no se marca como valorización imposible', null, valorizacionImposible(docs));
 
-  // Con el informe filtrado —ninguna fila en cero— la ausencia no prueba nada
-  // y el valor del arrastre vuelve a mandar.
+  // Y con el informe filtrado tampoco: que falte no prueba que tenga valor.
   state.articulos = parseArticulos(INV(['OTRO', 'OTRO PRODUCTO', 'BODEGA CENTRAL', 5, 'UN', 100, 500]));
-  comprobar('pero con el informe filtrado sí se marca', 'valorSinStock',
-            (valorizacionImposible(docs) || {}).cual);
+  comprobar('con el informe filtrado tampoco', null, valorizacionImposible(docs));
   state.articulos = parseArticulos(completo);
   // El arrastre sigue mandando para calcular ajustes.
   // Dando por agotado lo que falta, el ajuste saldría por todo el valor del
