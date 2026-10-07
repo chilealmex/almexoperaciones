@@ -810,17 +810,29 @@
       const cara = compras.find(m => costoUnitario(m) === cu[1]);
       const barata = compras.find(m => costoUnitario(m) === cu[0]);
       const pmpHoy = pmpAt(ultimo);
+      // Cuando ya decidió cuál de las dos compras es la buena y escribió el
+      // costo, esto deja de ser una duda y pasa a ser un ajuste con su monto:
+      // sin eso habría que sacar la cuenta a mano y el paso no serviría para
+      // cuadrar nada.
+      const aMano = state.pmpEdit.has(k) ? state.pmpEdit.get(k) : null;
+      const hoy = aMano > 0 ? comoEstaHoy(docs, aMano) : null;
+      const conMonto = hoy && hoy.ajuste != null && Math.abs(hoy.ajuste) > 0.5;
       zero.push({
         key: k, m: cara, code: cara.art, name: cara.desc || names.get(k) || '',
-        linea: lineas.get(k) || '', pmp: pmpHoy, edited: false, raro: null, dosCompras: true,
-        pmpSrc: 'Según el informe', valor: null,
-        rev: {need: true, costo: null, corr: null, ajusteCosto: null, soloRevisar: true,
+        linea: lineas.get(k) || '', pmp: pmpHoy, edited: aMano > 0, raro: null, dosCompras: true,
+        pmpSrc: aMano > 0 ? 'Ingresado a mano' : 'Según el informe',
+        valor: hoy ? hoy.deberiaValer : null,
+        rev: {need: true, corr: null, soloRevisar: !conMonto,
+          costo: aMano > 0 ? {v: aMano, src: 'Ingresado a mano'} : null,
+          ajusteCosto: conMonto ? hoy.ajuste : null,
           txt: `Sólo tiene dos compras y una cuesta ${fmt(Math.round(cu[1] / cu[0] * 10) / 10)} veces la otra: ` +
             `${cuTxt(cu[0])} c/u con ${barata.tipo} #${barata.folio} del ${fmtDate(barata.fecha)} y ` +
             `${cuTxt(cu[1])} c/u con ${cara.tipo} #${cara.folio} del ${fmtDate(cara.fecha)}. ` +
             `Con dos no se sabe cuál es la buena.`,
-          hacer: `Revisar cuál de las dos compras tiene el costo correcto. Hoy quedan ${fmt(ultimo.saldo)} unidades ` +
-            `a ${cuTxt(pmpHoy)} c/u. Si hay que corregir, escribe el costo en la columna PMP.`},
+          hacer: conMonto
+            ? `${ajCostoTxt(hoy.ajuste, hoy.stock, aMano)}. El valor del inventario pasa de ${money(hoy.valor)} a ${money(hoy.deberiaValer)}.`
+            : `Revisar cuál de las dos compras tiene el costo correcto. Hoy quedan ${fmt(ultimo.saldo)} unidades ` +
+              `a ${cuTxt(pmpHoy)} c/u. Si hay que corregir, escribe el costo en la columna PMP y se calcula el ajuste.`},
       });
     }
     // Las valorizaciones imposibles van una por artículo, no por documento:

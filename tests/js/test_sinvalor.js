@@ -38,9 +38,10 @@ const INV = (...filas) => [
   ['Código Artículo', 'Descripción', 'Bodega', 'Saldo', 'Unidad', 'Valor unidad', 'Total'], ...filas,
 ];
 
-function plan(docs, inventario) {
+function plan(docs, inventario, costoAMano) {
   state.stock = []; state.recount = new Map(); state.manual = new Set();
-  state.hechos = new Map(); state.pmpEdit = new Map(); state.ajustes = [];
+  state.hechos = new Map(); state.ajustes = [];
+  state.pmpEdit = costoAMano == null ? new Map() : new Map([['AAA', costoAMano]]);
   state.articulos = inventario || null;
   porId.set('optBodega', Object.assign(porId.get('optBodega') || {}, {value: '*'}));
   porId.set('optAprob', Object.assign(porId.get('optAprob') || {}, {checked: false}));
@@ -213,6 +214,40 @@ escenario('Dos compras muy distintas: no se sabe cuál es la buena, se pregunta'
   comprobar('dice cuántas veces', true, /7 veces la otra/.test(z.rev.txt));
   comprobar('y nombra las dos compras', true, /\$978 c\/u.*\$6\.800 c\/u/.test(z.rev.txt));
   comprobar('y que no se sabe cuál es la buena', true, /no se sabe cuál es la buena/.test(z.rev.txt));
+});
+
+escenario('Dos compras muy distintas: al escribir el costo sale el ajuste', () => {
+  // Preguntar cuál de las dos compras es la buena no cuadra nada por sí solo:
+  // una vez que ella decide y escribe el costo, el paso tiene que decir el
+  // monto del ajuste y si es entrada o salida. Si no, hay que sacar la cuenta
+  // a mano cada vez.
+  const docs = docsDe([ing(10, 978, 1), ing(10, 6800, 2)]);
+  const inv = parseArticulos(INV(['AAA', 'PROD AAA', 'BODEGA CENTRAL', 20, 'UN', 3889, 77780]));
+
+  const sin = plan(docs, inv);
+  const zSin = (sin.r.costExtra || [])[0];
+  comprobar('sin costo escrito, sólo se muestra', true, zSin.rev.soloRevisar);
+  comprobar('y no hay monto', null, zSin.rev.ajusteCosto);
+  comprobar('pide escribir el costo', true, /escribe el costo en la columna PMP/i.test(zSin.rev.hacer));
+
+  // 20 unidades a $6.800 son $136.000 y hoy el inventario vale $77.780
+  const caro = plan(docs, inv, 6800);
+  const zCaro = (caro.r.costExtra || [])[0];
+  comprobar('con el costo caro ya no es sólo revisar', false, zCaro.rev.soloRevisar);
+  comprobar('el ajuste sube el valor', 58220, Math.round(zCaro.rev.ajusteCosto));
+  comprobar('y es una entrada de costo', true, /Ajuste de costo ENTRADA por \$58\.220/.test(zCaro.rev.hacer));
+  comprobar('dice qué poner en Defontana', true, /"Costo Unitario".*\$6\.800/.test(zCaro.rev.hacer));
+  comprobar('y de cuánto a cuánto pasa el inventario', true, /\$77\.780 a \$136\.000/.test(zCaro.rev.hacer));
+
+  // Al revés: 20 a $978 son $19.560, hay que sacarle $58.220
+  const barato = plan(docs, inv, 978);
+  const zBarato = (barato.r.costExtra || [])[0];
+  comprobar('con el costo barato el ajuste baja el valor', -58220, Math.round(zBarato.rev.ajusteCosto));
+  comprobar('y es una salida de costo', true, /Ajuste de costo SALIDA por \$58\.220/.test(zBarato.rev.hacer));
+
+  // Y el plan lo lleva con su monto, que es lo que ella sigue para cuadrar
+  comprobar('el plan lo pide igual', 1, caro.P.cost.length);
+  comprobar('con el costo escrito', 6800, caro.P.cost[0].v);
 });
 
 escenario('Dos compras parecidas: nada que revisar', () => {
