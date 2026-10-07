@@ -11,7 +11,7 @@
    Con sus archivos reales los dos coinciden en el 97,5% de las cantidades y el
    97,6% de los valores; el 2% que no coincide es lo que se avisa. */
 const {porId} = require('./entorno.js');
-const {compute, parseArticulos, comoEstaHoy, valorizacionImposible, state} =
+const {compute, parseMov, parseArticulos, comoEstaHoy, valorizacionImposible, avisoDeFechas, state} =
   require('../../app/static/js/regularizacion.js');
 
 let fallas = 0, hechas = 0;
@@ -292,6 +292,67 @@ escenario('Un producto con dos códigos, y el inventario bajo uno solo', () => {
   comprobar('encuentra el stock por el otro código', 30, comoEstaHoy(docs, 1000).stock);
   comprobar('y no lo da por agotado', null, valorizacionImposible(docs));
   state.articulos = null;
+});
+
+// --- Los dos informes, de momentos distintos ---
+//
+// Se bajan por separado y es fácil que queden de días distintos. Si el de
+// documentos es más viejo, le faltan movimientos y los productos que "no
+// cuadran" pueden ser sólo eso.
+
+const DOCS = (gen, ...filas) => [
+  ['Informe de Documentos de Inventario'], ['Empresa: Shaw Almex Chile SpA'],
+  ['Fecha de generación: ' + gen], [],
+  ['Tipo Documento', 'Estado', 'Folio', 'Fecha', 'Bod. Origen', 'Bod. Destino', 'Motivo',
+   'Movimiento', 'Proveedor', 'Referencia', 'Cliente', 'Artículo', 'Descripción',
+   'Cant. Movimiento', 'U. Medida', 'Valor Movimiento', 'Saldo Inventario', 'Valor Inventario'],
+  ...filas,
+];
+const UNA_FILA = ['PARTE DE ENTRADA', 'Aprobado', 1, '02-01-2026', '', 'BODEGA CENTRAL', 'COMPRA',
+                  'Ingreso', '', '', '', 'AAA', 'PROD AAA', 10, 'UN', 10000, 10, 10000];
+
+function avisoCon(genDocs, genInv) {
+  state.mov = parseMov(DOCS(genDocs, UNA_FILA));
+  state.articulos = parseArticulos(INV(['AAA', 'PROD AAA', 'BODEGA CENTRAL', 10, 'UN', 1000, 10000])
+    .map(r => r[0] && String(r[0]).startsWith('Fecha de generación') ? ['Fecha de generación: ' + genInv] : r));
+  return avisoDeFechas();
+}
+
+escenario('Avisa cuando el informe de documentos está atrasado', () => {
+  const aviso = avisoCon('25-09-2026, 09:01 a. m.', '07-10-2026, 09:20 a. m.');
+  comprobar('avisa', true, !!aviso);
+  comprobar('dice cuántos días', true, /12 días de diferencia/.test(aviso || ''));
+  comprobar('y nombra los dos informes', true,
+            /25-09-2026.*07-10-2026/.test(aviso || ''));
+  comprobar('y qué hacer', true, /Vuelve a bajar el Informe de Documentos/.test(aviso || ''));
+});
+
+escenario('No avisa cuando están al mismo momento', () => {
+  comprobar('mismo día y hora', null, avisoCon('07-10-2026, 09:20 a. m.', '07-10-2026, 09:20 a. m.'));
+  comprobar('unas horas de diferencia no son nada',
+            null, avisoCon('07-10-2026, 09:20 a. m.', '07-10-2026, 11:40 a. m.'));
+});
+
+escenario('Tampoco avisa si el de documentos es el más nuevo', () => {
+  // Ahí no faltan movimientos: sobran, y eso el cálculo ya lo maneja.
+  comprobar('sin aviso', null, avisoCon('07-10-2026, 09:20 a. m.', '25-09-2026, 09:01 a. m.'));
+});
+
+escenario('La tarde se lee como tarde', () => {
+  // "11:00 p. m." leído como las 11 de la mañana son doce horas de error. Acá
+  // entre los dos informes hay 10 horas —nada que avisar—, pero leyendo mal la
+  // tarde serían 22 y saldría un aviso falso.
+  comprobar('diez horas de diferencia: sin aviso',
+            null, avisoCon('06-10-2026, 11:00 p. m.', '07-10-2026, 09:00 a. m.'));
+  // Y al revés, la tarde del día anterior sí deja movimientos fuera
+  comprobar('diecisiete horas sí avisan', true,
+            /un día de diferencia/.test(avisoCon('06-10-2026, 04:19 p. m.', '07-10-2026, 09:20 a. m.') || ''));
+});
+
+escenario('Sin fecha en alguno de los dos, no se inventa el aviso', () => {
+  comprobar('sin fecha en el de documentos', null,
+            avisoCon('', '07-10-2026, 09:20 a. m.'));
+  state.mov = []; state.articulos = null;
 });
 
 console.log(`\n${hechas - fallas} de ${hechas} comprobaciones pasaron`);

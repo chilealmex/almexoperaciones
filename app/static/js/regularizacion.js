@@ -131,6 +131,7 @@
     }
     if (!out.length) throw new Error('El informe no trae filas con datos.');
     out.fecha = fechaDeGeneracion(rows);
+    out.fechaGen = fechaGenerada(out.fecha);
     // Con la columna Total el valor es el que Defontana tiene; sin ella es
     // stock por costo, que con stock 0 da 0 y no sirve para ver el valor que
     // quedó sin unidades.
@@ -148,6 +149,20 @@
       }
     }
     return null;
+  }
+  // "25-09-2026, 09:01 a. m." como fecha. Defontana escribe la tarde con
+  // "p. m.", y sin mirarlo un informe de las 4 de la tarde quedaría a las 4 de
+  // la mañana: doce horas de diferencia alcanzan para comparar mal dos
+  // informes del mismo día.
+  function fechaGenerada(txt){
+    if (!txt) return null;
+    const d = parseDate(txt);
+    if (!d) return null;
+    const pm = /p\.?\s*m\.?/i.test(txt), am = /a\.?\s*m\.?/i.test(txt);
+    const h = d.getHours();
+    if (pm && h < 12) d.setHours(h + 12);
+    else if (am && h === 12) d.setHours(0);
+    return d;
   }
 
   // ---------- Unidades de medida ----------
@@ -240,6 +255,8 @@
         valor:c.valor >= 0 ? num(at(r,'valor')) : null, saldo:num(at(r,'saldo')), valorInv:c.valorInv >= 0 ? num(at(r,'valorInv')) : null});
     });
     out.sort((a,b) => (a.fecha||0) - (b.fecha||0) || a.i - b.i);
+    out.fecha = fechaDeGeneracion(rows);
+    out.fechaGen = fechaGenerada(out.fecha);
     return out;
   }
 
@@ -763,6 +780,24 @@
       (r.costExtra = r.costExtra || []).push(z);
     }
     return {rows, zero, orphan: [...byKey.keys()].filter(k => !seen.has(k)).length};
+  }
+
+  // Los dos informes se bajan por separado y es fácil que queden de días
+  // distintos. Si el de documentos es más viejo que el inventario, le faltan
+  // los movimientos de esos días, y los productos que "no cuadran" pueden ser
+  // sólo eso: no hay cómo saberlo desde acá, así que se avisa antes de que se
+  // persiga un descuadre que no existe.
+  const DIA_MS = 86400000;
+  function avisoDeFechas(){
+    const a = state.articulos, m = state.mov;
+    if (!a || !a.length || !m || !m.length || !a.fechaGen || !m.fechaGen) return null;
+    const dias = (a.fechaGen - m.fechaGen) / DIA_MS;
+    if (dias <= 0.5) return null;
+    const cuanto = dias < 1.5 ? 'un día' : `${Math.round(dias)} días`;
+    return `El Informe de Documentos se generó el ${m.fecha} y el de Inventario el ${a.fecha}: ` +
+      `${cuanto} de diferencia. Al de documentos le faltan los movimientos de esos días, así que ` +
+      `parte de los productos que no cuadran puede ser sólo eso. Vuelve a bajar el Informe de ` +
+      `Documentos para que los dos queden al mismo momento.`;
   }
 
   // La foto del stock valorizado, por artículo. Cuando está, manda sobre lo que
@@ -1958,6 +1993,9 @@
     document.querySelectorAll('.view').forEach(b => b.setAttribute('aria-selected', b.dataset.view === state.view));
     $('checkPanel').hidden = !chk;
     renderStepsPanel(reg);
+    const aviso = avisoDeFechas();
+    $('avisoFechas').textContent = aviso || '';
+    $('avisoFechas').hidden = !aviso;
     const dash = state.view === 'dash', plan = state.view === 'plan' || dash;
     $('planBox').hidden = state.view !== 'plan'; $('dashBox').hidden = !dash;
     $('filtersBar').hidden = plan; $('tablebox').hidden = plan; $('summary').hidden = plan; $('copyNote').hidden = plan;
@@ -2363,6 +2401,6 @@
   // puerta, la matemática que decide los ajustes de inventario no se puede
   // comprobar más que a ojo.
   if (typeof module !== 'undefined' && module.exports){
-    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, parseArticulos, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, tipoAjCosto, state};
+    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, parseArticulos, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, tipoAjCosto, avisoDeFechas, state};
   }
 })();
