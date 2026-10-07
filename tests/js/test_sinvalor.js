@@ -362,22 +362,51 @@ escenario('Un producto que ya no tiene stock no se lista', () => {
   comprobar('con stock se listan las dos', 2, state.zero.length);
 });
 
-escenario('Sin stock pero con valor sí se lista: eso hay que sacarlo', () => {
-  // Salieron todas las unidades y el inventario quedó valiendo $5.000. Es el
-  // caso que sí hay que arreglar, así que el filtro no se lo puede comer: se
-  // muestra el producto con toda su historia.
+escenario('Sin stock pero con valor en el inventario: eso hay que sacarlo', () => {
+  // Salieron todas las unidades y el inventario sigue valiendo $5.000. Eso lo
+  // dice el stock valorizado: trae el producto con 0 unidades y un Total que
+  // no es cero. Es el caso que sí hay que arreglar, así que el filtro no se lo
+  // puede comer: se muestra el producto con toda su historia.
+  const docs = docsDe([ing(10, 1000, 1)]);
+  docs.push({...docs[0], folio: '200', fecha: DIA(2026, 8, 2), kind: 'out', qty: 10,
+             valor: 5000, saldo: 0, valorInv: 5000});
+  vistaMovimientos(docs, parseArticulos(INV(['AAA', 'PROD AAA', 'BODEGA CENTRAL', 0, 'UN', 0, 5000])));
+  comprobar('se lista', true, state.zero.length > 0);
+  comprobar('con la valorización imposible', true, state.zero.some(z => z.imposible === 'valorSinStock'));
+  comprobar('y también sus movimientos', true, state.zero.some(z => z.normal));
+});
+
+escenario('Si el inventario no lo trae, hoy está en $0: no se pide nada', () => {
+  // El mismo producto, pero el stock valorizado no lo lista. Ese informe sólo
+  // trae lo que tiene stock, así que Defontana hoy no le tiene ni unidades ni
+  // valor: los $5.000 son del arrastre del informe de documentos, que es una
+  // reconstrucción. Pedir un ajuste de costo ahí es pedir un comprobante para
+  // dejar en $0 algo que ya está en $0.
   //
-  // Y el valor hay que mirarlo en el informe de documentos cuando el producto
-  // no viene en el stock valorizado —que es lo que pasa con los dos suyos: el
-  // valorizado no los trae—. Si se diera por agotado por no estar ahí, los
-  // $5.000 que hay que sacar no se verían nunca.
+  // El informe tiene que estar completo para poder leer la ausencia así: la
+  // fila en cero de OTRO-2 es lo que prueba que lista todo el maestro y no
+  // sólo lo que tiene stock.
+  const docs = docsDe([ing(10, 1000, 1)]);
+  docs.push({...docs[0], folio: '200', fecha: DIA(2026, 8, 2), kind: 'out', qty: 10,
+             valor: 5000, saldo: 0, valorInv: 5000});
+  vistaMovimientos(docs, parseArticulos(INV(
+    ['OTRO', 'PROD OTRO', 'BODEGA CENTRAL', 5, 'UN', 100, 500],
+    ['OTRO-2', 'PROD OTRO 2', 'BODEGA CENTRAL', 0, 'UN', 0, 0])));
+  comprobar('no se marca la valorización imposible', false, state.zero.some(z => z.imposible));
+  comprobar('y no se lista nada del producto', 0, state.zero.length);
+});
+
+escenario('Con el informe filtrado, el ausente se sigue mostrando', () => {
+  // Sin filas en cero no se sabe si el informe lista todo el maestro o sólo lo
+  // que tiene stock. Dar por cero lo que falta ahí esconde productos en
+  // silencio: con su informe de las 09:20 serían 1.984.
   const docs = docsDe([ing(10, 1000, 1)]);
   docs.push({...docs[0], folio: '200', fecha: DIA(2026, 8, 2), kind: 'out', qty: 10,
              valor: 5000, saldo: 0, valorInv: 5000});
   vistaMovimientos(docs, parseArticulos(INV(['OTRO', 'PROD OTRO', 'BODEGA CENTRAL', 5, 'UN', 100, 500])));
-  comprobar('se lista', true, state.zero.length > 0);
-  comprobar('con la valorización imposible', true, state.zero.some(z => z.imposible === 'valorSinStock'));
-  comprobar('y también sus movimientos', true, state.zero.some(z => z.normal));
+  comprobar('se lista igual', true, state.zero.length > 0);
+  comprobar('y se marca la valorización imposible', true,
+            state.zero.some(z => z.imposible === 'valorSinStock'));
 });
 
 escenario('El stock que manda es el del inventario, no el arrastrado', () => {

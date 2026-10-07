@@ -113,8 +113,18 @@
     const t = inv || readTable(rows, ['ARTICULO', 'STOCK DISPONIBLE']);
     if (!t) throw new Error('No encontré las columnas del stock valorizado. ¿Es el Informe de Inventario (Código Artículo, Saldo, Valor unidad, Total) o el de Artículos (Artículo, Stock Disponible, Costo Vigente) de Defontana?');
     const c = inv
+      // Defontana nombra la columna del valorizado de dos maneras —"Total" y
+      // "Valorización"— según cómo se saque el informe, y en el segundo caso
+      // además va ANTES de "Valor Unidad". Sin reconocer el otro nombre el
+      // valor se daba por ausente y se reconstruía multiplicando stock por
+      // "Valor Unidad"; en su informe esa columna viene en 0 para 533 de los
+      // 1.108 productos con stock —BRP-003 trae 209 unidades, Valorización
+      // $943.448 y Valor Unidad 0—, así que 533 productos valorizados
+      // aparecían como "con unidades y sin valor" y el plan proponía cargarles
+      // un costo que ya tienen.
       ? {art:t.col('Código Artículo'), desc:t.col('Descripción'), bod:t.col('Bodega'),
-         stock:t.col('Saldo'), costo:t.col('Valor unidad'), total:t.col('Total')}
+         stock:t.col('Saldo'), costo:t.col('Valor unidad'),
+         total:t.col('Total', 'Valorización', 'Valorizado', 'Valor total')}
       : {art:t.col('Artículo'), desc:t.col('Descripción'), bod:-1,
          stock:t.col('Stock Disponible'), costo:t.col('Costo Vigente'), total:-1};
     if (c.costo < 0) throw new Error(inv ? 'No encontré la columna “Valor unidad”.' : 'No encontré la columna “Costo Vigente”.');
@@ -124,9 +134,15 @@
       const stock = num(r[c.stock]), costo = num(r[c.costo]);
       const total = c.total >= 0 ? num(r[c.total]) : null;
       if (stock == null && costo == null && total == null) continue;
+      // Cuando viene el valorizado, el costo de una unidad se saca de él y no
+      // de la columna "Valor Unidad": esa columna llega en 0 aunque el
+      // producto esté valorizado, y entonces el producto parece sin costo. El
+      // valorizado dividido por el saldo es el PMP, que es lo que Defontana
+      // tiene de verdad.
+      const unit = total != null && stock > 0 ? total / stock : costo;
       out.push({art, key:keyOf(art), name:c.desc >= 0 ? String(r[c.desc] ?? '').trim() : '',
         bodega: c.bod >= 0 ? String(r[c.bod] ?? '').trim() : '',
-        stock: stock ?? 0, costo: costo ?? 0,
+        stock: stock ?? 0, costo: unit ?? 0,
         valor: total != null ? total : (stock ?? 0) * (costo ?? 0)});
     }
     if (!out.length) throw new Error('El informe no trae filas con datos.');
@@ -136,6 +152,13 @@
     // stock por costo, que con stock 0 da 0 y no sirve para ver el valor que
     // quedó sin unidades.
     out.valorReal = c.total >= 0;
+    // Si el informe trae filas con saldo 0, está completo: lista todo el
+    // maestro, y entonces que un producto NO esté significa que Defontana no
+    // lo tiene. Si no trae ninguna, viene filtrado a lo que tiene stock, y la
+    // ausencia no dice nada —sus dos informes del mismo día se diferencian en
+    // esto: el de las 09:20 trae 1.109 filas y ninguna en cero; el de las
+    // 10:37 trae 3.145, de las cuales 2.037 están en cero—.
+    out.completo = out.some(a => !(a.stock > EPS));
     return out;
   }
   // "Fecha de generación: 06-10-2026, 04:17 p. m." en las primeras filas.
@@ -859,21 +882,26 @@
     // no se puede arreglar: en su informe son 2.387 filas de 9.307.
     //
     // El valor se mira además del stock, con las mismas dos fuentes que usa la
-    // revisión de valorizaciones imposibles: si el producto no está en el stock
-    // valorizado, el valor sale del informe de documentos. Si no, el caso que
-    // sí hay que arreglar —valor sin unidades— quedaría escondido justamente
-    // por no tener unidades: son 41015-042 por $1.193.505 y AA-BRP-50100.
+    // revisión de valorizaciones imposibles, para que las dos no se
+    // contradigan: lo que una marca como problema, la otra no lo puede
+    // esconder.
     const hayQueHacerAlgo = new Map();
     function quedaAlgo(k){
       if (hayQueHacerAlgo.has(k)) return hayQueHacerAlgo.get(k);
       const docs = (byKey.get(k) || []).filter(inBod), ultimo = docs[docs.length - 1];
-      const foto = fotoDe(docs);
-      const stock = foto ? foto.stock : ultimo && ultimo.saldo != null ? ultimo.saldo : null;
-      const valor = foto && foto.valorReal ? foto.valor : ultimo ? ultimo.valorInv : null;
-      // Se esconde sólo lo que quedó en nada: ni unidades ni valor. Un stock
-      // negativo no es "sin stock" —es un imposible que hay que arreglar— y
-      // tiene que seguir viéndose.
-      const r = stock == null || Math.abs(stock) > EPS || (valor != null && Math.abs(valor) > EPS);
+      const foto = stockSegunFoto(docs);
+      // Si el stock valorizado está cargado y no trae el producto, Defontana
+      // hoy no le tiene ni unidades ni valor. Lo que el informe de documentos
+      // arrastre es una reconstrucción, y no hay ajuste que hacer sobre algo
+      // que ya está en cero.
+      const r = foto && foto.ausente && foto.completo ? false : (() => {
+        const stock = foto ? foto.stock : ultimo && ultimo.saldo != null ? ultimo.saldo : null;
+        const valor = foto && foto.valorReal ? foto.valor : ultimo ? ultimo.valorInv : null;
+        // Se esconde sólo lo que quedó en nada: ni unidades ni valor. Un stock
+        // negativo no es "sin stock" —es un imposible que hay que arreglar— y
+        // tiene que seguir viéndose.
+        return stock == null || Math.abs(stock) > EPS || (valor != null && Math.abs(valor) > EPS);
+      })();
       hayQueHacerAlgo.set(k, r);
       return r;
     }
@@ -1010,8 +1038,12 @@
   function stockSegunFoto(docs){
     if (!state.articulos || !state.articulos.length || !docs || !docs.length) return null;
     const f = fotoDe(docs);
-    return f ? {stock: f.stock, valor: f.valor, valorReal: f.valorReal, ausente: false}
-             : {stock: 0, valor: 0, valorReal: false, ausente: true};
+    // 'ausente' sólo significa algo cuando el informe está completo: en uno
+    // filtrado a lo que tiene stock, faltar no dice nada. Con el de las 09:20
+    // faltan 1.984 productos y con el de las 10:37, del mismo día, sólo 243.
+    const completo = !!state.articulos.completo;
+    return f ? {stock: f.stock, valor: f.valor, valorReal: f.valorReal, ausente: false, completo}
+             : {stock: 0, valor: 0, valorReal: false, ausente: true, completo};
   }
 
   // ---------- Costo: productos que entraron o salieron a $0 ----------
@@ -1449,9 +1481,15 @@
     // contabilizado.
     const saldo = foto ? foto.stock : ultimo.saldo;
     const valor = foto && foto.valorReal ? foto.valor : ultimo.valorInv;
-    const cual = valor < -EPS ? 'valorNegativo'
+    // Si el producto no viene en el stock valorizado, Defontana hoy no le
+    // tiene ni unidades ni valor, y eso es lo que vale: el valor que arrastra
+    // el informe de documentos es una reconstrucción. Pedir un ajuste de costo
+    // ahí es pedir un comprobante para dejar en $0 algo que ya está en $0.
+    // Sólo vale cuando el informe está completo: ver stockSegunFoto().
+    const ausenteDelValorizado = !!(foto && foto.ausente && foto.completo);
+    const cual = valor < -EPS && !ausenteDelValorizado ? 'valorNegativo'
       : saldo < -EPS ? 'stockNegativo'
-      : (saldo <= EPS && valor > EPS) ? 'valorSinStock'
+      : (saldo <= EPS && valor > EPS && !ausenteDelValorizado) ? 'valorSinStock'
       : null;
     return cual ? {cual, saldo, valor, m: ultimo} : null;
   }
