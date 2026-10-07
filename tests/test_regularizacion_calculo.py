@@ -53,7 +53,7 @@ def test_las_comprobaciones_del_navegador_existen():
     assert "no existe" in (JS / "test_imposibles.js").read_text(encoding="utf-8")
     assert "no se inventa uno malo" in (JS / "test_plan.js").read_text(encoding="utf-8")
     assert "no esconde el ajuste de cantidad" in (JS / "test_marcas.js").read_text(encoding="utf-8")
-    assert "revalorizó para arriba" in (JS / "test_recosteo.js").read_text(encoding="utf-8")
+    assert "reproduce el valor de Defontana" in (JS / "test_recosteo.js").read_text(encoding="utf-8")
     assert "manda la foto" in (JS / "test_valorizado.js").read_text(encoding="utf-8")
     assert "se suben de vuelta" in (JS / "test_costos_excel.js").read_text(encoding="utf-8")
     assert "su propia compra" in (JS / "test_sinvalor.js").read_text(encoding="utf-8")

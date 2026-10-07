@@ -166,23 +166,21 @@ escenario('Si cuadra por un ajuste de costo ya hecho, lo dice', () => {
   comprobar('no lo atribuye a los movimientos', false, /movimientos posteriores lo acomodaron/.test(texto));
 });
 
-escenario('Si cuadra porque Defontana contabilizó otra cosa, lo dice', () => {
-  // 40080-004: entró 15 a $1 —$15 en total— y Defontana le anotó $8.553.600,
-  // que es lo que costaron en su compra anterior. El valor de hoy cuadra, pero
-  // no por el documento: si alguien recostea esa entrada, se cae a $15.
+escenario('El 40080-004: no entró a $1, eso lo decía la columna mala', () => {
+  // Su caso real. La Parte de Entrada dice $15 por 15 unidades, pero el Valor
+  // Inventario subió $8.553.600: entró a $570.240 c/u, lo mismo que costaron
+  // en su compra anterior. La columna "Valor Movimiento" no es fiable y por
+  // eso no se usa; el costo sale de lo que movió el inventario.
   const docs = docsDe([ing(12, 570240, 1)]);
   docs.push({...docs[0], folio: '200', fecha: DIA(2026, 8, 2), kind: 'out', qty: 12,
              valor: 6842880, saldo: 0, valorInv: 0});
   docs.push({...docs[0], tipo: 'NO OCUPAR2', folio: '83', fecha: DIA(2026, 8, 3), kind: 'in',
              qty: 15, valor: 15, saldo: 15, valorInv: 8553600});
   const {P, r} = plan(docs, parseArticulos(INV(['AAA', 'PROD AAA', 'BODEGA CENTRAL', 15, 'UN', 570240, 8553600])));
-  comprobar('aparece para revisar', 1, P.cost.length);
-  const texto = (r.costExtra || []).map(z => z.rev.txt).join(' ');
-  comprobar('dice lo que el documento dice', true, /el documento dice \$15/.test(texto));
-  comprobar('y lo que Defontana contabilizó', true, /contabilizó \$8\.553\.600/.test(texto));
-  comprobar('con su costo por unidad', true, /\$570\.240 c\/u/.test(texto));
-  comprobar('y que no cuadra por el documento', true, /no por el documento/.test(texto));
-  comprobar('no lo atribuye a movimientos posteriores', false, /movimientos posteriores/.test(texto));
+  comprobar('no se lo trata como una entrada a $1', 0, P.cost.length);
+  comprobar('ni como sin valor: Defontana le tiene valor', 0, P.sinValor.length);
+  comprobar('el PMP de hoy es el del inventario', 570240,
+            Math.round(docs[2].valorInv / docs[2].saldo));
 });
 
 console.log(`\n${hechas - fallas} de ${hechas} comprobaciones pasaron`);

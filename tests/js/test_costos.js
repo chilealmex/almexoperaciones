@@ -55,6 +55,26 @@ function enPantalla(lista, costoAMano) {
 
 // --- Reconocer el ingreso raro ---
 
+escenario('El valor de un movimiento es lo que movió el inventario', () => {
+  // La columna "Valor Movimiento" no es fiable: en su informe no coincide con
+  // el salto del Valor Inventario en el 13,5% de los ingresos. Las que sirven
+  // son Saldo Inventario, Valor Inventario y Cant. Movimiento.
+  const docs = docsDe([ingreso(10, 1000, 1), ingreso(10, 1000, 2)]);
+  // Se falsea la columna: el inventario sigue diciendo la verdad
+  docs[1] = {...docs[1], valor: 1};
+  const o = compute(docs);
+  comprobar('el segundo ingreso vale lo que movió el inventario', 10000, Math.round(o.rows[0].docs[1]._v));
+  comprobar('y no el $1 de la columna', false, Math.round(o.rows[0].docs[1]._v) === 1);
+  comprobar('así que no se marca como entrada a $1', null, costoAtipico(o.rows[0].docs[1], 1000));
+
+  // Una salida vale lo que SACÓ del inventario, en positivo: con el signo al
+  // revés el valor de las salidas se sumaría y el inventario crecería al vender
+  const conSalida = compute(docsDe([ingreso(10, 1000, 1), egreso(4, 2)]));
+  const sal = conSalida.rows[0].docs[1];
+  comprobar('la salida sacó 4 unidades a $1.000', 4000, Math.round(sal._v));
+  comprobar('y va en positivo, no en negativo', true, sal._v > 0);
+});
+
 escenario('Lo que suele costar: la mediana, no el promedio', () => {
   // El promedio se lo lleva justamente el ingreso raro que se busca
   const docs = docsDe([ingreso(10, 1000, 1), ingreso(10, 1000, 2), ingreso(10, 1000, 3), ingreso(1, 20000, 4)]);
