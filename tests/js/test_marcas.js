@@ -186,7 +186,9 @@ escenario('Un producto sin costo en Defontana: cargarlo es una entrada', () => {
   // Todo entró a $0 y quedan unidades: el PMP es $0. Cargarle el costo sube el
   // valor del inventario, así que el comprobante es de entrada.
   const p = pantalla(undefined, {mov: [ing(20, 0, 1)], conteo: CONTEO});
-  const paso = docSteps(p.r).find(x => x.k === 'cost');
+  // Va en su propio paso: "tiene unidades y no vale nada" es distinto de
+  // "entró a un costo raro", y se resuelve distinto.
+  const paso = docSteps(p.r).find(x => x.k === 'sinvalor');
   comprobar('pide cargar el costo', true, !!paso && /cargar el costo/.test(paso.txt));
   comprobar('y es una entrada', true, !!paso && paso.txt.startsWith('Ajuste de costo ENTRADA'));
 });
