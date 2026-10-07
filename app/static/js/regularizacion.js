@@ -788,16 +788,34 @@
   // sólo eso: no hay cómo saberlo desde acá, así que se avisa antes de que se
   // persiga un descuadre que no existe.
   const DIA_MS = 86400000;
+  // Hasta cuándo llega de verdad el informe de documentos. La "Fecha de
+  // generación" de la cabecera no sirve sola: cuando los datos se pegan en un
+  // Excel que ya existía, esa línea se queda con la fecha del archivo viejo y
+  // dice el 25 de septiembre un informe que trae movimientos de octubre. El
+  // último movimiento no miente, y entre los dos vale el que llegue más lejos:
+  // los dos dicen "al menos hasta acá".
+  function hastaCuandoLlega(mov){
+    if (!mov || !mov.length) return null;
+    let ultimo = null;
+    for (const m of mov) if (m.fecha && (!ultimo || m.fecha > ultimo)) ultimo = m.fecha;
+    if (mov.fechaGen && (!ultimo || mov.fechaGen > ultimo)) return mov.fechaGen;
+    return ultimo;
+  }
   function avisoDeFechas(){
     const a = state.articulos, m = state.mov;
-    if (!a || !a.length || !m || !m.length || !a.fechaGen || !m.fechaGen) return null;
-    const dias = (a.fechaGen - m.fechaGen) / DIA_MS;
-    if (dias <= 0.5) return null;
-    const cuanto = dias < 1.5 ? 'un día' : `${Math.round(dias)} días`;
-    return `El Informe de Documentos se generó el ${m.fecha} y el de Inventario el ${a.fecha}: ` +
+    if (!a || !a.length || !m || !m.length || !a.fechaGen) return null;
+    const hasta = hastaCuandoLlega(m);
+    if (!hasta) return null;
+    // Por día, no por hora: los movimientos no traen hora, así que comparar
+    // timestamps haría parecer atrasado un informe del mismo día.
+    const soloDia = d => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const dias = Math.round((soloDia(a.fechaGen) - soloDia(hasta)) / DIA_MS);
+    if (dias < 1) return null;
+    const cuanto = dias === 1 ? 'un día' : `${dias} días`;
+    return `El Informe de Documentos llega hasta el ${fmtDate(hasta)} y el de Inventario es del ${a.fecha}: ` +
       `${cuanto} de diferencia. Al de documentos le faltan los movimientos de esos días, así que ` +
-      `parte de los productos que no cuadran puede ser sólo eso. Vuelve a bajar el Informe de ` +
-      `Documentos para que los dos queden al mismo momento.`;
+      `parte de los productos que no cuadran puede ser sólo eso. Vuelve a bajarlo para que los dos ` +
+      `queden al mismo momento.`;
   }
 
   // La foto del stock valorizado, por artículo. Cuando está, manda sobre lo que

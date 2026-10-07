@@ -308,11 +308,13 @@ const DOCS = (gen, ...filas) => [
    'Cant. Movimiento', 'U. Medida', 'Valor Movimiento', 'Saldo Inventario', 'Valor Inventario'],
   ...filas,
 ];
-const UNA_FILA = ['PARTE DE ENTRADA', 'Aprobado', 1, '02-01-2026', '', 'BODEGA CENTRAL', 'COMPRA',
+const UNA_FILA = fecha => ['PARTE DE ENTRADA', 'Aprobado', 1, fecha, '', 'BODEGA CENTRAL', 'COMPRA',
                   'Ingreso', '', '', '', 'AAA', 'PROD AAA', 10, 'UN', 10000, 10, 10000];
 
-function avisoCon(genDocs, genInv) {
-  state.mov = parseMov(DOCS(genDocs, UNA_FILA));
+// El informe llega hasta donde llegue lo que esté más lejos: la cabecera o el
+// último movimiento. Por eso las pruebas fijan los dos.
+function avisoCon(genDocs, genInv, ultimoMov = '02-01-2026') {
+  state.mov = parseMov(DOCS(genDocs, UNA_FILA(ultimoMov)));
   state.articulos = parseArticulos(INV(['AAA', 'PROD AAA', 'BODEGA CENTRAL', 10, 'UN', 1000, 10000])
     .map(r => r[0] && String(r[0]).startsWith('Fecha de generación') ? ['Fecha de generación: ' + genInv] : r));
   return avisoDeFechas();
@@ -324,7 +326,7 @@ escenario('Avisa cuando el informe de documentos está atrasado', () => {
   comprobar('dice cuántos días', true, /12 días de diferencia/.test(aviso || ''));
   comprobar('y nombra los dos informes', true,
             /25-09-2026.*07-10-2026/.test(aviso || ''));
-  comprobar('y qué hacer', true, /Vuelve a bajar el Informe de Documentos/.test(aviso || ''));
+  comprobar('y qué hacer', true, /Vuelve a bajarlo/.test(aviso || ''));
 });
 
 escenario('No avisa cuando están al mismo momento', () => {
@@ -343,15 +345,34 @@ escenario('La tarde se lee como tarde', () => {
   // entre los dos informes hay 10 horas —nada que avisar—, pero leyendo mal la
   // tarde serían 22 y saldría un aviso falso.
   comprobar('diez horas de diferencia: sin aviso',
-            null, avisoCon('06-10-2026, 11:00 p. m.', '07-10-2026, 09:00 a. m.'));
+            null, avisoCon('06-10-2026, 11:00 p. m.', '07-10-2026, 09:00 a. m.', '07-10-2026'));
   // Y al revés, la tarde del día anterior sí deja movimientos fuera
   comprobar('diecisiete horas sí avisan', true,
             /un día de diferencia/.test(avisoCon('06-10-2026, 04:19 p. m.', '07-10-2026, 09:20 a. m.') || ''));
 });
 
-escenario('Sin fecha en alguno de los dos, no se inventa el aviso', () => {
-  comprobar('sin fecha en el de documentos', null,
-            avisoCon('', '07-10-2026, 09:20 a. m.'));
+escenario('Se cuenta por días, no por horas', () => {
+  // Los movimientos no traen hora: quedan a medianoche. Restando timestamps,
+  // un inventario sacado a las 8 de la tarde suma casi un día de más y el
+  // aviso dice dos días donde hay uno.
+  // Sin cabecera manda el movimiento, que queda a medianoche del 07
+  const aviso = avisoCon('', '08-10-2026, 08:00 p. m.', '07-10-2026');
+  comprobar('avisa', true, !!aviso);
+  comprobar('y dice un día, no dos', true, /un día de diferencia/.test(aviso || ''));
+  comprobar('no dos', false, /2 días/.test(aviso || ''));
+});
+
+escenario('Sin fecha en la cabecera manda el último movimiento', () => {
+  // Es lo que pasa cuando los datos se pegan en un Excel que ya existía: la
+  // cabecera miente o no está, y el último movimiento es lo único fiable.
+  comprobar('sin cabecera pero con movimientos al día, no avisa', null,
+            avisoCon('', '07-10-2026, 09:20 a. m.', '07-10-2026'));
+  comprobar('sin cabecera y con movimientos viejos, avisa', true,
+            /llega hasta el 02-01-2026/.test(avisoCon('', '07-10-2026, 09:20 a. m.') || ''));
+  // Y con la cabecera vieja pero movimientos nuevos, tampoco avisa: fue
+  // exactamente su caso, un informe que decía 25-09 y traía octubre
+  comprobar('cabecera vieja y movimientos nuevos: manda el movimiento', null,
+            avisoCon('25-09-2026, 09:01 a. m.', '07-10-2026, 09:20 a. m.', '07-10-2026'));
   state.mov = []; state.articulos = null;
 });
 
