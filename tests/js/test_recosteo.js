@@ -54,9 +54,16 @@ function informe(lista, valorFinal) {
 
 const ing = (q, cu, d) => ({kind: 'in', qty: q, cu, fecha: DIA(2026, 8, d)});
 
-function pantalla(docs) {
+// El monto del ajuste sale sólo del costo que ella escriba en la columna PMP:
+// sin eso habría que estimarlo, y un comprobante no se hace con una estimación.
+// Las pruebas que miran montos escriben ese costo, que acá son los $1.000 que
+// cuestan de verdad las compras del artículo.
+const COSTO_ESCRITO = 1000;
+
+function pantalla(docs, costoAMano = COSTO_ESCRITO) {
   state.stock = []; state.recount = new Map(); state.manual = new Set();
-  state.hechos = new Map(); state.pmpEdit = new Map(); state.ajustes = []; state.mov = docs;
+  state.hechos = new Map(); state.ajustes = []; state.mov = docs;
+  state.pmpEdit = costoAMano == null ? new Map() : new Map([['AAA', costoAMano]]);
   porId.set('optBodega', Object.assign(porId.get('optBodega') || {}, {value: '*'}));
   porId.set('optAprob', Object.assign(porId.get('optAprob') || {}, {checked: false}));
   porId.set('optLinea', Object.assign(porId.get('optLinea') || {}, {value: ''}));
@@ -186,6 +193,18 @@ escenario('Un costo fuera de lo normal también manda el costo a dejar', () => {
   comprobar('el costo a dejar es el habitual', 1000, Math.round(x.corr.pmp));
   comprobar('y el paso lo dice', true,
             /"Costo Unitario" de Defontana pon \$1\.000/.test(out.rows[0].costExtra[0].rev.hacer));
+});
+
+escenario('Sin un costo escrito no se propone ningún monto', () => {
+  // Lo que ella pidió: mostrar, no estimar. El sistema enseña las cifras
+  // exactas —cuánto entró a $0, qué tiene Defontana hoy— y pide el costo.
+  const r = pantalla(informe(MOVS, 120000), null);
+  comprobar('sigue pidiendo revisar el costo', true, !!(r.cost && r.cost.need));
+  comprobar('pero sin monto', null, r.cost.corr);
+  const txt = r.cost.hacer.map(h => h.txt).join(' ');
+  comprobar('dice qué entró a $0', true, /entró 10 a \$0 con FACTURA #100/.test(txt));
+  comprobar('y pide escribir el costo', true, /Escribe el costo en la columna PMP/.test(txt));
+  comprobar('sin nombrar entrada ni salida, que no se sabe', false, /ENTRADA|SALIDA/.test(txt));
 });
 
 console.log(`\n${hechas - fallas} de ${hechas} comprobaciones pasaron`);

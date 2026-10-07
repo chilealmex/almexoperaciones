@@ -84,6 +84,20 @@ escenario('Un ingreso mucho más barato de lo normal también', () => {
   comprobar('y dice que es más barato', true, raro && raro.barato);
 });
 
+escenario('Dos grupos de precios lejanos: no hay un costo normal que inventar', () => {
+  // El caso de 11-STR-ENC-09: 840 unidades compradas entre $382 y $414, y 30
+  // entre $8.280 y $9.869. Con seis compras, las dos del medio son $414 y
+  // $8.280 y su promedio —$4.347— no es el costo de ninguna. Proponiendo ése
+  // se pedía revalorizar las 246 que quedan, hoy a $406, por $969.322.
+  const docs = docsDe([ingreso(400, 382, 1), ingreso(240, 397, 2), ingreso(200, 414, 3),
+                       ingreso(8, 8280, 4), ingreso(2, 9303, 5), ingreso(20, 9869, 6)]);
+  comprobar('no se inventa un costo normal', null, costoHabitual(docs));
+
+  // Y si las dos del medio se parecen, la mediana sigue valiendo
+  const parejas = docsDe([ingreso(10, 1000, 1), ingreso(10, 1100, 2), ingreso(10, 1200, 3), ingreso(10, 9000, 4)]);
+  comprobar('con las del medio parecidas, sí', 1150, costoHabitual(parejas));
+});
+
 escenario('Lo que NO se marca, para no llenar de avisos falsos', () => {
   const subeDeAPoco = docsDe([ingreso(10, 1000, 1), ingreso(10, 1200, 2), ingreso(10, 1400, 3), ingreso(10, 1800, 4)]);
   comprobar('un alza normal de precios no es un error',
@@ -97,7 +111,9 @@ escenario('Lo que NO se marca, para no llenar de avisos falsos', () => {
 const MALO_HOY = [ingreso(1, 1000, 1), ingreso(1, 1000, 2), ingreso(1, 1000, 3), ingreso(10, 20000, 4)];
 
 escenario('Con stock y el PMP de hoy malo: se propone el ajuste de costo', () => {
-  const z = enPantalla(MALO_HOY);
+  // El monto sale del costo escrito a mano: sin eso se muestran las cifras y
+  // se pide el costo, pero no se propone un número estimado.
+  const z = enPantalla(MALO_HOY, 1000);
   comprobar('aparece una fila', 1, z.length);
   const rev = z[0].rev;
   comprobar('hay que regularizar', true, rev.need);
@@ -106,6 +122,22 @@ escenario('Con stock y el PMP de hoy malo: se propone el ajuste de costo', () =>
   // 13 unidades que deberían valer 13.000 y hoy valen 203.000
   comprobar('por la diferencia de valor de lo que queda', -190000, Math.round(rev.ajusteCosto));
   comprobar('dice el PMP de hoy y lo que queda en bodega', true, /PMP de hoy/.test(rev.txt));
+});
+
+escenario('Sin un costo escrito, se muestran las cifras pero no se propone un monto', () => {
+  // Un comprobante contable no se hace con una mediana. "Lo que suele costar"
+  // sirve para reconocer el ingreso raro y como referencia en pantalla, pero el
+  // monto sale sólo del costo que ella escriba.
+  const z = enPantalla(MALO_HOY);
+  const rev = z[0].rev;
+  comprobar('igual hay que regularizar', true, rev.need);
+  comprobar('pero no hay monto calculado', null, rev.ajusteCosto);
+  comprobar('no se nombra un ajuste de entrada ni de salida', false, /ENTRADA|SALIDA/.test(rev.hacer));
+  comprobar('dice cuántas unidades hay y en cuánto están', true,
+            /13 unidades valorizadas en \$203\.000/.test(rev.hacer));
+  comprobar('dice lo que suelen costar sus compras', true, /suelen ser de \$1\.000/.test(rev.hacer));
+  comprobar('y pide escribir el costo', true, /Escribe el costo en la columna PMP/.test(rev.hacer));
+  comprobar('el costo que muestra va marcado como referencia', true, /de referencia/.test(rev.costo.src));
 });
 
 escenario('Sin stock hoy: no se propone nada', () => {
@@ -131,7 +163,7 @@ const SIN_REFERENCIA = [ingreso(5, 1, 1)];
 escenario('Sin con qué compararlo, se pide el costo en vez de inventarlo', () => {
   const z = enPantalla(SIN_REFERENCIA);
   comprobar('hay que regularizar', true, z[0].rev.need);
-  comprobar('pide escribir el costo', true, /Escríbelo en la columna PMP/.test(z[0].rev.hacer));
+  comprobar('pide escribir el costo', true, /Escribe el costo en la columna PMP/.test(z[0].rev.hacer));
   comprobar('y no inventa un ajuste', null, z[0].rev.ajusteCosto);
 });
 
@@ -184,10 +216,13 @@ escenario('Sin suficientes compras, se sigue usando la más cercana', () => {
 
 // --- Nunca se propone tocar un comprobante ya emitido ---
 
-function planDe(lista) {
+function planDe(lista, costoAMano) {
   state.stock = [{code:'ART-1', key:'ART1', name:'ARTICULO', stock:10, fecha:DIA(2026, 8, 20),
                   por:'B', estado:'Contado', um:'', linea:''}];
-  state.recount = new Map(); state.manual = new Set(); state.hechos = new Map(); state.pmpEdit = new Map();
+  state.recount = new Map(); state.manual = new Set(); state.hechos = new Map();
+  // El monto del ajuste sale del costo escrito a mano; sin eso sólo se piden
+  // las cifras. Acá se escribe para poder comprobar qué ajuste se propone.
+  state.pmpEdit = costoAMano == null ? new Map() : new Map([['ART1', costoAMano]]);
   porId.set('optBodega', Object.assign(porId.get('optBodega') || {}, {value: '*'}));
   porId.set('optAprob', Object.assign(porId.get('optAprob') || {}, {checked: false}));
   const r = compute(docsDe(lista)).rows[0];
@@ -198,7 +233,7 @@ escenario('Un ingreso a $0 se arregla con un ajuste de costo, no editando el doc
   // Un comprobante ya emitido no se toca: corregirlo hacia atrás recalcula
   // todas las salidas que salieron a ese PMP, incluidas las ya facturadas.
   const pasos = planDe([ingreso(6, 0, 1), ingreso(100, 1271, 2), ingreso(100, 1271, 3),
-                        ingreso(50, 1271, 4), egreso(240, 5)]);
+                        ingreso(50, 1271, 4), egreso(240, 5)], 1271);
   comprobar('hay un paso de costo', true, pasos.length > 0);
   comprobar('propone un ajuste de costo', true, pasos.some(t => /Ajuste de costo/.test(t)));
   comprobar('y no propone corregir el comprobante', false, pasos.some(t => /Corregir el costo de/.test(t)));

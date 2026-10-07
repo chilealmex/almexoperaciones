@@ -148,6 +148,15 @@ def test_la_pagina_ofrece_subir_el_stock_valorizado(client, db, empresa, usuario
     assert "Informe de Inventario de Defontana" in html
 
 
+def test_la_pagina_ofrece_subir_los_costos_llenados(client, db, empresa, usuario_admin):
+    """Sin el botón no hay dónde devolver el Excel con los costos escritos."""
+    login(client, "admin@test.cl")
+    js = client.get("/static/js/regularizacion.js").get_data(as_text=True)
+    assert 'id="fileCostos"' in js
+    assert "Subir los costos llenados" in js
+    assert "ESCRIBE AQUÍ el costo a usar" in js
+
+
 def test_subir_de_nuevo_reemplaza_lo_guardado(client, db, empresa, usuario_admin):
     login(client, "admin@test.cl")
     for contenido in (b"primero", b"segundo"):
