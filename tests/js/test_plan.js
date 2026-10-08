@@ -6,7 +6,7 @@
    se ve en esa vista y no entra nunca al plan, que es lo que ella sigue para
    regularizar: con su informe real el paso 2 decía 1 producto cuando había 53. */
 const {porId} = require('./entorno.js');
-const {compute, buildPlan, docSteps, state} = require('../../app/static/js/regularizacion.js');
+const {compute, buildPlan, docSteps, parseArticulos, state} = require('../../app/static/js/regularizacion.js');
 
 let fallas = 0, hechas = 0;
 
@@ -119,10 +119,19 @@ escenario('Una valorización imposible también entra al paso 2', () => {
   // Valor sin unidades: salió todo y el inventario sigue valiendo $5.000. No
   // sale de una cuenta bien hecha —se arma a mano— porque justamente es un
   // estado en que Defontana no debería poder quedar.
+  //
+  // Lo tiene que decir el stock valorizado: el producto listado, con 0
+  // unidades y un Total que no es cero. Del arrastre del informe de documentos
+  // no alcanza, porque es una reconstrucción y el ajuste sacaría valor que
+  // Defontana no tiene.
   const mov = docsDe([ingreso('AAA', 10, 1000, 1), ingreso('AAA', 10, 0, 2)]);
   mov.push({...mov[1], folio: '200', fecha: DIA(2026, 8, 3), kind: 'out', qty: 20,
             valor: 5000, saldo: 0, valorInv: 5000});
   state.stock = []; state.recount = new Map(); state.manual = new Set();
+  state.articulos = parseArticulos([
+    ['Informe de Inventario'], ['Empresa: X'], ['Fecha de generación: 07-10-2026, 10:37 a. m.'], [],
+    ['Código Artículo', 'Descripción', 'Bodega', 'Saldo', 'Unidad', 'Valor Unidad', 'Total'],
+    ['AAA', 'PRODUCTO AAA', 'BODEGA CENTRAL', 0, 'UN', 0, 5000]]);
   state.hechos = new Map(); state.pmpEdit = new Map([['AAA', 1000]]); state.ajustes = []; state.mov = mov;
   const out = compute(mov);
   state.rows = out.rows; state.zero = out.zero;
@@ -133,6 +142,7 @@ escenario('Una valorización imposible también entra al paso 2', () => {
   comprobar('con su nombre', true, !!x);
   comprobar('y el ajuste deja el valor en $0', -5000, x && Math.round(x.corr.ajuste));
   comprobar('el panel lo cuenta', 1, cuentaDelPanel(p));
+  state.articulos = null;
 });
 
 escenario('Si no se sabe el costo, no se inventa uno malo', () => {
