@@ -717,8 +717,8 @@
       const foto = fotoDe(docs);
       let fotoDifiere = null;
       if (foto){
-        const hoyMov = sysCalc ?? sysNow, u = docs[docs.length - 1];
-        const valorMov = u && u.valorInv != null ? u.valorInv : null;
+        const hoyMov = sysCalc ?? sysNow;
+        const valorMov = arrastradoHoy(docs).valor;
         const cantMal = hoyMov != null && Math.abs(foto.stock - hoyMov) > Math.max(0.01, Math.abs(hoyMov) * 0.001);
         const valMal = valorMov != null && Math.abs(foto.valor - valorMov) > Math.max(1, Math.abs(valorMov) * 0.005);
         if (cantMal || valMal){
@@ -992,6 +992,27 @@
   // se arrastra de los movimientos: es lo que Defontana tiene de verdad, y es
   // contra eso que hay que hacer el ajuste.
   let fotoPorKey = null;
+  // Lo que el informe de documentos arrastra para el producto HOY.
+  //
+  // Un producto puede venir con varios códigos en Defontana —"HT-1" y
+  // "HT- 1", que es el mismo kit— y cada código arrastra su propio saldo y su
+  // propio valor. La última fila del producto es la del código que se movió
+  // último, no la del producto entero: hay que sumar la última de cada
+  // código. Sin eso HT- 1 daba 0 unidades y $0 cuando Defontana tiene 6 por
+  // $6.789.444, que es exactamente lo que suman sus dos códigos. En su
+  // informe son 17 productos con más de un código, y los 6 avisos de "no
+  // cuadra con el stock valorizado" eran falsos por esto.
+  function arrastradoHoy(docs){
+    const ultimo = new Map();
+    for (const d of docs) ultimo.set(d.art, d);
+    let saldo = null, valor = null;
+    for (const d of ultimo.values()){
+      if (d.saldo != null) saldo = (saldo || 0) + d.saldo;
+      if (d.valorInv != null) valor = (valor || 0) + d.valorInv;
+    }
+    return {saldo, valor};
+  }
+
   function fotoDe(docs){
     if (!state.articulos || !state.articulos.length || !docs || !docs.length) return null;
     if (!fotoPorKey || fotoPorKey._de !== state.articulos){
