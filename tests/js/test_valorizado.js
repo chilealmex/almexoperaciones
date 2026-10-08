@@ -106,6 +106,39 @@ function pantalla(foto) {
 
 const foto = (stock, costo) => parseArticulos(hoja(['AAA', 'PROD AAA', stock, costo, 0]));
 
+escenario('Con dos códigos, el arrastre es la suma de los dos', () => {
+  // El mismo kit está en Defontana con dos códigos, "HT-1" y "HT- 1", y cada
+  // uno arrastra su propio saldo y su propio valor. La última fila es la del
+  // código que se movió último, no la del producto: el código viejo quedó en
+  // cero y el nuevo tiene las 6 unidades. Mirando sólo la última fila el aviso
+  // decía que Defontana vale $6.789.444 y los movimientos dan $0, cuando los
+  // movimientos dan exactamente eso. En su informe eran 6 avisos falsos.
+  const viejo = [
+    {art: 'HT-1', key: 'HT1', nameKey: 'NHT', tipo: 'PARTE', folio: '1', fecha: DIA(2026, 8, 1),
+     kind: 'in', qty: 2, valor: 2619522, saldo: 2, valorInv: 2619522, um: '', orig: 'C', dest: 'C',
+     estado: 'Aprobado', motivo: '', desc: 'KIT'},
+    {art: 'HT-1', key: 'HT1', nameKey: 'NHT', tipo: 'GUIA', folio: '2', fecha: DIA(2026, 8, 4),
+     kind: 'out', qty: 2, valor: 2619522, saldo: 0, valorInv: 0, um: '', orig: 'C', dest: 'C',
+     estado: 'Aprobado', motivo: '', desc: 'KIT'},
+  ];
+  const nuevo = {art: 'HT- 1', key: 'HT1', nameKey: 'NHT', tipo: 'PARTE', folio: '3',
+     fecha: DIA(2026, 8, 2), kind: 'in', qty: 6, valor: 6789444, saldo: 6, valorInv: 6789444,
+     um: '', orig: 'C', dest: 'C', estado: 'Aprobado', motivo: '', desc: 'KIT'};
+  const docs = [viejo[0], nuevo, viejo[1]];   // la última fila es la del código viejo, en cero
+
+  state.stock = []; state.recount = new Map(); state.manual = new Set();
+  state.hechos = new Map(); state.pmpEdit = new Map(); state.ajustes = [];
+  state.articulos = parseArticulos([
+    ['Informe de Inventario'], ['Empresa: X'], ['Fecha de generación: 08-10-2026, 08:20 a. m.'], [],
+    ['Código Artículo', 'Descripción', 'Bodega', 'Saldo', 'Unidad', 'Valor Unidad', 'Total'],
+    ['HT- 1', 'KIT', 'BODEGA CENTRAL', 6, 'UN', 1131574, 6789444]]);
+  state.mov = docs;
+  const r = compute(docs).rows[0];
+  comprobar('no avisa que no cuadra', null, r.fotoDifiere);
+  state.articulos = null;
+});
+
+
 escenario('Sin foto, todo sigue saliendo de los movimientos', () => {
   const p = pantalla(null);
   comprobar('no hay nada que avisar', null, p.r.fotoDifiere);
