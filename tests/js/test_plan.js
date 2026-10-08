@@ -150,13 +150,17 @@ escenario('Si no se sabe el costo, no se inventa uno malo', () => {
   // comparar. La compra anterior más cercana al segundo ingreso es el primero,
   // que es el mismo dato de relleno que está mal; apoyarse en él es corregir
   // un $1 con otro $1. Y como son sólo dos, tampoco hay mediana.
+  //
+  // Va al paso 2a y no al 2: hoy el producto vale $1 la unidad, así que lo que
+  // corresponde es cargarle el costo, no corregir uno que no tiene. Los dos
+  // pasos no se pisan.
   const p = pantalla([ingreso('AAA', 2, 1, 1), ingreso('AAA', 3, 1, 2)], undefined, undefined, null);
-  comprobar('entra al paso 2', true, enPaso2(p).has('AAA'));
-  comprobar('una línea por producto', 1, p.plan.cost.length);
-  const x = p.plan.cost[0];
+  comprobar('no entra al paso 2', false, enPaso2(p).has('AAA'));
+  comprobar('entra al 2a', true, p.plan.sinValor.some(x => x.r.code === 'AAA'));
+  comprobar('una línea por producto', 1, p.plan.sinValor.length);
+  const x = p.plan.sinValor[0];
   comprobar('no propone un costo', null, x.v);
-  comprobar('y pide escribirlo a mano', true, /Escribe el costo en la columna PMP/.test(x.nota));
-  comprobar('sin inventar un ajuste de valor', null, x.corr);
+  comprobar('y dice que nunca tuvo una compra con costo', true, /nunca tuvo una compra con costo/.test(x.src));
 });
 
 escenario('Un producto marcado como ya regularizado no entra', () => {

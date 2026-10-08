@@ -176,10 +176,16 @@ escenario('El ajuste de costo dice si es entrada o salida', () => {
 });
 
 escenario('Si el costo no se sabe, no inventa el sentido del comprobante', () => {
+  // Todo entró a $1, así que hoy el producto vale $1 la unidad: va al paso 2a
+  // —cargarle el costo— y no al 2, que es para lo que tiene valor y lo tiene
+  // mal. Sin costo conocido no se dice si el comprobante sube o baja el valor.
   const p = pantalla(undefined, {mov: [ing(2, 1, 1), ing(3, 1, 2)], conteo: CONTEO}, null);
-  const x = p.plan.cost[0];
-  comprobar('no hay ajuste calculado', null, x.corr);
-  comprobar('no dice ni entrada ni salida', false, /ENTRADA|SALIDA/.test(x.nota));
+  comprobar('no va al paso 2', 0, p.plan.cost.length);
+  const x = p.plan.sinValor[0];
+  comprobar('va al 2a', true, !!x);
+  comprobar('sin costo propuesto', null, x.v);
+  const paso = docSteps(p.r).find(h => h.k === 'sinvalor');
+  comprobar('y no dice ni entrada ni salida', false, /SALIDA/.test(paso.txt));
 });
 
 escenario('Un producto sin costo en Defontana: cargarlo es una entrada', () => {
