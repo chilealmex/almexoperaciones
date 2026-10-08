@@ -231,10 +231,31 @@ escenario('El 40080-004: no entró a $1, eso lo decía la columna mala', () => {
 escenario('Una sola compra, y a $1: se revisa igual', () => {
   // No hace falta tener con qué comparar: $1 la unidad no es un costo, punto.
   // Y la regla vale aunque el producto tenga una única compra en su historia.
+  //
+  // Va al 2a y no al 2: hoy vale $1 la unidad, así que lo que corresponde es
+  // cargarle el costo. El 2 es para lo que tiene valor y lo tiene mal.
   const docs = docsDe([ing(20, 1, 1)]);
   const {P} = plan(docs, parseArticulos(INV(['AAA', 'PROD AAA', 'BODEGA CENTRAL', 20, 'UN', 1, 20])));
-  comprobar('se muestra', 1, P.cost.length);
-  comprobar('sin inventar un monto', null, P.cost[0].corr);
+  comprobar('se muestra', 1, P.sinValor.length);
+  comprobar('y no en el paso 2', 0, P.cost.length);
+  comprobar('sin inventar un monto', null, P.sinValor[0].v);
+});
+
+escenario('Un producto del 2a no cuenta también en el paso 2', () => {
+  // El panel y el plan tienen que contar lo mismo. Si el producto suma en los
+  // dos pasos, el panel dice que hay costos que corregir donde en realidad hay
+  // costos que cargar, y el mismo producto se ajustaría dos veces.
+  const inv = parseArticulos(INV(['AAA', 'PROD AAA', 'BODEGA CENTRAL', 20, 'UN', 1, 20]));
+  const {r} = plan(docsDe([ing(20, 1, 1)]), inv);
+  comprobar('tiene el paso 2a', true, docSteps(r).some(x => x.k === 'sinvalor'));
+  comprobar('y no el paso 2', false, docSteps(r).some(x => x.k === 'cost'));
+
+  // Un ingreso fuera de lo normal sobre un producto que SÍ tiene valor sigue
+  // contando en el paso 2: ahí es donde corresponde.
+  const raro = plan(docsDe([ing(1, 1000, 1), ing(1, 1000, 2), ing(1, 1000, 3), ing(10, 20000, 4)]),
+    parseArticulos(INV(['AAA', 'PROD AAA', 'BODEGA CENTRAL', 13, 'UN', 15615, 203000])));
+  comprobar('el de costo raro sí cuenta en el 2', true, docSteps(raro.r).some(x => x.k === 'cost'));
+  comprobar('y no en el 2a', false, docSteps(raro.r).some(x => x.k === 'sinvalor'));
 });
 
 escenario('Una sola compra a precio normal: no se inventa un problema', () => {

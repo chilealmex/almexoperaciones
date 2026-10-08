@@ -1607,8 +1607,14 @@
       if (r.st === 'nofile') add('verify', 'Revisar por qué no está en el conteo');
     }
     if (r.st === 'done') add('none', hecho('cantidad') ? 'Nada: marcaste la cantidad como ya regularizada' : 'Nada: ya se ajustó la cantidad');
-    if (r.cost && r.cost.need) r.cost.hacer.forEach(h => add(h.k, h.txt));
-    if (r.costExtra) r.costExtra.forEach(z => add('cost', z.rev.hacer));
+    // Los dos pasos de costo no se pisan. El 2 es para lo que TIENE valor y
+    // lo tiene mal; el 2a para lo que hoy vale $0 o $1 y nunca se le cargó
+    // costo. Un producto que va al 2a no va también al 2: cargarle el costo
+    // ahí es lo que lo arregla, y pedir las dos cosas lleva a ajustar dos
+    // veces el mismo producto. Con sus archivos eran 38 productos en los dos.
+    const vaAlSinValor = !!(r.cost && r.cost.need && r.cost.hacer.some(h => h.k === 'sinvalor'));
+    if (r.cost && r.cost.need) r.cost.hacer.forEach(h => { if (!vaAlSinValor || h.k !== 'cost') add(h.k, h.txt); });
+    if (r.costExtra && !vaAlSinValor) r.costExtra.forEach(z => add('cost', z.rev.hacer));
     const enCod = !r.arts ? '' : r.artAjuste ? ` en el código ${r.artAjuste}` : ' (antes deja el saldo en un solo código)';
     if (r.st === 'up' && r.cause !== 'um'){
       if (r.cause === 'egrnodesp') add('in', `Parte de Entrada por ${q}${enCod} (devolución), o anular la salida que no se despachó`);
@@ -2055,16 +2061,18 @@
     for (const r of R){
       if (lin && (r.linea || '') !== lin) continue;
       if (dudoso(r)){ plan.verify.push({r, qty:r.diff, txt: (r.obs[0] || docSteps(r).find(x => x.k === 'verify').txt).replace(/<[^>]+>/g, ''), motivo: r.cause ? CAUSES[r.cause] : ''}); continue; }
+      // Mismo criterio que docSteps(): lo que va al 2a no va también al 2.
+      const vaAlSinValor = !!(r.cost && r.cost.need && r.cost.costos.some(c => c.sinValor));
       if (r.cost && r.cost.need){
         for (const c of r.cost.costos){
           if (/^entrada por /.test(c.doc)) plan.in.push({r, qty:c.qty, v:c.v, src:c.src, motivo:'Salió sin stock (' + c.doc.replace(/^entrada por /, '') + ')'});
           else if (c.sinValor) plan.sinValor.push({r, doc:c.doc, qty:c.qty, v:c.v, src:c.src});
-          else plan.cost.push({r, doc:c.doc, qty:c.qty, v:c.v, src:c.src, corr:r.cost.corr});
+          else if (!vaAlSinValor) plan.cost.push({r, doc:c.doc, qty:c.qty, v:c.v, src:c.src, corr:r.cost.corr});
         }
       }
       // Costo fuera de lo normal y valorizaciones imposibles: el ajuste va
       // sobre lo que queda en bodega hoy, no sobre el documento de entonces.
-      for (const z of r.costExtra || []){
+      for (const z of vaAlSinValor ? [] : r.costExtra || []){
         const v = z.rev.costo ? z.rev.costo.v : null;
         const ajuste = typeof z.rev.ajusteCosto === 'number' ? z.rev.ajusteCosto
                      : z.imposible && z.valorHoy != null ? -z.valorHoy : null;
