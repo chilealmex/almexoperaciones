@@ -11,8 +11,8 @@
    bueno aunque Defontana lo tuviera en cero. En su inventario son 189
    productos, 5.409 unidades, $30.778.738 que el inventario no cuenta. */
 const {porId} = require('./entorno.js');
-const {compute, buildPlan, docSteps, parseArticulos, costoDeSuCompra, state} =
-  require('../../app/static/js/regularizacion.js');
+const {compute, buildPlan, docSteps, parseArticulos, costoDeSuCompra, pmpEditable,
+       costoPropuestoSinValor, renderStepsPanel, state} = require('../../app/static/js/regularizacion.js');
 
 let fallas = 0, hechas = 0;
 function escenario(t, fn){ console.log('\n' + t); try { fn(); } catch(e){ fallas++; hechas++; console.log(`  ✘ reventó: ${e.message}`); } }
@@ -453,6 +453,57 @@ escenario('Si el informe no trae el saldo, no se esconde todo', () => {
   const docs = docsDe([ing(10, 1000, 1)]).map(m => ({...m, saldo: null, valorInv: null}));
   vistaMovimientos(docs, null);
   comprobar('el movimiento se lista', 1, state.zero.length);
+});
+
+escenario('El costo escrito a mano manda sobre el de su propia compra', () => {
+  // La columna PMP es donde se corrige lo que el sistema propuso. Antes
+  // escribir ahí no cambiaba nada en este paso: el monto seguía saliendo de la
+  // compra del producto, así que no había forma de ajustar la propuesta.
+  const inv = parseArticulos(INV(['AAA', 'PROD AAA', 'BODEGA CENTRAL', 12, 'UN', 0, 0]));
+  const solo = plan(COMPRADO, inv);
+  comprobar('sin escribir nada, propone su compra', 5919, solo.P.sinValor[0].v);
+  comprobar('y dice de dónde sale', true, /PARTE DE ENTRADA #100/.test(solo.P.sinValor[0].src));
+
+  const aMano = plan(COMPRADO, inv, 8000);
+  comprobar('con el costo escrito, manda ése', 8000, aMano.P.sinValor[0].v);
+  comprobar('el total se recalcula', 96000, Math.round(aMano.P.sinValor[0].v * aMano.P.sinValor[0].qty));
+  comprobar('y lo dice', 'Ingresado a mano', aMano.P.sinValor[0].src);
+  comprobar('el paso lo repite', true,
+            docSteps(aMano.r).some(x => x.k === 'sinvalor' && /8\.000 c\/u, el costo que escribiste/.test(x.txt)));
+});
+
+escenario('En esos productos se puede escribir el costo', () => {
+  // La celda del PMP era de sólo lectura salvo que hubiera un ajuste de
+  // cantidad. Justo en los productos sin valor —173 de los 204 suyos— no se
+  // podía escribir nada, que es donde más falta hace.
+  const inv = parseArticulos(INV(['AAA', 'PROD AAA', 'BODEGA CENTRAL', 12, 'UN', 0, 0]));
+  const {r} = plan(COMPRADO, inv);
+  comprobar('no tiene ajuste de cantidad', false, ['up', 'down', 'check'].includes(r.st));
+  comprobar('y aun así se puede escribir su costo', true, pmpEditable(r));
+
+  // Y la casilla llega con el costo propuesto puesto, para revisarlo antes de
+  // cargarlo en vez de tener que ir al plan a buscarlo. Sale del mismo lugar
+  // que el plan: con sus archivos r.pmp y la propuesta no coinciden en 12 de
+  // los 167, y la pantalla y el plan tienen que decir lo mismo.
+  comprobar('con el costo propuesto puesto', 5919, costoPropuestoSinValor(r));
+
+  // Uno sano y cuadrado sigue de sólo lectura: ahí no hay nada que poner
+  const sano = plan(docsDe([ing(20, 5000, 1)]),
+    parseArticulos(INV(['AAA', 'PROD AAA', 'BODEGA CENTRAL', 20, 'UN', 5000, 100000])));
+  comprobar('uno sano no', false, pmpEditable(sano.r));
+  comprobar('y no propone nada', null, costoPropuestoSinValor(sano.r));
+});
+
+escenario('El paso 2a está en el orden recomendado', () => {
+  // Sin esto el panel sólo lleva a los costos raros, y los 204 productos con
+  // unidades sin valor —$37.293.260— quedan fuera del orden que se sigue.
+  plan(COMPRADO, parseArticulos(INV(['AAA', 'PROD AAA', 'BODEGA CENTRAL', 12, 'UN', 0, 0])));
+  state.filter = state.filter || {};
+  renderStepsPanel(true);
+  const html = porId.get('stepsPanel').innerHTML || '';
+  comprobar('el panel trae el paso 2a', true, /2a<\/span>/.test(html));
+  comprobar('con su título', true, /Cargar el costo de lo que no vale nada/.test(html));
+  comprobar('y cuenta el producto', true, /data-go="sinvalor"/.test(html));
 });
 
 console.log(`\n${hechas - fallas} de ${hechas} comprobaciones pasaron`);
