@@ -297,8 +297,17 @@
       const mv = strip(at(r,'mov'));
       const kind = mv.startsWith('ING') ? 'in' : mv.startsWith('EGR') ? 'out' : null;
       if (!kind) return;
+      const orig = String(at(r,'orig')).trim(), dest = String(at(r,'dest')).trim();
       out.push({i, art, key:keyOf(art), kind, qty:Math.abs(num(at(r,'cant')) || 0), fecha:parseDate(at(r,'fecha')),
-        tipo:at(r,'tipo'), motivo:String(at(r,'motivo')).trim(), estado:at(r,'estado'), folio:at(r,'folio'), orig:String(at(r,'orig')).trim(), dest:String(at(r,'dest')).trim(),
+        // Un traspaso entre bodegas mueve unidades de una a otra: el artículo
+        // no entra ni sale del inventario. Se reconoce porque es el único
+        // documento que trae bodega de origen Y de destino en la misma fila
+        // —Defontana lo informa en una sola línea, marcada "Ingreso"—, así que
+        // contarla como entrada suma unidades que nunca llegaron: con
+        // 39000-038 daba 146 unidades cuando Defontana tiene 96. El propio
+        // informe lo confirma: en esa fila el Saldo Inventario no se mueve.
+        traspaso: !!(orig && dest),
+        tipo:at(r,'tipo'), motivo:String(at(r,'motivo')).trim(), estado:at(r,'estado'), folio:at(r,'folio'), orig, dest,
         ref:at(r,'ref') || at(r,'cli') || at(r,'prov'), tercero:String(at(r,'prov') || at(r,'cli')).trim(), desc:at(r,'desc'), nameKey:keyOf(at(r,'desc')), um:at(r,'um'),
         valor:c.valor >= 0 ? num(at(r,'valor')) : null, saldo:num(at(r,'saldo')), valorInv:c.valorInv >= 0 ? num(at(r,'valorInv')) : null});
     });
@@ -595,7 +604,7 @@
       for (const m of ajDocs){ aj += m.kind === 'in' ? m.qty : -m.qty; ajVal += (m.kind === 'in' ? 1 : -1) * (m.valor || 0); }
       docs.forEach((m, j) => {
         if (!counted || !m.fecha) return;
-        if (after(m)){ if (!m._aj && !m._ajc && inBod(m)){ if (m.kind === 'in') ins += m.qty; else outs += m.qty; } }
+        if (after(m)){ if (!m._aj && !m._ajc && !m.traspaso && inBod(m)){ if (m.kind === 'in') ins += m.qty; else outs += m.qty; } }
         else { idx = j; if (dayKey(m.fecha) === ck){ sameDay++; sameNet += m.kind === 'in' ? m.qty : -m.qty; } }
       });
       // Defontana lleva un saldo por cada artículo: si el código existe escrito de varias formas, se suman
@@ -605,7 +614,8 @@
       // puede no ser el orden de las filas cuando hay varios el mismo día. Por eso se toma como saldo
       // inicial el valor que más se repite de (saldo de la fila − movimientos acumulados hasta ella) y
       // los saldos al conteo y final se calculan sumando los documentos.
-      const signed = m => m.kind === 'in' ? m.qty : -m.qty;
+      // El traspaso no suma ni resta: cambia de bodega, no de inventario.
+      const signed = m => m.traspaso ? 0 : m.kind === 'in' ? m.qty : -m.qty;
       let sysNow = null, sysAtCount = null, sysCalc = null, toOther = 0;
       const porArt = [];
       for (const list of byArt.values()){
@@ -665,7 +675,7 @@
       else if (!counted) st = 'nocount';
       else if (diff == null) st = 'nodata';
       else st = diff > EPS ? 'up' : diff < -EPS ? 'down' : 'ok';
-      const zeros = docs.filter(m => !m._ajc && valorReal(m) != null && Math.abs(valorReal(m)) < EPS && m.qty > EPS).length;
+      const zeros = docs.filter(m => !m._ajc && !m.traspaso && valorReal(m) != null && Math.abs(valorReal(m)) < EPS && m.qty > EPS).length;
       const costoEscrito = edited && pmp > 0 ? pmp : null;
       let cost = porArt.length > 1 ? costReviewArts(porArt, costoEscrito) : costReview(docs, sysCalc, costoEscrito);
       if (cost && !cost.need && costDocs.length) cost = null;   // el costo ya se ajustó: no hace falta otro aviso
@@ -717,8 +727,8 @@
       const foto = fotoDe(docs);
       let fotoDifiere = null;
       if (foto){
-        const hoyMov = sysCalc ?? sysNow, u = docs[docs.length - 1];
-        const valorMov = u && u.valorInv != null ? u.valorInv : null;
+        const hoyMov = sysCalc ?? sysNow;
+        const valorMov = arrastradoHoy(docs).valor;
         const cantMal = hoyMov != null && Math.abs(foto.stock - hoyMov) > Math.max(0.01, Math.abs(hoyMov) * 0.001);
         const valMal = valorMov != null && Math.abs(foto.valor - valorMov) > Math.max(1, Math.abs(valorMov) * 0.005);
         if (cantMal || valMal){
@@ -777,7 +787,7 @@
       if (!habitualPorArt.has(a)) habitualPorArt.set(a, costoHabitual(all.filter(x => norm(x.art) === a)));
     }
     for (const [k, all] of byKey) all.forEach(m => {
-      if (m._ajc || !inBod(m) || valorReal(m) == null || m.qty <= EPS) return;
+      if (m._ajc || m.traspaso || !inBod(m) || valorReal(m) == null || m.qty <= EPS) return;
       const aCero = Math.abs(valorReal(m)) <= EPS;
       // Un ingreso puede estar mal valorizado sin ser $0: a $1, o a 20 veces lo
       // que cuesta siempre. No se nota mirando cantidades y ensucia la
@@ -992,6 +1002,27 @@
   // se arrastra de los movimientos: es lo que Defontana tiene de verdad, y es
   // contra eso que hay que hacer el ajuste.
   let fotoPorKey = null;
+  // Lo que el informe de documentos arrastra para el producto HOY.
+  //
+  // Un producto puede venir con varios códigos en Defontana —"HT-1" y
+  // "HT- 1", que es el mismo kit— y cada código arrastra su propio saldo y su
+  // propio valor. La última fila del producto es la del código que se movió
+  // último, no la del producto entero: hay que sumar la última de cada
+  // código. Sin eso HT- 1 daba 0 unidades y $0 cuando Defontana tiene 6 por
+  // $6.789.444, que es exactamente lo que suman sus dos códigos. En su
+  // informe son 17 productos con más de un código, y los 6 avisos de "no
+  // cuadra con el stock valorizado" eran falsos por esto.
+  function arrastradoHoy(docs){
+    const ultimo = new Map();
+    for (const d of docs) ultimo.set(d.art, d);
+    let saldo = null, valor = null;
+    for (const d of ultimo.values()){
+      if (d.saldo != null) saldo = (saldo || 0) + d.saldo;
+      if (d.valorInv != null) valor = (valor || 0) + d.valorInv;
+    }
+    return {saldo, valor};
+  }
+
   function fotoDe(docs){
     if (!state.articulos || !state.articulos.length || !docs || !docs.length) return null;
     if (!fotoPorKey || fotoPorKey._de !== state.articulos){
@@ -1192,7 +1223,7 @@
     return {saldo, valor, pmp: saldo > EPS && valor > EPS ? valor / saldo : null};
   }
   function costReview(docs, saldoHoy, costoAMano){
-    const zeros = docs.filter(m => !m._ajc && valorReal(m) != null && Math.abs(valorReal(m)) < EPS && m.qty > EPS);
+    const zeros = docs.filter(m => !m._ajc && !m.traspaso && valorReal(m) != null && Math.abs(valorReal(m)) < EPS && m.qty > EPS);
     const last = docs[docs.length - 1];
     const calc = valorDocs(docs);
     const pmpHoy = pmpAt(last) || (calc && calc.pmp);

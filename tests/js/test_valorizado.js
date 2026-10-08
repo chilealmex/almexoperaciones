@@ -106,6 +106,85 @@ function pantalla(foto) {
 
 const foto = (stock, costo) => parseArticulos(hoja(['AAA', 'PROD AAA', stock, costo, 0]));
 
+escenario('Un traspaso entre bodegas no suma ni resta inventario', () => {
+  // Defontana informa el traspaso en UNA sola fila, marcada "Ingreso", con
+  // bodega de origen y de destino. Es el único documento que trae las dos. Si
+  // se cuenta como entrada, suma unidades que nunca llegaron: con 39000-038
+  // daba 146 cuando Defontana tiene 96, justo las 50 del traspaso. El propio
+  // informe lo confirma: en esa fila el Saldo Inventario no se mueve.
+  const base = {key: 'AAA', nameKey: 'NAAA', um: '', estado: 'Aprobado', motivo: '',
+                desc: 'PROD AAA', art: 'AAA'};
+  const docs = [
+    {...base, tipo: 'PARTE DE ENTRADA', folio: '1', fecha: DIA(2026, 8, 1), kind: 'in',
+     qty: 50, valor: 500000, saldo: 50, valorInv: 500000, orig: '', dest: 'BODEGA DE ACTIVOS FIJOS'},
+    {...base, tipo: 'TRASPASO ENTRE BODEGAS', folio: '2', fecha: DIA(2026, 8, 5), kind: 'in',
+     qty: 50, valor: 500000, saldo: 50, valorInv: 500000, traspaso: true,
+     orig: 'BODEGA DE ACTIVOS FIJOS', dest: 'BODEGA CENTRAL'},
+  ];
+  state.stock = []; state.recount = new Map(); state.manual = new Set();
+  state.hechos = new Map(); state.pmpEdit = new Map(); state.ajustes = [];
+  state.articulos = parseArticulos([
+    ['Informe de Inventario'], ['Empresa: X'], ['Fecha de generación: 08-10-2026, 08:20 a. m.'], [],
+    ['Código Artículo', 'Descripción', 'Bodega', 'Saldo', 'Unidad', 'Valor Unidad', 'Total'],
+    ['AAA', 'PROD AAA', 'BODEGA CENTRAL', 50, 'UN', 10000, 500000]]);
+  state.mov = docs;
+  const r = compute(docs).rows[0];
+  comprobar('no avisa que no cuadra', null, r.fotoDifiere);
+  // Su "Valor Movimiento" no movió el inventario, así que vale $0 de delta.
+  // Eso no es "entró a $0": no hay nada que corregir.
+  comprobar('no lo cuenta como ingreso a $0', 0, r.zeros);
+  state.articulos = null;
+
+  // Y la marca la pone el lector del informe, por traer las dos bodegas
+  const fila = (tipo, orig, dest) => [tipo, 'Aprobado', '1', '2026-08-01', orig, dest,
+    'TRASPASO', 'Ingreso', 'AAA', 'PROD AAA', '50', 'UN', '500000', '50', '500000'];
+  const CAB = ['Tipo Documento', 'Estado', 'Folio', 'Fecha', 'Bod. Origen', 'Bod. Destino',
+               'Motivo', 'Movimiento', 'Artículo', 'Descripción', 'Cant. Movimiento',
+               'U. Medida', 'Valor Movimiento', 'Saldo Inventario', 'Valor Inventario'];
+  const salida = ['52 Guia de Despacho Electronica', 'Aprobado', '2', '2026-08-01',
+    'BODEGA CENTRAL', '', 'VENTA', 'Egreso', 'AAA', 'PROD AAA', '5', 'UN', '50000', '45', '450000'];
+  const leido = parseMov([CAB,
+    fila('TRASPASO ENTRE BODEGAS', 'BODEGA DE ACTIVOS FIJOS', 'BODEGA CENTRAL'),
+    fila('PARTE DE ENTRADA', '', 'BODEGA CENTRAL'),
+    salida]);
+  comprobar('con las dos bodegas, es traspaso', true, leido[0].traspaso);
+  comprobar('una entrada, que sólo trae destino, no', false, leido[1].traspaso);
+  comprobar('una salida, que sólo trae origen, tampoco', false, leido[2].traspaso);
+});
+
+escenario('Con dos códigos, el arrastre es la suma de los dos', () => {
+  // El mismo kit está en Defontana con dos códigos, "HT-1" y "HT- 1", y cada
+  // uno arrastra su propio saldo y su propio valor. La última fila es la del
+  // código que se movió último, no la del producto: el código viejo quedó en
+  // cero y el nuevo tiene las 6 unidades. Mirando sólo la última fila el aviso
+  // decía que Defontana vale $6.789.444 y los movimientos dan $0, cuando los
+  // movimientos dan exactamente eso. En su informe eran 6 avisos falsos.
+  const viejo = [
+    {art: 'HT-1', key: 'HT1', nameKey: 'NHT', tipo: 'PARTE', folio: '1', fecha: DIA(2026, 8, 1),
+     kind: 'in', qty: 2, valor: 2619522, saldo: 2, valorInv: 2619522, um: '', orig: 'C', dest: 'C',
+     estado: 'Aprobado', motivo: '', desc: 'KIT'},
+    {art: 'HT-1', key: 'HT1', nameKey: 'NHT', tipo: 'GUIA', folio: '2', fecha: DIA(2026, 8, 4),
+     kind: 'out', qty: 2, valor: 2619522, saldo: 0, valorInv: 0, um: '', orig: 'C', dest: 'C',
+     estado: 'Aprobado', motivo: '', desc: 'KIT'},
+  ];
+  const nuevo = {art: 'HT- 1', key: 'HT1', nameKey: 'NHT', tipo: 'PARTE', folio: '3',
+     fecha: DIA(2026, 8, 2), kind: 'in', qty: 6, valor: 6789444, saldo: 6, valorInv: 6789444,
+     um: '', orig: 'C', dest: 'C', estado: 'Aprobado', motivo: '', desc: 'KIT'};
+  const docs = [viejo[0], nuevo, viejo[1]];   // la última fila es la del código viejo, en cero
+
+  state.stock = []; state.recount = new Map(); state.manual = new Set();
+  state.hechos = new Map(); state.pmpEdit = new Map(); state.ajustes = [];
+  state.articulos = parseArticulos([
+    ['Informe de Inventario'], ['Empresa: X'], ['Fecha de generación: 08-10-2026, 08:20 a. m.'], [],
+    ['Código Artículo', 'Descripción', 'Bodega', 'Saldo', 'Unidad', 'Valor Unidad', 'Total'],
+    ['HT- 1', 'KIT', 'BODEGA CENTRAL', 6, 'UN', 1131574, 6789444]]);
+  state.mov = docs;
+  const r = compute(docs).rows[0];
+  comprobar('no avisa que no cuadra', null, r.fotoDifiere);
+  state.articulos = null;
+});
+
+
 escenario('Sin foto, todo sigue saliendo de los movimientos', () => {
   const p = pantalla(null);
   comprobar('no hay nada que avisar', null, p.r.fotoDifiere);
