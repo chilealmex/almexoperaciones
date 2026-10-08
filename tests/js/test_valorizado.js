@@ -11,7 +11,7 @@
    Con sus archivos reales los dos coinciden en el 97,5% de las cantidades y el
    97,6% de los valores; el 2% que no coincide es lo que se avisa. */
 const {porId} = require('./entorno.js');
-const {compute, parseMov, parseArticulos, comoEstaHoy, valorizacionImposible, avisoDeFechas, state} =
+const {compute, parseMov, parseArticulos, parseStock, comoEstaHoy, valorizacionImposible, avisoDeFechas, state} =
   require('../../app/static/js/regularizacion.js');
 
 let fallas = 0, hechas = 0;
@@ -266,6 +266,30 @@ escenario('El valorizado también se llama "Valorización", y va antes', () => {
   // 943.447,67 / 209 = 4.514,1037
   comprobar('el costo sale de ahí, no de la columna en 0', 4514.1037,
             Math.round(a[0].costo * 1e4) / 1e4);
+});
+
+escenario('La fila de totales del conteo no es un artículo', () => {
+  // El archivo de conteo cierra con "Totales (3180)" y la suma de todo el
+  // stock físico en su columna. Leída como artículo deja un producto fantasma
+  // con 83.807 unidades contadas encima, que no existe en ninguna bodega.
+  const filas = [
+    ['Almex Operaciones — Toma de inventario cerrada el 30-09-2026 11:00'],
+    ['Cerrada por Super Administrador'], [],
+    ['Código', 'Nombre', 'Unidad Medida', 'Stock físico', 'Contado por', 'Fecha y hora del conteo', 'Línea de negocio'],
+    ['AAA', 'PROD AAA', 'UN', 13, 'Wilrayli', '19-08-2026 17:33', 'PRENSAS'],
+    ['Totales (3180)', '', '0', 83807, '', '', ''],
+  ];
+  const s = parseStock(filas);
+  comprobar('queda un solo artículo', 1, s.length);
+  comprobar('y es el de verdad', 'AAA', s[0].code);
+  // "Total general" y "Totales" a secas son las otras formas en que sale
+  comprobar('"Totales" a secas tampoco entra', 1,
+            parseStock([...filas.slice(0, 5), ['Totales', '', '', 99, '', '', '']]).length);
+  comprobar('"Total general" tampoco', 1,
+            parseStock([...filas.slice(0, 5), ['Total general', '', '', 99, '', '', '']]).length);
+  // Pero un código que empieza con esas letras sí es un artículo
+  comprobar('un código que sólo empieza parecido sí entra', 2,
+            parseStock([...filas.slice(0, 5), ['TOTALIZADOR-01', 'EQUIPO', 'UN', 2, '', '', '']]).length);
 });
 
 escenario('Una fila sin stock no deja el costo en NaN', () => {

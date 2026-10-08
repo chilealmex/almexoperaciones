@@ -75,6 +75,9 @@
     }
     return null;
   }
+  // "Totales", "Total general", "Totales (3180)": la fila de cierre que varios
+  // informes ponen al final. No es un artículo.
+  const ES_FILA_TOTAL = /^total(es)?\b/i;
   function parseStock(rows){
     const t = readTable(rows, ['CODIGO', 'STOCK FISICO']);
     if (!t) throw new Error('No encontré las columnas “Código” y “Stock físico”. ¿Es el archivo de Stock y conteo?');
@@ -85,6 +88,10 @@
     const out = [];
     for (const r of t.rows){
       const code = String(r[c.code] ?? '').trim(); if (!code) continue;
+      // La última fila del archivo de conteo es el total —"Totales (3180)"
+      // con 83.807 en la columna de stock físico—. Leída como artículo deja un
+      // producto fantasma con el stock de todo el inventario encima.
+      if (ES_FILA_TOTAL.test(code)) continue;
       out.push({code, key:keyOf(code), name:r[c.name] ?? '', stock:num(r[c.stock]), estado:c.estado >= 0 ? r[c.estado] ?? '' : '',
         por:c.por >= 0 ? r[c.por] ?? '' : '', fecha:c.fecha >= 0 ? parseDate(r[c.fecha]) : null, um:c.um >= 0 ? String(r[c.um] ?? '').trim() : '', linea:c.linea >= 0 ? String(r[c.linea] ?? '').trim() : ''});
     }
