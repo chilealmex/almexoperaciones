@@ -1280,7 +1280,9 @@
                          : (saldoHoy > EPS && last && last.valorInv != null ? last.valorInv / saldoHoy : 0);
       txt.push(`Defontana tiene ${fmt(uds)} unidades de este producto valorizadas en ${cuTxt(cuHoy)} c/u.`);
       hacer.push({k:'sinvalor', txt:`${AJ_COSTO_IN}: cargar el costo a las ${fmt(uds)} unidades` +
-        (suyo ? `. Entró a ${cuTxt(suyo.v)} c/u con ${suyo.doc} del ${fmtDate(suyo.fecha)}` : ', que nunca tuvo una compra con costo') + '.'});
+        (costoAMano > 0 ? ` a ${cuTxt(costoAMano)} c/u, el costo que escribiste`
+         : suyo ? `. Entró a ${cuTxt(suyo.v)} c/u con ${suyo.doc} del ${fmtDate(suyo.fecha)}`
+                : ', que nunca tuvo una compra con costo') + '.'});
     }
     const costos = [];
     for (const m of ins0){
@@ -1313,9 +1315,13 @@
       // el inventario quedó en cero, así que no hay nada que estimar.
       const suyo = costoDeSuCompra(docs);
       const uds = foto ? foto.stock : saldoHoy;
+      // El costo escrito a mano manda sobre el de su propia compra: la columna
+      // PMP es donde se corrige lo que el sistema propuso, y sin esto escribir
+      // ahí no cambiaba nada en este paso.
       costos.push({sinValor: true, doc: 'Unidades sin valor en Defontana', qty: uds,
-        v: suyo ? suyo.v : null,
-        src: suyo ? `entró a ${cuTxt(suyo.v)} c/u con ${suyo.doc} del ${fmtDate(suyo.fecha)}`
+        v: costoAMano > 0 ? costoAMano : suyo ? suyo.v : null,
+        src: costoAMano > 0 ? 'Ingresado a mano'
+           : suyo ? `entró a ${cuTxt(suyo.v)} c/u con ${suyo.doc} del ${fmtDate(suyo.fecha)}`
                   : 'nunca tuvo una compra con costo: usa el costo de la factura'});
     }
     const need = sinCostoHoy || ins0.length > 0;
@@ -1906,6 +1912,22 @@
     ['make', 'Documento a generar', '', z => z.rev.hacer]
   ];
 
+  // El costo que el paso 2a propone para este producto: el de su propia compra.
+  // Se muestra en la columna PMP para poder revisarlo —y cambiarlo— sin tener
+  // que ir al plan a buscarlo. Sale del mismo lugar que el plan, no de r.pmp:
+  // con sus archivos los dos no coinciden en 12 de los 167, y la pantalla y el
+  // plan tienen que decir lo mismo.
+  function costoPropuestoSinValor(r){
+    const c = r.cost && r.cost.costos ? r.cost.costos.find(x => x.sinValor) : null;
+    return c && c.v > 0 ? c.v : null;
+  }
+  // Dónde se puede escribir el costo: donde hay un ajuste de cantidad que
+  // valorizar, y en los productos con unidades sin valor, que es justo donde
+  // hay que poner un costo y la celda estaba de sólo lectura —173 de los 204
+  // de su informe—.
+  const pmpEditable = r => r.st === 'up' || r.st === 'down' || r.st === 'check'
+    || docSteps(r).some(x => x.k === 'sinvalor');
+
   const pmpInput = (key, v, edited, code) =>
     `<input class="pmp${edited ? ' edited' : v > 0 ? '' : ' missing'}" type="number" min="0" step="any" inputmode="decimal" data-key="${esc(key)}" value="${v != null ? Math.round(v*100)/100 : ''}" placeholder="Poner costo" aria-label="PMP de ${esc(code)}">`;
 
@@ -1952,7 +1974,7 @@
       <td class="obs">${obsCell(r)}</td>
       <td class="tomake">${stepsCell(docSteps(r), r)}${marcasCell(r)}${r.s ? botonPaso(r, 'todo', r.manual ? 'Desmarcar todo' : '✓ Todo regularizado', r.manual ? 'Volver a mostrarlo como pendiente' : 'Ya regularizaste todo este producto en Defontana') : ''}</td>
       <td class="num">${costCell(r)}</td>
-      <td class="num">${r.st === 'up' || r.st === 'down' || r.st === 'check' ? pmpInput(r.key, r.pmp, r.edited, r.code) : '<span class="mut">' + (r.pmp != null ? money(r.pmp) : '—') + '</span>'}</td>
+      <td class="num">${pmpEditable(r) ? pmpInput(r.key, r.edited ? r.pmp : (costoPropuestoSinValor(r) ?? r.pmp), r.edited, r.code) : '<span class="mut">' + (r.pmp != null ? money(r.pmp) : '—') + '</span>'}</td>
       <td class="num diff ${r.valor > 0.5 ? 'plus' : r.valor < -0.5 ? 'minus' : 'mut'}">${r.st === 'up' || r.st === 'down' || r.st === 'check' ? money(r.valor) : '—'}</td></tr>`;
   }
   function zeroRow(z){
@@ -2343,6 +2365,7 @@
     box.innerHTML = `<div class="ajhead"><h3>Orden recomendado</h3><button type="button" class="rx-btn sm" data-view-go="plan">Ver el plan completo por paso →</button></div><div class="pasos">
       ${paso('p-verify', 1, 'Confirmar lo dudoso', 'Recontar o revisar antes de tocar Defontana: diferencias por fechas de documentos o por unidad de medida.')}
       ${paso('p-cost', 2, 'Corregir costos', 'Primero los costos: Defontana valoriza cada entrada y salida al PMP del momento.')}
+      ${paso('sinvalor', '2a', 'Cargar el costo de lo que no vale nada', 'Unidades que Defontana tiene valorizadas en $0 o $1. Van antes de las cantidades: una entrada sobre un producto sin costo entra a $0.')}
       ${paso('p-in', 3, 'Entradas', 'Parte de Entrada por lo que sobra en bodega, antes de las salidas, para que el saldo no quede negativo.')}
       ${paso('p-out', 4, 'Salidas', 'Parte de Salida por lo que falta en bodega, ya con el costo correcto.')}
       <button type="button" class="paso" data-view-go="check"><span class="pnum">5</span><span class="ptxt"><b>Verificar</b> <span class="pwhy">Bajar de nuevo el informe de Defontana y revisarlo en “Verificar ajustes”.</span></span></button>
@@ -2796,6 +2819,6 @@
   // puerta, la matemática que decide los ajustes de inventario no se puede
   // comprobar más que a ojo.
   if (typeof module !== 'undefined' && module.exports){
-    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, parseArticulos, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, tipoAjCosto, avisoDeFechas, detectarAjustes, conAjustes, parseCostos, costoDeSuCompra, state};
+    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, parseArticulos, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, tipoAjCosto, avisoDeFechas, detectarAjustes, conAjustes, parseCostos, costoDeSuCompra, pmpEditable, costoPropuestoSinValor, renderStepsPanel, state};
   }
 })();
