@@ -200,13 +200,47 @@ escenario('Una entrada a $1 se revisa aunque hoy se vea bien', () => {
   comprobar('y no inventa un ajuste de costo que no existe', false, /ajuste de costo \(/.test(texto));
 });
 
-escenario('Si cuadra por un ajuste de costo ya hecho, lo dice', () => {
+escenario('Si ya se le hizo el ajuste de costo, deja de pedirse', () => {
+  // Una entrada a $1 se muestra mientras el producto siga sin resolver. Una
+  // vez resuelto deja de pedirse: lo que se pediría es exactamente lo que ya
+  // se hizo. Sin esto, cada producto regularizado en el paso 2a reaparece al
+  // día siguiente en el paso 2 —con sus 189 AJUSTE COSTO ENTRADA del 08-10
+  // eran 59 productos volviendo a pedir lo mismo—.
   const {P, r} = plan(conUnAjuste(ACOMODADO), parseArticulos(INV(['AAA', 'PROD AAA', 'BODEGA CENTRAL', 105, 'UN', 952.4, 100005])));
-  comprobar('igual aparece para revisar', 1, P.cost.length);
-  const texto = P.cost[0].nota + ' ' + (r.costExtra || []).map(z => z.rev.txt).join(' ');
-  comprobar('dice que ya hay un ajuste de costo', true, /ajuste de costo \(AJUSTE COSTO ENTRADA #7\)/.test(texto));
-  comprobar('y que el valor cuadra por eso', true, /cuadra por eso/.test(texto));
+  comprobar('ya no aparece en el paso 2', 0, P.cost.length);
+  comprobar('ni colgado del producto', 0, (r.costExtra || []).length);
+  // Pero la fila sigue en la vista de movimientos, explicando por qué no hay
+  // nada que hacer: esconderla sin decir nada obliga a averiguarlo de nuevo.
+  const fila = state.zero.find(z => z.raro);
+  const texto = fila.rev.txt + ' ' + fila.rev.hacer;
+  comprobar('dice qué comprobante lo arregló', true, /AJUSTE COSTO ENTRADA #7/.test(texto));
+  comprobar('y que no hay nada que hacer', true, /el costo ya se ajustó/.test(texto));
   comprobar('no lo atribuye a los movimientos', false, /movimientos posteriores lo acomodaron/.test(texto));
+});
+
+escenario('El ajuste se reconoce aunque no venga marcado', () => {
+  // Sus AJUSTE COSTO ENTRADA no traen ninguna marca interna: son cantidad 0
+  // con valor, y el inventario sube por ese monto. Así vienen en el informe,
+  // y así hay que reconocerlos —si no, los 59 productos que regularizó
+  // seguirían pidiendo lo mismo—.
+  const sinMarca = [...ACOMODADO, {art: 'AAA', key: 'AAA', nameKey: 'NAAA',
+    tipo: 'AJUSTE COSTO ENTRADA', folio: '3', fecha: DIA(2026, 8, 9), kind: 'in',
+    qty: 0, valor: 50000, saldo: 105, valorInv: 150005, um: '', orig: '', dest: 'C',
+    estado: 'Aprobado', motivo: 'AJUSTE', desc: 'PROD AAA'}];
+  const {P} = plan(sinMarca, parseArticulos(INV(['AAA', 'PROD AAA', 'BODEGA CENTRAL', 105, 'UN', 1428.6, 150005])));
+  comprobar('deja de pedirse igual', 0, P.cost.length);
+  comprobar('y lo nombra', true, /AJUSTE COSTO ENTRADA #3/.test(state.zero.find(z => z.raro).rev.txt));
+});
+
+escenario('Pero si el PMP de hoy sigue mal, se pide igual', () => {
+  // El ajuste no es un salvoconducto: si después de hacerlo el producto sigue
+  // valorizado fuera de lo normal, hay algo más que revisar.
+  const malParado = [...docsDe([ing(5, 1000, 1), ing(100, 1000, 2), ing(100, 1000, 3), ing(50, 60000, 4)]),
+    {art: 'AAA', key: 'AAA', nameKey: 'NAAA', tipo: 'AJUSTE COSTO ENTRADA', folio: '9',
+     fecha: DIA(2026, 8, 9), kind: 'in', qty: 0, valor: 1000, saldo: 255, valorInv: 3206000,
+     um: '', orig: '', dest: 'C', estado: 'Aprobado', motivo: 'AJUSTE', desc: 'PROD AAA'}];
+  const {P} = plan(malParado, parseArticulos(INV(['AAA', 'PROD AAA', 'BODEGA CENTRAL', 255, 'UN', 12572, 3206000])));
+  comprobar('sigue pidiéndose', true, P.cost.length > 0);
 });
 
 escenario('El 40080-004: no entró a $1, eso lo decía la columna mala', () => {
