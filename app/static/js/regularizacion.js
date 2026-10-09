@@ -1448,6 +1448,19 @@
     const porQue = yaAjustado.length
       ? `ya se le hizo un ajuste de costo (${[...new Set(yaAjustado.map(x => `${x.tipo} #${x.folio}`))].join(', ')}): el valor cuadra por eso`
       : 'los movimientos posteriores lo acomodaron';
+    // Si ya se le hizo el ajuste de costo, no hay nada que revisar: lo que se
+    // pediría es exactamente lo que ya se hizo. Una entrada a $1 se muestra
+    // mientras el producto siga sin resolver, pero una vez resuelto deja de
+    // pedirse: si no, cada producto regularizado en el paso 2a reaparece en el
+    // paso 2 al día siguiente. Con sus 189 AJUSTE COSTO ENTRADA del 08-10 eran
+    // 59 productos volviendo a pedir lo mismo.
+    const yaSeArreglo = costFixed(docs, j, null);
+    if (!hoy.malo && yaSeArreglo) return {
+      need: false, costo: null, corr: null,
+      txt: `No. Entró a ${cuTxt(raro.cu)} c/u, que no es un costo real, pero ${yaSeArreglo}: ` +
+        `hoy son ${fmt(hoy.stock)} unidades a ${cuTxt(hoy.pmp)} c/u.`,
+      hacer: 'Nada: el costo ya se ajustó',
+    };
     if (!hoy.malo) return raro.irrisorio ? {
       need: true, costo: null, corr: null, ajusteCosto: null, soloRevisar: true,
       txt: `Entró a ${cuTxt(raro.cu)} c/u, que no es un costo real. El PMP de hoy (${cuTxt(hoy.pmp)}) se ve bien${aQue ? ' (' + aQue + ')' : ''}: ${porQue}.`,
