@@ -421,7 +421,8 @@
     egrnodesp: 'Salida registrada que sigue en bodega',
     um:        'Posible otra unidad de medida',
     noin:      'Falta registrar un ingreso',
-    noout:     'Falta registrar una salida'
+    noout:     'Falta registrar una salida',
+    faltanmov: 'Al informe le faltan movimientos de este producto'
   };
   const near = (a, b) => Math.abs(a - b) < 1e-6;
   const docTxt = m => `${m.tipo} #${m.folio} del ${fmtDate(m.fecha)} por ${fmt(m.qty)}`;
@@ -616,6 +617,31 @@
       // los saldos al conteo y final se calculan sumando los documentos.
       // El traspaso no suma ni resta: cambia de bodega, no de inventario.
       const signed = m => m.traspaso ? 0 : m.kind === 'in' ? m.qty : -m.qty;
+      // El informe a veces no trae todos los movimientos de un producto: el
+      // Saldo Inventario salta sin que ninguna fila lo explique. En 23083-012
+      // sube 14 entre el 14-09 y el 01-10 sin un solo movimiento en medio, y
+      // cae 30 con un egreso de 2: 56 unidades que el informe no explica.
+      //
+      // Importa porque "lo que debería tener hoy" se calcula sumando el conteo
+      // y los movimientos: si faltan movimientos, esa cuenta sale mal y el
+      // ajuste que se propone es un fantasma. Mejor decirlo y mandarlo a
+      // confirmar que proponer una cantidad sacada de una historia incompleta.
+      // Con sus archivos son 4 productos de 1.737.
+      let faltanMov = null;
+      for (const list of byArt.values()){
+        let prev = null, saltos = 0, unidades = 0, primero = null;
+        for (const m of list){
+          if (m._ext || m.saldo == null) continue;
+          if (prev != null){
+            const hueco = m.saldo - (prev + signed(m));
+            if (Math.abs(hueco) > 1e-6){ saltos++; unidades += Math.abs(hueco); if (!primero) primero = m; }
+          }
+          prev = m.saldo;
+        }
+        if (saltos) faltanMov = {saltos: (faltanMov ? faltanMov.saltos : 0) + saltos,
+                                 unidades: (faltanMov ? faltanMov.unidades : 0) + unidades,
+                                 desde: faltanMov ? faltanMov.desde : primero};
+      }
       let sysNow = null, sysAtCount = null, sysCalc = null, toOther = 0;
       const porArt = [];
       for (const list of byArt.values()){
@@ -770,7 +796,7 @@
         if (hechos.has('costo')) cost = null;
         if (hechos.has('cantidad') && (st === 'up' || st === 'down')) st = 'done';
       }
-      return {cause:dx.cause, obs:dx.obs, hechos, foto, fotoDifiere, umRound: !!dx.umRound, umMaster: !!dx.umMaster, linea: s ? s.linea || '' : '', alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, umInfo, arts, artAjuste, pend, costDocs, manual, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs, sysCalc, toOther,
+      return {cause:dx.cause, obs:dx.obs, hechos, foto, fotoDifiere, faltanMov, umRound: !!dx.umRound, umMaster: !!dx.umMaster, linea: s ? s.linea || '' : '', alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, umInfo, arts, artAjuste, pend, costDocs, manual, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs, sysCalc, toOther,
         sysAtCount, sysNow, realNow, diff, st, pmp, edited, pmpSrc: edited ? 'Ingresado a mano' : pm ? pm.src : 'Sin costo en Defontana',
         valor: st === 'done' ? 0 : pend != null && pmp != null ? pend * pmp : diff != null && Math.abs(diff) > EPS && pmp != null ? diff * pmp : (st === 'ok' ? 0 : null), zeros, cost};
     };
@@ -1603,6 +1629,17 @@
   const PASOS_MARCABLES = ['confirmar', 'costo', 'cantidad'];
   const PASO_DE = {verify:'confirmar', unit:'confirmar', sinvalor:'costo', cost:'costo', in:'cantidad', out:'cantidad', none:null};
   const PASO_NOMBRE = {confirmar:'Confirmado (unidad / revisión)', costo:'Costo regularizado', cantidad:'Cantidad regularizada'};
+  // El aviso de que al informe le faltan movimientos. Vive aparte porque lo
+  // usan la pantalla y el plan, y los dos tienen que decir lo mismo.
+  function avisoFaltanMov(r){
+    const f = r.faltanMov;
+    return `Al informe le faltan movimientos de este producto: su Saldo Inventario ` +
+      `salta ${f.saltos === 1 ? 'una vez' : fmt(f.saltos) + ' veces'} sin que ninguna fila lo explique ` +
+      `(${fmt(Math.round(f.unidades))} unidades` +
+      (f.desde ? `, la primera en ${f.desde.tipo} #${f.desde.folio} del ${fmtDate(f.desde.fecha)}` : '') +
+      `). No ajustes por la diferencia calculada: comparar el conteo contra lo que Defontana tiene hoy.`;
+  }
+
   function docSteps(r){
     if (r._steps) return r._steps;
     const d = r.pend ?? r.diff, q = d != null ? fmt(Math.abs(d)) : '', steps = [];
@@ -1618,6 +1655,9 @@
       if (r.st === 'nodata') add('verify', 'Ver el saldo del producto en Defontana (no hay documentos en el informe)');
       if (r.st === 'nocount') add('verify', 'Contar el producto');
       if (r.st === 'nofile') add('verify', 'Revisar por qué no está en el conteo');
+      // El informe no explica su propio saldo: la cuenta de "lo que debería
+      // tener hoy" se apoya en los movimientos, así que acá no sirve.
+      if (r.faltanMov) add('verify', avisoFaltanMov(r));
     }
     if (r.st === 'done') add('none', hecho('cantidad') ? 'Nada: marcaste la cantidad como ya regularizada' : 'Nada: ya se ajustó la cantidad');
     // Los dos pasos de costo no se pisan. El 2 es para lo que TIENE valor y
@@ -1839,6 +1879,7 @@
     ['cost', 'Revisar costo ($0)', r => !!(r.cost && r.cost.need), 'var(--warn)'],
     ['recount', 'Recontados', r => !!(r.s && r.s.recontado), 'var(--accent)'],
     ['foto', 'No cuadra con el stock valorizado', r => !!r.fotoDifiere, 'var(--warn)'],
+    ['faltanmov', 'Le faltan movimientos en el informe', r => !!r.faltanMov, 'var(--warn)'],
     ['sinvalor', 'Con unidades y sin valor', r => docSteps(r).some(x => x.k === 'sinvalor'), 'var(--warn)'],
     ['p-verify', 'Paso 1: confirmar', r => !r.umRound && r.st === 'check' || (r.cause === 'um' && (r.st === 'up' || r.st === 'down')), 'var(--warn)', true],
     ['p-cost', 'Paso 2: corregir costos', r => docSteps(r).some(x => x.k === 'cost'), 'var(--warn)', true],
@@ -2069,11 +2110,26 @@
   // ---------- Plan de ajustes: listado por paso ----------
   function buildPlan(){
     const R = state.rows, plan = {verify:[], sinValor:[], cost:[], in:[], out:[]};
-    const dudoso = r => !r.umRound && (r.st === 'check' || (r.cause === 'um' && (r.st === 'up' || r.st === 'down')));
+    // A los que les faltan movimientos en el informe se les revisa antes de
+    // tocar Defontana: la cantidad que saldría está calculada sobre una
+    // historia incompleta.
+    const dudoso = r => !r.umRound && (r.st === 'check' || !!r.faltanMov
+      || (r.cause === 'um' && (r.st === 'up' || r.st === 'down')));
     const lin = $('optLinea').value;
     for (const r of R){
       if (lin && (r.linea || '') !== lin) continue;
-      if (dudoso(r)){ plan.verify.push({r, qty:r.diff, txt: (r.obs[0] || docSteps(r).find(x => x.k === 'verify').txt).replace(/<[^>]+>/g, ''), motivo: r.cause ? CAUSES[r.cause] : ''}); continue; }
+      if (dudoso(r)){
+        // Cuando al informe le faltan movimientos, manda ese aviso: el
+        // diagnóstico de la diferencia está hecho sobre la misma historia
+        // incompleta, así que explicar la diferencia sería explicar un
+        // fantasma. En 23083-012 decía que lo que sobra calza con una salida
+        // de 8 del 2025, cuando lo que pasa es que faltan 56 unidades.
+        const paso = docSteps(r).find(x => x.k === 'verify');
+        const txt = r.faltanMov ? avisoFaltanMov(r) : (r.obs[0] || (paso ? paso.txt : ''));
+        plan.verify.push({r, qty:r.diff, txt: String(txt).replace(/<[^>]+>/g, ''),
+          motivo: r.faltanMov ? CAUSES.faltanmov : r.cause ? CAUSES[r.cause] : ''});
+        continue;
+      }
       // Mismo criterio que docSteps(): lo que va al 2a no va también al 2.
       const vaAlSinValor = !!(r.cost && r.cost.need && r.cost.costos.some(c => c.sinValor));
       if (r.cost && r.cost.need){
