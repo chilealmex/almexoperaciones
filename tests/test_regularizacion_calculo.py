@@ -24,6 +24,7 @@ PRUEBAS = {
     "los costos malos entran al paso 2 del plan": JS / "test_plan.js",
     "cada paso se marca por su cuenta": JS / "test_marcas.js",
     "el ajuste de costo se mide contra lo que Defontana tiene hoy": JS / "test_recosteo.js",
+    "se avisa cuando al informe le faltan movimientos": JS / "test_faltanmov.js",
     "el stock valorizado manda sobre lo que arrastran los movimientos": JS / "test_valorizado.js",
     "los costos se llenan en el Excel y se suben de vuelta": JS / "test_costos_excel.js",
     "los productos con unidades y sin valor van en su propio paso": JS / "test_sinvalor.js",
@@ -57,3 +58,4 @@ def test_las_comprobaciones_del_navegador_existen():
     assert "manda la foto" in (JS / "test_valorizado.js").read_text(encoding="utf-8")
     assert "se suben de vuelta" in (JS / "test_costos_excel.js").read_text(encoding="utf-8")
     assert "su propia compra" in (JS / "test_sinvalor.js").read_text(encoding="utf-8")
+    assert "Saldo Inventario salta" in (JS / "test_faltanmov.js").read_text(encoding="utf-8")
