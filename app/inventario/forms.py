@@ -17,6 +17,20 @@ class ImportarCsvForm(FlaskForm):
     )
 
 
+class ImportarConteoForm(FlaskForm):
+    """El conteo físico subido de a muchos, en vez de fila por fila.
+
+    Sin la casilla de "solo no contados" de los otros importadores: acá el
+    archivo ES el conteo, así que si trae una cantidad es porque se contó y
+    manda sobre lo que hubiera.
+    """
+
+    archivo = FileField(
+        "Archivo CSV o Excel con el conteo",
+        validators=[DataRequired(), FileAllowed(["csv", "xlsx"], "Debe ser un archivo .csv o .xlsx")],
+    )
+
+
 class CruceDePruebaForm(FlaskForm):
     """Las dos planillas que se comparan sin cargarlas al sistema.
 

@@ -10,7 +10,7 @@ from sqlalchemy import or_, and_
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.inventario import bp
-from app.inventario.forms import AccionForm, CruceDePruebaForm, ImportarCsvForm
+from app.inventario.forms import AccionForm, CruceDePruebaForm, ImportarConteoForm, ImportarCsvForm
 from app.extensions import db
 from app.models.conteo_inventario import ItemConteoInventario, TomaInventario, TomaInventarioDetalle
 from app.models.equivalencia_codigo import EquivalenciaCodigo, crear_equivalencia
@@ -22,6 +22,7 @@ from app.utils.decorators import require_permission
 from app.utils.equivalencias_codigos import proponer
 from app.utils.importar_conteo import (
     articulos_fuera_de_ambas_planillas,
+    importar_conteo_fisico,
     leer_defontana,
     leer_qms,
     clave_sin_ceros,
@@ -1493,7 +1494,8 @@ def conteo_importar():
     form_defontana = ImportarCsvForm(prefix="def")
     total_items = ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id).count()
     return render_template(
-        "inventario/conteo_importar.html", form_qms=form_qms, form_defontana=form_defontana, total_items=total_items
+        "inventario/conteo_importar.html", form_qms=form_qms, form_defontana=form_defontana,
+        form_conteo=ImportarConteoForm(prefix="cnt"), total_items=total_items
     )
 
 
@@ -1675,6 +1677,61 @@ def conteo_importar_qms():
     else:
         flash("Selecciona un archivo .csv o .xlsx válido.", "danger")
     return redirect(url_for("inventario.conteo_importar"))
+
+
+def _resumen_conteo(r) -> str:
+    """Qué pasó al subir el conteo, en una línea, nombrando lo que no entró."""
+    partes = [f"{r['actualizados']} artículos actualizados"]
+    if r["sin_cambio"]:
+        partes.append(f"{r['sin_cambio']} ya tenían esa cantidad")
+    if r["vacias"]:
+        partes.append(f"{r['vacias']} filas sin cantidad")
+    texto = f"Conteo cargado: {', '.join(partes)}."
+    # Lo que no entró se dice con nombre y apellido: un recuento de filas
+    # descartadas obliga a buscarlas a mano en el archivo.
+    def _lista(titulo, codigos, tope=10):
+        if not codigos:
+            return ""
+        muestra = ", ".join(codigos[:tope])
+        resto = f" y {len(codigos) - tope} más" if len(codigos) > tope else ""
+        return f" {titulo}: {muestra}{resto}."
+    texto += _lista("No están en el maestro", r["sin_codigo"])
+    texto += _lista("Cantidad ambigua, escríbela con coma o sin puntos", r["ambiguos"])
+    texto += _lista("No se entendió la cantidad", r["sin_numero"])
+    texto += _lista("Cantidad negativa", r["negativos"])
+    return texto
+
+
+@bp.route("/conteo/importar/conteo", methods=["POST"])
+@require_permission("inventario", "editar")
+def conteo_importar_fisico():
+    """Sube el conteo físico de a muchos. No toca nada más del artículo."""
+    form = ImportarConteoForm(prefix="cnt")
+    if not form.validate_on_submit():
+        flash("Selecciona un archivo .csv o .xlsx válido.", "danger")
+        return redirect(url_for("inventario.conteo_importar"))
+    try:
+        resultado = importar_conteo_fisico(
+            form.archivo.data, current_user.empresa_id, current_user.id
+        )
+        hubo_problemas = any(resultado[k] for k in ("sin_codigo", "ambiguos", "sin_numero", "negativos"))
+        flash(_resumen_conteo(resultado), "warning" if hubo_problemas else "success")
+    except ValueError as e:
+        flash(str(e), "danger")
+    except SQLAlchemyError as e:
+        _avisar_fallo_de_importacion(e, "el conteo")
+    return redirect(url_for("inventario.conteo_importar"))
+
+
+@bp.route("/conteo/importar/plantilla-conteo")
+@require_permission("inventario", "editar")
+def conteo_plantilla_conteo():
+    return responder_plantilla_excel(
+        "plantilla-conteo",
+        "Conteo",
+        ["Código", "Descripción", "Stock físico"],
+        fila_ejemplo=["ROP-BCAN-M", "Roldana cable acero", 12],
+    )
 
 
 @bp.route("/conteo/importar/defontana", methods=["POST"])
