@@ -78,7 +78,11 @@ def test_unir_dos_codigos_distintos_vale_en_todas_las_pantallas(
                 follow_redirects=True)
 
     assert ItemConteoInventario.query.count() == 1
-    assert _donde_aparece(client, "GOLPRE-58") == []
+    # En Stock y conteo el código de Defontana sí se sigue viendo, y a
+    # propósito: es la columna "Código Defontana" de la línea que quedó, que es
+    # con lo que se busca el artículo allá. Lo que no puede pasar es que siga
+    # siendo una fila aparte, y eso lo dice el conteo de arriba.
+    assert _donde_aparece(client, "GOLPRE-58") == ["Stock y conteo"]
     assert "GOLPRE-58" in client.get("/inventario/equivalencias").get_data(as_text=True)
     # Y la que queda trae los dos lados: ya no "falta en" ninguno
     queda = ItemConteoInventario.query.one()
