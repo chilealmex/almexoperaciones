@@ -203,7 +203,10 @@ def test_lo_ya_unido_sale_de_las_propuestas(client, db, empresa, usuario_admin):
     }, follow_redirects=True)
 
     cuerpo = client.get("/inventario/equivalencias").get_data(as_text=True)
-    propuestas = cuerpo[cuerpo.index("Parejas propuestas"):cuerpo.index("Ya unidos")]
+    # El corte llega hasta "Unir a mano" y no hasta "Ya unidos": esa caja trae
+    # un código de ejemplo escrito en el texto, y contarlo como si fuera una
+    # propuesta daría por fallada una pantalla que está bien.
+    propuestas = cuerpo[cuerpo.index("Parejas propuestas"):cuerpo.index("Unir a mano")]
 
     assert "GOLPRE-58" not in propuestas
     assert "Ya unidos <span class=\"text-muted\">(1)</span>" in cuerpo
@@ -614,7 +617,10 @@ def test_si_el_codigo_esta_en_el_otro_sistema_lo_dice(client, db, empresa, usuar
 
     cuerpo = _intentar_unir(client, "SOLO-EN-DEFO", "SOLO-EN-QMS")
 
-    assert "está en Defontana, no en QMS" in cuerpo
+    # Lo primero que hay que leer es que ahí no existe: es la respuesta a lo que
+    # se acaba de intentar. Dónde sí está viene después, como la pista.
+    assert "no existe en QMS" in cuerpo
+    assert "sólo en Defontana" in cuerpo
     assert "al revés" in cuerpo
 
 

@@ -2035,7 +2035,7 @@ def _codigo_que_no_esta(codigo, sueltos, sistema) -> str:
             "Dar de baja los que ya no existen."
         )
     return (
-        f'"{item.codigo}" está en {otro}, no en {sistema}. '
+        f'"{item.codigo}" no existe en {sistema}: está sólo en {otro}. '
         "Revisa si pusiste los dos códigos al revés."
     )
 
@@ -2140,6 +2140,11 @@ def equivalencias_codigos():
         grupos=grupos_duplicados(current_user.empresa_id),
         clave_sin_ceros=clave_sin_ceros,
         rarezas_del_codigo=rarezas_del_codigo,
+        # "Unir a mano" también junta dos líneas del maestro, y ese caso existe
+        # aunque no haya quedado ni un código suelto en un solo sistema.
+        total_items=ItemConteoInventario.query.filter_by(
+            empresa_id=current_user.empresa_id
+        ).count(),
         form=AccionForm(),
         **_los_que_ya_cruzan(current_user.empresa_id, request.args.get("cruzado", "")),
     )
@@ -2222,6 +2227,78 @@ def _absorber_fila_de_defontana(codigo_qms, codigo_defo, solo_qms, solo_defo) ->
     db.session.delete(origen)
 
 
+def _dos_lineas_del_maestro(codigo_a, codigo_b):
+    """Las dos líneas a juntar, o None si esto no es ese caso.
+
+    Se exige que las dos estén en los DOS sistemas, que es exactamente la
+    situación que no tenía salida: el mismo artículo cargado dos veces, con un
+    código distinto, en QMS y en Defontana a la vez.
+
+    Pedir tanto no es rigor de más. Si bastara con que las dos líneas
+    existieran, escribir un código de Defontana en la casilla de QMS —un
+    cambio de casilla, el error más fácil de cometer acá— dejaría dos líneas
+    que existen, y en vez de avisar del error se fundirían en una sumando el
+    stock. Cuando alguno de los dos no está en los dos sistemas, lo que
+    corresponde es decir dónde está y dónde no.
+    """
+    items = _items_de_la_empresa_actual()
+    por_clave = {codigo_normalizado(i.codigo): i for i in items}
+    a = por_clave.get(codigo_normalizado(codigo_a))
+    b = por_clave.get(codigo_normalizado(codigo_b))
+    if a is None or b is None or a.id == b.id:
+        return None
+    if not all(i.en_qms and i.en_defontana for i in (a, b)):
+        return None
+    return a, b
+
+
+def _el_que_no_tiene_linea(codigo_a, codigo_b) -> str:
+    """El aviso del primero de los dos que no tiene línea en el maestro.
+
+    Vacío si los dos existen. Se le pasan cero sueltos a propósito: sólo se
+    llama con un código que ya se comprobó que no está, así que el aviso que
+    sale es el de "no existe", con los códigos parecidos para encontrar el
+    dedazo.
+    """
+    claves = {codigo_normalizado(i.codigo) for i in _items_de_la_empresa_actual()}
+    for codigo in (codigo_a, codigo_b):
+        if codigo and codigo_normalizado(codigo) not in claves:
+            return _codigo_que_no_esta(codigo, [], "QMS")
+    return ""
+
+
+def _unir_dos_lineas(codigo_a, codigo_b) -> str:
+    """Junta dos líneas del maestro que son el mismo artículo. Devuelve el aviso.
+
+    Es el tercer caso, el que no tenía salida. "El mismo código escrito
+    distinto" sólo agrupa códigos que se parecen; las parejas entre sistemas
+    sólo miran los que quedaron en un solo sistema. Dos códigos que no se
+    parecen en nada y que están los dos en los dos sistemas —el mismo artículo
+    cargado dos veces en cada sistema— no entraban en ninguno de los dos, y
+    unir a mano los rechazaba diciendo que no había nada que unir.
+
+    Se usa la misma maquinaria que los duplicados: se suman las cantidades de
+    cada sistema, porque cada línea era stock declarado por separado; el conteo
+    físico se conserva; y el código que se retira queda guardado apuntando al
+    que queda, así la unión sobrevive a las próximas importaciones en vez de
+    deshacerse en la siguiente carga.
+    """
+    par = _dos_lineas_del_maestro(codigo_a, codigo_b)
+    if par is None:
+        return ""
+    antes = {i.codigo: (i.cantidad_qms or 0, i.cantidad_defontana or 0) for i in par}
+    principal = unificar_grupo(list(par), current_user.id)
+    db.session.commit()
+    retirado = next(c for c in antes if c != principal.codigo)
+    return (
+        f"{retirado} y {principal.codigo} quedaron en una sola línea, con el código "
+        f"{principal.codigo}: {format_cantidad(principal.cantidad_qms)} en QMS y "
+        f"{format_cantidad(principal.cantidad_defontana)} en Defontana, sumando las dos. "
+        f"{retirado} queda apuntando ahí, así que las próximas importaciones no los "
+        "vuelven a separar. Si fue un error, se deshace en “Códigos ya unificados”."
+    )
+
+
 @bp.route("/equivalencias/unir", methods=["POST"])
 @require_permission("inventario", "editar")
 def equivalencias_unir():
@@ -2240,7 +2317,19 @@ def equivalencias_unir():
         codigo_defo, solo_defo, "Defontana"
     )
     if faltante:
-        flash(faltante, "warning")
+        # No es una pareja entre sistemas, pero sí pueden ser dos líneas del
+        # maestro que son el mismo artículo: eso también es unirlos, sólo que
+        # con el otro mecanismo. Rechazarlo diciendo "no hay nada que unir"
+        # dejaba el caso sin ninguna salida en la pantalla.
+        hecho = _unir_dos_lineas(codigo_qms, codigo_defo)
+        if hecho:
+            flash(hecho, "success")
+            return redirect(url_for("inventario.equivalencias_codigos"))
+        # 'faltante' es el aviso del primero de los dos que no servía como
+        # pareja entre sistemas, y puede ser el que está bien escrito. Si lo
+        # que pasa es que uno de los dos no existe, ese es el problema y hay
+        # que nombrarlo: avisar del otro manda a revisar el código sano.
+        flash(_el_que_no_tiene_linea(codigo_qms, codigo_defo) or faltante, "warning")
         return redirect(url_for("inventario.equivalencias_codigos"))
 
     _equivalencia, error = crear_equivalencia(

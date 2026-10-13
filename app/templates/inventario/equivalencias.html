@@ -165,14 +165,25 @@
 </div>
 {% endif %}
 
-{# ---------- Unir a mano ---------- #}
-{% if solo_qms and solo_defontana %}
+{# ---------- Unir a mano ----------
+   Ya no depende de que haya sueltos en los dos sistemas: también sirve para
+   juntar dos líneas del maestro que son el mismo artículo, y ese caso existe
+   aunque no quede ni un código suelto. #}
+{% if total_items %}
 <div class="card mb-4">
   <div class="card-body">
     <h2 class="h6">Unir a mano</h2>
     <p class="text-muted small">
       Para las parejas que el sistema no propone porque los códigos no se parecen en nada.
       Tú sabes cuáles son; el sistema sólo puede adivinar por el texto.
+    </p>
+    <p class="text-muted small">
+      Sirve para las dos cosas, según lo que sean los códigos que escribas:
+      si cada uno está en un sistema distinto, quedan <strong>cruzados</strong> —los dos códigos
+      siguen vivos, uno en cada sistema—. Si los dos son líneas del maestro, quedan
+      <strong>en una sola línea</strong>: se suman las cantidades de QMS y de Defontana, el conteo
+      físico se conserva y el código que se retira queda apuntando al que queda, así las próximas
+      importaciones no los vuelven a separar.
     </p>
     {# Se escriben los códigos en vez de elegirlos de una lista: con miles de
        artículos sueltos, dos listas desplegables son miles de <option> que el
@@ -181,19 +192,23 @@
     <form method="post" action="{{ url_for('inventario.equivalencias_unir') }}" class="row g-2 align-items-end">
       {{ form.hidden_tag() }}
       <div class="col-12 col-md-5">
-        <label class="form-label small mb-1" for="cod-qms">Código en QMS</label>
+        <label class="form-label small mb-1" for="cod-qms">Código en QMS, o el primero</label>
         <input type="text" class="form-control" id="cod-qms" name="codigo_qms" required
                placeholder="{{ solo_qms[0].codigo if solo_qms else 'GOL.PRE-5_8' }}"
                autocomplete="off" spellcheck="false">
       </div>
       <div class="col-12 col-md-5">
-        <label class="form-label small mb-1" for="cod-defo">Código en Defontana</label>
+        <label class="form-label small mb-1" for="cod-defo">Código en Defontana, o el segundo</label>
         <input type="text" class="form-control" id="cod-defo" name="codigo_defontana" required
                placeholder="{{ solo_defontana[0].codigo if solo_defontana else 'GOLPRE-58' }}"
                autocomplete="off" spellcheck="false">
       </div>
       <div class="col-12 col-md-2">
-        <button type="submit" class="btn btn-outline-primary w-100">Unir</button>
+        {# Juntar dos líneas del maestro suma stock y borra una fila. Se puede
+           deshacer, pero no devuelve la línea hasta la próxima importación, así
+           que vale preguntar antes de un dedazo. #}
+        <button type="submit" class="btn btn-outline-primary w-100"
+                onclick="return confirm('¿Unir estos dos códigos?\n\nSi cada uno está en un sistema distinto, quedan cruzados.\n\nSi los dos son líneas del maestro, quedan en UNA SOLA LÍNEA: se suman las cantidades de QMS y de Defontana y una de las dos filas desaparece.')">Unir</button>
       </div>
     </form>
   </div>
