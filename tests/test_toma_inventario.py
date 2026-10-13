@@ -315,7 +315,9 @@ def test_el_excel_de_stock_muestra_quien_conto_tras_continuar(client, empresa, u
     import openpyxl
     hoja = openpyxl.load_workbook(io.BytesIO(respuesta.data)).active
     filas = [[c.value for c in fila] for fila in hoja.iter_rows()]
-    encabezado = next(f for f in filas if f and "Código" in f)
+    # "Código QMS" y no "Código": la planilla trae una columna por sistema,
+    # porque cada uno puede nombrar al artículo con un código distinto.
+    encabezado = next(f for f in filas if f and "Código QMS" in f)
     i_por = encabezado.index("Contado por")
     i_cuando = encabezado.index("Fecha y hora del conteo")
     fila = next(f for f in filas if f and f[0] == "COD-001")
