@@ -159,9 +159,26 @@ def _consulta_stock(args, filtro_por_defecto="todos", esconder_vacios_por_defect
     base = ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id)
     if q:
         patron = f"%{q}%"
-        base = base.filter(
-            or_(ItemConteoInventario.codigo.ilike(patron), ItemConteoInventario.nombre.ilike(patron))
-        )
+        # También por el código con que lo nombra Defontana: ahora que esa
+        # columna se ve, buscar lo que se está mirando tiene que encontrarlo.
+        # La línea del maestro lleva el código de QMS, así que sin esto la
+        # pantalla contesta "no hay resultados" por un artículo que está ahí.
+        claves = [
+            e.clave_qms
+            for e in EquivalenciaCodigo.query.filter_by(empresa_id=current_user.empresa_id).all()
+            if q.lower() in e.codigo_defontana.lower()
+        ]
+        condiciones = [
+            ItemConteoInventario.codigo.ilike(patron),
+            ItemConteoInventario.nombre.ilike(patron),
+        ]
+        if claves:
+            condiciones.append(ItemConteoInventario.codigo.in_(
+                [i.codigo for i in ItemConteoInventario.query.filter_by(
+                    empresa_id=current_user.empresa_id).all()
+                 if codigo_normalizado(i.codigo) in set(claves)]
+            ))
+        base = base.filter(or_(*condiciones))
         # Buscar un artículo tiene que encontrarlo aunque esté en cero: si no, la
         # pantalla contestaría "no hay resultados" por un artículo que sí existe,
         # sólo porque venía escondido. Pedirlo a mano con "vacios=no" sí manda.
@@ -225,6 +242,7 @@ def stock():
         direccion=direccion,
         sin_vacios=sin_vacios,
         puede_cerrar_toma=current_user.es_admin_o_superior,
+        codigos=codigos_por_sistema(paginacion.items, current_user.empresa_id),
     )
 
 
@@ -535,8 +553,15 @@ def stock_excel():
     )
     items = consulta.all()
 
+    codigos = codigos_por_sistema(items, current_user.empresa_id)
+
     columnas = [
-        col("Código", ancho=20, total="texto"),
+        # Las mismas dos columnas que la pantalla. "Código QMS" va primera y
+        # sigue conteniendo la palabra "código", así que el importador del
+        # conteo la encuentra igual y la planilla exportada se puede llenar y
+        # volver a subir.
+        col("Código QMS", ancho=20, total="texto"),
+        col("Código Defontana", ancho=20),
         col("Nombre", ancho=48),
         col("Unidad QMS", ancho=12),
         col("Unidad Defontana", ancho=17),
@@ -561,7 +586,8 @@ def stock_excel():
     ]
     filas = [
         [
-            i.codigo,
+            codigos[i.id][0],
+            codigos[i.id][1],
             i.nombre or "",
             i.unidad_qms or "",
             i.unidad_defontana or "",
@@ -1978,6 +2004,38 @@ ORDEN_PRUEBA = {
 #
 # Nada se une solo. Se proponen parejas y alguien confirma una por una: unir
 # dos artículos distintos suma sus existencias y falsea el inventario.
+
+
+def codigos_por_sistema(items, empresa_id) -> dict:
+    """Con qué código nombra cada sistema a cada artículo: {id: (qms, defontana)}.
+
+    La línea del maestro es una sola, pero los dos sistemas pueden llamarla
+    distinto: eso es exactamente lo que guarda "Unificar códigos" al confirmar
+    una pareja. Hasta ahora esa pantalla era el único lugar donde se veía, así
+    que mirando Stock y conteo no había forma de saber qué código buscar en
+    Defontana, que es lo que se necesita para ir a revisar allá.
+
+    Sale del registro de parejas confirmadas y no de una columna aparte: así
+    dice lo mismo que la pantalla donde se confirmaron, sin una segunda copia
+    que se pueda desfasar. Cuando los dos sistemas usan el mismo código, las
+    dos columnas muestran ese mismo código; cuando un sistema no tiene el
+    artículo, su columna queda vacía.
+
+    Un mismo código de QMS puede tener varias parejas de Defontana —cada
+    pareja es un código distinto de allá que apunta al mismo artículo—, así que
+    se muestran todos: esconder los demás haría buscar un código que sí existe.
+    """
+    por_clave = {}
+    for e in EquivalenciaCodigo.query.filter_by(empresa_id=empresa_id).all():
+        por_clave.setdefault(e.clave_qms, []).append(e.codigo_defontana)
+    salida = {}
+    for i in items:
+        otros = por_clave.get(codigo_normalizado(i.codigo))
+        salida[i.id] = (
+            i.codigo if i.en_qms else "",
+            ", ".join(sorted(otros)) if otros else (i.codigo if i.en_defontana else ""),
+        )
+    return salida
 
 
 def _sueltos(empresa_id):

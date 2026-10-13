@@ -170,7 +170,11 @@
     <table class="table table-hover align-middle mb-0 tabla-stock" id="tabla-stock">
       <thead>
         <tr>
-          {{ t.th('Código', 'codigo', orden, direccion) }}
+          {# Dos columnas y no una: la línea es una sola, pero cada sistema
+             puede llamarla distinto, y para ir a revisar a Defontana hace
+             falta su código. Sale del registro de "Unificar códigos". #}
+          {{ t.th('Código QMS', 'codigo', orden, direccion) }}
+          <th>Código Defontana</th>
           {{ t.th('Nombre', 'nombre', orden, direccion) }}
           {{ t.th('Unidad', 'unidad_qms', orden, direccion) }}
           {{ t.th('QMS', 'cantidad_qms', orden, direccion, 'num') }}
@@ -184,6 +188,7 @@
         </tr>
         <tr class="filtros-fila">
           {{ t.filtro('f_codigo', filtros_columna, 'filtros-stock', 'Código') }}
+          {{ t.sin_filtro() }}
           {{ t.filtro('f_nombre', filtros_columna, 'filtros-stock', 'Nombre') }}
           {{ t.filtro('f_unidad', filtros_columna, 'filtros-stock', 'Unidad') }}
           {{ t.sin_filtro('num') }}
@@ -199,7 +204,10 @@
       <tbody>
         {% for i in paginacion.items %}
         <tr data-fila="{{ i.id }}" class="{{ 'table-warning' if i.tiene_diferencia else '' }}{{ ' fila-contada' if i.contado }}">
-          <td class="text-nowrap fw-semibold">{{ i.codigo }}</td>
+          {# Vacío donde el sistema no tiene el artículo: un guion es más claro
+             que repetir el código y hacer creer que sí está. #}
+          <td class="text-nowrap fw-semibold">{{ codigos[i.id][0] or '—' }}</td>
+          <td class="text-nowrap fw-semibold">{{ codigos[i.id][1] or '—' }}</td>
           <td class="celda-nombre" title="{{ i.nombre or '' }}">{{ i.nombre or '—' }}</td>
           <td class="text-nowrap">
             {% if i.unidades_coinciden %}
@@ -257,7 +265,12 @@
   <div class="stock-card {{ 'is-diff' if i.tiene_diferencia else '' }}" data-fila="{{ i.id }}">
     <div class="stock-card-head">
       <div>
-        <div class="stock-card-codigo">{{ i.codigo }}</div>
+        {# En angosto no caben dos columnas: se muestra el otro código sólo
+           cuando de verdad es otro, que es cuando aporta algo. #}
+        <div class="stock-card-codigo">{{ codigos[i.id][0] or codigos[i.id][1] }}</div>
+        {% if codigos[i.id][1] and codigos[i.id][1] != codigos[i.id][0] and codigos[i.id][0] %}
+        <div class="text-muted small">En Defontana: {{ codigos[i.id][1] }}</div>
+        {% endif %}
         <div class="stock-card-nombre" title="{{ i.nombre or '' }}">{{ i.nombre or '—' }}</div>
       </div>
       {% if i.diferencia_sistemas != 0 %}

@@ -202,6 +202,108 @@ def test_la_caja_de_unir_a_mano_se_ve_sin_codigos_sueltos(db, empresa, usuario_a
     assert "Unir a mano" in html
 
 
+# --- Las dos columnas de código en Stock y conteo ---
+#
+# La línea del maestro es una sola, pero los dos sistemas pueden llamarla
+# distinto: es justo lo que se confirma en "Unificar códigos". Hasta ahora eso
+# sólo se veía en esa pantalla, así que mirando Stock y conteo no había forma de
+# saber qué código buscar en Defontana para ir a revisar allá.
+#
+# Las columnas salen del registro de parejas confirmadas y no de una copia
+# aparte: así dicen lo mismo que la pantalla donde se confirmaron.
+
+
+def _pareja(db, empresa, codigo_qms, codigo_defo):
+    from app.models.equivalencia_codigo import crear_equivalencia
+
+    crear_equivalencia(empresa.id, codigo_qms, codigo_defo, None)
+    db.session.commit()
+
+
+def test_se_ve_el_codigo_de_cada_sistema(db, empresa, usuario_admin, client):
+    _item(db, empresa, "0136-1005", cantidad_qms=5, cantidad_defontana=5)
+    _pareja(db, empresa, "0136-1005", "A2000ETQ-CATNOINFLAMABL")
+    login(client, "admin@test.cl")
+
+    html = client.get("/inventario/stock?filtro=todos").get_data(as_text=True)
+
+    assert "Código QMS" in html
+    assert "Código Defontana" in html
+    # Dentro de la tabla, y no en cualquier parte de la página: el mismo código
+    # sale también en la tarjeta de pantalla angosta, así que buscarlo suelto
+    # daría por buena una tabla que muestra otra cosa.
+    tabla = html[html.index('id="tabla-stock"'):html.index("</table>")]
+    assert "A2000ETQ-CATNOINFLAMABL" in tabla
+    assert "0136-1005" in tabla
+
+
+def test_si_los_dos_sistemas_usan_el_mismo_codigo_sale_en_las_dos(db, empresa, usuario_admin, client):
+    """Sin pareja confirmada no hay nada que traducir: el código es uno solo."""
+    from app.inventario.routes import codigos_por_sistema
+
+    item = _item(db, empresa, "COD-001", cantidad_qms=5, cantidad_defontana=5)
+
+    assert codigos_por_sistema([item], empresa.id)[item.id] == ("COD-001", "COD-001")
+
+
+def test_la_columna_del_sistema_que_no_lo_tiene_queda_vacia(db, empresa, usuario_admin):
+    """Repetir el código ahí haría creer que el artículo está en ese sistema."""
+    from app.inventario.routes import codigos_por_sistema
+
+    solo_qms = _item(db, empresa, "SOLO-QMS", cantidad_qms=5, en_defontana=False)
+    solo_defo = _item(db, empresa, "SOLO-DEFO", cantidad_defontana=5, en_qms=False)
+
+    codigos = codigos_por_sistema([solo_qms, solo_defo], empresa.id)
+    assert codigos[solo_qms.id] == ("SOLO-QMS", "")
+    assert codigos[solo_defo.id] == ("", "SOLO-DEFO")
+
+
+def test_se_muestran_todos_los_codigos_de_defontana_del_articulo(db, empresa, usuario_admin):
+    """Un mismo artículo de QMS puede tener varias parejas de Defontana.
+    Esconder las demás haría buscar un código que sí existe."""
+    from app.inventario.routes import codigos_por_sistema
+
+    item = _item(db, empresa, "0136-1005", cantidad_qms=5, cantidad_defontana=5)
+    _pareja(db, empresa, "0136-1005", "DEFO-A")
+    _pareja(db, empresa, "0136-1005", "DEFO-B")
+
+    assert codigos_por_sistema([item], empresa.id)[item.id][1] == "DEFO-A, DEFO-B"
+
+
+def test_buscar_por_el_codigo_de_defontana_lo_encuentra(db, empresa, usuario_admin, client):
+    """Ahora que esa columna se ve, buscar lo que se está mirando tiene que
+    encontrarlo: la línea lleva el código de QMS, así que sin esto la pantalla
+    contesta "no hay resultados" por un artículo que está ahí."""
+    _item(db, empresa, "0136-1005", nombre="ETIQUETA", cantidad_qms=5, cantidad_defontana=5)
+    _item(db, empresa, "OTRO-COD", nombre="OTRA COSA", cantidad_qms=1, cantidad_defontana=1)
+    _pareja(db, empresa, "0136-1005", "A2000ETQ-CATNOINFLAMABL")
+    login(client, "admin@test.cl")
+
+    html = client.get("/inventario/stock?q=A2000ETQ").get_data(as_text=True)
+
+    assert "0136-1005" in html
+    assert "OTRO-COD" not in html
+
+
+def test_el_excel_trae_las_dos_columnas(db, empresa, usuario_admin, client):
+    """El archivo descargado tiene que ser lo que se está viendo."""
+    import io
+
+    import openpyxl
+
+    _item(db, empresa, "0136-1005", cantidad_qms=5, cantidad_defontana=5)
+    _pareja(db, empresa, "0136-1005", "A2000ETQ-CATNOINFLAMABL")
+    login(client, "admin@test.cl")
+
+    datos = client.get("/inventario/stock.xlsx").data
+    hoja = openpyxl.load_workbook(io.BytesIO(datos)).active
+    textos = [str(c.value) for fila in hoja.iter_rows() for c in fila]
+
+    assert "Código QMS" in textos
+    assert "Código Defontana" in textos
+    assert "A2000ETQ-CATNOINFLAMABL" in textos
+
+
 def test_queda_la_linea_que_tiene_el_conteo(db, empresa, usuario_admin, client):
     """Entre dos líneas vivas manda la contada: es la que bodega ya trabajó, y
     es el código con el que se registró ese trabajo."""
