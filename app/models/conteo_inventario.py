@@ -245,6 +245,14 @@ class ItemConteoInventario(db.Model, _CalculosConteoMixin):
     # planillas ya no son stock vigente.
     en_qms = db.Column(db.Boolean, nullable=False, default=True)
     en_defontana = db.Column(db.Boolean, nullable=False, default=True)
+    # Si alguna importación de LA TOMA ACTUAL ya trajo este artículo. Finalizar
+    # una toma la apaga en todos; cada importación la enciende en los que trae.
+    #
+    # Es otra pregunta que en_qms/en_defontana. Esas dicen si el artículo está
+    # en la planilla; esta dice si esa respuesta es de ahora o quedó de la toma
+    # anterior. Entre medio pueden haberlo eliminado o desactivado, y arrastrar
+    # el maestro viejo hace contar artículos que ya no existen.
+    importado_en_la_toma = db.Column(db.Boolean, nullable=False, default=True)
 
     @property
     def falta_en(self) -> str:
