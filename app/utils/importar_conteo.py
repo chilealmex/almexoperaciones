@@ -2,6 +2,7 @@ import csv
 import io
 import re
 import unicodedata
+from datetime import datetime, timezone
 
 from flask import current_app
 from sqlalchemy import update
@@ -13,7 +14,7 @@ from app.utils.codigos import (  # noqa: F401
     codigo_normalizado,
     rarezas_del_codigo,
 )
-from app.utils.cantidades import a_cantidad
+from app.utils.cantidades import a_cantidad, punto_ambiguo
 
 _ESPACIOS_RE = re.compile(r"\s+")
 CERO = a_cantidad(0)
@@ -236,10 +237,14 @@ def _leer_filas(file_storage, codificaciones_csv=("utf-8-sig",)):
     return _filas_desde_csv(file_storage, codificaciones_csv)
 
 
-# IMPORTANTE: los importadores sólo actualizan lo que declara cada sistema
-# (cantidades, costo, unidad, nombre, ubicación). Nunca escriben cantidad_fisica,
-# contado_por_id ni contado_en: el conteo físico es trabajo de bodega y debe
-# sobrevivir a cualquier reimportación de QMS o Defontana.
+# IMPORTANTE: los importadores DE SISTEMA —QMS y Defontana— sólo actualizan lo
+# que declara cada sistema (cantidades, costo, unidad, nombre, ubicación).
+# Nunca escriben cantidad_fisica, contado_por_id ni contado_en: el conteo
+# físico es trabajo de bodega y debe sobrevivir a cualquier reimportación.
+#
+# El único que escribe el conteo es importar_conteo_fisico(), más abajo, y no
+# toca ninguna otra columna: es el mismo trabajo que escribir la cantidad en la
+# fila de Stock y conteo, hecho de a muchas.
 
 
 # Guiones que Excel y Word escriben en vez del normal. Se unifican al '-' de
@@ -720,3 +725,124 @@ def unificar_grupo(items: list, usuario_id=None) -> ItemConteoInventario:
 
 
 
+
+
+# "Totales", "Total general", "Totales (3180)": la fila de cierre que varios
+# informes ponen al final, con la suma de toda la columna. No es un artículo:
+# cargarla dejaría un conteo de 83.807 unidades sobre un código inventado.
+ES_FILA_TOTAL = re.compile(r"^total(es)?\b", re.IGNORECASE)
+
+
+def leer_conteo_fisico(file_storage) -> tuple:
+    """Lee el archivo de conteo físico: devuelve (filas, problemas).
+
+    Cada fila es (código, cantidad). 'problemas' junta lo que no se pudo leer,
+    para decirlo al final en vez de descartarlo en silencio.
+
+    Se aceptan decimales: hay artículos que se cuentan en metros, kilos o
+    litros. Un punto con tres dígitos detrás —"3.125"— no se adivina: en Chile
+    es separador de miles tanto como decimal, y elegir mal guarda mil veces la
+    cantidad real. Escribiéndolo a mano la pantalla pregunta; acá no hay a
+    quién preguntar, así que esa fila se informa y no se carga.
+    """
+    encabezados, reader = _leer_filas(file_storage)
+    columna_codigo = (
+        _buscar_columna(encabezados, "código") or _buscar_columna(encabezados, "codigo")
+        or _buscar_columna(encabezados, "artículo") or _buscar_columna(encabezados, "articulo")
+    )
+    columna_cantidad = (
+        _buscar_columna(encabezados, "físico") or _buscar_columna(encabezados, "fisico")
+        or _buscar_columna(encabezados, "contado") or _buscar_columna(encabezados, "cantidad")
+        or _buscar_columna(encabezados, "stock")
+    )
+    if not columna_codigo or not columna_cantidad:
+        raise ValueError(
+            "No encontré las columnas del conteo. Hace falta una de código "
+            "(“Código”, “Artículo”) y una de cantidad (“Stock físico”, “Contado”, “Cantidad”)."
+        )
+
+    filas, problemas = [], {"ambiguos": [], "sin_numero": [], "negativos": [], "vacias": 0}
+    for fila in reader:
+        codigo = _normalizar_codigo(fila.get(columna_codigo) or "")
+        if not codigo or ES_FILA_TOTAL.match(codigo):
+            continue
+        crudo = fila.get(columna_cantidad)
+        texto = "" if crudo is None else str(crudo).strip()
+        # Una celda vacía no borra el conteo que ya había: el archivo puede
+        # traer todo el maestro y sólo algunas filas contadas.
+        if texto == "":
+            problemas["vacias"] += 1
+            continue
+        if punto_ambiguo(texto):
+            problemas["ambiguos"].append(f"{codigo} ({texto})")
+            continue
+        cantidad = a_cantidad(crudo)
+        if cantidad is None:
+            problemas["sin_numero"].append(f"{codigo} ({texto})")
+            continue
+        if cantidad < 0:
+            problemas["negativos"].append(f"{codigo} ({texto})")
+            continue
+        filas.append((codigo, cantidad))
+    return filas, problemas
+
+
+def importar_conteo_fisico(file_storage, empresa_id: int, usuario_id=None) -> dict:
+    """Carga el conteo físico desde un archivo. No toca nada más.
+
+    Escribe sólo cantidad_fisica, contado_por_id y contado_en: ni las
+    cantidades de los sistemas, ni el costo, ni la unidad, ni el nombre. Es
+    escribir la cantidad en la fila de Stock y conteo, de a muchas.
+
+    El conteo que ya había se reemplaza: subir "el conteo actualizado" y que
+    las correcciones no entren sería lo contrario de lo que se pidió. Se
+    informa cuántos cambiaron para poder revisarlo.
+
+    Un código que no está en el maestro se informa y no se carga: el maestro se
+    arma con las planillas de QMS y Defontana, no con el conteo.
+    """
+    filas, problemas = leer_conteo_fisico(file_storage)
+
+    items = _items_de_la_empresa(empresa_id)
+    existentes = _por_codigo_normalizado(items)
+    # Un código que alguien retiró al unificar sigue viniendo en las planillas
+    # de bodega: hay que mandarlo al artículo que quedó, igual que hacen los
+    # otros importadores.
+    redirigidos = _redirecciones_de_unificaciones(empresa_id)
+
+    ahora = datetime.now(timezone.utc)
+    cambios, sin_codigo, iguales = [], [], 0
+    # Cuántos venían contados de antes con otra cantidad. Si la toma anterior se
+    # finalizó primero, esto es 0 y el archivo entra sobre un conteo en blanco;
+    # si no es 0, la captura se está mezclando con una toma a medio hacer y hay
+    # que poder verlo.
+    pisados = 0
+    vistos = set()
+    for codigo, cantidad in filas:
+        clave = codigo_normalizado(codigo)
+        item = existentes.get(redirigidos.get(clave, clave))
+        if item is None:
+            sin_codigo.append(codigo)
+            continue
+        # El mismo código dos veces en el archivo: manda la última fila, que es
+        # lo mismo que pasaría escribiéndolo dos veces en la pantalla.
+        vistos.add(item.id)
+        if item.cantidad_fisica is not None and item.cantidad_fisica == cantidad:
+            iguales += 1
+            continue
+        if item.cantidad_fisica is not None:
+            pisados += 1
+        cambios.append({"id": item.id, "cantidad_fisica": cantidad,
+                        "contado_por_id": usuario_id, "contado_en": ahora})
+
+    _aplicar_en_lote(cambios)
+    db.session.commit()
+    return {
+        "total_filas": len(filas),
+        "actualizados": len(cambios),
+        "sin_cambio": iguales,
+        "pisados": pisados,
+        "sin_codigo": sin_codigo,
+        "articulos": len(vistos),
+        **problemas,
+    }

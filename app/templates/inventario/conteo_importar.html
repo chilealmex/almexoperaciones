@@ -72,6 +72,59 @@
       </div>
     </div>
   </div>
+
+  {# El conteo físico es trabajo de bodega, no un sistema: por eso va en su
+     propia tarjeta, a lo ancho, y sin la casilla de "solo no contados" —acá el
+     archivo ES el conteo y manda sobre lo que hubiera—. #}
+  <div class="col-12">
+    <div class="card">
+      <div class="card-body">
+        <h2 class="h5">Conteo físico</h2>
+        <p class="text-muted small">
+          Lo contado en bodega, de a muchos en vez de fila por fila. Basta con dos columnas:
+          el <strong>código</strong> y el <strong>stock físico</strong>. Se aceptan decimales
+          con coma (12,5) para lo que se cuenta en metros, kilos o litros.
+        </p>
+        <p class="text-muted small mb-2">
+          <strong>Sólo actualiza el conteo.</strong> No toca las cantidades de QMS ni de Defontana,
+          ni el costo, ni la unidad. Si un artículo ya tenía conteo, la cantidad del archivo lo
+          reemplaza; si una fila viene sin cantidad, ese artículo queda como estaba. Los códigos
+          que no estén en el maestro se informan y no se cargan.
+        </p>
+        {# Hay una toma a medio hacer. Si esta captura es de una toma nueva, lo
+           que corresponde es finalizar la anterior primero: así queda archivada
+           en el historial y el archivo entra sobre un conteo en blanco. No se
+           bloquea la subida —reemplazar la planilla de la misma toma es
+           legítimo—, pero sin este aviso la mezcla pasa inadvertida y de las
+           cantidades anteriores no queda rastro. #}
+        {% if toma_en_curso.contados %}
+        <div class="alert alert-warning small">
+          Hay <strong>{{ toma_en_curso.contados }}</strong> artículo{{ 's' if toma_en_curso.contados != 1 }}
+          ya contado{{ 's' if toma_en_curso.contados != 1 }} en la toma en curso{% if toma_en_curso.desde %},
+          desde el {{ toma_en_curso.desde|fecha }}{% endif %}.
+          Si esta captura es de una <strong>toma nueva</strong>,
+          {% if puede_cerrar_toma %}finaliza primero la anterior{% else %}pide a un administrador que finalice primero la anterior{% endif %}
+          en <a href="{{ url_for('inventario.stock') }}">Stock y conteo → Finalizar toma</a>:
+          queda archivada en el historial con sus diferencias y el conteo parte en blanco.
+          Si subes el archivo ahora, esas cantidades se reemplazan por las del archivo y no queda registro de las anteriores.
+        </div>
+        {% endif %}
+        <p><a href="{{ url_for('inventario.conteo_plantilla_conteo') }}" class="small">↓ Descargar plantilla</a></p>
+        <form method="post" action="{{ url_for('inventario.conteo_importar_fisico') }}" enctype="multipart/form-data"
+              data-boton-ocupado="Cargando el conteo, espera...">
+          {{ form_conteo.hidden_tag() }}
+          <div class="mb-3">
+            {{ form_conteo.archivo(class="form-control") }}
+            {% for error in form_conteo.archivo.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+          </div>
+          <button type="submit" class="btn btn-primary">Cargar conteo</button>
+          <div class="small text-muted mt-2" data-aviso-ocupado hidden>
+            Leyendo el archivo y registrando el conteo. <strong>No cierres ni recargues la página.</strong>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
 </div>
 
 <p class="text-muted mt-4">Actualmente hay <strong>{{ total_items }}</strong> artículos cargados. <a href="{{ url_for('inventario.stock') }}">Ir a Stock y conteo →</a></p>

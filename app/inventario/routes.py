@@ -6,11 +6,11 @@ from datetime import date, datetime, timezone
 
 from flask import render_template, redirect, url_for, flash, request, abort, jsonify, make_response, current_app
 from flask_login import current_user
-from sqlalchemy import or_, and_
+from sqlalchemy import or_, and_, func
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.inventario import bp
-from app.inventario.forms import AccionForm, CruceDePruebaForm, ImportarCsvForm
+from app.inventario.forms import AccionForm, CruceDePruebaForm, ImportarConteoForm, ImportarCsvForm
 from app.extensions import db
 from app.models.conteo_inventario import ItemConteoInventario, TomaInventario, TomaInventarioDetalle
 from app.models.equivalencia_codigo import EquivalenciaCodigo, crear_equivalencia
@@ -22,6 +22,7 @@ from app.utils.decorators import require_permission
 from app.utils.equivalencias_codigos import proponer
 from app.utils.importar_conteo import (
     articulos_fuera_de_ambas_planillas,
+    importar_conteo_fisico,
     leer_defontana,
     leer_qms,
     clave_sin_ceros,
@@ -1486,6 +1487,27 @@ def regularizacion_guardado(clave):
     return jsonify(ok=True, nombre=registro.nombre or "", fecha=format_fecha_hora(registro.actualizado_en), por=current_user.nombre_completo)
 
 
+def _toma_en_curso(empresa_id: int) -> dict:
+    """Lo que ya está contado y todavía no se finalizó.
+
+    Subir una captura de bodega encima de una toma a medio hacer mezcla dos
+    conteos en la misma pantalla, y del anterior no queda rastro: el archivo
+    pisa las cantidades y nadie puede volver a ver con qué se cerró. Finalizar
+    la toma primero la archiva en el historial —con sus diferencias y el stock
+    que los sistemas declaraban ese día— y deja el conteo en blanco.
+
+    No se bloquea la subida: reemplazar el archivo de una misma toma, cuando
+    bodega manda una planilla corregida, es legítimo y frecuente. Se avisa.
+    """
+    contados, desde = db.session.query(
+        func.count(ItemConteoInventario.id), func.min(ItemConteoInventario.contado_en)
+    ).filter(
+        ItemConteoInventario.empresa_id == empresa_id,
+        ItemConteoInventario.cantidad_fisica.isnot(None),
+    ).one()
+    return {"contados": contados or 0, "desde": desde}
+
+
 @bp.route("/conteo/importar", methods=["GET", "POST"])
 @require_permission("inventario", "editar")
 def conteo_importar():
@@ -1493,7 +1515,10 @@ def conteo_importar():
     form_defontana = ImportarCsvForm(prefix="def")
     total_items = ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id).count()
     return render_template(
-        "inventario/conteo_importar.html", form_qms=form_qms, form_defontana=form_defontana, total_items=total_items
+        "inventario/conteo_importar.html", form_qms=form_qms, form_defontana=form_defontana,
+        form_conteo=ImportarConteoForm(prefix="cnt"), total_items=total_items,
+        toma_en_curso=_toma_en_curso(current_user.empresa_id),
+        puede_cerrar_toma=current_user.es_admin_o_superior,
     )
 
 
@@ -1675,6 +1700,66 @@ def conteo_importar_qms():
     else:
         flash("Selecciona un archivo .csv o .xlsx válido.", "danger")
     return redirect(url_for("inventario.conteo_importar"))
+
+
+def _resumen_conteo(r) -> str:
+    """Qué pasó al subir el conteo, en una línea, nombrando lo que no entró."""
+    partes = [f"{r['actualizados']} artículos actualizados"]
+    # Si venían contados de antes, la captura se mezcló con una toma que no se
+    # finalizó: hay que decirlo acá, porque es lo único que queda de la cantidad
+    # anterior una vez pisada.
+    if r.get("pisados"):
+        partes.append(f"{r['pisados']} ya venían contados en la toma en curso y quedaron con la cantidad del archivo")
+    if r["sin_cambio"]:
+        partes.append(f"{r['sin_cambio']} ya tenían esa cantidad")
+    if r["vacias"]:
+        partes.append(f"{r['vacias']} filas sin cantidad")
+    texto = f"Conteo cargado: {', '.join(partes)}."
+    # Lo que no entró se dice con nombre y apellido: un recuento de filas
+    # descartadas obliga a buscarlas a mano en el archivo.
+    def _lista(titulo, codigos, tope=10):
+        if not codigos:
+            return ""
+        muestra = ", ".join(codigos[:tope])
+        resto = f" y {len(codigos) - tope} más" if len(codigos) > tope else ""
+        return f" {titulo}: {muestra}{resto}."
+    texto += _lista("No están en el maestro", r["sin_codigo"])
+    texto += _lista("Cantidad ambigua, escríbela con coma o sin puntos", r["ambiguos"])
+    texto += _lista("No se entendió la cantidad", r["sin_numero"])
+    texto += _lista("Cantidad negativa", r["negativos"])
+    return texto
+
+
+@bp.route("/conteo/importar/conteo", methods=["POST"])
+@require_permission("inventario", "editar")
+def conteo_importar_fisico():
+    """Sube el conteo físico de a muchos. No toca nada más del artículo."""
+    form = ImportarConteoForm(prefix="cnt")
+    if not form.validate_on_submit():
+        flash("Selecciona un archivo .csv o .xlsx válido.", "danger")
+        return redirect(url_for("inventario.conteo_importar"))
+    try:
+        resultado = importar_conteo_fisico(
+            form.archivo.data, current_user.empresa_id, current_user.id
+        )
+        hubo_problemas = any(resultado[k] for k in ("sin_codigo", "ambiguos", "sin_numero", "negativos"))
+        flash(_resumen_conteo(resultado), "warning" if hubo_problemas else "success")
+    except ValueError as e:
+        flash(str(e), "danger")
+    except SQLAlchemyError as e:
+        _avisar_fallo_de_importacion(e, "el conteo")
+    return redirect(url_for("inventario.conteo_importar"))
+
+
+@bp.route("/conteo/importar/plantilla-conteo")
+@require_permission("inventario", "editar")
+def conteo_plantilla_conteo():
+    return responder_plantilla_excel(
+        "plantilla-conteo",
+        "Conteo",
+        ["Código", "Descripción", "Stock físico"],
+        fila_ejemplo=["ROP-BCAN-M", "Roldana cable acero", 12],
+    )
 
 
 @bp.route("/conteo/importar/defontana", methods=["POST"])
