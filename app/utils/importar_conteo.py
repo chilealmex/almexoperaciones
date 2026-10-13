@@ -2,7 +2,7 @@ import csv
 import io
 import re
 import unicodedata
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from flask import current_app
 from sqlalchemy import update
@@ -15,6 +15,7 @@ from app.utils.codigos import (  # noqa: F401
     rarezas_del_codigo,
 )
 from app.utils.cantidades import a_cantidad, punto_ambiguo
+from app.utils.formatting import ZONA_LOCAL
 
 _ESPACIOS_RE = re.compile(r"\s+")
 CERO = a_cantidad(0)
@@ -711,6 +712,7 @@ def unificar_grupo(items: list, usuario_id=None) -> ItemConteoInventario:
     contador = next((i for i in ordenados if i.cantidad_fisica is not None), None)
     if contador is not None:
         principal.contado_por_id = contador.contado_por_id
+        principal.contado_por_texto = contador.contado_por_texto
         principal.contado_en = contador.contado_en
 
     for campo in ("nombre", "linea_negocio", "ubicacion", "categoria", "unidad_qms",
@@ -733,11 +735,106 @@ def unificar_grupo(items: list, usuario_id=None) -> ItemConteoInventario:
 ES_FILA_TOTAL = re.compile(r"^total(es)?\b", re.IGNORECASE)
 
 
+# La exportación de Stock y conteo escribe la fecha así, en hora de Chile. Los
+# otros formatos son los que sale escribiendo a mano quien llena la planilla.
+FORMATOS_FECHA_CONTEO = (
+    "%d-%m-%Y %H:%M:%S", "%d-%m-%Y %H:%M", "%d-%m-%Y",
+    "%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y",
+)
+
+
+def _a_fecha_de_conteo(valor):
+    """La fecha del conteo, en UTC. None si la celda viene vacía.
+
+    La planilla la llena gente en Chile y la exportación sale en hora local
+    ("13-10-2026 10:30"), pero en la base las fechas se guardan en UTC. Sin
+    convertir, cada conteo quedaría corrido tres o cuatro horas según la época
+    del año, y en el borde del día cambiaría de fecha.
+
+    Levanta ValueError si hay algo escrito que no se entiende: adivinar una
+    fecha es peor que informar la fila.
+    """
+    if valor is None:
+        return None
+    if isinstance(valor, datetime):
+        fecha = valor
+    elif isinstance(valor, date):  # una celda con fecha pero sin hora
+        fecha = datetime(valor.year, valor.month, valor.day)
+    else:
+        texto = str(valor).strip()
+        if not texto:
+            return None
+        for formato in FORMATOS_FECHA_CONTEO:
+            try:
+                fecha = datetime.strptime(texto, formato)
+                break
+            except ValueError:
+                continue
+        else:
+            raise ValueError(texto)
+    if fecha.tzinfo is None:
+        fecha = fecha.replace(tzinfo=ZONA_LOCAL)
+    return fecha.astimezone(timezone.utc)
+
+
+def _clave_de_persona(texto) -> str:
+    """El nombre como para compararlo: sin tildes, sin espacios de más, en minúsculas.
+
+    Quien llena la planilla escribe "Juan Pérez", "JUAN PEREZ" o "Juan  Perez",
+    y las tres son la misma persona.
+    """
+    if not texto:
+        return ""
+    sin_tildes = "".join(
+        c for c in unicodedata.normalize("NFD", str(texto)) if unicodedata.category(c) != "Mn"
+    )
+    return _ESPACIOS_RE.sub(" ", sin_tildes).strip().lower()
+
+
+def _personas_de_la_empresa(empresa_id: int) -> dict:
+    """Nombre escrito -> id de usuario, para reconocer a quién contó.
+
+    Se aceptan las tres formas en que una persona aparece nombrada en el
+    sistema: su nombre completo (que es lo que sale en la exportación), su
+    nombre de usuario y su correo.
+    """
+    from app.models.usuario import Usuario
+
+    mapa = {}
+    for usuario in Usuario.query.filter_by(empresa_id=empresa_id).all():
+        for escrito in (usuario.nombre_completo, usuario.nombre_usuario, usuario.email):
+            clave = _clave_de_persona(escrito)
+            if clave:
+                mapa.setdefault(clave, usuario.id)
+    return mapa
+
+
+def _columna_de_cantidad(encabezados, excluir):
+    """La columna con lo contado, sin confundirla con "Contado por".
+
+    "contado" es palabra de las dos, y la exportación de Stock y conteo trae
+    ambas. Si "Contado por" se tomara como la cantidad, el conteo entero se
+    cargaría leyendo nombres de personas.
+    """
+    candidatos = [c for c in encabezados or [] if c not in excluir]
+    for palabra in ("físico", "fisico", "contado", "cantidad", "stock"):
+        columna = _buscar_columna(candidatos, palabra)
+        if columna:
+            return columna
+    return None
+
+
 def leer_conteo_fisico(file_storage) -> tuple:
     """Lee el archivo de conteo físico: devuelve (filas, problemas).
 
-    Cada fila es (código, cantidad). 'problemas' junta lo que no se pudo leer,
-    para decirlo al final en vez de descartarlo en silencio.
+    Cada fila es un dict con código, cantidad, quién contó y cuándo. 'problemas'
+    junta lo que no se pudo leer, para decirlo al final en vez de descartarlo en
+    silencio.
+
+    Las columnas de quién y cuándo son opcionales: si no vienen, el conteo queda
+    a nombre de quien sube el archivo y con la hora de la importación. Si vienen
+    —y vienen, porque la exportación de Stock y conteo las trae— mandan ellas:
+    el conteo lo hizo bodega, no quien lo sube, y lo hizo otro día.
 
     Se aceptan decimales: hay artículos que se cuentan en metros, kilos o
     litros. Un punto con tres dígitos detrás —"3.125"— no se adivina: en Chile
@@ -750,18 +847,19 @@ def leer_conteo_fisico(file_storage) -> tuple:
         _buscar_columna(encabezados, "código") or _buscar_columna(encabezados, "codigo")
         or _buscar_columna(encabezados, "artículo") or _buscar_columna(encabezados, "articulo")
     )
-    columna_cantidad = (
-        _buscar_columna(encabezados, "físico") or _buscar_columna(encabezados, "fisico")
-        or _buscar_columna(encabezados, "contado") or _buscar_columna(encabezados, "cantidad")
-        or _buscar_columna(encabezados, "stock")
+    columna_quien = _buscar_columna(encabezados, "contado", "por")
+    columna_fecha = (
+        _buscar_columna(encabezados, "fecha", "conteo") or _buscar_columna(encabezados, "fecha")
     )
+    columna_cantidad = _columna_de_cantidad(encabezados, {columna_codigo, columna_quien, columna_fecha})
     if not columna_codigo or not columna_cantidad:
         raise ValueError(
             "No encontré las columnas del conteo. Hace falta una de código "
             "(“Código”, “Artículo”) y una de cantidad (“Stock físico”, “Contado”, “Cantidad”)."
         )
 
-    filas, problemas = [], {"ambiguos": [], "sin_numero": [], "negativos": [], "vacias": 0}
+    filas = []
+    problemas = {"ambiguos": [], "sin_numero": [], "negativos": [], "vacias": 0, "fechas_malas": []}
     for fila in reader:
         codigo = _normalizar_codigo(fila.get(columna_codigo) or "")
         if not codigo or ES_FILA_TOTAL.match(codigo):
@@ -783,8 +881,42 @@ def leer_conteo_fisico(file_storage) -> tuple:
         if cantidad < 0:
             problemas["negativos"].append(f"{codigo} ({texto})")
             continue
-        filas.append((codigo, cantidad))
+        # Una fecha que no se entiende no bota la fila: la cantidad es el dato
+        # que importa y ya se leyó bien. Se informa y esa fila queda con la hora
+        # de la importación.
+        try:
+            cuando = _a_fecha_de_conteo(fila.get(columna_fecha)) if columna_fecha else None
+        except ValueError as e:
+            problemas["fechas_malas"].append(f"{codigo} ({e})")
+            cuando = None
+        quien = _ESPACIOS_RE.sub(" ", str(fila.get(columna_quien) or "")).strip() if columna_quien else ""
+        filas.append({"codigo": codigo, "cantidad": cantidad, "quien": quien, "cuando": cuando})
     return filas, problemas
+
+
+def _mismo_conteo(item, cantidad, por_id, por_texto, cuando) -> bool:
+    """Si la fila no cambiaría nada de lo ya registrado.
+
+    Importa para el resumen: volver a subir el mismo archivo tiene que decir
+    que no cambió nada, no que se actualizaron tres mil artículos. Con ese
+    número ella revisa lo que se movió, y si lo dice todo no sirve de nada.
+
+    La fecha se compara con un minuto de tolerancia porque la exportación la
+    escribe sin segundos: al volver a subirla, el segundo que se perdió haría
+    aparecer como cambio cada una de las filas.
+    """
+    if item.cantidad_fisica is None or item.cantidad_fisica != cantidad:
+        return False
+    if item.contado_por_id != por_id or (item.contado_por_texto or "") != (por_texto or ""):
+        return False
+    if cuando is None:  # el archivo no dice cuándo: no hay con qué contradecir lo guardado
+        return True
+    if item.contado_en is None:
+        return False
+    guardado = item.contado_en
+    if guardado.tzinfo is None:  # la base devuelve la fecha sin zona, guardada en UTC
+        guardado = guardado.replace(tzinfo=timezone.utc)
+    return abs((guardado - cuando).total_seconds()) < 60
 
 
 def importar_conteo_fisico(file_storage, empresa_id: int, usuario_id=None) -> dict:
@@ -809,6 +941,7 @@ def importar_conteo_fisico(file_storage, empresa_id: int, usuario_id=None) -> di
     # de bodega: hay que mandarlo al artículo que quedó, igual que hacen los
     # otros importadores.
     redirigidos = _redirecciones_de_unificaciones(empresa_id)
+    personas = _personas_de_la_empresa(empresa_id)
 
     ahora = datetime.now(timezone.utc)
     cambios, sin_codigo, iguales = [], [], 0
@@ -817,23 +950,39 @@ def importar_conteo_fisico(file_storage, empresa_id: int, usuario_id=None) -> di
     # si no es 0, la captura se está mezclando con una toma a medio hacer y hay
     # que poder verlo.
     pisados = 0
+    # Nombres de la columna "Contado por" que no son usuarios del sistema. Se
+    # guardan igual como texto —son el único registro de quién contó— pero se
+    # informan, porque muchas veces es un nombre escrito distinto.
+    sin_usuario = []
     vistos = set()
-    for codigo, cantidad in filas:
-        clave = codigo_normalizado(codigo)
+    for fila in filas:
+        clave = codigo_normalizado(fila["codigo"])
         item = existentes.get(redirigidos.get(clave, clave))
         if item is None:
-            sin_codigo.append(codigo)
+            sin_codigo.append(fila["codigo"])
             continue
         # El mismo código dos veces en el archivo: manda la última fila, que es
         # lo mismo que pasaría escribiéndolo dos veces en la pantalla.
         vistos.add(item.id)
-        if item.cantidad_fisica is not None and item.cantidad_fisica == cantidad:
+
+        # Si el archivo no trae quién contó, queda a nombre de quien lo sube.
+        if fila["quien"]:
+            encontrado = personas.get(_clave_de_persona(fila["quien"]))
+            por_id = encontrado
+            por_texto = None if encontrado else fila["quien"]
+            if not encontrado and fila["quien"] not in sin_usuario:
+                sin_usuario.append(fila["quien"])
+        else:
+            por_id, por_texto = usuario_id, None
+
+        if _mismo_conteo(item, fila["cantidad"], por_id, por_texto, fila["cuando"]):
             iguales += 1
             continue
-        if item.cantidad_fisica is not None:
+        if item.cantidad_fisica is not None and item.cantidad_fisica != fila["cantidad"]:
             pisados += 1
-        cambios.append({"id": item.id, "cantidad_fisica": cantidad,
-                        "contado_por_id": usuario_id, "contado_en": ahora})
+        cambios.append({"id": item.id, "cantidad_fisica": fila["cantidad"],
+                        "contado_por_id": por_id, "contado_por_texto": por_texto,
+                        "contado_en": fila["cuando"] or ahora})
 
     _aplicar_en_lote(cambios)
     db.session.commit()
@@ -843,6 +992,7 @@ def importar_conteo_fisico(file_storage, empresa_id: int, usuario_id=None) -> di
         "sin_cambio": iguales,
         "pisados": pisados,
         "sin_codigo": sin_codigo,
+        "sin_usuario": sin_usuario,
         "articulos": len(vistos),
         **problemas,
     }

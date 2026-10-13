@@ -121,8 +121,8 @@
           <td class="num">{{ d.cantidad_defontana|cantidad }}</td>
           <td class="num">{{ d.cantidad_fisica|cantidad if d.contado else '—' }}</td>
           <td class="text-nowrap">
-            {% if d.contado_por %}
-            <div class="small">{{ d.contado_por.nombre_completo }}</div>
+            {% if d.quien_conto %}
+            <div class="small">{{ d.quien_conto }}</div>
             <div class="small text-muted">{{ d.contado_en|fecha_hora }}</div>
             {% else %}
             <span class="text-muted small">No contado</span>

@@ -213,6 +213,279 @@ def test_el_mismo_codigo_dos_veces_vale_la_ultima(db, empresa):
     assert item.cantidad_fisica == a_cantidad(9)
 
 
+# --- Quién contó y cuándo: mantener el historial ---
+#
+# Sin estas dos columnas el conteo queda a nombre de quien sube el archivo y con
+# la hora de la importación, que es falso en los dos campos: no contó esa persona
+# ni fue a esa hora. La exportación de Stock y conteo ya las trae, así que el
+# viaje de ida y vuelta —exportar, llenar, subir— tiene que conservarlas.
+
+
+def test_lee_quien_conto_y_lo_vincula_al_usuario(db, empresa, usuario_admin):
+    item = _item(db, empresa, "COD-001")
+
+    importar_conteo_fisico(
+        _fs("Código;Stock físico;Contado por\nCOD-001;7;Admin de Prueba\n"), empresa.id
+    )
+
+    db.session.refresh(item)
+    assert item.contado_por_id == usuario_admin.id
+    assert item.contado_por_texto is None
+    assert item.quien_conto == "Admin de Prueba"
+
+
+def test_el_nombre_se_reconoce_escrito_distinto(db, empresa, usuario_admin):
+    """Quien llena la planilla escribe como le sale: en mayúsculas, con espacios
+    de más, sin tildes."""
+    item = _item(db, empresa, "COD-001")
+
+    importar_conteo_fisico(
+        _fs("Código;Stock físico;Contado por\nCOD-001;7;  ADMIN  DE  PRUEBA \n"), empresa.id
+    )
+
+    db.session.refresh(item)
+    assert item.contado_por_id == usuario_admin.id
+
+
+def test_un_nombre_que_no_es_usuario_se_guarda_igual(db, empresa, usuario_admin):
+    """En bodega cuenta gente sin cuenta en el sistema. El nombre escrito es el
+    único registro de quién fue: perderlo sería perder el historial, que es
+    justo para lo que sirven estas columnas."""
+    item = _item(db, empresa, "COD-001")
+
+    r = importar_conteo_fisico(
+        _fs("Código;Stock físico;Contado por\nCOD-001;7;Juan Pérez\n"), empresa.id, usuario_admin.id
+    )
+
+    db.session.refresh(item)
+    assert item.contado_por_id is None
+    assert item.contado_por_texto == "Juan Pérez"
+    assert item.quien_conto == "Juan Pérez"
+    # Se informa igual: casi siempre es un nombre escrito distinto.
+    assert r["sin_usuario"] == ["Juan Pérez"]
+
+
+def test_la_fecha_se_lee_en_hora_de_chile_y_se_guarda_en_utc(db, empresa):
+    """La planilla la llena gente en Chile y la exportación sale en hora local,
+    pero la base guarda en UTC. Sin convertir, cada conteo quedaría corrido tres
+    o cuatro horas, y en el borde del día cambiaría de fecha.
+
+    Las dos filas son del mismo año a propósito: en octubre Chile está en UTC-3
+    y en junio en UTC-4. Un desfase fijo acertaría una y fallaría la otra.
+    """
+    from datetime import datetime, timezone
+
+    _item(db, empresa, "COD-001")
+    _item(db, empresa, "COD-002")
+
+    importar_conteo_fisico(_fs(
+        "Código;Stock físico;Fecha y hora del conteo\n"
+        "COD-001;7;13-10-2026 10:30\n"
+        "COD-002;3;20-06-2026 10:30\n"
+    ), empresa.id)
+
+    guardadas = {i.codigo: i.contado_en for i in ItemConteoInventario.query}
+    def utc(x):
+        return x.replace(tzinfo=timezone.utc) if x.tzinfo is None else x.astimezone(timezone.utc)
+    assert utc(guardadas["COD-001"]) == datetime(2026, 10, 13, 13, 30, tzinfo=timezone.utc)
+    assert utc(guardadas["COD-002"]) == datetime(2026, 6, 20, 14, 30, tzinfo=timezone.utc)
+
+
+def test_una_celda_de_fecha_de_excel_tambien_se_lee(db, empresa):
+    """En .xlsx la fecha llega como fecha, no como texto."""
+    from datetime import datetime, timezone
+    import openpyxl
+
+    libro = openpyxl.Workbook()
+    hoja = libro.active
+    hoja.append(["Código", "Stock físico", "Fecha y hora del conteo"])
+    hoja.append(["COD-001", 7, datetime(2026, 10, 13, 10, 30)])
+    buffer = io.BytesIO()
+    libro.save(buffer)
+    buffer.seek(0)
+
+    item = _item(db, empresa, "COD-001")
+    importar_conteo_fisico(
+        FileStorage(stream=buffer, filename="conteo.xlsx"), empresa.id
+    )
+
+    db.session.refresh(item)
+    guardada = item.contado_en
+    if guardada.tzinfo is None:
+        guardada = guardada.replace(tzinfo=timezone.utc)
+    assert guardada == datetime(2026, 10, 13, 13, 30, tzinfo=timezone.utc)
+
+
+def test_sin_esas_columnas_queda_quien_sube_y_la_hora_de_ahora(db, empresa, usuario_admin):
+    """El archivo de dos columnas tiene que seguir funcionando igual."""
+    item = _item(db, empresa, "COD-001")
+
+    importar_conteo_fisico(_fs("Código;Stock físico\nCOD-001;7\n"), empresa.id, usuario_admin.id)
+
+    db.session.refresh(item)
+    assert item.contado_por_id == usuario_admin.id
+    assert item.contado_por_texto is None
+    assert item.contado_en is not None
+
+
+def test_una_celda_vacia_de_fecha_o_nombre_cae_en_lo_de_siempre(db, empresa, usuario_admin):
+    item = _item(db, empresa, "COD-001")
+
+    importar_conteo_fisico(
+        _fs("Código;Stock físico;Contado por;Fecha y hora del conteo\nCOD-001;7;;\n"),
+        empresa.id, usuario_admin.id,
+    )
+
+    db.session.refresh(item)
+    assert item.contado_por_id == usuario_admin.id
+    assert item.contado_en is not None
+
+
+def test_una_fecha_que_no_se_entiende_no_bota_la_fila(db, empresa):
+    """La cantidad es el dato que importa y ya se leyó bien."""
+    item = _item(db, empresa, "COD-001")
+
+    r = importar_conteo_fisico(
+        _fs("Código;Stock físico;Fecha y hora del conteo\nCOD-001;7;el martes pasado\n"), empresa.id
+    )
+
+    db.session.refresh(item)
+    assert item.cantidad_fisica == a_cantidad(7)
+    assert item.contado_en is not None
+    assert r["fechas_malas"] == ["COD-001 (el martes pasado)"]
+
+
+def test_contado_por_no_se_confunde_con_la_cantidad(db, empresa):
+    """"contado" es palabra de las dos columnas. Si "Contado por" se tomara como
+    la cantidad, el conteo entero se cargaría leyendo nombres de personas.
+
+    El encabezado de cantidad acá es "Cantidad" a propósito, sin la palabra
+    "físico": con "Stock físico" la columna correcta gana igual por el orden en
+    que se buscan, y la confusión no llega a producirse nunca.
+    """
+    item = _item(db, empresa, "COD-001")
+
+    r = importar_conteo_fisico(
+        _fs("Código;Contado por;Cantidad\nCOD-001;Juan Pérez;7\n"), empresa.id
+    )
+
+    db.session.refresh(item)
+    assert item.cantidad_fisica == a_cantidad(7)
+    assert item.contado_por_texto == "Juan Pérez"
+    assert r["sin_numero"] == []
+
+
+def test_volver_a_subir_la_misma_exportacion_no_dice_que_cambio_todo(db, empresa, usuario_admin):
+    """La exportación escribe la fecha sin segundos. Sin tolerancia, el segundo
+    que se pierde en el viaje haría aparecer como cambio cada una de las filas, y
+    el número con que ella revisa lo que se movió dejaría de servir.
+
+    El conteo de partida se guarda con segundos, como queda al contar desde la
+    pantalla; el archivo trae el mismo minuto sin ellos, como sale exportado.
+    """
+    from datetime import datetime, timezone
+
+    _item(db, empresa, "COD-001", cantidad_fisica=a_cantidad(7),
+          contado_por_id=usuario_admin.id,
+          contado_en=datetime(2026, 10, 13, 13, 30, 45, tzinfo=timezone.utc))
+    archivo = ("Código;Stock físico;Contado por;Fecha y hora del conteo\n"
+               "COD-001;7;Admin de Prueba;13-10-2026 10:30\n")
+
+    r = importar_conteo_fisico(_fs(archivo), empresa.id, usuario_admin.id)
+
+    assert r["actualizados"] == 0
+    assert r["sin_cambio"] == 1
+
+
+def test_el_nombre_libre_sale_en_el_excel_de_stock(db, empresa, usuario_admin, client):
+    """La exportación es el archivo que se vuelve a llenar y subir: si ahí se
+    pierde el nombre, el viaje de ida y vuelta lo borra."""
+    import openpyxl
+    from tests.conftest import login
+
+    _item(db, empresa, "COD-001")
+    importar_conteo_fisico(
+        _fs("Código;Stock físico;Contado por\nCOD-001;7;Juan Pérez\n"), empresa.id, usuario_admin.id
+    )
+    login(client, usuario_admin.email)
+
+    datos = client.get("/inventario/stock.xlsx?filtro=todos").data
+    hoja = openpyxl.load_workbook(io.BytesIO(datos)).active
+    textos = [str(c.value) for fila in hoja.iter_rows() for c in fila]
+
+    assert "Juan Pérez" in textos
+
+
+def test_corregir_quien_conto_sin_cambiar_la_cantidad_si_entra(db, empresa, usuario_admin):
+    """Si sólo estaba mal el nombre, volver a subir el archivo tiene que arreglarlo."""
+    item = _item(db, empresa, "COD-001")
+    importar_conteo_fisico(
+        _fs("Código;Stock físico;Contado por\nCOD-001;7;Juan Pérez\n"), empresa.id, usuario_admin.id
+    )
+
+    r = importar_conteo_fisico(
+        _fs("Código;Stock físico;Contado por\nCOD-001;7;Pedro Soto\n"), empresa.id, usuario_admin.id
+    )
+
+    db.session.refresh(item)
+    assert item.contado_por_texto == "Pedro Soto"
+    assert r["actualizados"] == 1
+    # No es un conteo pisado: la cantidad es la misma, sólo se corrigió el nombre.
+    assert r["pisados"] == 0
+
+
+def test_el_nombre_libre_sobrevive_a_finalizar_la_toma(db, empresa, usuario_admin, client):
+    """Si no se archivara, finalizar borraría el nombre justo cuando pasa a ser
+    historial, que es para lo que sirve."""
+    from app.models.conteo_inventario import TomaInventarioDetalle
+    from tests.conftest import login
+
+    _item(db, empresa, "COD-001")
+    importar_conteo_fisico(
+        _fs("Código;Stock físico;Contado por\nCOD-001;7;Juan Pérez\n"), empresa.id, usuario_admin.id
+    )
+    login(client, usuario_admin.email)
+
+    client.post("/inventario/toma/cerrar", follow_redirects=True)
+
+    detalle = TomaInventarioDetalle.query.one()
+    assert detalle.contado_por_texto == "Juan Pérez"
+    assert detalle.quien_conto == "Juan Pérez"
+    # Y el cruce vivo quedó limpio, sin el nombre colgando de un conteo borrado.
+    assert ItemConteoInventario.query.one().contado_por_texto is None
+
+
+def test_continuar_una_toma_devuelve_el_nombre_libre(db, empresa, usuario_admin, client):
+    from app.models.conteo_inventario import TomaInventario
+    from tests.conftest import login
+
+    _item(db, empresa, "COD-001")
+    importar_conteo_fisico(
+        _fs("Código;Stock físico;Contado por\nCOD-001;7;Juan Pérez\n"), empresa.id, usuario_admin.id
+    )
+    login(client, usuario_admin.email)
+    client.post("/inventario/toma/cerrar", follow_redirects=True)
+
+    toma = TomaInventario.query.one()
+    client.post(f"/inventario/historial/{toma.id}/reabrir", follow_redirects=True)
+
+    assert ItemConteoInventario.query.one().contado_por_texto == "Juan Pérez"
+
+
+def test_el_nombre_libre_se_ve_en_stock_y_conteo(db, empresa, usuario_admin, client):
+    from tests.conftest import login
+
+    _item(db, empresa, "COD-001")
+    importar_conteo_fisico(
+        _fs("Código;Stock físico;Contado por\nCOD-001;7;Juan Pérez\n"), empresa.id, usuario_admin.id
+    )
+    login(client, usuario_admin.email)
+
+    html = client.get("/inventario/stock?filtro=todos").get_data(as_text=True)
+
+    assert "Juan Pérez" in html
+
+
 # --- Finalizar la toma anterior antes de subir la captura ---
 #
 # La captura de bodega es de una toma nueva. Si la anterior no se finalizó, el

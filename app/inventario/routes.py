@@ -283,6 +283,7 @@ def toma_cerrar():
             cantidad_defontana=i.cantidad_defontana,
             cantidad_fisica=i.cantidad_fisica,
             contado_por_id=i.contado_por_id,
+            contado_por_texto=i.contado_por_texto,
             contado_en=i.contado_en,
         )
         for i in items
@@ -292,6 +293,7 @@ def toma_cerrar():
     for i in items:
         i.cantidad_fisica = None
         i.contado_por_id = None
+        i.contado_por_texto = None
         i.contado_en = None
 
     db.session.commit()
@@ -342,6 +344,7 @@ def toma_reabrir(toma_id):
             continue
         item.cantidad_fisica = detalle.cantidad_fisica
         item.contado_por_id = detalle.contado_por_id
+        item.contado_por_texto = detalle.contado_por_texto
         item.contado_en = detalle.contado_en
         item.cantidad_qms = detalle.cantidad_qms
         item.cantidad_defontana = detalle.cantidad_defontana
@@ -473,7 +476,7 @@ def historial_excel(toma_id):
             d.cantidad_qms,
             d.cantidad_defontana,
             d.cantidad_fisica if d.contado else None,
-            d.contado_por.nombre_completo if d.contado_por else "",
+            d.quien_conto,
             format_fecha_hora(d.contado_en),
             d.categoria or "",
             d.linea_negocio or "",
@@ -579,7 +582,7 @@ def stock_excel():
             i.diferencia_fisica_qms,
             i.diferencia_fisica_defontana,
             "Contado" if i.contado else "Pendiente",
-            i.contado_por.nombre_completo if i.contado_por else "",
+            i.quien_conto,
             format_fecha_hora(i.contado_en),
             i.ubicacion or "",
             i.linea_negocio or "",
@@ -613,6 +616,7 @@ def stock_contar(item_id):
     if valor == "":
         item.cantidad_fisica = None
         item.contado_por_id = None
+        item.contado_por_texto = None
         item.contado_en = None
     else:
         # Se aceptan decimales: hay artículos que se cuentan en metros, kilos o
@@ -637,6 +641,7 @@ def stock_contar(item_id):
             return jsonify({"ok": False, "error": "La cantidad no puede ser negativa."}), 400
         item.cantidad_fisica = cantidad
         item.contado_por_id = current_user.id
+        item.contado_por_texto = None
         item.contado_en = datetime.now(timezone.utc)
 
     db.session.commit()
@@ -648,7 +653,7 @@ def stock_contar(item_id):
             "dif_defontana": item.diferencia_fisica_defontana,
             "tiene_diferencia": item.tiene_diferencia,
             # Para mostrar la trazabilidad del conteo sin recargar la página
-            "registrado_por": item.contado_por.nombre_completo if item.contado_por else "",
+            "registrado_por": item.quien_conto,
             "registrado_en": format_fecha_hora(item.contado_en),
         }
     )
@@ -1727,6 +1732,14 @@ def _resumen_conteo(r) -> str:
     texto += _lista("Cantidad ambigua, escríbela con coma o sin puntos", r["ambiguos"])
     texto += _lista("No se entendió la cantidad", r["sin_numero"])
     texto += _lista("Cantidad negativa", r["negativos"])
+    # Estos dos no botan la fila: el conteo entró igual. Se dicen porque casi
+    # siempre son un nombre escrito distinto o una fecha mal tecleada, y se
+    # arreglan volviendo a subir el archivo corregido.
+    texto += _lista("Se guardó el nombre, pero no es un usuario del sistema", r.get("sin_usuario") or [])
+    texto += _lista(
+        "No se entendió la fecha, quedó con la hora de ahora (escríbela 13-10-2026 10:30)",
+        r.get("fechas_malas") or [],
+    )
     return texto
 
 
@@ -1754,11 +1767,14 @@ def conteo_importar_fisico():
 @bp.route("/conteo/importar/plantilla-conteo")
 @require_permission("inventario", "editar")
 def conteo_plantilla_conteo():
+    # "Contado por" y "Fecha y hora del conteo" van con los mismos nombres que
+    # usa la exportación de Stock y conteo: así la planilla exportada se puede
+    # llenar y volver a subir sin tocarle los encabezados.
     return responder_plantilla_excel(
         "plantilla-conteo",
         "Conteo",
-        ["Código", "Descripción", "Stock físico"],
-        fila_ejemplo=["ROP-BCAN-M", "Roldana cable acero", 12],
+        ["Código", "Descripción", "Stock físico", "Contado por", "Fecha y hora del conteo"],
+        fila_ejemplo=["ROP-BCAN-M", "Roldana cable acero", 12, "Juan Pérez", "13-10-2026 10:30"],
     )
 
 
@@ -2217,6 +2233,7 @@ def _absorber_fila_de_defontana(codigo_qms, codigo_defo, solo_qms, solo_defo) ->
     if destino.cantidad_fisica is None and origen.cantidad_fisica is not None:
         destino.cantidad_fisica = origen.cantidad_fisica
         destino.contado_por_id = origen.contado_por_id
+        destino.contado_por_texto = origen.contado_por_texto
         destino.contado_en = origen.contado_en
 
     db.session.delete(origen)

@@ -23,6 +23,19 @@ class _CalculosConteoMixin:
         return self.cantidad_fisica is not None
 
     @property
+    def quien_conto(self) -> str:
+        """Quién contó: el usuario del sistema, o el nombre que trajo la planilla.
+
+        En bodega cuenta gente que no tiene cuenta en el sistema. Cuando el
+        conteo se sube desde un Excel, el nombre de esa columna es el único
+        registro de quién fue, así que se guarda tal cual en contado_por_texto.
+        Si además hay un usuario vinculado, manda ese: es el dato más firme.
+        """
+        if self.contado_por:
+            return self.contado_por.nombre_completo
+        return self.contado_por_texto or ""
+
+    @property
     def diferencia_sistemas(self):
         """QMS - Defontana. Distinto de 0 significa que los dos sistemas no cuadran entre sí."""
         return (self.cantidad_qms or 0) - (self.cantidad_defontana or 0)
@@ -223,6 +236,9 @@ class ItemConteoInventario(db.Model, _CalculosConteoMixin):
     unidad_qms = db.Column(db.String(20), nullable=True)
     unidad_defontana = db.Column(db.String(20), nullable=True)
     contado_por_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"), nullable=True)
+    # El nombre tal cual lo trajo la planilla de bodega, cuando no corresponde a
+    # ningún usuario del sistema. Ver quien_conto en el mixin.
+    contado_por_texto = db.Column(db.String(150), nullable=True)
     contado_en = db.Column(db.DateTime, nullable=True)
     # Si el artículo venía en la última importación de cada sistema. Sirve para
     # saber cuáles dejaron de existir: los que no están en ninguna de las dos
@@ -337,6 +353,9 @@ class TomaInventarioDetalle(db.Model, _CalculosConteoMixin):
     cantidad_fisica = db.Column(CANTIDAD, nullable=True)
 
     contado_por_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"), nullable=True)
+    # También acá: si no se archivara, finalizar la toma borraría el nombre de
+    # quien contó justo cuando pasa a ser historial, que es para lo que sirve.
+    contado_por_texto = db.Column(db.String(150), nullable=True)
     contado_en = db.Column(db.DateTime, nullable=True)
 
     toma = db.relationship("TomaInventario", back_populates="detalles")
