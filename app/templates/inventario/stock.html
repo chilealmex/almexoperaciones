@@ -231,8 +231,8 @@
             {% endif %}
           </td>
           <td class="celda-registro text-nowrap d-none d-xl-table-cell">
-            {% if i.contado and i.contado_por %}
-            {{ i.contado_por.nombre_completo }}
+            {% if i.contado and i.quien_conto %}
+            {{ i.quien_conto }}
             {% else %}
             <span class="text-muted small">—</span>
             {% endif %}
@@ -316,7 +316,7 @@
 
     <div class="stock-card-foot">
       <div class="small text-muted">
-        <span class="celda-registro">{% if i.contado and i.contado_por %}{{ i.contado_por.nombre_completo }}{% elif i.contado %}—{% else %}Sin contar{% endif %}</span>
+        <span class="celda-registro">{% if i.contado and i.quien_conto %}{{ i.quien_conto }}{% elif i.contado %}—{% else %}Sin contar{% endif %}</span>
         <span class="celda-fecha">{% if i.contado %}{{ i.contado_en|fecha_hora }}{% endif %}</span>
       </div>
     </div>
