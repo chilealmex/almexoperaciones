@@ -6,7 +6,7 @@ from datetime import date, datetime, timezone
 
 from flask import render_template, redirect, url_for, flash, request, abort, jsonify, make_response, current_app
 from flask_login import current_user
-from sqlalchemy import or_, and_
+from sqlalchemy import or_, and_, func
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.inventario import bp
@@ -1487,6 +1487,27 @@ def regularizacion_guardado(clave):
     return jsonify(ok=True, nombre=registro.nombre or "", fecha=format_fecha_hora(registro.actualizado_en), por=current_user.nombre_completo)
 
 
+def _toma_en_curso(empresa_id: int) -> dict:
+    """Lo que ya está contado y todavía no se finalizó.
+
+    Subir una captura de bodega encima de una toma a medio hacer mezcla dos
+    conteos en la misma pantalla, y del anterior no queda rastro: el archivo
+    pisa las cantidades y nadie puede volver a ver con qué se cerró. Finalizar
+    la toma primero la archiva en el historial —con sus diferencias y el stock
+    que los sistemas declaraban ese día— y deja el conteo en blanco.
+
+    No se bloquea la subida: reemplazar el archivo de una misma toma, cuando
+    bodega manda una planilla corregida, es legítimo y frecuente. Se avisa.
+    """
+    contados, desde = db.session.query(
+        func.count(ItemConteoInventario.id), func.min(ItemConteoInventario.contado_en)
+    ).filter(
+        ItemConteoInventario.empresa_id == empresa_id,
+        ItemConteoInventario.cantidad_fisica.isnot(None),
+    ).one()
+    return {"contados": contados or 0, "desde": desde}
+
+
 @bp.route("/conteo/importar", methods=["GET", "POST"])
 @require_permission("inventario", "editar")
 def conteo_importar():
@@ -1495,7 +1516,9 @@ def conteo_importar():
     total_items = ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id).count()
     return render_template(
         "inventario/conteo_importar.html", form_qms=form_qms, form_defontana=form_defontana,
-        form_conteo=ImportarConteoForm(prefix="cnt"), total_items=total_items
+        form_conteo=ImportarConteoForm(prefix="cnt"), total_items=total_items,
+        toma_en_curso=_toma_en_curso(current_user.empresa_id),
+        puede_cerrar_toma=current_user.es_admin_o_superior,
     )
 
 
@@ -1682,6 +1705,11 @@ def conteo_importar_qms():
 def _resumen_conteo(r) -> str:
     """Qué pasó al subir el conteo, en una línea, nombrando lo que no entró."""
     partes = [f"{r['actualizados']} artículos actualizados"]
+    # Si venían contados de antes, la captura se mezcló con una toma que no se
+    # finalizó: hay que decirlo acá, porque es lo único que queda de la cantidad
+    # anterior una vez pisada.
+    if r.get("pisados"):
+        partes.append(f"{r['pisados']} ya venían contados en la toma en curso y quedaron con la cantidad del archivo")
     if r["sin_cambio"]:
         partes.append(f"{r['sin_cambio']} ya tenían esa cantidad")
     if r["vacias"]:

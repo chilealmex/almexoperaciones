@@ -211,3 +211,110 @@ def test_el_mismo_codigo_dos_veces_vale_la_ultima(db, empresa):
 
     db.session.refresh(item)
     assert item.cantidad_fisica == a_cantidad(9)
+
+
+# --- Finalizar la toma anterior antes de subir la captura ---
+#
+# La captura de bodega es de una toma nueva. Si la anterior no se finalizó, el
+# archivo pisa esas cantidades y del conteo anterior no queda rastro: ni en la
+# pantalla ni en el historial. No se bloquea la subida —reemplazar la planilla
+# de la misma toma, cuando bodega manda una corregida, es legítimo y frecuente—,
+# pero tiene que avisarse antes y contarse después.
+
+
+def test_informa_cuantos_venian_contados_de_la_toma_en_curso(db, empresa):
+    """Es lo único que queda de la cantidad anterior una vez pisada."""
+    _item(db, empresa, "COD-001", cantidad_fisica=a_cantidad(99))  # venía contado, cambia
+    _item(db, empresa, "COD-002", cantidad_fisica=a_cantidad(3))   # venía contado, igual
+    _item(db, empresa, "COD-003")                                  # sin contar
+
+    r = importar_conteo_fisico(
+        _fs("Código;Stock físico\nCOD-001;7\nCOD-002;3\nCOD-003;5\n"), empresa.id
+    )
+
+    assert r["pisados"] == 1
+    assert r["actualizados"] == 2
+    assert r["sin_cambio"] == 1
+
+
+def test_con_la_toma_anterior_finalizada_no_se_pisa_nada(db, empresa, usuario_admin, client):
+    """El orden que corresponde, de punta a punta: finalizar y después subir.
+
+    Finalizar deja el conteo en blanco, así que la captura entra limpia y no
+    pisa nada; y la cantidad anterior queda consultable en el historial, que es
+    justamente para lo que sirve finalizar antes.
+    """
+    from app.models.conteo_inventario import TomaInventarioDetalle
+    from tests.conftest import login
+
+    _item(db, empresa, "COD-001", cantidad_fisica=a_cantidad(99))
+    login(client, usuario_admin.email)
+    client.post("/inventario/toma/cerrar", follow_redirects=True)
+
+    r = importar_conteo_fisico(_fs("Código;Stock físico\nCOD-001;7\n"), empresa.id)
+
+    assert r["pisados"] == 0
+    assert r["actualizados"] == 1
+    assert TomaInventarioDetalle.query.one().cantidad_fisica == a_cantidad(99)
+
+
+def test_el_resumen_dice_cuantos_se_pisaron(db, empresa, usuario_admin, client):
+    """Después de subir, es el único rastro que queda de la cantidad anterior."""
+    from tests.conftest import login
+
+    _item(db, empresa, "COD-001", cantidad_fisica=a_cantidad(99))
+    login(client, usuario_admin.email)
+
+    html = client.post(
+        "/inventario/conteo/importar/conteo",
+        data={"cnt-archivo": _fs("Código;Stock físico\nCOD-001;7\n")},
+        content_type="multipart/form-data", follow_redirects=True,
+    ).get_data(as_text=True)
+
+    assert "1 ya venían contados en la toma en curso" in html
+
+
+def test_la_pantalla_avisa_que_hay_una_toma_sin_finalizar(db, empresa, usuario_admin, client):
+    """Sin el aviso la mezcla pasa inadvertida: la pantalla no muestra de qué
+    toma es cada cantidad."""
+    from tests.conftest import login
+
+    _item(db, empresa, "COD-001", cantidad_fisica=a_cantidad(99))
+    login(client, usuario_admin.email)
+
+    html = client.get("/inventario/conteo/importar").get_data(as_text=True)
+
+    assert "ya contado en la toma en curso" in html
+    assert "Finalizar toma" in html
+
+
+def test_el_aviso_es_de_la_propia_empresa(db, empresa, usuario_admin, client):
+    """Una toma a medio hacer de otra empresa no tiene nada que ver acá: avisaría
+    de finalizar algo que en esta pantalla no existe, y no se podría."""
+    from app.models.empresa import Empresa
+    from tests.conftest import login
+
+    otra = Empresa(rut="77.000.000-0", razon_social="Otra SPA")
+    db.session.add(otra)
+    db.session.commit()
+    _item(db, otra, "COD-001", cantidad_fisica=a_cantidad(99))
+    _item(db, empresa, "COD-002")
+    login(client, usuario_admin.email)
+
+    html = client.get("/inventario/conteo/importar").get_data(as_text=True)
+
+    assert "en la toma en curso" not in html
+
+
+def test_sin_nada_contado_no_avisa(db, empresa, usuario_admin, client):
+    """El aviso tiene que significar algo: puesto siempre, se deja de leer."""
+    from tests.conftest import login
+
+    _item(db, empresa, "COD-001")
+    login(client, usuario_admin.email)
+
+    html = client.get("/inventario/conteo/importar").get_data(as_text=True)
+
+    assert "en la toma en curso" not in html
+    # Pero la tarjeta sigue ahí
+    assert "Conteo físico" in html

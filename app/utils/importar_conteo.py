@@ -812,6 +812,11 @@ def importar_conteo_fisico(file_storage, empresa_id: int, usuario_id=None) -> di
 
     ahora = datetime.now(timezone.utc)
     cambios, sin_codigo, iguales = [], [], 0
+    # Cuántos venían contados de antes con otra cantidad. Si la toma anterior se
+    # finalizó primero, esto es 0 y el archivo entra sobre un conteo en blanco;
+    # si no es 0, la captura se está mezclando con una toma a medio hacer y hay
+    # que poder verlo.
+    pisados = 0
     vistos = set()
     for codigo, cantidad in filas:
         clave = codigo_normalizado(codigo)
@@ -825,6 +830,8 @@ def importar_conteo_fisico(file_storage, empresa_id: int, usuario_id=None) -> di
         if item.cantidad_fisica is not None and item.cantidad_fisica == cantidad:
             iguales += 1
             continue
+        if item.cantidad_fisica is not None:
+            pisados += 1
         cambios.append({"id": item.id, "cantidad_fisica": cantidad,
                         "contado_por_id": usuario_id, "contado_en": ahora})
 
@@ -834,6 +841,7 @@ def importar_conteo_fisico(file_storage, empresa_id: int, usuario_id=None) -> di
         "total_filas": len(filas),
         "actualizados": len(cambios),
         "sin_cambio": iguales,
+        "pisados": pisados,
         "sin_codigo": sin_codigo,
         "articulos": len(vistos),
         **problemas,

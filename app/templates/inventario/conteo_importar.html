@@ -91,6 +91,24 @@
           reemplaza; si una fila viene sin cantidad, ese artículo queda como estaba. Los códigos
           que no estén en el maestro se informan y no se cargan.
         </p>
+        {# Hay una toma a medio hacer. Si esta captura es de una toma nueva, lo
+           que corresponde es finalizar la anterior primero: así queda archivada
+           en el historial y el archivo entra sobre un conteo en blanco. No se
+           bloquea la subida —reemplazar la planilla de la misma toma es
+           legítimo—, pero sin este aviso la mezcla pasa inadvertida y de las
+           cantidades anteriores no queda rastro. #}
+        {% if toma_en_curso.contados %}
+        <div class="alert alert-warning small">
+          Hay <strong>{{ toma_en_curso.contados }}</strong> artículo{{ 's' if toma_en_curso.contados != 1 }}
+          ya contado{{ 's' if toma_en_curso.contados != 1 }} en la toma en curso{% if toma_en_curso.desde %},
+          desde el {{ toma_en_curso.desde|fecha }}{% endif %}.
+          Si esta captura es de una <strong>toma nueva</strong>,
+          {% if puede_cerrar_toma %}finaliza primero la anterior{% else %}pide a un administrador que finalice primero la anterior{% endif %}
+          en <a href="{{ url_for('inventario.stock') }}">Stock y conteo → Finalizar toma</a>:
+          queda archivada en el historial con sus diferencias y el conteo parte en blanco.
+          Si subes el archivo ahora, esas cantidades se reemplazan por las del archivo y no queda registro de las anteriores.
+        </div>
+        {% endif %}
         <p><a href="{{ url_for('inventario.conteo_plantilla_conteo') }}" class="small">↓ Descargar plantilla</a></p>
         <form method="post" action="{{ url_for('inventario.conteo_importar_fisico') }}" enctype="multipart/form-data"
               data-boton-ocupado="Cargando el conteo, espera...">
