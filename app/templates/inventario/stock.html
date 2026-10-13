@@ -33,8 +33,23 @@
 </div>
 
 {% if resumen.total == 0 %}
+{# Dos pantallas vacías que se ven igual y significan cosas distintas: acá
+   nunca se cargó nada, allá se acaba de finalizar una toma y el maestro
+   anterior quedó fuera a la espera de las planillas nuevas. Decir "aún no hay
+   stock cargado" después de finalizar haría pensar que se borró todo. #}
 <div class="alert alert-info">
+  {% if esperando_planillas %}
+  <strong>La toma anterior se finalizó.</strong> La toma nueva parte de las planillas nuevas, así que
+  acá van a aparecer sólo los artículos que traiga la próxima importación: los que ya no vengan
+  —eliminados, desactivados— quedan fuera en vez de arrastrarse. No se borró nada; el que vuelva a
+  venir reaparece, con su conteo en blanco.
+  {% if puede('inventario', 'editar') %}
+  Ve a <a href="{{ url_for('inventario.conteo_importar') }}">Importar</a> y sube QMS y Defontana para empezar.
+  {% endif %}
+  Lo contado quedó en <a href="{{ url_for('inventario.historial') }}">Historial de tomas</a>.
+  {% else %}
   Aún no hay stock cargado. {% if puede('inventario', 'editar') %}Ve a <a href="{{ url_for('inventario.conteo_importar') }}">Importar</a> para subir los archivos de QMS y Defontana.{% endif %}
+  {% endif %}
 </div>
 {% else %}
 

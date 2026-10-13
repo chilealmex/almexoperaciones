@@ -156,7 +156,13 @@ def _consulta_stock(args, filtro_por_defecto="todos", esconder_vacios_por_defect
     filtro = filtro_stock(args, filtro_por_defecto)
     sin_vacios = esconder_vacios(args, esconder_vacios_por_defecto)
 
-    base = ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id)
+    # Sólo lo que trajo una importación de esta toma. Al finalizar la anterior
+    # se sacan todos de la lista: lo que no vuelve a venir en las planillas pudo
+    # haberse eliminado o desactivado, y contarlo igual sería contar algo que ya
+    # no existe. No se borra nada; el que vuelve reaparece con su conteo limpio.
+    base = ItemConteoInventario.query.filter_by(
+        empresa_id=current_user.empresa_id, importado_en_la_toma=True
+    )
     if q:
         patron = f"%{q}%"
         # También por el código con que lo nombra Defontana: ahora que esa
@@ -222,7 +228,11 @@ def stock():
     pagina = request.args.get("pagina", 1, type=int)
     paginacion = consulta.paginate(page=max(1, pagina), per_page=100, error_out=False)
 
-    todos = ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id).all()
+    # Los contadores cuentan lo mismo que se lista: si dijeran 3.111 sobre una
+    # lista de 900, no habría forma de saber cuál de los dos números creer.
+    todos = ItemConteoInventario.query.filter_by(
+        empresa_id=current_user.empresa_id, importado_en_la_toma=True
+    ).all()
     resumen = {
         "total": len(todos),
         "con_diferencia": sum(1 for i in todos if i.tiene_diferencia),
@@ -230,6 +240,11 @@ def stock():
         "contados": sum(1 for i in todos if i.contado),
         "vacios": sum(1 for i in todos if not _tiene_stock(i)),
     }
+    # Se finalizó una toma y todavía no se sube ninguna planilla: la pantalla
+    # vacía sin explicación se parece a una rota.
+    esperando_planillas = not todos and ItemConteoInventario.query.filter_by(
+        empresa_id=current_user.empresa_id
+    ).count() > 0
     return render_template(
         "inventario/stock.html",
         paginacion=paginacion,
@@ -243,6 +258,7 @@ def stock():
         sin_vacios=sin_vacios,
         puede_cerrar_toma=current_user.es_admin_o_superior,
         codigos=codigos_por_sistema(paginacion.items, current_user.empresa_id),
+        esperando_planillas=esperando_planillas,
     )
 
 
@@ -313,6 +329,12 @@ def toma_cerrar():
         i.contado_por_id = None
         i.contado_por_texto = None
         i.contado_en = None
+        # La toma nueva parte de la planilla nueva, no del maestro viejo. Entre
+        # una toma y otra pueden haber eliminado un artículo o haberlo dejado
+        # inactivo: arrastrarlo hace que bodega cuente cosas que ya no existen.
+        # Los artículos no se borran, quedan fuera de la lista hasta que una
+        # importación los traiga de vuelta.
+        i.importado_en_la_toma = False
 
     db.session.commit()
     flash(
@@ -366,6 +388,10 @@ def toma_reabrir(toma_id):
         item.contado_en = detalle.contado_en
         item.cantidad_qms = detalle.cantidad_qms
         item.cantidad_defontana = detalle.cantidad_defontana
+        # Vuelve a la lista: continuar una toma es deshacer el cierre, y al
+        # cerrar se habían sacado todos. Sin esto, retomarla mostraría la
+        # pantalla vacía con los conteos restituidos y escondidos.
+        item.importado_en_la_toma = True
         restaurados += 1
 
     db.session.delete(toma)  # deja de ser historial: vuelve a estar en curso

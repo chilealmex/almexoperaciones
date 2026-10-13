@@ -419,7 +419,8 @@ def importar_qms(file_storage, empresa_id: int, solo_no_contados: bool = False) 
         item = existentes.get(redirigidos.get(clave, clave))
         if item is None:
             item = ItemConteoInventario(empresa_id=empresa_id, codigo=codigo, cantidad_defontana=0,
-                                        en_qms=True, en_defontana=False)
+                                        en_qms=True, en_defontana=False,
+                                        importado_en_la_toma=True)
             item.cantidad_qms = datos["cantidad"]
             item.nombre = datos["nombre"] or None
             item.linea_negocio = datos["linea_negocio"] or None
@@ -454,6 +455,9 @@ def importar_qms(file_storage, empresa_id: int, solo_no_contados: bool = False) 
             "unidad_qms": datos["unidad"] or item.unidad_qms,
             "costo_unitario_qms": datos["costo"] if datos["costo"] is not None else item.costo_unitario_qms,
             "en_qms": True,
+            # Lo trajo esta importación, así que entra a la toma actual: al
+            # finalizar la anterior se habían sacado todos de la lista.
+            "importado_en_la_toma": True,
         })
 
     if nuevos:
@@ -545,7 +549,8 @@ def importar_defontana(file_storage, empresa_id: int, solo_no_contados: bool = F
         item = existentes.get(equivalentes.get(clave, clave))
         if item is None:
             item = ItemConteoInventario(empresa_id=empresa_id, codigo=codigo, cantidad_qms=0,
-                                        en_defontana=True, en_qms=False)
+                                        en_defontana=True, en_qms=False,
+                                        importado_en_la_toma=True)
             item.cantidad_defontana = datos["cantidad"]
             item.nombre = datos["nombre"] or None
             item.ubicacion = bodegas or None
@@ -573,6 +578,7 @@ def importar_defontana(file_storage, empresa_id: int, solo_no_contados: bool = F
                 datos["costo"] if datos["costo"] is not None else item.costo_unitario_defontana
             ),
             "en_defontana": True,
+            "importado_en_la_toma": True,
         })
 
     if nuevos:
