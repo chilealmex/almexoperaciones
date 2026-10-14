@@ -16,7 +16,7 @@ import io
 from werkzeug.datastructures import FileStorage
 
 from app.models.conteo_inventario import ItemConteoInventario
-from app.utils.importar_conteo import importar_qms
+from app.utils.importar_conteo import importar_defontana, importar_qms
 from tests.conftest import login
 
 # La plantilla que se descarga, con su columna nueva.
@@ -67,12 +67,14 @@ def test_se_carga_la_ubicacion_escrita_a_mano(db, empresa):
     assert _ubicacion() == "ESTANTE A3"
 
 
-def test_sin_columna_de_ubicacion_sigue_quedando_la_sucursal(db, empresa):
-    """Es lo que pasaba antes y no se rompe: la sucursal es menos precisa que un
-    estante, pero dejar la celda vacía manda a recorrer la bodega entera."""
+def test_sin_columna_de_ubicacion_queda_en_blanco(db, empresa):
+    """La sucursal no es la ubicación: es de dónde salió la planilla. Usarla de
+    respaldo dejaba la misma palabra repetida en las tres mil filas, que
+    contando es igual a no tener ninguna, y encima con aspecto de dato.
+    """
     _subir(SIN_UBICACION, empresa)
 
-    assert _ubicacion() == "Bodega Central"
+    assert _ubicacion() is None
 
 
 def test_el_export_del_sistema_sigue_mandando(db, empresa):
@@ -108,12 +110,92 @@ def test_se_puede_corregir_la_ubicacion_de_un_articulo_que_ya_existe(db, empresa
     assert _ubicacion() == "ESTANTE B1"
 
 
-def test_la_sucursal_no_pisa_una_ubicacion_que_ya_estaba(db, empresa):
-    """La protección que existía, y que hay que conservar: un archivo sin
-    columna de ubicación no puede reemplazar un estante por el nombre de la
-    bodega de la que salió la planilla."""
+def test_la_planilla_manda_tambien_cuando_viene_vacia(db, empresa):
+    """Lo que diga la columna de QMS es lo que queda, incluso vacío.
+
+    Conservar lo anterior cuando no viene parece más seguro, pero deja para
+    siempre las ubicaciones que escribieron las versiones anteriores —la
+    sucursal, el nombre de la bodega de Defontana— sin ninguna forma de
+    limpiarlas: no hay pantalla donde borrar una ubicación.
+    """
+    _subir(CON_UBICACION, empresa)
+    assert _ubicacion() == "ESTANTE A3"
+
+    _subir(CON_UBICACION.replace("ESTANTE A3", ""), empresa)
+
+    assert _ubicacion() is None
+
+
+# --- Defontana no escribe la ubicación ---
+#
+# Llenaba la ubicación con el nombre de la bodega ("BODEGA CENTRAL") en todo
+# artículo que no tuviera una. Con una sola bodega eso es la misma palabra
+# repetida en todas las filas: ocupa la columna, parece un dato y no dice dónde
+# está nada. La ubicación sale sólo de la planilla de QMS.
+
+CAB_DEFO = "CodArticulo;Descripción Artículo;CodBodega;Nombre Bodega;Saldo Stock;Unidad;Costo Unitario\r\n"
+
+
+def _subir_defontana(codigo, empresa, bodega="BODEGA CENTRAL"):
+    texto = CAB_DEFO + f"{codigo};PRODUCTO;B1;{bodega};10;UN;1000\r\n"
+    return importar_defontana(
+        FileStorage(stream=io.BytesIO(texto.encode("utf-8")), filename="defontana.csv"), empresa.id
+    )
+
+
+def test_defontana_no_llena_la_ubicacion_de_un_articulo_nuevo(db, empresa):
+    _subir_defontana("SOLO-DEFO", empresa)
+
+    assert ItemConteoInventario.query.one().ubicacion is None
+
+
+def test_defontana_no_toca_la_ubicacion_que_puso_qms(db, empresa):
+    """Es el caso que importa: el artículo está en los dos sistemas y la
+    ubicación buena vino de QMS."""
     _subir(CON_UBICACION, empresa)
 
-    _subir(SIN_UBICACION, empresa)
+    _subir_defontana("ROP-BCAN-M", empresa)
 
     assert _ubicacion() == "ESTANTE A3"
+
+
+def test_importar_defontana_sigue_cargando_lo_suyo(db, empresa):
+    """No se le quitó más que la ubicación: las cantidades, la unidad y el costo
+    son suyos y tienen que seguir entrando."""
+    _subir_defontana("SOLO-DEFO", empresa)
+
+    item = ItemConteoInventario.query.one()
+    assert item.cantidad_defontana == 10
+    assert item.unidad_defontana == "UN"
+    assert item.costo_unitario_defontana == 1000
+    assert item.en_defontana is True
+
+
+def test_defontana_tampoco_la_llena_en_un_articulo_que_ya_existe(db, empresa):
+    """El caso que de verdad pasaba: el artículo ya está en el maestro —lo trajo
+    QMS— pero sin ubicación, y al importar Defontana aparecía "BODEGA CENTRAL"
+    en todas las filas. El artículo nuevo es el camino fácil; este es el otro.
+    """
+    _subir(SIN_UBICACION, empresa)  # QMS lo crea sin ubicación
+    assert _ubicacion() is None
+
+    _subir_defontana("ROP-BCAN-M", empresa)  # ahora pasa por la actualización
+
+    assert _ubicacion() is None
+
+
+def test_el_cruce_de_prueba_dice_lo_mismo(db, empresa):
+    """Esa pantalla compara dos planillas sin cargarlas, para ver qué pasaría.
+    Si ahí Defontana llenara la ubicación, mostraría un cruce que no es el que
+    se va a guardar.
+    """
+    from app.utils.cruce_prueba import comparar
+
+    items = comparar(
+        {"COD-X": {"cantidad": 5, "nombre": "PROD", "ubicacion": "", "linea_negocio": "",
+                   "categoria": "", "unidad": "UN", "costo": 100}},
+        {"COD-X": {"cantidad": 5, "nombre": "PROD", "bodegas": {"BODEGA CENTRAL"},
+                   "unidad": "UN", "costo": 100}},
+    )
+
+    assert items[0].ubicacion is None

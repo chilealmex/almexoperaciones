@@ -383,19 +383,11 @@ def leer_qms(file_storage) -> dict:
                 "cantidad": 0,
                 "nombre": _texto(fila.get(columna_nombre), 255),
                 "linea_negocio": _texto(fila.get(columna_linea), 120) if columna_linea else "",
-                # Se guardan por separado la ubicación que el archivo declara y
-                # el respaldo de la sucursal. No son lo mismo: una la escribió
-                # alguien para decir dónde está el artículo, la otra es de dónde
-                # salió la planilla. Al actualizar, sólo la declarada puede pisar
-                # lo que ya había (ver importar_qms).
-                "ubicacion_declarada": (
-                    _texto(fila.get(columna_ubicacion), 255) if columna_ubicacion else ""
-                ),
-                # Sin ubicación propia queda la sucursal, que es lo único que
-                # dice dónde buscarlo. Es menos preciso que un estante, pero
-                # dejar la celda vacía manda a recorrer la bodega entera.
-                "ubicacion": (_texto(fila.get(columna_ubicacion), 255) if columna_ubicacion else "")
-                or _texto(fila.get("Sucursal"), 255),
+                # Sólo lo que dice la columna de ubicación. La sucursal no sirve
+                # de respaldo: es de dónde salió la planilla, no dónde está el
+                # artículo, y ponerla dejaba la misma palabra repetida en todas
+                # las filas, que contando es igual a no tener ninguna.
+                "ubicacion": _texto(fila.get(columna_ubicacion), 255) if columna_ubicacion else "",
                 "categoria": _texto(fila.get(columna_categoria), 120) if columna_categoria else "",
                 "unidad": _texto(fila.get(columna_unidad), 20) if columna_unidad else "",
                 "costo": None,
@@ -469,12 +461,12 @@ def importar_qms(file_storage, empresa_id: int, solo_no_contados: bool = False) 
             "cantidad_qms": item.cantidad_qms if congelado else datos["cantidad"],
             "nombre": datos["nombre"] or item.nombre,
             "linea_negocio": datos["linea_negocio"] or item.linea_negocio,
-            # La ubicación que el archivo declara manda: es la única forma de
-            # corregirla, porque no se escribe en ninguna pantalla. La sucursal
-            # no, y por eso no basta con "datos['ubicacion']": entra sólo cuando
-            # el artículo no tenía ninguna, así no pisa un estante con el nombre
-            # de la bodega de la que salió la planilla.
-            "ubicacion": datos["ubicacion_declarada"] or item.ubicacion or datos["ubicacion"],
+            # La planilla de QMS es la única fuente: lo que diga su columna es lo
+            # que queda, incluso vacío. Conservar lo anterior cuando no viene
+            # dejaría para siempre las ubicaciones que escribieron las versiones
+            # anteriores —la sucursal, el nombre de la bodega de Defontana— sin
+            # ninguna forma de limpiarlas.
+            "ubicacion": datos["ubicacion"] or None,
             "categoria": datos["categoria"] or item.categoria,
             "unidad_qms": datos["unidad"] or item.unidad_qms,
             "costo_unitario_qms": datos["costo"] if datos["costo"] is not None else item.costo_unitario_qms,
@@ -568,7 +560,6 @@ def importar_defontana(file_storage, empresa_id: int, solo_no_contados: bool = F
     nuevos = []
     cambios = []
     for codigo, datos in acumulado.items():
-        bodegas = ", ".join(sorted(datos["bodegas"]))[:255] if datos["bodegas"] else ""
         clave = codigo_normalizado(codigo)
         item = existentes.get(equivalentes.get(clave, clave))
         if item is None:
@@ -577,7 +568,6 @@ def importar_defontana(file_storage, empresa_id: int, solo_no_contados: bool = F
                                         importado_en_la_toma=True)
             item.cantidad_defontana = datos["cantidad"]
             item.nombre = datos["nombre"] or None
-            item.ubicacion = bodegas or None
             item.unidad_defontana = datos["unidad"] or None
             item.costo_unitario_defontana = datos["costo"]
             nuevos.append(item)
@@ -596,7 +586,6 @@ def importar_defontana(file_storage, empresa_id: int, solo_no_contados: bool = F
             "codigo": _normalizar_codigo(item.codigo),
             "cantidad_defontana": item.cantidad_defontana if congelado else datos["cantidad"],
             "nombre": item.nombre or datos["nombre"] or item.nombre,
-            "ubicacion": item.ubicacion or bodegas or item.ubicacion,
             "unidad_defontana": datos["unidad"] or item.unidad_defontana,
             "costo_unitario_defontana": (
                 datos["costo"] if datos["costo"] is not None else item.costo_unitario_defontana

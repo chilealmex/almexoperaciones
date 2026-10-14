@@ -68,6 +68,9 @@ def comparar(lectura_qms: dict, lectura_defontana: dict, equivalencias=None) -> 
         item.en_qms = True
         item.nombre = item.nombre or datos.get("nombre") or None
         item.linea_negocio = item.linea_negocio or datos.get("linea_negocio") or None
+        # La ubicación sale sólo de QMS, igual que al importar: Defontana no
+        # la escribe. Esta pantalla compara dos planillas sin cargarlas, así
+        # que tiene que mostrar lo mismo que se guardaría.
         item.ubicacion = item.ubicacion or datos.get("ubicacion") or None
         item.categoria = item.categoria or datos.get("categoria") or None
         item.unidad_qms = datos.get("unidad") or None
@@ -79,8 +82,6 @@ def comparar(lectura_qms: dict, lectura_defontana: dict, equivalencias=None) -> 
         item.cantidad_defontana = item.cantidad_defontana + _cantidad(datos.get("cantidad"))
         item.en_defontana = True
         item.nombre = item.nombre or datos.get("nombre") or None
-        bodegas = datos.get("bodegas") or []
-        item.ubicacion = item.ubicacion or (", ".join(sorted(bodegas))[:255] if bodegas else None)
         item.unidad_defontana = datos.get("unidad") or None
         item.costo_unitario_defontana = datos.get("costo")
 
