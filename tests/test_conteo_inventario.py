@@ -634,7 +634,13 @@ Casa Matriz;;;99;;;COD-001;
     assert item.nombre == "PRODUCTO UNO"    # el nombre no se pisa con vacío
     assert item.linea_negocio == "GOMAS"
     assert item.categoria == "CAT-A"
-    assert item.ubicacion == "RACK PROPIO"  # la ubicación puesta a mano se respeta
+    # La ubicación es la excepción, y a propósito: sale sólo de la planilla de
+    # QMS y lo que diga su columna es lo que queda, incluso vacío. No hay
+    # pantalla donde escribirla a mano —el "puesto a mano" de esta prueba era
+    # escribir en la base—, así que conservarla cuando no viene dejaba para
+    # siempre las ubicaciones que pusieron las versiones anteriores: la sucursal
+    # repetida en todas las filas, o el nombre de la bodega de Defontana.
+    assert item.ubicacion is None
 
 
 def test_defontana_en_lote_no_pisa_el_nombre_que_ya_existe(db, empresa):
