@@ -1330,8 +1330,12 @@ input.campo-excel.esta-vacio::placeholder {
 }
 
 /* Bootstrap decide por el ancho de la ventana, pero aquí lo que queda libre es
-   la ventana menos el menú lateral. Ubicación y Línea de negocio son datos de
-   apoyo: aparecen recién cuando de verdad sobra sitio. */
+   la ventana menos el menú lateral. Línea de negocio es un dato de apoyo:
+   aparece recién cuando de verdad sobra sitio.
+
+   Ubicación salió de acá: contando es el dato con el que se camina a buscar el
+   artículo, no un dato de apoyo, y esconderla sobre 1700px de ventana la dejaba
+   fuera del borde justo en la pantalla donde se usa. */
 .solo-pantalla-ancha { display: none !important; }
 
 @media (min-width: 1700px) {

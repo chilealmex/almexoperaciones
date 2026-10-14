@@ -191,6 +191,11 @@
           {{ t.th('Código QMS', 'codigo', orden, direccion) }}
           <th>Código Defontana</th>
           {{ t.th('Nombre', 'nombre', orden, direccion) }}
+          {# Dónde está guardado. Va acá y siempre a la vista: contando es
+             el dato con el que se camina a buscarlo, no un dato de apoyo.
+             Al final y sólo sobre 1700px de ventana, quedaba fuera del
+             borde justo en la pantalla donde se usa. #}
+          {{ t.th('Ubicación', 'ubicacion', orden, direccion) }}
           {{ t.th('Unidad', 'unidad_qms', orden, direccion) }}
           {{ t.th('QMS', 'cantidad_qms', orden, direccion, 'num') }}
           {{ t.th('Defontana', 'cantidad_defontana', orden, direccion, 'num') }}
@@ -198,13 +203,13 @@
           {{ t.th('Físico', 'cantidad_fisica', orden, direccion, 'num') }}
           <th class="d-none d-xl-table-cell">Registrado por</th>
           {{ t.th('Fecha y hora', 'contado_en', orden, direccion, 'd-none d-xl-table-cell') }}
-          {{ t.th('Ubicación', 'ubicacion', orden, direccion, 'solo-pantalla-ancha') }}
           {{ t.th('Línea de negocio', 'linea_negocio', orden, direccion, 'solo-pantalla-ancha') }}
         </tr>
         <tr class="filtros-fila">
           {{ t.filtro('f_codigo', filtros_columna, 'filtros-stock', 'Código') }}
           {{ t.sin_filtro() }}
           {{ t.filtro('f_nombre', filtros_columna, 'filtros-stock', 'Nombre') }}
+          {{ t.filtro('f_ubicacion', filtros_columna, 'filtros-stock', 'Ubicación') }}
           {{ t.filtro('f_unidad', filtros_columna, 'filtros-stock', 'Unidad') }}
           {{ t.sin_filtro('num') }}
           {{ t.sin_filtro('num') }}
@@ -212,7 +217,6 @@
           {{ t.sin_filtro('num') }}
           {{ t.sin_filtro() }}
           {{ t.sin_filtro() }}
-          {{ t.filtro('f_ubicacion', filtros_columna, 'filtros-stock', 'Ubicación', 'solo-pantalla-ancha') }}
           {{ t.filtro('f_linea', filtros_columna, 'filtros-stock', 'Línea', 'solo-pantalla-ancha') }}
         </tr>
       </thead>
@@ -224,6 +228,7 @@
           <td class="text-nowrap fw-semibold">{{ codigos[i.id][0] or '—' }}</td>
           <td class="text-nowrap fw-semibold">{{ codigos[i.id][1] or '—' }}</td>
           <td class="celda-nombre" title="{{ i.nombre or '' }}">{{ i.nombre or '—' }}</td>
+          <td class="celda-ubicacion" title="{{ i.ubicacion or '' }}">{{ i.ubicacion or '—' }}</td>
           <td class="text-nowrap">
             {% if i.unidades_coinciden %}
             {{ i.unidad_qms or i.unidad_defontana or '—' }}
@@ -263,7 +268,6 @@
           <td class="celda-fecha text-nowrap text-muted small d-none d-xl-table-cell">
             {{ i.contado_en|fecha_hora if i.contado else '—' }}
           </td>
-          <td class="solo-pantalla-ancha celda-ubicacion" title="{{ i.ubicacion or '' }}">{{ i.ubicacion or '—' }}</td>
           <td class="solo-pantalla-ancha celda-linea" title="{{ i.linea_negocio or '' }}">{{ i.linea_negocio or '—' }}</td>
         </tr>
         {% else %}
