@@ -356,7 +356,14 @@ def leer_qms(file_storage) -> dict:
     columna_nombre = next((c for c in encabezados if "descripci" in c.lower()), None)
     columna_stock = "Stock" if "Stock" in encabezados else _buscar_columna(encabezados, "stock")
     columna_linea = "Linea Negocio" if "Linea Negocio" in encabezados else _buscar_columna(encabezados, "linea")
-    columna_ubicacion = "ubicacion_bodega"
+    # El export de QMS la trae como "ubicacion_bodega", pero la plantilla que se
+    # llena a mano no puede pedir un nombre de sistema, así que también se
+    # reconoce escrita como "Ubicación". Se prefiere la del export: si un
+    # archivo trajera las dos, la del sistema es la que manda.
+    columna_ubicacion = (
+        "ubicacion_bodega" if "ubicacion_bodega" in encabezados
+        else _buscar_columna(encabezados, "ubicaci")
+    )
     columna_unidad = _buscar_columna(encabezados, "unidad")
     columna_categoria = _buscar_columna(encabezados, "categor")
     columna_costo = _buscar_columna(encabezados, "valor", "unitario")
@@ -376,7 +383,19 @@ def leer_qms(file_storage) -> dict:
                 "cantidad": 0,
                 "nombre": _texto(fila.get(columna_nombre), 255),
                 "linea_negocio": _texto(fila.get(columna_linea), 120) if columna_linea else "",
-                "ubicacion": _texto(fila.get(columna_ubicacion), 255) or _texto(fila.get("Sucursal"), 255),
+                # Se guardan por separado la ubicación que el archivo declara y
+                # el respaldo de la sucursal. No son lo mismo: una la escribió
+                # alguien para decir dónde está el artículo, la otra es de dónde
+                # salió la planilla. Al actualizar, sólo la declarada puede pisar
+                # lo que ya había (ver importar_qms).
+                "ubicacion_declarada": (
+                    _texto(fila.get(columna_ubicacion), 255) if columna_ubicacion else ""
+                ),
+                # Sin ubicación propia queda la sucursal, que es lo único que
+                # dice dónde buscarlo. Es menos preciso que un estante, pero
+                # dejar la celda vacía manda a recorrer la bodega entera.
+                "ubicacion": (_texto(fila.get(columna_ubicacion), 255) if columna_ubicacion else "")
+                or _texto(fila.get("Sucursal"), 255),
                 "categoria": _texto(fila.get(columna_categoria), 120) if columna_categoria else "",
                 "unidad": _texto(fila.get(columna_unidad), 20) if columna_unidad else "",
                 "costo": None,
@@ -450,7 +469,12 @@ def importar_qms(file_storage, empresa_id: int, solo_no_contados: bool = False) 
             "cantidad_qms": item.cantidad_qms if congelado else datos["cantidad"],
             "nombre": datos["nombre"] or item.nombre,
             "linea_negocio": datos["linea_negocio"] or item.linea_negocio,
-            "ubicacion": item.ubicacion or datos["ubicacion"] or item.ubicacion,
+            # La ubicación que el archivo declara manda: es la única forma de
+            # corregirla, porque no se escribe en ninguna pantalla. La sucursal
+            # no, y por eso no basta con "datos['ubicacion']": entra sólo cuando
+            # el artículo no tenía ninguna, así no pisa un estante con el nombre
+            # de la bodega de la que salió la planilla.
+            "ubicacion": datos["ubicacion_declarada"] or item.ubicacion or datos["ubicacion"],
             "categoria": datos["categoria"] or item.categoria,
             "unidad_qms": datos["unidad"] or item.unidad_qms,
             "costo_unitario_qms": datos["costo"] if datos["costo"] is not None else item.costo_unitario_qms,

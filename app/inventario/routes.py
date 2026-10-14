@@ -1660,11 +1660,16 @@ def conteo_plantilla_qms():
     return responder_plantilla_excel(
         "plantilla-qms",
         "QMS",
+        # "Ubicación" va junto a la sucursal porque es la misma pregunta con más
+        # detalle: la sucursal dice en qué bodega está y la ubicación dónde
+        # dentro de ella. La plantilla no la pedía, y sin ella el importador
+        # caía en la sucursal: contando, eso manda a recorrer la bodega entera.
         [
             "Código único", "Descripción", "Stock", "Linea Negocio", "Sucursal",
-            "Unidad", "Categoría", "Valor Unitario", "Valor Total",
+            "Ubicación", "Unidad", "Categoría", "Valor Unitario", "Valor Total",
         ],
-        fila_ejemplo=["ROP-BCAN-M", "Roldana cable acero", 12, "Repuestos", "Bodega Central", "UN", "Componentes", 15000, 180000],
+        fila_ejemplo=["ROP-BCAN-M", "Roldana cable acero", 12, "Repuestos", "Bodega Central",
+                      "Estante A3 / Nivel 2", "UN", "Componentes", 15000, 180000],
     )
 
 
