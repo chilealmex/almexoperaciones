@@ -288,4 +288,20 @@ def _registrar_cabeceras_de_seguridad(app):
         # Render); en Dev/Test no se envía para no romper el http:// local.
         if app.config.get("SESSION_COOKIE_SECURE"):
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+
+        # Las páginas salían sin ninguna directiva de caché. Sin nada que diga lo
+        # contrario, el navegador —o un proxy de la empresa— puede reusar una
+        # copia vieja sin preguntarle al servidor, y entonces una importación
+        # recién hecha no se ve: cada quien mira la página que le quedó guardada.
+        #
+        # Y lo otro, que es peor: después de cerrar sesión, el botón "atrás"
+        # muestra las pantallas del que estaba antes. En un computador compartido
+        # en bodega, eso es el inventario de la empresa a la vista de cualquiera.
+        #
+        # Va con setdefault y eso es lo que hace el trabajo, no un adorno: los
+        # archivos estáticos ya traen su "no-cache" puesto por Flask, así que
+        # esta línea no los toca y siguen revalidando contra el servidor en vez
+        # de volver a bajarse en cada página. Con una asignación directa, el CSS
+        # y el JavaScript se descargarían completos cada vez.
+        response.headers.setdefault("Cache-Control", "no-store")
         return response
