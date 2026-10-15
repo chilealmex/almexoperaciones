@@ -102,4 +102,5 @@ def test_el_macro_lo_usan_las_pantallas_que_tienen_listados_largos():
     # El cruce aparece como _cruce_tabla.html: la tabla la comparten la
     # pantalla del sistema y la del cruce de prueba, así que la paginación vive
     # una sola vez, en la pieza que las dos incluyen.
-    assert usan == ["_cruce_tabla.html", "ajuste.html", "historial_detalle.html", "stock.html"]
+    assert usan == ["_cruce_tabla.html", "ajuste.html", "historial_detalle.html",
+                    "oti_lista.html", "stock.html"]
