@@ -52,18 +52,11 @@
     <input type="search" class="form-control form-control-sm" id="q" name="q" value="{{ q }}"
            placeholder="N° de OTI, cliente, o qué se mandó a hacer...">
   </div>
-  <div class="col-6 col-md-2">
+  <div class="col-6 col-md-3">
     <label class="form-label small mb-1" for="f-linea">Línea de negocio</label>
     <select class="form-select form-select-sm" id="f-linea" name="linea">
       <option value="">Todas</option>
       {% for l in lineas %}<option value="{{ l }}" {{ 'selected' if request.args.get('linea') == l }}>{{ l }}</option>{% endfor %}
-    </select>
-  </div>
-  <div class="col-6 col-md-2">
-    <label class="form-label small mb-1" for="f-sucursal">Sucursal</label>
-    <select class="form-select form-select-sm" id="f-sucursal" name="sucursal">
-      <option value="">Todas</option>
-      {% for s in sucursales %}<option value="{{ s }}" {{ 'selected' if request.args.get('sucursal') == s }}>{{ s }}</option>{% endfor %}
     </select>
   </div>
   <div class="col-6 col-md-2">
@@ -104,7 +97,6 @@
           <th>Qué se manda a hacer</th>
           {{ th('Cliente', 'cliente') }}
           {{ th('Línea', 'linea_negocio') }}
-          <th>Sucursal</th>
           <th>OT QMS</th>
           <th></th>
         </tr>
@@ -130,7 +122,6 @@
           </td>
           <td class="small">{{ o.cliente or '—' }}</td>
           <td class="small">{{ o.linea_negocio or '—' }}</td>
-          <td class="small">{{ o.sucursal or '—' }}</td>
           <td class="small">{{ o.ot_qms or '—' }}</td>
           {# Modificar y eliminar son sólo de administrador: lo que decía la
              orden queda reemplazado sin rastro, y quien la escribió puede no

@@ -61,6 +61,12 @@ class OrdenTrabajoInterna(db.Model):
     # cliente es la minera a la que termina llegando.
     customer = db.Column(db.String(120), nullable=True)
     cliente = db.Column(db.String(120), nullable=True)
+    # Ya no se muestra ni se edita: en la planilla mezclaba sucursales de
+    # verdad (SANTIAGO, ANTOFAGASTA) con áreas (PRODUCCION, COMERCIAL,
+    # CONTROL CALIDAD), así que la columna no contestaba una sola pregunta.
+    # La columna se conserva y la carga de la planilla la sigue guardando:
+    # borrarla perdería para siempre lo que sí dice de las 723 órdenes que
+    # ya están, y volver a mostrarla es sacarle el comentario a esta línea.
     sucursal = db.Column(db.String(40), nullable=True)
     linea_negocio = db.Column(db.String(40), nullable=True)
     # El número con que la misma orden existe en QMS, para poder cruzarlas.

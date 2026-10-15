@@ -57,11 +57,7 @@
           <label class="form-label small mb-1" for="{{ form.cliente.id }}">{{ form.cliente.label.text }}</label>
           {{ form.cliente(class="form-control", list="lista-cliente") }}
         </div>
-        <div class="col-6 col-md-2">
-          <label class="form-label small mb-1" for="{{ form.sucursal.id }}">{{ form.sucursal.label.text }}</label>
-          {{ form.sucursal(class="form-control", list="lista-sucursal") }}
-        </div>
-        <div class="col-6 col-md-2">
+        <div class="col-6 col-md-4">
           <label class="form-label small mb-1" for="{{ form.linea_negocio.id }}">{{ form.linea_negocio.label.text }}</label>
           {{ form.linea_negocio(class="form-control", list="lista-linea") }}
         </div>
@@ -130,7 +126,6 @@
 
 <datalist id="lista-customer">{% for v in sugerencias.customer %}<option value="{{ v }}">{% endfor %}</datalist>
 <datalist id="lista-cliente">{% for v in sugerencias.cliente %}<option value="{{ v }}">{% endfor %}</datalist>
-<datalist id="lista-sucursal">{% for v in sugerencias.sucursal %}<option value="{{ v }}">{% endfor %}</datalist>
 <datalist id="lista-linea">{% for v in sugerencias.linea %}<option value="{{ v }}">{% endfor %}</datalist>
 
 <script>

@@ -77,7 +77,6 @@ class OTIForm(FlaskForm):
     estado = SelectField("Estado", validators=[DataRequired()])
     customer = StringField("Solicita", validators=[Optional(), Length(max=120)])
     cliente = StringField("Cliente final", validators=[Optional(), Length(max=120)])
-    sucursal = StringField("Sucursal", validators=[Optional(), Length(max=40)])
     linea_negocio = StringField("Línea de negocio", validators=[Optional(), Length(max=40)])
     ot_qms = StringField("N° OT en QMS", validators=[Optional(), Length(max=30)])
     fecha_inicio = DateField("Fecha de inicio", validators=[Optional()])

@@ -2637,7 +2637,6 @@ def _filtros_oti(args):
         base = base.filter(or_(*condiciones))
 
     for campo, columna in (("linea", OrdenTrabajoInterna.linea_negocio),
-                           ("sucursal", OrdenTrabajoInterna.sucursal),
                            ("anio", OrdenTrabajoInterna.fecha)):
         valor = (args.get(campo) or "").strip()
         if not valor:
@@ -2685,7 +2684,6 @@ def oti_lista():
         pendientes=sum(1 for o in todas if o.pendiente),
         total=len(todas),
         lineas=_valores_oti(current_user.empresa_id, OrdenTrabajoInterna.linea_negocio),
-        sucursales=_valores_oti(current_user.empresa_id, OrdenTrabajoInterna.sucursal),
         anios=sorted({o.fecha.year for o in todas if o.fecha}, reverse=True),
         form_importar=ImportarOTIForm(prefix="oti"),
         form_accion=AccionForm(),
@@ -2705,7 +2703,6 @@ def _sugerencias_oti(empresa_id) -> dict:
     return {
         "customer": _valores_oti(empresa_id, OrdenTrabajoInterna.customer),
         "cliente": _valores_oti(empresa_id, OrdenTrabajoInterna.cliente),
-        "sucursal": _valores_oti(empresa_id, OrdenTrabajoInterna.sucursal),
         "linea": _valores_oti(empresa_id, OrdenTrabajoInterna.linea_negocio),
     }
 
@@ -2826,7 +2823,6 @@ def oti_excel():
         col("Qué se manda a hacer", ancho=60),
         col("Cliente", ancho=30),
         col("Solicita", ancho=28),
-        col("Sucursal", ancho=16),
         col("Línea de negocio", ancho=20),
         col("N° OT QMS", ancho=12),
         col("Fecha de inicio", ancho=14, formato=FECHA),
@@ -2837,7 +2833,7 @@ def oti_excel():
     filas = [
         [
             o.numero, o.fecha, o.estado, item.cantidad, item.descripcion,
-            o.cliente or "", o.customer or "", o.sucursal or "", o.linea_negocio or "",
+            o.cliente or "", o.customer or "", o.linea_negocio or "",
             o.ot_qms or "", o.fecha_inicio, o.fecha_termino, o.dias_abierta,
             o.observaciones or "",
         ]

@@ -577,3 +577,64 @@ def test_el_boton_de_excel_se_lleva_los_filtros(client, db, empresa, usuario_adm
     html = client.get("/inventario/ot-interna?estado=todas").get_data(as_text=True)
 
     assert "ot-interna.xlsx?estado=todas" in html
+
+
+# --- La sucursal salió de la pantalla ---
+#
+# En la planilla mezclaba sucursales de verdad (SANTIAGO, ANTOFAGASTA) con áreas
+# (PRODUCCION, COMERCIAL, CONTROL CALIDAD), así que la columna no contestaba una
+# sola pregunta. Se saca de la vista; el dato de las 723 órdenes que ya están se
+# conserva, porque borrarlo sería perderlo para siempre.
+
+
+def test_la_sucursal_ya_no_se_ve_en_la_lista(client, db, empresa, usuario_admin):
+    _oti(db, empresa, 500, sucursal="PRODUCCION")
+    login(client, "admin@test.cl")
+
+    html = client.get("/inventario/ot-interna").get_data(as_text=True)
+
+    assert "Sucursal" not in html
+    assert "PRODUCCION" not in html
+
+
+def test_la_sucursal_ya_no_se_edita(client, db, empresa, usuario_admin):
+    orden = _oti(db, empresa, 500, sucursal="PRODUCCION")
+    login(client, "admin@test.cl")
+
+    html = client.get(f"/inventario/ot-interna/{orden.id}/editar").get_data(as_text=True)
+
+    assert 'name="sucursal"' not in html
+
+
+def test_modificar_no_le_borra_la_sucursal_que_tenia(client, db, empresa, usuario_admin):
+    """El campo salió del formulario, así que no llega en el envío. Si eso lo
+    dejara en blanco, cada orden que se toque perdería el dato en silencio."""
+    orden = _oti(db, empresa, 500, sucursal="ANTOFAGASTA")
+    login(client, "admin@test.cl")
+
+    client.post(f"/inventario/ot-interna/{orden.id}/editar", data={
+        "fecha": "2026-02-20", "estado": "CERRADA",
+        "item_cantidad": "1", "item_descripcion": "TRABAJO",
+    }, follow_redirects=True)
+
+    db.session.refresh(orden)
+    assert orden.sucursal == "ANTOFAGASTA"
+    assert orden.estado == "CERRADA"
+
+
+def test_la_planilla_la_sigue_guardando(client, db, empresa, usuario_admin):
+    """Volver a mostrarla es sacarle un comentario a una línea; recuperar el dato
+    borrado de 723 órdenes no se puede."""
+    importar_ot_internas(_planilla([FILA]), empresa.id)
+
+    assert OrdenTrabajoInterna.query.one().sucursal == "PRODUCCION"
+
+
+def test_el_excel_tampoco_la_trae(client, db, empresa, usuario_admin):
+    _oti(db, empresa, 500, sucursal="PRODUCCION")
+    login(client, "admin@test.cl")
+
+    textos = _textos(_hoja(client.get("/inventario/ot-interna.xlsx").data))
+
+    assert "Sucursal" not in textos
+    assert "PRODUCCION" not in textos
