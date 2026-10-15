@@ -114,6 +114,20 @@
   <a href="{{ url_for('inventario.oti_lista') }}" class="btn btn-link">Cancelar</a>
 </form>
 
+{% if orden and es_admin %}
+{# Fuera del formulario de arriba: un formulario dentro de otro no es válido y
+   el navegador lo desarma, dejando el botón sin hacer nada. #}
+<form method="post" action="{{ url_for('inventario.oti_eliminar', oti_id=orden.id) }}" class="mt-4"
+      onsubmit="return confirm('¿Eliminar la OT interna N° {{ numero }}?\n\nSe borra con todos sus ítems y no se puede deshacer.\n\nSi la orden no corresponde pero ya circuló, déjala en estado Nula: así queda registrada y su número sigue ocupado.')">
+  {{ form_accion.hidden_tag() }}
+  <button type="submit" class="btn btn-outline-danger btn-sm">Eliminar esta OT interna</button>
+  <span class="text-muted small ms-2">
+    Se borra con todos sus ítems. Si la orden no corresponde pero ya circuló, déjala en
+    <strong>Nula</strong>: queda registrada y su número sigue ocupado.
+  </span>
+</form>
+{% endif %}
+
 <datalist id="lista-customer">{% for v in sugerencias.customer %}<option value="{{ v }}">{% endfor %}</datalist>
 <datalist id="lista-cliente">{% for v in sugerencias.cliente %}<option value="{{ v }}">{% endfor %}</datalist>
 <datalist id="lista-sucursal">{% for v in sugerencias.sucursal %}<option value="{{ v }}">{% endfor %}</datalist>

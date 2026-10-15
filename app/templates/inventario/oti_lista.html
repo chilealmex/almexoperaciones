@@ -9,6 +9,10 @@
     <p class="page-sub">Órdenes de trabajo internas: qué se mandó a hacer, para quién y en qué va.</p>
   </div>
   <div class="page-actions">
+    {# Se lleva los filtros puestos: el archivo descargado es lo que se está
+       mirando, no otra cosa. #}
+    <a href="{{ url_for('inventario.oti_excel', **request.args) }}" class="btn btn-outline-secondary btn-sm"
+       title="Descarga lo que estás viendo, con los filtros aplicados. Una fila por ítem.">⬇ Excel</a>
     {% if puede('inventario', 'editar') %}
     <a href="{{ url_for('inventario.oti_nueva') }}" class="btn btn-primary btn-sm">+ Nueva OT interna</a>
     {% endif %}
@@ -128,9 +132,18 @@
           <td class="small">{{ o.linea_negocio or '—' }}</td>
           <td class="small">{{ o.sucursal or '—' }}</td>
           <td class="small">{{ o.ot_qms or '—' }}</td>
-          <td class="text-end">
-            {% if puede('inventario', 'editar') %}
+          {# Modificar y eliminar son sólo de administrador: lo que decía la
+             orden queda reemplazado sin rastro, y quien la escribió puede no
+             ser quien la cambia. Crear sí lo puede hacer cualquiera con
+             permiso de editar inventario. #}
+          <td class="text-end text-nowrap">
+            {% if es_admin %}
             <a href="{{ url_for('inventario.oti_editar', oti_id=o.id) }}" class="btn btn-sm btn-outline-secondary">Modificar</a>
+            <form method="post" action="{{ url_for('inventario.oti_eliminar', oti_id=o.id) }}" class="d-inline"
+                  onsubmit="return confirm('¿Eliminar la OT interna N° {{ o.numero }}?\n\nSe borra con todos sus ítems y no se puede deshacer.\n\nSi la orden no corresponde pero ya circuló, déjala en estado Nula: así queda registrada y su número sigue ocupado.')">
+              {{ form_accion.hidden_tag() }}
+              <button type="submit" class="btn btn-sm btn-outline-danger" title="Eliminar esta OT interna">Eliminar</button>
+            </form>
             {% endif %}
           </td>
         </tr>
