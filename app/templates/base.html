@@ -7,6 +7,18 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}">
   {# v= evita que el navegador siga mostrando una versión antigua del CSS tras un despliegue #}
   <link rel="stylesheet" href="{{ url_for('static', filename='css/custom.css', v=version_estatica) }}">
+
+  {# Para poder dejarlo en el escritorio del celular: con esto Android y iOS lo
+     instalan como una aplicación —ícono propio, a pantalla completa, sin la
+     barra del navegador— sin tienda ni descarga. Es el mismo sitio, así que
+     entra con el mismo usuario y no hay una segunda versión que mantener. #}
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest', v=version_estatica) }}">
+  <meta name="theme-color" content="#0a1f33">
+  {# iOS no lee el manifiesto para esto: usa sus propias etiquetas. #}
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/apple-touch-icon.png', v=version_estatica) }}">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Almex">
   {% block head %}{% endblock %}
 </head>
 <body>
@@ -24,6 +36,21 @@
 
   <script src="{{ url_for('static', filename='vendor/bootstrap/bootstrap.bundle.min.js') }}"></script>
   <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+  <script>
+    // Android sólo ofrece "Instalar aplicación" si el sitio registra un service
+    // worker. El nuestro no guarda nada: deja pasar cada petición al servidor
+    // tal cual. Guardar páginas sería volver al problema que acabamos de
+    // arreglar —gente mirando datos viejos sin saberlo—, y acá todo lo que se
+    // muestra es stock, conteos y órdenes que cambian durante el día.
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('/sw.js').catch(function () {
+          // Sin service worker el sitio funciona igual; sólo deja de ofrecerse
+          // la instalación. No vale romper la página por eso.
+        });
+      });
+    }
+  </script>
   {% block scripts %}{% endblock %}
 </body>
 </html>
