@@ -10,16 +10,20 @@ from sqlalchemy import or_, and_, func
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.inventario import bp
-from app.inventario.forms import AccionForm, CruceDePruebaForm, ImportarConteoForm, ImportarCsvForm
+from app.inventario.forms import (
+    AccionForm, CruceDePruebaForm, ImportarConteoForm, ImportarCsvForm, ImportarOTIForm, OTIForm,
+)
 from app.extensions import db
 from app.models.conteo_inventario import ItemConteoInventario, TomaInventario, TomaInventarioDetalle
 from app.models.equivalencia_codigo import EquivalenciaCodigo, crear_equivalencia
 from app.models.codigo_unificado import CodigoUnificado
+from app.models.oti import ItemOTI, OrdenTrabajoInterna, siguiente_numero
 from app.models.cruce_prueba import borrar_prueba, guardar_prueba, prueba_en_curso
 from app.models.importacion_inventario import registrar_importacion, ultimas_importaciones
 from app.models.regularizacion import RegularizacionArchivo, RegularizacionHistorial, RegularizacionHistorialArchivo
 from app.utils.decorators import require_permission
 from app.utils.equivalencias_codigos import proponer
+from app.utils.importar_oti import importar_ot_internas
 from app.utils.importar_conteo import (
     articulos_fuera_de_ambas_planillas,
     importar_conteo_fisico,
@@ -2579,3 +2583,243 @@ def equivalencias_excel():
          "Están solo en Defontana y no se les encontró pareja: hay que buscarla a mano."),
     ]
     return responder_excel_hojas("unificar-codigos", hojas)
+
+
+# --- OT internas ---------------------------------------------------------
+#
+# El registro que vivía en una planilla de 909 líneas desde 2010. Una orden
+# puede tener varios ítems —hasta 32 en un caso—, así que son dos tablas: la
+# orden y sus ítems. Ver app/models/oti.py.
+
+ORDEN_OTI = {
+    "numero": OrdenTrabajoInterna.numero,
+    "fecha": OrdenTrabajoInterna.fecha,
+    "estado": OrdenTrabajoInterna.estado,
+    "cliente": OrdenTrabajoInterna.cliente,
+    "linea_negocio": OrdenTrabajoInterna.linea_negocio,
+}
+
+
+def _filtros_oti(args):
+    """La consulta de OT internas con los filtros de la pantalla aplicados.
+
+    Por defecto muestra sólo las que siguen vivas —abiertas y detenidas—, que
+    son 24 de 723: es la lista de trabajo. El historial completo está a un
+    clic, pero abrir la pantalla en 723 órdenes de quince años escondería las
+    dos docenas que importan hoy.
+    """
+    estado = (args.get("estado") or "pendientes").strip()
+    q = (args.get("q") or "").strip()
+
+    base = OrdenTrabajoInterna.query.filter_by(empresa_id=current_user.empresa_id)
+    if estado == "pendientes":
+        base = base.filter(OrdenTrabajoInterna.estado.in_(OrdenTrabajoInterna.PENDIENTES))
+    elif estado != "todas":
+        base = base.filter(OrdenTrabajoInterna.estado == estado)
+
+    if q:
+        patron = f"%{q}%"
+        # También por el texto de los ítems: lo que se recuerda de una orden
+        # vieja es qué se mandó a hacer, no su número ni su cliente.
+        ids = [
+            i.oti_id
+            for i in ItemOTI.query.filter(ItemOTI.descripcion.ilike(patron)).all()
+        ]
+        condiciones = [
+            OrdenTrabajoInterna.cliente.ilike(patron),
+            OrdenTrabajoInterna.customer.ilike(patron),
+            OrdenTrabajoInterna.ot_qms.ilike(patron),
+        ]
+        if q.isdigit():
+            condiciones.append(OrdenTrabajoInterna.numero == int(q))
+        if ids:
+            condiciones.append(OrdenTrabajoInterna.id.in_(ids))
+        base = base.filter(or_(*condiciones))
+
+    for campo, columna in (("linea", OrdenTrabajoInterna.linea_negocio),
+                           ("sucursal", OrdenTrabajoInterna.sucursal),
+                           ("anio", OrdenTrabajoInterna.fecha)):
+        valor = (args.get(campo) or "").strip()
+        if not valor:
+            continue
+        if campo == "anio" and valor.isdigit():
+            base = base.filter(db.extract("year", columna) == int(valor))
+        elif campo != "anio":
+            base = base.filter(columna == valor)
+
+    orden = args.get("orden") if args.get("orden") in ORDEN_OTI else "numero"
+    direccion = "asc" if args.get("dir") == "asc" else "desc"
+    columna = ORDEN_OTI[orden]
+    base = base.order_by(columna.asc() if direccion == "asc" else columna.desc())
+    return base, estado, q, orden, direccion
+
+
+def _valores_oti(empresa_id, columna):
+    """Los valores que de verdad existen, para llenar un desplegable de filtro."""
+    filas = (
+        db.session.query(columna)
+        .filter(OrdenTrabajoInterna.empresa_id == empresa_id, columna.isnot(None), columna != "")
+        .distinct()
+        .all()
+    )
+    return sorted(f[0] for f in filas)
+
+
+@bp.route("/ot-interna")
+@require_permission("inventario", "ver")
+def oti_lista():
+    consulta, estado, q, orden, direccion = _filtros_oti(request.args)
+    pagina = request.args.get("pagina", 1, type=int)
+    paginacion = consulta.paginate(page=max(1, pagina), per_page=50, error_out=False)
+
+    todas = OrdenTrabajoInterna.query.filter_by(empresa_id=current_user.empresa_id).all()
+    return render_template(
+        "inventario/oti_lista.html",
+        paginacion=paginacion,
+        estado=estado,
+        q=q,
+        orden=orden,
+        direccion=direccion,
+        conteos={e: sum(1 for o in todas if o.estado == e)
+                 for e in OrdenTrabajoInterna.TODOS_LOS_ESTADOS},
+        pendientes=sum(1 for o in todas if o.pendiente),
+        total=len(todas),
+        lineas=_valores_oti(current_user.empresa_id, OrdenTrabajoInterna.linea_negocio),
+        sucursales=_valores_oti(current_user.empresa_id, OrdenTrabajoInterna.sucursal),
+        anios=sorted({o.fecha.year for o in todas if o.fecha}, reverse=True),
+        form_importar=ImportarOTIForm(prefix="oti"),
+        siguiente=siguiente_numero(current_user.empresa_id),
+    )
+
+
+def _sugerencias_oti(empresa_id) -> dict:
+    """Lo que ya se escribió en cada campo, para ofrecerlo al escribir.
+
+    En la planilla la misma empresa aparece escrita de cuatro formas —"SpA",
+    "S.A.", "SpA.", "SPA"— y cada variante es un valor distinto para los
+    filtros. Ofrecer lo que ya existe no obliga a elegirlo, pero hace que
+    escribir igual sea más fácil que escribir distinto.
+    """
+    return {
+        "customer": _valores_oti(empresa_id, OrdenTrabajoInterna.customer),
+        "cliente": _valores_oti(empresa_id, OrdenTrabajoInterna.cliente),
+        "sucursal": _valores_oti(empresa_id, OrdenTrabajoInterna.sucursal),
+        "linea": _valores_oti(empresa_id, OrdenTrabajoInterna.linea_negocio),
+    }
+
+
+def _items_del_formulario(form):
+    """Los ítems escritos en el formulario, en orden y sin las filas vacías.
+
+    La pantalla ofrece siempre una fila más de la que hay: una orden sin ítems
+    no dice qué se mandó a hacer, y obligar a apretar "agregar" antes de poder
+    escribir el primero es un paso de más en lo que se hace siempre.
+    """
+    cantidades = form.getlist("item_cantidad")
+    descripciones = form.getlist("item_descripcion")
+    items = []
+    for i, descripcion in enumerate(descripciones):
+        texto = " ".join(str(descripcion).split())[:500]
+        if not texto:
+            continue
+        crudo = cantidades[i] if i < len(cantidades) else ""
+        items.append({"cantidad": a_cantidad(crudo), "descripcion": texto})
+    return items
+
+
+def _guardar_oti(orden, form, items):
+    """Pasa el formulario a la orden. Los ítems se reemplazan por los escritos."""
+    form.populate_obj(orden)
+    orden.items.clear()
+    for item in items:
+        orden.items.append(ItemOTI(**item))
+
+
+@bp.route("/ot-interna/nueva", methods=["GET", "POST"])
+@require_permission("inventario", "editar")
+def oti_nueva():
+    form = OTIForm()
+    if request.method == "GET":
+        form.fecha.data = date.today()
+    items = _items_del_formulario(request.form) if request.method == "POST" else []
+
+    if form.validate_on_submit():
+        if not items:
+            flash("Escribe al menos un ítem: qué se manda a hacer.", "warning")
+        else:
+            orden = OrdenTrabajoInterna(
+                empresa_id=current_user.empresa_id,
+                numero=siguiente_numero(current_user.empresa_id),
+                creado_por_id=current_user.id,
+                actualizado_por_id=current_user.id,
+            )
+            _guardar_oti(orden, form, items)
+            db.session.add(orden)
+            db.session.commit()
+            flash(f"OT interna N° {orden.numero} creada.", "success")
+            return redirect(url_for("inventario.oti_lista"))
+
+    return render_template(
+        "inventario/oti_form.html", form=form, orden=None, items=items,
+        numero=siguiente_numero(current_user.empresa_id),
+        sugerencias=_sugerencias_oti(current_user.empresa_id),
+    )
+
+
+@bp.route("/ot-interna/<int:oti_id>/editar", methods=["GET", "POST"])
+@require_permission("inventario", "editar")
+def oti_editar(oti_id):
+    orden = OrdenTrabajoInterna.query.filter_by(
+        id=oti_id, empresa_id=current_user.empresa_id
+    ).first_or_404()
+    form = OTIForm(obj=orden)
+    items = (
+        _items_del_formulario(request.form)
+        if request.method == "POST"
+        else [{"cantidad": i.cantidad, "descripcion": i.descripcion} for i in orden.items]
+    )
+
+    if form.validate_on_submit():
+        if not items:
+            flash("Escribe al menos un ítem: qué se manda a hacer.", "warning")
+        else:
+            _guardar_oti(orden, form, items)
+            orden.actualizado_por_id = current_user.id
+            db.session.commit()
+            flash(f"OT interna N° {orden.numero} modificada.", "success")
+            return redirect(url_for("inventario.oti_lista"))
+
+    return render_template(
+        "inventario/oti_form.html", form=form, orden=orden, items=items, numero=orden.numero,
+        sugerencias=_sugerencias_oti(current_user.empresa_id),
+    )
+
+
+@bp.route("/ot-interna/importar", methods=["POST"])
+@require_permission("inventario", "editar")
+def oti_importar():
+    """Sube el registro histórico. Las órdenes que ya están no se tocan."""
+    form = ImportarOTIForm(prefix="oti")
+    if not form.validate_on_submit():
+        flash("Selecciona la planilla .xlsx de OT internas.", "danger")
+        return redirect(url_for("inventario.oti_lista"))
+    try:
+        r = importar_ot_internas(form.archivo.data, current_user.empresa_id, current_user.id)
+        partes = [f"{r['creadas']} órdenes nuevas con {r['items']} ítems"]
+        if r["ya_estaban"]:
+            partes.append(f"{r['ya_estaban']} ya estaban y no se tocaron")
+        if r["sin_numero"]:
+            partes.append(f"{r['sin_numero']} filas sin número de OTI")
+        texto = "Planilla cargada: " + ", ".join(partes) + "."
+        if r["fecha_a_medias"]:
+            # Se dice con nombre y apellido: es una fecha puesta por el sistema
+            # y hay que ir a corregirla a mano.
+            muestra = ", ".join(str(n) for n in r["fecha_a_medias"][:10])
+            texto += (f" Sin mes o día en la planilla, les puse el 1 de enero de su año: {muestra}"
+                      f"{' y más' if len(r['fecha_a_medias']) > 10 else ''}.")
+        flash(texto, "warning" if r["fecha_a_medias"] or r["sin_numero"] else "success")
+    except ValueError as e:
+        flash(str(e), "danger")
+    except SQLAlchemyError as e:
+        _avisar_fallo_de_importacion(e, "las OT internas")
+    return redirect(url_for("inventario.oti_lista"))

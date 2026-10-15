@@ -37,6 +37,17 @@ MODULOS = (
                 "endpoints": ("inventario.stock", "inventario.stock_contar"),
             },
             {
+                "clave": "oti",
+                "etiqueta": "OT interna",
+                "endpoint": "inventario.oti_lista",
+                "endpoints": (
+                    "inventario.oti_lista",
+                    "inventario.oti_nueva",
+                    "inventario.oti_editar",
+                    "inventario.oti_importar",
+                ),
+            },
+            {
                 "clave": "ajuste",
                 "etiqueta": "Ajuste inventario",
                 "endpoint": "inventario.ajuste",

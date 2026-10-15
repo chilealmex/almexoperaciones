@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% import "partials/_tabla.html" as t with context %}
+{% block title %}OT interna · Almex Operaciones{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">OT interna</h1>
+    <p class="page-sub">Órdenes de trabajo internas: qué se mandó a hacer, para quién y en qué va.</p>
+  </div>
+  <div class="page-actions">
+    {% if puede('inventario', 'editar') %}
+    <a href="{{ url_for('inventario.oti_nueva') }}" class="btn btn-primary btn-sm">+ Nueva OT interna</a>
+    {% endif %}
+  </div>
+</div>
+
+{# Abre en las que siguen vivas, no en las 723 de quince años: es la lista de
+   trabajo. El historial completo está a un clic. #}
+<div class="mb-3 d-flex flex-wrap gap-2 align-items-center">
+  {% set pills = [('pendientes', 'Abiertas y detenidas', pendientes), ('todas', 'Todas', total)] %}
+  {% for clave, etiqueta, n in pills %}
+  <a class="btn btn-sm {{ 'btn-dark' if estado == clave else 'btn-outline-secondary' }}"
+     href="{{ url_for('inventario.oti_lista', estado=clave, q=q) }}">{{ etiqueta }} <span class="text-muted">({{ n }})</span></a>
+  {% endfor %}
+  {% for e in ['ABIERTA', 'DETENIDA', 'CERRADA', 'NULA', 'SIN ESTADO'] %}
+  {% if conteos.get(e) %}
+  <a class="btn btn-sm {{ 'btn-dark' if estado == e else 'btn-outline-secondary' }}"
+     href="{{ url_for('inventario.oti_lista', estado=e, q=q) }}">{{ e|capitalize }} <span class="text-muted">({{ conteos[e] }})</span></a>
+  {% endif %}
+  {% endfor %}
+</div>
+
+{% if conteos.get('SIN ESTADO') %}
+<p class="text-muted small">
+  Hay <strong>{{ conteos['SIN ESTADO'] }}</strong> órdenes <strong>sin estado</strong>: vienen de la planilla
+  vieja, que no registraba esa columna antes de 2023. No se sabe si se hicieron, así que no cuentan como
+  pendientes ni como cerradas. Al modificarlas se les puede poner el estado que corresponda.
+</p>
+{% endif %}
+
+<form method="get" class="row g-2 align-items-end mb-3">
+  <input type="hidden" name="estado" value="{{ estado }}">
+  <div class="col-12 col-md-4">
+    <label class="form-label small mb-1" for="q">Buscar</label>
+    {# Busca también en el texto de los ítems: de una orden vieja se recuerda
+       qué se mandó a hacer, no su número ni su cliente. #}
+    <input type="search" class="form-control form-control-sm" id="q" name="q" value="{{ q }}"
+           placeholder="N° de OTI, cliente, o qué se mandó a hacer...">
+  </div>
+  <div class="col-6 col-md-2">
+    <label class="form-label small mb-1" for="f-linea">Línea de negocio</label>
+    <select class="form-select form-select-sm" id="f-linea" name="linea">
+      <option value="">Todas</option>
+      {% for l in lineas %}<option value="{{ l }}" {{ 'selected' if request.args.get('linea') == l }}>{{ l }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="col-6 col-md-2">
+    <label class="form-label small mb-1" for="f-sucursal">Sucursal</label>
+    <select class="form-select form-select-sm" id="f-sucursal" name="sucursal">
+      <option value="">Todas</option>
+      {% for s in sucursales %}<option value="{{ s }}" {{ 'selected' if request.args.get('sucursal') == s }}>{{ s }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="col-6 col-md-2">
+    <label class="form-label small mb-1" for="f-anio">Año</label>
+    <select class="form-select form-select-sm" id="f-anio" name="anio">
+      <option value="">Todos</option>
+      {% for a in anios %}<option value="{{ a }}" {{ 'selected' if request.args.get('anio') == a|string }}>{{ a }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="col-6 col-md-2 d-flex gap-2">
+    <button type="submit" class="btn btn-sm btn-dark w-100">Filtrar</button>
+    <a href="{{ url_for('inventario.oti_lista') }}" class="btn btn-sm btn-outline-secondary">Limpiar</a>
+  </div>
+</form>
+
+{% if not paginacion.items %}
+<div class="alert alert-info">
+  {% if total %}
+  Ninguna OT interna calza con el filtro. <a href="{{ url_for('inventario.oti_lista', estado='todas') }}">Ver todas ({{ total }})</a>.
+  {% else %}
+  Aún no hay OT internas. {% if puede('inventario', 'editar') %}Crea la primera con <strong>+ Nueva OT interna</strong>, o sube la planilla histórica más abajo.{% endif %}
+  {% endif %}
+</div>
+{% else %}
+
+<div class="table-card">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead>
+        <tr>
+          {% macro th(etiqueta, clave) %}
+          {% set nueva_dir = 'desc' if orden == clave and direccion == 'asc' else 'asc' %}
+          <th><a class="text-decoration-none" href="{{ url_for('inventario.oti_lista', **dict(request.args, orden=clave, dir=nueva_dir)) }}">{{ etiqueta }}{% if orden == clave %} {{ '▲' if direccion == 'asc' else '▼' }}{% endif %}</a></th>
+          {% endmacro %}
+          {{ th('N° OTI', 'numero') }}
+          {{ th('Fecha', 'fecha') }}
+          {{ th('Estado', 'estado') }}
+          <th>Qué se manda a hacer</th>
+          {{ th('Cliente', 'cliente') }}
+          {{ th('Línea', 'linea_negocio') }}
+          <th>Sucursal</th>
+          <th>OT QMS</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for o in paginacion.items %}
+        <tr>
+          <td class="fw-semibold text-nowrap">{{ o.numero }}</td>
+          <td class="text-nowrap">{{ o.fecha|fecha }}
+            {% if o.dias_abierta and o.dias_abierta > 60 %}
+            {# Una orden de hace ocho meses todavía abierta no se distingue de
+               una de ayer mirando sólo la fecha. #}
+            <div class="small text-danger">{{ o.dias_abierta }} días</div>
+            {% endif %}
+          </td>
+          <td class="text-nowrap">
+            <span class="badge {{ {'ABIERTA': 'bg-primary', 'DETENIDA': 'bg-warning text-dark', 'CERRADA': 'bg-success', 'NULA': 'bg-secondary'}.get(o.estado, 'bg-light text-dark border') }}">{{ o.estado|capitalize }}</span>
+          </td>
+          <td>
+            {% for i in o.items %}
+            <div class="small">{% if i.cantidad %}<span class="text-muted">{{ i.cantidad|cantidad }} ×</span> {% endif %}{{ i.descripcion }}</div>
+            {% endfor %}
+          </td>
+          <td class="small">{{ o.cliente or '—' }}</td>
+          <td class="small">{{ o.linea_negocio or '—' }}</td>
+          <td class="small">{{ o.sucursal or '—' }}</td>
+          <td class="small">{{ o.ot_qms or '—' }}</td>
+          <td class="text-end">
+            {% if puede('inventario', 'editar') %}
+            <a href="{{ url_for('inventario.oti_editar', oti_id=o.id) }}" class="btn btn-sm btn-outline-secondary">Modificar</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {{ t.paginacion(paginacion.page, paginacion.pages, paginacion.total, 'OT internas') }}
+</div>
+{% endif %}
+
+{% if puede('inventario', 'editar') %}
+<div class="card mt-4">
+  <div class="card-body">
+    <h2 class="h6">Subir la planilla histórica</h2>
+    <p class="text-muted small">
+      El registro que se llevaba en Excel. Se sube una vez: las órdenes que ya están
+      <strong>no se tocan</strong>, así que volver a subirla no duplica nada ni pisa lo que hayas
+      corregido acá. La próxima OT interna que crees será la <strong>N° {{ siguiente }}</strong>.
+    </p>
+    <form method="post" action="{{ url_for('inventario.oti_importar') }}" enctype="multipart/form-data"
+          class="row g-2 align-items-end">
+      {{ form_importar.hidden_tag() }}
+      <div class="col-12 col-md-8">{{ form_importar.archivo(class="form-control form-control-sm") }}</div>
+      <div class="col-12 col-md-4">
+        <button type="submit" class="btn btn-sm btn-outline-primary">Cargar planilla</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,7 +1,9 @@
 from flask_wtf import FlaskForm
 from flask_wtf.file import FileField, FileAllowed
-from wtforms import BooleanField
-from wtforms.validators import DataRequired
+from wtforms import BooleanField, DateField, SelectField, StringField, TextAreaField
+from wtforms.validators import DataRequired, Length, Optional
+
+from app.models.oti import OrdenTrabajoInterna
 
 
 class ImportarCsvForm(FlaskForm):
@@ -57,3 +59,43 @@ class CruceDePruebaForm(FlaskForm):
 
 class AccionForm(FlaskForm):
     """Solo aporta el token CSRF a los botones que no envían campos propios."""
+
+
+class OTIForm(FlaskForm):
+    """La cabecera de una OT interna.
+
+    El número no está acá: lo pone el sistema. La numeración de la planilla va
+    del 100 al 822 sin un solo salto, y esa continuidad es lo que permite
+    nombrar una orden por su número sin ambigüedad. Dejarlo escribir a mano
+    abriría la puerta a repetirlo o saltárselo sin querer.
+
+    Los ítems tampoco: son una lista de largo variable y se leen del formulario
+    aparte, en la ruta.
+    """
+
+    fecha = DateField("Fecha", validators=[DataRequired()])
+    estado = SelectField("Estado", validators=[DataRequired()])
+    customer = StringField("Solicita", validators=[Optional(), Length(max=120)])
+    cliente = StringField("Cliente final", validators=[Optional(), Length(max=120)])
+    sucursal = StringField("Sucursal", validators=[Optional(), Length(max=40)])
+    linea_negocio = StringField("Línea de negocio", validators=[Optional(), Length(max=40)])
+    ot_qms = StringField("N° OT en QMS", validators=[Optional(), Length(max=30)])
+    fecha_inicio = DateField("Fecha de inicio", validators=[Optional()])
+    fecha_termino = DateField("Fecha real de término", validators=[Optional()])
+    observaciones = TextAreaField("Observaciones", validators=[Optional()])
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # "SIN ESTADO" no se ofrece: lo pone sólo la carga del historial, para
+        # las órdenes viejas cuya planilla no registraba el estado. Elegirlo a
+        # mano sería crear a propósito una orden sin decir en qué va.
+        self.estado.choices = [(e, e.capitalize()) for e in OrdenTrabajoInterna.ESTADOS]
+
+
+class ImportarOTIForm(FlaskForm):
+    """El registro histórico de OT internas, que vivía en una planilla."""
+
+    archivo = FileField(
+        "Planilla de OT internas",
+        validators=[DataRequired(), FileAllowed(["xlsx"], "Debe ser un archivo .xlsx")],
+    )

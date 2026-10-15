@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Modificar' if orden else 'Nueva' }} OT interna · Almex Operaciones{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">{% if orden %}Modificar OT interna N° {{ numero }}{% else %}Nueva OT interna{% endif %}</h1>
+    <p class="page-sub">
+      {% if orden %}
+      Se puede cambiar cualquier dato, incluidos los ítems. El número no: es la identidad de la orden.
+      {% else %}
+      Le va a tocar el <strong>N° {{ numero }}</strong>, que es el siguiente de tu numeración.
+      {% endif %}
+    </p>
+  </div>
+  <div class="page-actions">
+    <a href="{{ url_for('inventario.oti_lista') }}" class="btn btn-outline-secondary btn-sm">Volver</a>
+  </div>
+</div>
+
+{# La confirmación sólo al modificar. Al crear no hay nada que perder: si sale
+   mal, se modifica. Al modificar se pisa lo que había, y quien la escribió
+   puede no ser quien la está cambiando. #}
+<form method="post" novalidate
+      {% if orden %}onsubmit="return confirm('¿Seguro de modificar la OT interna N° {{ numero }}?\n\nLo que tenía guardado se reemplaza por lo que está en pantalla, incluidos los ítems.')"{% endif %}>
+  {{ form.hidden_tag() }}
+
+  <div class="card mb-3">
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-6 col-md-2">
+          <label class="form-label small mb-1">N° OTI</label>
+          {# Se muestra y no se edita: la numeración no tiene saltos del 100 al
+             822, y esa continuidad es lo que permite nombrar una orden por su
+             número sin ambigüedad. #}
+          <input type="text" class="form-control" value="{{ numero }}" disabled>
+        </div>
+        <div class="col-6 col-md-3">
+          <label class="form-label small mb-1" for="{{ form.fecha.id }}">{{ form.fecha.label.text }}</label>
+          {{ form.fecha(class="form-control", type="date") }}
+          {% for e in form.fecha.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
+        </div>
+        <div class="col-6 col-md-3">
+          <label class="form-label small mb-1" for="{{ form.estado.id }}">{{ form.estado.label.text }}</label>
+          {{ form.estado(class="form-select") }}
+        </div>
+        <div class="col-6 col-md-4">
+          <label class="form-label small mb-1" for="{{ form.ot_qms.id }}">{{ form.ot_qms.label.text }}</label>
+          {{ form.ot_qms(class="form-control") }}
+        </div>
+
+        <div class="col-12 col-md-4">
+          <label class="form-label small mb-1" for="{{ form.customer.id }}">{{ form.customer.label.text }}</label>
+          {{ form.customer(class="form-control", list="lista-customer") }}
+        </div>
+        <div class="col-12 col-md-4">
+          <label class="form-label small mb-1" for="{{ form.cliente.id }}">{{ form.cliente.label.text }}</label>
+          {{ form.cliente(class="form-control", list="lista-cliente") }}
+        </div>
+        <div class="col-6 col-md-2">
+          <label class="form-label small mb-1" for="{{ form.sucursal.id }}">{{ form.sucursal.label.text }}</label>
+          {{ form.sucursal(class="form-control", list="lista-sucursal") }}
+        </div>
+        <div class="col-6 col-md-2">
+          <label class="form-label small mb-1" for="{{ form.linea_negocio.id }}">{{ form.linea_negocio.label.text }}</label>
+          {{ form.linea_negocio(class="form-control", list="lista-linea") }}
+        </div>
+
+        <div class="col-6 col-md-3">
+          <label class="form-label small mb-1" for="{{ form.fecha_inicio.id }}">{{ form.fecha_inicio.label.text }}</label>
+          {{ form.fecha_inicio(class="form-control", type="date") }}
+        </div>
+        <div class="col-6 col-md-3">
+          <label class="form-label small mb-1" for="{{ form.fecha_termino.id }}">{{ form.fecha_termino.label.text }}</label>
+          {{ form.fecha_termino(class="form-control", type="date") }}
+        </div>
+        <div class="col-12 col-md-6">
+          <label class="form-label small mb-1" for="{{ form.observaciones.id }}">{{ form.observaciones.label.text }}</label>
+          {{ form.observaciones(class="form-control", rows="2") }}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card mb-3">
+    <div class="card-body">
+      <h2 class="h6">Qué se manda a hacer</h2>
+      <p class="text-muted small">
+        Una orden puede tener varios ítems: cada uno con su cantidad y su descripción.
+        Las filas que dejes en blanco no se guardan.
+      </p>
+      <table class="table table-sm align-middle" id="tabla-items">
+        <thead>
+          <tr><th style="width:8rem">Cantidad</th><th>Descripción</th><th style="width:3rem"></th></tr>
+        </thead>
+        <tbody>
+          {# Siempre una fila más de las que hay: escribir el primer ítem es lo
+             que se hace siempre, y obligar a apretar "agregar" antes es un paso
+             de más. #}
+          {% for item in items + [{'cantidad': '', 'descripcion': ''}] %}
+          <tr>
+            <td><input type="number" step="any" min="0" class="form-control form-control-sm" name="item_cantidad" value="{{ item.cantidad if item.cantidad is not none else '' }}"></td>
+            <td><input type="text" maxlength="500" class="form-control form-control-sm" name="item_descripcion" value="{{ item.descripcion or '' }}"></td>
+            <td><button type="button" class="btn btn-sm btn-outline-secondary" data-quitar-item title="Quitar este ítem">✕</button></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <button type="button" class="btn btn-sm btn-outline-secondary" id="agregar-item">+ Agregar ítem</button>
+    </div>
+  </div>
+
+  <button type="submit" class="btn btn-primary">{{ 'Guardar cambios' if orden else 'Crear OT interna' }}</button>
+  <a href="{{ url_for('inventario.oti_lista') }}" class="btn btn-link">Cancelar</a>
+</form>
+
+<datalist id="lista-customer">{% for v in sugerencias.customer %}<option value="{{ v }}">{% endfor %}</datalist>
+<datalist id="lista-cliente">{% for v in sugerencias.cliente %}<option value="{{ v }}">{% endfor %}</datalist>
+<datalist id="lista-sucursal">{% for v in sugerencias.sucursal %}<option value="{{ v }}">{% endfor %}</datalist>
+<datalist id="lista-linea">{% for v in sugerencias.linea %}<option value="{{ v }}">{% endfor %}</datalist>
+
+<script>
+  // Las filas se agregan y se quitan en la pantalla; lo que se guarda son las
+  // que llegan con descripción, así que quitar una fila es borrarla del DOM.
+  (function () {
+    const cuerpo = document.querySelector('#tabla-items tbody');
+    document.getElementById('agregar-item').addEventListener('click', function () {
+      const fila = cuerpo.rows[cuerpo.rows.length - 1].cloneNode(true);
+      fila.querySelectorAll('input').forEach(i => { i.value = ''; });
+      cuerpo.appendChild(fila);
+      fila.querySelector('input[name="item_descripcion"]').focus();
+    });
+    cuerpo.addEventListener('click', function (e) {
+      if (!e.target.closest('[data-quitar-item]')) return;
+      // Nunca dejar la tabla sin ninguna fila: quedaría sin dónde escribir.
+      if (cuerpo.rows.length === 1) {
+        cuerpo.rows[0].querySelectorAll('input').forEach(i => { i.value = ''; });
+        return;
+      }
+      e.target.closest('tr').remove();
+    });
+  })();
+</script>
+{% endblock %}
