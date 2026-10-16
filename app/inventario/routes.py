@@ -2637,7 +2637,6 @@ def _filtros_oti(args):
         base = base.filter(or_(*condiciones))
 
     for campo, columna in (("linea", OrdenTrabajoInterna.linea_negocio),
-                           ("sucursal", OrdenTrabajoInterna.sucursal),
                            ("anio", OrdenTrabajoInterna.fecha)):
         valor = (args.get(campo) or "").strip()
         if not valor:
@@ -2685,9 +2684,10 @@ def oti_lista():
         pendientes=sum(1 for o in todas if o.pendiente),
         total=len(todas),
         lineas=_valores_oti(current_user.empresa_id, OrdenTrabajoInterna.linea_negocio),
-        sucursales=_valores_oti(current_user.empresa_id, OrdenTrabajoInterna.sucursal),
         anios=sorted({o.fecha.year for o in todas if o.fecha}, reverse=True),
         form_importar=ImportarOTIForm(prefix="oti"),
+        form_accion=AccionForm(),
+        es_admin=current_user.es_admin_o_superior,
         siguiente=siguiente_numero(current_user.empresa_id),
     )
 
@@ -2703,7 +2703,6 @@ def _sugerencias_oti(empresa_id) -> dict:
     return {
         "customer": _valores_oti(empresa_id, OrdenTrabajoInterna.customer),
         "cliente": _valores_oti(empresa_id, OrdenTrabajoInterna.cliente),
-        "sucursal": _valores_oti(empresa_id, OrdenTrabajoInterna.sucursal),
         "linea": _valores_oti(empresa_id, OrdenTrabajoInterna.linea_negocio),
     }
 
@@ -2761,6 +2760,7 @@ def oti_nueva():
 
     return render_template(
         "inventario/oti_form.html", form=form, orden=None, items=items,
+        es_admin=current_user.es_admin_o_superior,
         numero=siguiente_numero(current_user.empresa_id),
         sugerencias=_sugerencias_oti(current_user.empresa_id),
     )
@@ -2769,6 +2769,12 @@ def oti_nueva():
 @bp.route("/ot-interna/<int:oti_id>/editar", methods=["GET", "POST"])
 @require_permission("inventario", "editar")
 def oti_editar(oti_id):
+    # Crear una orden es trabajo de todos los días y lo puede hacer quien tenga
+    # permiso de editar inventario. Cambiar una que ya existe, no: lo que decía
+    # antes queda reemplazado sin rastro, y quien la escribió puede no ser quien
+    # la está cambiando.
+    if not current_user.es_admin_o_superior:
+        abort(403)
     orden = OrdenTrabajoInterna.query.filter_by(
         id=oti_id, empresa_id=current_user.empresa_id
     ).first_or_404()
@@ -2791,8 +2797,82 @@ def oti_editar(oti_id):
 
     return render_template(
         "inventario/oti_form.html", form=form, orden=orden, items=items, numero=orden.numero,
+        es_admin=current_user.es_admin_o_superior, form_accion=AccionForm(),
         sugerencias=_sugerencias_oti(current_user.empresa_id),
     )
+
+
+@bp.route("/ot-interna.xlsx")
+@require_permission("inventario", "ver")
+def oti_excel():
+    """El listado en Excel, con los mismos filtros que la pantalla.
+
+    Una fila por ítem y no por orden, repitiendo la cabecera: es como viene la
+    planilla de la que salió este módulo, y es lo que deja sumar cantidades o
+    armar una tabla dinámica. Juntar los ítems de una orden en una celda se ve
+    mejor en pantalla y no sirve para nada en Excel.
+    """
+    consulta, estado, q, _orden, _dir = _filtros_oti(request.args)
+    ordenes = consulta.all()
+
+    columnas = [
+        col("N° OTI", ancho=10, total="texto"),
+        col("Fecha", ancho=12, formato=FECHA),
+        col("Estado", ancho=12),
+        col("Cantidad", ancho=10, formato=CANTIDAD, total="suma"),
+        col("Qué se manda a hacer", ancho=60),
+        col("Cliente", ancho=30),
+        col("Solicita", ancho=28),
+        col("Línea de negocio", ancho=20),
+        col("N° OT QMS", ancho=12),
+        col("Fecha de inicio", ancho=14, formato=FECHA),
+        col("Fecha real de término", ancho=18, formato=FECHA),
+        col("Días abierta", ancho=12),
+        col("Observaciones", ancho=40),
+    ]
+    filas = [
+        [
+            o.numero, o.fecha, o.estado, item.cantidad, item.descripcion,
+            o.cliente or "", o.customer or "", o.linea_negocio or "",
+            o.ot_qms or "", o.fecha_inicio, o.fecha_termino, o.dias_abierta,
+            o.observaciones or "",
+        ]
+        for o in ordenes
+        for item in o.items
+    ]
+    cuales = {"pendientes": "abiertas y detenidas", "todas": "todas"}.get(estado, estado.lower())
+    return responder_excel(
+        "ot-internas",
+        "OT internas",
+        columnas,
+        filas,
+        f"{len(ordenes)} órdenes ({cuales}){', buscando “' + q + '”' if q else ''}",
+    )
+
+
+@bp.route("/ot-interna/<int:oti_id>/eliminar", methods=["POST"])
+@require_permission("inventario", "editar")
+def oti_eliminar(oti_id):
+    """Borra una orden y sus ítems. Sólo admin, y no se puede deshacer.
+
+    Para una orden que no corresponde pero ya circuló —se nombró en un correo,
+    se imprimió— lo que cabe es dejarla en "Nula": queda registrada, su número
+    sigue ocupado y se sabe que no se hizo. Borrar es para la que se creó por
+    error hace un minuto.
+    """
+    if not current_user.es_admin_o_superior:
+        abort(403)
+    if not AccionForm().validate_on_submit():
+        abort(400)
+
+    orden = OrdenTrabajoInterna.query.filter_by(
+        id=oti_id, empresa_id=current_user.empresa_id
+    ).first_or_404()
+    numero = orden.numero
+    db.session.delete(orden)
+    db.session.commit()
+    flash(f"OT interna N° {numero} eliminada.", "success")
+    return redirect(url_for("inventario.oti_lista"))
 
 
 @bp.route("/ot-interna/importar", methods=["POST"])

@@ -9,6 +9,7 @@ esconderían las dos docenas que importan hoy.
 import io
 from datetime import date
 
+import pytest
 from werkzeug.datastructures import FileStorage
 
 from app.models.oti import ItemOTI, OrdenTrabajoInterna, siguiente_numero
@@ -383,3 +384,257 @@ def test_aparece_en_el_menu_de_inventario(client, db, empresa, usuario_admin):
 
     assert "OT interna" in html
     assert "/inventario/ot-interna" in html
+
+
+# --- Quién puede qué ---
+#
+# Crear una orden es trabajo de todos los días y lo puede hacer quien tenga
+# permiso de editar inventario. Cambiar una que ya existe o borrarla, no: lo que
+# decía queda reemplazado sin rastro, y quien la escribió puede no ser quien la
+# está cambiando.
+
+
+@pytest.fixture()
+def usuario_produccion(db, empresa, roles):
+    """Alguien que puede editar inventario pero no es administrador.
+
+    El de bodega no sirve para esto: no tiene permiso de editar, así que no
+    distingue "no puede modificar porque no es admin" de "no puede nada".
+    """
+    from app.models.permiso import RolModuloPermiso
+    from app.models.usuario import Rol, Usuario
+
+    rol = Rol(clave="produccion", nombre="Producción")
+    db.session.add(rol)
+    db.session.commit()
+    db.session.add(RolModuloPermiso(rol_id=rol.id, modulo="inventario",
+                                    puede_ver=True, puede_editar=True))
+    usuario = Usuario(empresa_id=empresa.id, nombre_completo="Produccion de Prueba",
+                      nombre_usuario="produccion", email="produccion@test.cl", rol_id=rol.id)
+    usuario.set_password("password123")
+    db.session.add(usuario)
+    db.session.commit()
+    return usuario
+
+
+def test_quien_no_es_admin_si_puede_crear(client, db, empresa, usuario_produccion):
+    login(client, "produccion@test.cl")
+
+    client.post("/inventario/ot-interna/nueva", data={
+        "fecha": "2026-10-15", "estado": "ABIERTA",
+        "item_cantidad": "1", "item_descripcion": "TRABAJO",
+    }, follow_redirects=True)
+
+    assert OrdenTrabajoInterna.query.count() == 1
+
+
+def test_quien_no_es_admin_no_puede_modificar(client, db, empresa, usuario_produccion):
+    orden = _oti(db, empresa, 500, cliente="EL ORIGINAL")
+    login(client, "produccion@test.cl")
+
+    assert client.get(f"/inventario/ot-interna/{orden.id}/editar").status_code == 403
+
+    client.post(f"/inventario/ot-interna/{orden.id}/editar", data={
+        "fecha": "2026-02-20", "estado": "CERRADA", "cliente": "CAMBIADO",
+        "item_cantidad": "1", "item_descripcion": "OTRO",
+    })
+
+    db.session.refresh(orden)
+    assert orden.cliente == "EL ORIGINAL"
+
+
+def test_quien_no_es_admin_no_puede_eliminar(client, db, empresa, usuario_produccion):
+    """Cerrar la puerta de la pantalla no basta: la dirección se puede escribir."""
+    orden = _oti(db, empresa, 500)
+    login(client, "produccion@test.cl")
+
+    assert client.post(f"/inventario/ot-interna/{orden.id}/eliminar").status_code == 403
+    assert OrdenTrabajoInterna.query.count() == 1
+
+
+def test_a_quien_no_es_admin_no_se_le_ofrecen_los_botones(client, db, empresa, usuario_produccion):
+    """Un botón que contesta 403 es peor que no tenerlo: hace perder el trabajo
+    escrito antes de descubrir que no se podía."""
+    _oti(db, empresa, 500)
+    login(client, "produccion@test.cl")
+
+    html = client.get("/inventario/ot-interna").get_data(as_text=True)
+
+    assert "Modificar" not in html
+    assert "Eliminar" not in html
+    # Pero crear sí, que es lo que sí puede hacer.
+    assert "Nueva OT interna" in html
+
+
+def test_el_admin_puede_eliminar(client, db, empresa, usuario_admin):
+    orden = _oti(db, empresa, 500, items=(("2", "UNO"), ("3", "DOS")))
+    login(client, "admin@test.cl")
+
+    client.post(f"/inventario/ot-interna/{orden.id}/eliminar", follow_redirects=True)
+
+    assert OrdenTrabajoInterna.query.count() == 0
+    # Los ítems se van con ella: dejarlos colgando sería basura invisible.
+    assert ItemOTI.query.count() == 0
+
+
+def test_eliminar_pregunta_antes(client, db, empresa, usuario_admin):
+    """No se puede deshacer."""
+    orden = _oti(db, empresa, 500)
+    login(client, "admin@test.cl")
+
+    html = client.get("/inventario/ot-interna").get_data(as_text=True)
+
+    # Enganchado al envío del formulario, no sólo escrito en la página: el texto
+    # puede estar y el botón borrar sin preguntar nada.
+    envio = html[html.index('oti/500/eliminar') if 'oti/500/eliminar' in html
+                 else html.index('/eliminar'):]
+    envio = envio[:envio.index('</form>')]
+    assert "onsubmit=" in envio
+    assert "¿Eliminar la OT interna N° 500?" in envio
+    assert "no se puede deshacer" in envio
+    # Y dice qué hacer en el caso que de verdad se da seguido.
+    assert "Nula" in envio
+
+
+def test_no_se_elimina_la_de_otra_empresa(client, db, empresa, usuario_admin):
+    from app.models.empresa import Empresa
+
+    otra = Empresa(rut="77.000.000-0", razon_social="Otra SPA")
+    db.session.add(otra)
+    db.session.commit()
+    ajena = _oti(db, otra, 100)
+    login(client, "admin@test.cl")
+
+    assert client.post(f"/inventario/ot-interna/{ajena.id}/eliminar").status_code == 404
+    assert OrdenTrabajoInterna.query.count() == 1
+
+
+# --- El Excel ---
+
+
+def _hoja(datos):
+    import openpyxl
+
+    return openpyxl.load_workbook(io.BytesIO(datos)).active
+
+
+def _textos(hoja):
+    return [str(c.value) for fila in hoja.iter_rows() for c in fila]
+
+
+def test_se_descarga_el_excel(client, db, empresa, usuario_admin):
+    _oti(db, empresa, 500, cliente="MINERA A", items=(("2", "RESERVORIO"),))
+    login(client, "admin@test.cl")
+
+    respuesta = client.get("/inventario/ot-interna.xlsx")
+
+    assert respuesta.status_code == 200
+    textos = _textos(_hoja(respuesta.data))
+    assert "500" in textos
+    assert "RESERVORIO" in textos
+    assert "MINERA A" in textos
+
+
+def test_el_excel_trae_una_fila_por_item(client, db, empresa, usuario_admin):
+    """Es como viene la planilla de la que salió el módulo, y es lo que deja
+    sumar cantidades o armar una tabla dinámica."""
+    _oti(db, empresa, 500, items=(("2", "UNO"), ("3", "DOS"), ("4", "TRES")))
+    login(client, "admin@test.cl")
+
+    hoja = _hoja(client.get("/inventario/ot-interna.xlsx").data)
+    con_el_numero = [f for f in hoja.iter_rows(values_only=True) if f and f[0] == 500]
+
+    assert len(con_el_numero) == 3
+    assert [f[4] for f in con_el_numero] == ["UNO", "DOS", "TRES"]
+
+
+def test_el_excel_respeta_los_filtros(client, db, empresa, usuario_admin):
+    """El archivo descargado es lo que se está mirando, no otra cosa."""
+    _oti(db, empresa, 500, "ABIERTA", items=(("1", "LA VIVA"),))
+    _oti(db, empresa, 501, "CERRADA", items=(("1", "LA CERRADA"),))
+    login(client, "admin@test.cl")
+
+    por_defecto = _textos(_hoja(client.get("/inventario/ot-interna.xlsx").data))
+    assert "LA VIVA" in por_defecto
+    assert "LA CERRADA" not in por_defecto
+
+    todas = _textos(_hoja(client.get("/inventario/ot-interna.xlsx?estado=todas").data))
+    assert "LA CERRADA" in todas
+
+
+def test_el_excel_lo_puede_bajar_quien_solo_mira(client, db, empresa, usuario_bodega):
+    """Descargar no cambia nada: alcanza con poder ver el módulo."""
+    _oti(db, empresa, 500)
+    login(client, "bodega@test.cl")
+
+    assert client.get("/inventario/ot-interna.xlsx").status_code == 200
+
+
+def test_el_boton_de_excel_se_lleva_los_filtros(client, db, empresa, usuario_admin):
+    _oti(db, empresa, 500, "CERRADA")
+    login(client, "admin@test.cl")
+
+    html = client.get("/inventario/ot-interna?estado=todas").get_data(as_text=True)
+
+    assert "ot-interna.xlsx?estado=todas" in html
+
+
+# --- La sucursal salió de la pantalla ---
+#
+# En la planilla mezclaba sucursales de verdad (SANTIAGO, ANTOFAGASTA) con áreas
+# (PRODUCCION, COMERCIAL, CONTROL CALIDAD), así que la columna no contestaba una
+# sola pregunta. Se saca de la vista; el dato de las 723 órdenes que ya están se
+# conserva, porque borrarlo sería perderlo para siempre.
+
+
+def test_la_sucursal_ya_no_se_ve_en_la_lista(client, db, empresa, usuario_admin):
+    _oti(db, empresa, 500, sucursal="PRODUCCION")
+    login(client, "admin@test.cl")
+
+    html = client.get("/inventario/ot-interna").get_data(as_text=True)
+
+    assert "Sucursal" not in html
+    assert "PRODUCCION" not in html
+
+
+def test_la_sucursal_ya_no_se_edita(client, db, empresa, usuario_admin):
+    orden = _oti(db, empresa, 500, sucursal="PRODUCCION")
+    login(client, "admin@test.cl")
+
+    html = client.get(f"/inventario/ot-interna/{orden.id}/editar").get_data(as_text=True)
+
+    assert 'name="sucursal"' not in html
+
+
+def test_modificar_no_le_borra_la_sucursal_que_tenia(client, db, empresa, usuario_admin):
+    """El campo salió del formulario, así que no llega en el envío. Si eso lo
+    dejara en blanco, cada orden que se toque perdería el dato en silencio."""
+    orden = _oti(db, empresa, 500, sucursal="ANTOFAGASTA")
+    login(client, "admin@test.cl")
+
+    client.post(f"/inventario/ot-interna/{orden.id}/editar", data={
+        "fecha": "2026-02-20", "estado": "CERRADA",
+        "item_cantidad": "1", "item_descripcion": "TRABAJO",
+    }, follow_redirects=True)
+
+    db.session.refresh(orden)
+    assert orden.sucursal == "ANTOFAGASTA"
+    assert orden.estado == "CERRADA"
+
+
+def test_la_planilla_la_sigue_guardando(client, db, empresa, usuario_admin):
+    """Volver a mostrarla es sacarle un comentario a una línea; recuperar el dato
+    borrado de 723 órdenes no se puede."""
+    importar_ot_internas(_planilla([FILA]), empresa.id)
+
+    assert OrdenTrabajoInterna.query.one().sucursal == "PRODUCCION"
+
+
+def test_el_excel_tampoco_la_trae(client, db, empresa, usuario_admin):
+    _oti(db, empresa, 500, sucursal="PRODUCCION")
+    login(client, "admin@test.cl")
+
+    textos = _textos(_hoja(client.get("/inventario/ot-interna.xlsx").data))
+
+    assert "Sucursal" not in textos
+    assert "PRODUCCION" not in textos
