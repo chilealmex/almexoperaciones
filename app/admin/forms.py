@@ -22,6 +22,10 @@ class UsuarioForm(FlaskForm):
     email = StringField("Correo electrónico (opcional)", validators=[Optional(), Email()])
     rut = StringField("RUT", validators=[Optional(), validar_rut])
     rol_id = SelectField("Rol", coerce=int, validators=[DataRequired()])
+    # Qué datos ve esta cuenta. Sólo lo llena el superadmin (ver
+    # _cargar_opciones_empresa): para todos los demás el campo no existe, y la
+    # empresa es la de quien crea al usuario.
+    empresa_id = SelectField("Empresa", coerce=int, validators=[Optional()])
     password = PasswordField(
         "Contraseña",
         validators=[Optional(), Length(min=8, message="Mínimo 8 caracteres.")],

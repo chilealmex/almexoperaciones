@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Empresas{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <h1>Empresas</h1>
+    {# Esta pantalla existe por un problema concreto: las cuentas quedaron
+       repartidas en dos empresas y nadie podía verlo. Todo lo que muestra el
+       sistema está filtrado por la empresa del usuario, así que cada grupo
+       trabajaba sobre datos distintos mirando pantallas que se ven iguales. #}
+    <p class="page-sub">
+      Cada cuenta ve sólo los datos de su empresa. Acá se ve dónde está cargado el trabajo,
+      que es lo que permite reconocer cuál es la empresa de verdad.
+    </p>
+  </div>
+  <div>
+    <a href="{{ url_for('admin.usuarios') }}" class="btn btn-outline-secondary btn-sm">← Volver a usuarios</a>
+  </div>
+</div>
+
+<div class="table-responsive">
+  <table class="table table-striped align-middle">
+    <thead>
+      <tr>
+        <th>Empresa</th>
+        <th>RUT</th>
+        <th class="num">Cuentas</th>
+        <th class="num">Artículos de inventario</th>
+        <th class="num">Contratos</th>
+        <th class="num">Activos fijos</th>
+        <th class="num">Provisiones</th>
+        <th>Última importación de inventario</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for fila in empresas %}
+      <tr>
+        <td class="fw-semibold">
+          {{ fila.empresa.razon_social }}
+          {% if fila.empresa.id == mi_empresa_id %}
+          <span class="badge bg-primary">la tuya</span>
+          {% endif %}
+        </td>
+        <td>{{ fila.empresa.rut }}</td>
+        <td class="num">{{ fila.usuarios }}</td>
+        <td class="num">{{ fila.articulos }}</td>
+        <td class="num">{{ fila.contratos }}</td>
+        <td class="num">{{ fila.activos }}</td>
+        <td class="num">{{ fila.provisiones }}</td>
+        <td>{{ fila.ultima_importacion | fecha_hora if fila.ultima_importacion else '—' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="text-center text-muted">No hay empresas registradas.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="alert alert-secondary">
+  <strong>Para dejar a todos en la misma empresa:</strong> entra a
+  <a href="{{ url_for('admin.usuarios') }}">Usuarios</a>, edita la cuenta que está en la
+  empresa equivocada y cámbiale la empresa. No se borra ni se mueve ningún dato: lo
+  único que cambia es qué datos ve esa persona. Lo que esté cargado en la empresa que
+  quede sin cuentas sigue ahí, y vuelve a verse si alguien vuelve a ella.
+</div>
+
+{% endblock %}
