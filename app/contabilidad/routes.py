@@ -163,6 +163,72 @@ def _aplicar_filtros(query, args):
     return query
 
 
+# --- OT provisionada dos veces ---------------------------------------------
+#
+# Una OT se provisiona una vez y se reversa cuando se factura. Que la misma OT
+# aparezca en dos líneas que siguen contando significa que su ingreso está
+# provisionado dos veces, y eso infla el resultado del mes sin que nada lo
+# muestre: cada línea por separado se ve bien.
+#
+# No es lo mismo que la misma OT vuelva a aparecer después de haberse reversado
+# por completo: eso es una reprovisión, que es normal cuando el trabajo sigue
+# sin facturarse al mes siguiente. Por eso el aviso mira el saldo y no sólo la
+# OT: lo que no puede pasar es que las dos estén abiertas a la vez.
+
+
+def _lineas_abiertas_con_la_ot(ot, clave_propia=None):
+    """Las otras líneas de esa OT que todavía tienen saldo pendiente."""
+    ot = (ot or "").strip()
+    if not ot:
+        return []
+    lineas = _query_base().filter(ProvisionIngreso.ot == ot, ProvisionIngreso.saldo > 0).all()
+    return [
+        l for l in lineas
+        if clave_propia is None or (l.mes_ano, l.cbte_prov, l.ot) != clave_propia
+    ]
+
+
+def _describir_linea(linea) -> str:
+    """Cómo se nombra una línea en un aviso: para poder ir a buscarla."""
+    return (
+        f"{nombre_mes(linea.mes_ano)} {linea.mes_ano.year if linea.mes_ano else ''} · "
+        f"comprobante {linea.cbte_prov} · {format_clp(linea.monto_provision)} provisionados"
+        f" · {format_clp(linea.saldo or 0)} de saldo"
+        + (f" · {linea.cliente}" if linea.cliente else "")
+    )
+
+
+def _aviso_de_ot_duplicada(ot, repetidas) -> str:
+    return (
+        f"La OT {ot} ya está provisionada y sin reversar en "
+        + " y en ".join(_describir_linea(l) for l in repetidas)
+        + ". No se cargó, para no provisionar dos veces el mismo ingreso. "
+        "Si de verdad corresponde provisionarla otra vez, primero reversa o "
+        "corrige la que ya está."
+    )
+
+
+def _ots_duplicadas() -> set:
+    """Las OT que tienen más de una línea abierta, preguntándoselo a la base.
+
+    Sirve para marcarlas en la pantalla. Se pregunta por toda la empresa y no
+    sólo por lo que se está viendo: con un filtro puesto, la otra línea de la
+    OT puede estar fuera de la pantalla, y entonces el aviso no aparecería
+    justo cuando más falta —es el caso en que la repetición no se ve.
+
+    Importa sobre todo por lo que ya estaba cargado: esas líneas entraron antes
+    de que existiera este aviso y nadie las revisó.
+    """
+    filas = (
+        db.session.query(ProvisionIngreso.ot)
+        .filter(ProvisionIngreso.empresa_id == _empresa_id(), ProvisionIngreso.saldo > 0)
+        .group_by(ProvisionIngreso.ot)
+        .having(db.func.count() > 1)
+        .all()
+    )
+    return {f[0] for f in filas}
+
+
 def _anios_disponibles():
     """Los años que existen, preguntándoselo a la base.
 
@@ -265,6 +331,7 @@ def provision_ingresos():
         anios=_anios_disponibles(),
         filtros=request.args,
         meses_reversa=_meses_de_reversa_disponibles(),
+        ots_duplicadas=_ots_duplicadas(),
         importar_form=ImportarProvisionesForm(),
         accion_form=AccionForm(),
         nueva_form=nueva_form,
@@ -311,7 +378,17 @@ def importar_provision_ingresos():
     # actualizan con lo que trae el archivo. Nada se elimina: una línea que ya
     # no venga en la planilla se queda como está.
     existentes = {(l.mes_ano, l.cbte_prov, l.ot): l for l in _query_base().all()}
+    # Qué OT quedan contando. Si la planilla trae otra línea de una OT que ya
+    # está provisionada y sin reversar, no se carga: su ingreso quedaría
+    # contado dos veces. Las que ya estaban (misma OT, mismo comprobante, mismo
+    # mes) se actualizan como siempre, que no es duplicar nada.
+    abiertas_por_ot = {}
+    for existente in existentes.values():
+        if (existente.saldo or 0) > 0:
+            abiertas_por_ot.setdefault(existente.ot, []).append(existente)
+
     nuevas = actualizadas = 0
+    repetidas = []
     for linea in lineas:
         datos = {k: v for k, v in linea.items() if k != "fila"}
         clave = (linea["mes_ano"], linea["cbte_prov"], linea["ot"])
@@ -328,6 +405,10 @@ def importar_provision_ingresos():
         }
         registro = existentes.get(clave)
         if registro is None:
+            ya_abiertas = abiertas_por_ot.get(linea["ot"])
+            if ya_abiertas:
+                repetidas.append((linea, ya_abiertas))
+                continue
             registro = ProvisionIngreso(empresa_id=_empresa_id(), **datos)
             existentes[clave] = registro
             db.session.add(registro)
@@ -336,6 +417,8 @@ def importar_provision_ingresos():
             # que la reversa de la planilla estrena el suyo.
             if reversa_planilla["monto"]:
                 registro.reversas.append(ReversaProvision(**reversa_planilla))
+            if _saldo_de(registro) > 0:
+                abiertas_por_ot.setdefault(registro.ot, []).append(registro)
         else:
             for campo, valor in datos.items():
                 setattr(registro, campo, valor)
@@ -350,6 +433,25 @@ def importar_provision_ingresos():
         partes.append(f"{actualizadas} actualizada(s) con los datos de la planilla")
     mensaje = "Se cargaron " + " y ".join(partes) + "." if partes else "La planilla no traía líneas."
     flash(mensaje, "success" if partes else "info")
+
+    # Las repetidas se dicen una por una, con la línea con que choca cada una:
+    # un "no se cargaron 3 líneas" sin decir cuáles obliga a buscarlas a mano
+    # en la planilla, que es donde menos se ven.
+    if repetidas:
+        detalle = " · ".join(
+            f"fila {linea['fila']}: OT {linea['ot']} ({format_clp(linea['monto_provision'])}), "
+            f"ya provisionada en {_describir_linea(otras[0])}"
+            for linea, otras in repetidas[:10]
+        )
+        if len(repetidas) > 10:
+            detalle += f" · y {len(repetidas) - 10} más"
+        flash(
+            f"{_frase(repetidas, 'línea no se cargó', 'líneas no se cargaron')} porque su OT "
+            f"ya está provisionada y sin reversar: {detalle}. "
+            "Revisa si corresponde reversar la que ya está o si la planilla trae "
+            "la provisión repetida.",
+            "danger",
+        )
     return redirect(url_for("contabilidad.provision_ingresos"))
 
 
@@ -467,6 +569,13 @@ def nueva_provision_ingreso():
             f"con el comprobante {cbte} y la OT {ot}.",
             "warning",
         )
+        return redirect(url_for("contabilidad.provision_ingresos"))
+
+    # Y si la misma OT ya está provisionada y sin reversar en otra línea, no se
+    # carga: su ingreso quedaría contado dos veces.
+    repetidas = _lineas_abiertas_con_la_ot(ot)
+    if repetidas:
+        flash(_aviso_de_ot_duplicada(ot, repetidas), "danger")
         return redirect(url_for("contabilidad.provision_ingresos"))
 
     linea = ProvisionIngreso(

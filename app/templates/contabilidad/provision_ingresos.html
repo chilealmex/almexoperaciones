@@ -34,6 +34,24 @@
   </div>
 </div>
 
+{# Una OT se provisiona una vez y se reversa cuando se factura. Que la misma OT
+   esté en dos líneas que siguen contando significa que su ingreso está
+   provisionado dos veces, y eso infla el resultado del mes sin que nada lo
+   muestre: cada línea por separado se ve bien. Las nuevas se rechazan al
+   cargarlas; esto es para las que ya estaban antes de ese aviso. #}
+{% if ots_duplicadas %}
+<div class="alert alert-danger py-2">
+  <strong>⚠️ {{ ots_duplicadas|length }} OT provisionada(s) en más de una línea abierta.</strong>
+  El ingreso de esa OT está contado dos veces hasta que una de las dos se reverse.
+  <div class="mt-1">
+    {% for ot in ots_duplicadas|sort %}
+    <a href="{{ url_for('contabilidad.provision_ingresos', texto=ot, estado='todas') }}"
+       class="badge rounded-pill bg-danger text-decoration-none me-1">OT {{ ot }}</a>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
 {% if puede_editar %}
 <div class="card mb-4">
   <div class="card-body">
@@ -197,6 +215,9 @@
             {# Saldo en $0 = provisión reversada por completo: la fila se bloquea. #}
             {% set cerrada = (l.saldo or 0) == 0 %}
             {% set editable = puede_editar and (not cerrada or current_user.es_superadmin) %}
+            {# Sólo las que todavía cuentan: la línea cerrada de esa OT no es
+               parte de la duplicación, y marcarla mandaría a mirar la que no es. #}
+            {% set ot_repetida = l.ot in ots_duplicadas and (l.saldo or 0) > 0 %}
             <tr>
               <td class="fw-semibold">{{ nombre_mes(l.mes_ano) }}</td>
               <td>{{ l.mes_ano.year if l.mes_ano else '' }}</td>
@@ -214,9 +235,12 @@
               <td>
                 {% if editable %}
                 <input type="text" name="linea-{{ l.id }}-ot" value="{{ l.ot }}"
-                       class="form-control form-control-sm campo-excel" style="min-width:86px;"
+                       class="form-control form-control-sm campo-excel {{ 'border-danger' if ot_repetida }}" style="min-width:86px;"
                        data-confirmar-cambio="la OT de {{ (l.cliente or 'esta línea')|replace('"', '') }} (Cbte {{ l.cbte_prov }}). Es parte de cómo se reconoce la línea al importar la planilla">
                 {% else %}{{ l.ot }}{% endif %}
+                {% if ot_repetida %}
+                <div class="small text-danger" title="Esta OT está provisionada en más de una línea con saldo pendiente: su ingreso queda contado dos veces hasta que una se reverse.">⚠️ OT repetida</div>
+                {% endif %}
               </td>
               <td class="num">{{ l.monto_provision|clp }}</td>
               {# La reversa ya no es una casilla: una provisión se reversa a veces

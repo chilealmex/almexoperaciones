@@ -517,6 +517,192 @@ def test_el_excel_trae_el_detalle_de_cada_reversa(client, usuario_admin, empresa
     assert "51035000" in celdas            # el total reversado, no la última reversa
 
 
+# --- Una OT provisionada dos veces ---------------------------------------
+#
+# Una OT se provisiona una vez y se reversa cuando se factura. Que la misma OT
+# esté en dos líneas que siguen contando significa que su ingreso está
+# provisionado dos veces, y eso infla el resultado del mes sin que nada lo
+# muestre: cada línea por separado se ve bien.
+
+
+def test_no_se_carga_a_mano_una_ot_que_ya_esta_provisionada(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([FILA_2]), "provision.xlsx")},   # OT 6119, saldo pendiente
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+
+    respuesta = client.post("/contabilidad/provision-ingresos/nueva",
+                            data=_datos_linea(ot="6119", mes=7, cbte_prov="999"),
+                            follow_redirects=True)
+    texto = respuesta.get_data(as_text=True)
+
+    assert ProvisionIngreso.query.count() == 1, "no se cargó"
+    assert "La OT 6119 ya está provisionada y sin reversar" in texto
+    # Y dice dónde está la que ya existe, para poder ir a verla.
+    assert "Marzo 2026" in texto
+    assert "comprobante 67" in texto
+    assert "$91.035.000" in texto
+    assert "PELAMBRES" in texto
+    # Y qué hacer si de verdad corresponde.
+    assert "primero reversa o corrige la que ya está" in texto
+
+
+def test_la_misma_ot_se_puede_volver_a_provisionar_si_la_anterior_se_reverso(client, usuario_admin, empresa, db):
+    """No es lo mismo que una duplicación: si el trabajo sigue sin facturarse,
+    la provisión del mes siguiente es la misma OT otra vez, y la anterior ya
+    no cuenta. Impedirlo dejaría sin forma de provisionar el mes."""
+    login(client, "admin@test.cl")
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([FILA_2]), "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    linea = ProvisionIngreso.query.one()
+    _reversar(client, linea, 91_035_000, mes="202605")   # queda cerrada
+
+    client.post("/contabilidad/provision-ingresos/nueva",
+                data=_datos_linea(ot="6119", mes=7, cbte_prov="999"), follow_redirects=True)
+
+    assert ProvisionIngreso.query.count() == 2
+
+
+def test_cargar_a_mano_otra_ot_sigue_funcionando(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([FILA_2]), "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+
+    client.post("/contabilidad/provision-ingresos/nueva",
+                data=_datos_linea(ot="6241"), follow_redirects=True)
+
+    assert ProvisionIngreso.query.count() == 2
+
+
+def test_la_planilla_no_carga_la_linea_cuya_ot_ya_esta_provisionada(client, usuario_admin, empresa, db):
+    """Y lo dice fila por fila: un "no se cargaron 3 líneas" sin decir cuáles
+    obliga a buscarlas a mano en la planilla, que es donde menos se ven."""
+    login(client, "admin@test.cl")
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([FILA_2]), "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+
+    repetida = list(FILA_2)        # la misma OT, otro mes y otro comprobante
+    repetida[0] = date(2026, 7, 1)
+    repetida[1] = 999
+    respuesta = client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([FILA_2, repetida, FILA_3]), "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    texto = respuesta.get_data(as_text=True)
+
+    # Se cargó CONTITECH, se actualizó PELAMBRES y la repetida quedó fuera.
+    assert ProvisionIngreso.query.count() == 2
+    assert {l.ot for l in ProvisionIngreso.query} == {"6119", "6136"}
+    assert "1 línea no se cargó porque su OT ya está provisionada" in texto
+    assert "fila 4: OT 6119" in texto          # la fila del archivo, para ir a buscarla
+    assert "ya provisionada en Marzo 2026" in texto
+
+
+def test_la_planilla_que_trae_la_misma_ot_dos_veces_carga_una(client, usuario_admin, empresa, db):
+    """Las dos son nuevas: ninguna estaba antes, así que el aviso tiene que
+    salir de comparar la planilla consigo misma."""
+    login(client, "admin@test.cl")
+    repetida = list(FILA_2)
+    repetida[0] = date(2026, 7, 1)
+    repetida[1] = 999
+
+    respuesta = client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([FILA_2, repetida]), "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+
+    assert ProvisionIngreso.query.count() == 1
+    assert "1 línea no se cargó" in respuesta.get_data(as_text=True)
+
+
+def test_reimportar_la_misma_planilla_no_dice_que_hay_repetidas(client, usuario_admin, empresa, db):
+    """La línea que ya estaba se actualiza, que no es duplicar nada. Si el
+    aviso saltara acá, saltaría en cada importación y nadie lo leería."""
+    login(client, "admin@test.cl")
+    for _ in range(2):
+        respuesta = client.post(
+            "/contabilidad/provision-ingresos/importar",
+            data={"archivo": (_planilla([FILA_1, FILA_2, FILA_3]), "provision.xlsx")},
+            content_type="multipart/form-data", follow_redirects=True,
+        )
+
+    assert ProvisionIngreso.query.count() == 3
+    assert "no se cargó" not in respuesta.get_data(as_text=True)
+
+
+def test_la_pantalla_marca_las_ot_repetidas_que_ya_estaban_cargadas(client, usuario_admin, empresa, db):
+    """Lo que ya estaba entró antes de que existiera el aviso, y nadie lo
+    revisó: son justamente las que hay que ver."""
+    login(client, "admin@test.cl")
+    primera = ProvisionIngreso(empresa_id=empresa.id, mes_ano=date(2026, 3, 1),
+                               cbte_prov="67", ot="6119", monto_provision=500, saldo=500)
+    segunda = ProvisionIngreso(empresa_id=empresa.id, mes_ano=date(2026, 7, 1),
+                               cbte_prov="999", ot="6119", monto_provision=500, saldo=500)
+    sola = ProvisionIngreso(empresa_id=empresa.id, mes_ano=date(2026, 3, 1),
+                            cbte_prov="67", ot="6136", monto_provision=500, saldo=500)
+    # Una tercera de la misma OT, ya reversada: no es parte de la duplicación
+    # —no cuenta— y marcarla mandaría a mirar la línea que no es.
+    vieja = ProvisionIngreso(empresa_id=empresa.id, mes_ano=date(2025, 11, 1),
+                             cbte_prov="12", ot="6119", monto_provision=500, saldo=0)
+    vieja.reversas.append(ReversaProvision(monto=500, mes="202512"))
+    db.session.add_all([primera, segunda, sola, vieja])
+    db.session.commit()
+
+    texto = client.get("/contabilidad/provision-ingresos?estado=todas").get_data(as_text=True)
+
+    assert "1 OT provisionada(s) en más de una línea abierta" in texto
+    assert texto.count("⚠️ OT repetida") == 2      # las dos abiertas, no la reversada
+    assert ">OT 6119<" in texto                    # el atajo para ir a verlas
+
+
+def test_la_ot_repetida_no_se_marca_cuando_una_ya_se_reverso(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    cerrada = ProvisionIngreso(empresa_id=empresa.id, mes_ano=date(2026, 3, 1),
+                               cbte_prov="67", ot="6119", monto_provision=500, saldo=0)
+    cerrada.reversas.append(ReversaProvision(monto=500, mes="202605"))
+    abierta = ProvisionIngreso(empresa_id=empresa.id, mes_ano=date(2026, 7, 1),
+                               cbte_prov="999", ot="6119", monto_provision=500, saldo=500)
+    db.session.add_all([cerrada, abierta])
+    db.session.commit()
+
+    texto = client.get("/contabilidad/provision-ingresos?estado=todas").get_data(as_text=True)
+
+    assert "OT repetida" not in texto
+    assert "más de una línea abierta" not in texto
+
+
+def test_la_ot_repetida_se_marca_aunque_la_otra_linea_este_filtrada(client, usuario_admin, empresa, db):
+    """Con un filtro puesto, la otra línea de la OT puede estar fuera de la
+    pantalla: es el caso en que la repetición no se ve, así que es cuando más
+    falta el aviso."""
+    login(client, "admin@test.cl")
+    marzo = ProvisionIngreso(empresa_id=empresa.id, mes_ano=date(2026, 3, 1),
+                             cbte_prov="67", ot="6119", monto_provision=500, saldo=500)
+    julio = ProvisionIngreso(empresa_id=empresa.id, mes_ano=date(2026, 7, 1),
+                             cbte_prov="999", ot="6119", monto_provision=500, saldo=500)
+    db.session.add_all([marzo, julio])
+    db.session.commit()
+
+    texto = client.get("/contabilidad/provision-ingresos?estado=todas&mes=3").get_data(as_text=True)
+
+    assert "6119" in texto
+    assert "999" not in texto          # la de julio no se está viendo
+    assert "⚠️ OT repetida" in texto   # y el aviso igual aparece
+
+
 # --- Las reversas vistas por mes, como la planilla de contabilidad -------
 
 
