@@ -1,7 +1,10 @@
+import re
 from datetime import date, datetime, timezone
 
 from flask import abort, flash, redirect, render_template, request, url_for
 from flask_login import current_user
+
+from app.utils.formatting import format_clp
 
 from app.contabilidad import bp
 from app.contabilidad.forms import (
@@ -20,6 +23,7 @@ from app.models.contabilidad import (
     LineaDifTc,
     PeriodoDifTc,
     ProvisionIngreso,
+    ReversaProvision,
     TipoCambioDifTc,
 )
 from app.utils.conciliacion_sii import COLUMNAS_MONTO as COLUMNAS_MONTO_CONCILIACION
@@ -45,10 +49,8 @@ from app.utils.provision_ingresos_excel import (
     leer_provisiones,
     mes_legible,
     nombre_mes,
+    numero_de_mes,
 )
-
-# Lo único editable desde la pantalla; el resto de las columnas viene del Excel.
-CAMPOS_EDITABLES = ("reversa", "mes_reversa", "cbte_reversa", "saldo")
 
 
 def _empresa_id():
@@ -84,8 +86,13 @@ def _parse_decimal(valor):
 
 
 def _saldo_de(linea):
-    """El saldo es lo que queda por reversar: la provisión menos la reversa."""
-    return (linea.monto_provision or 0) - (linea.reversa or 0)
+    """Lo que queda por reversar: la provisión menos TODAS las reversas.
+
+    Sigue guardándose en su columna, y no se calcula al vuelo, porque la
+    pantalla filtra por él en la base —pendientes contra cerradas— y eso no
+    se puede hacer sobre algo que sólo existe en memoria.
+    """
+    return (linea.monto_provision or 0) - linea.reversado
 
 
 def _linea_cerrada(linea):
@@ -110,7 +117,14 @@ def estado_filtrado(args) -> str:
     de "recién llego a la pantalla".
     """
     estado = (args.get("estado") or "").strip()
-    return estado or "pendiente"
+    if estado:
+        return estado
+    # Buscar por mes de reversa es ir a ver algo ya reversado, y lo reversado
+    # por completo está cerrado: con el filtro de siempre la pantalla saldría
+    # vacía y parecería que ese mes no tiene nada.
+    if (args.get("mes_reversa") or "").strip():
+        return "todas"
+    return "pendiente"
 
 
 def _aplicar_filtros(query, args):
@@ -170,6 +184,45 @@ def _meses_disponibles():
     return [(str(n), MESES_NOMBRES[n - 1]) for n in numeros]
 
 
+def _meses_de_reversa_disponibles():
+    """Los meses en que se reversó algo, para el desplegable del filtro.
+
+    El mes de reversa no es el de la provisión: una provisión de marzo se
+    reversa en mayo, o en mayo y junio. Por eso tiene su propio filtro, y acá
+    va el mes con su año junto —"may-26"—, que es como se habla de él.
+    """
+    filas = (
+        db.session.query(ReversaProvision.mes)
+        .join(ProvisionIngreso, ReversaProvision.provision_id == ProvisionIngreso.id)
+        .filter(ProvisionIngreso.empresa_id == _empresa_id())
+        .distinct()
+    )
+    claves = {mes_normalizado(f[0]) for f in filas if f[0]}
+    # Primero los meses de verdad, del más reciente al más viejo, que es el
+    # orden en que se trabaja. Lo que venía escrito a mano y no se entiende
+    # como mes va al final, tal cual, en vez de desaparecer del filtro.
+    normales = sorted((c for c in claves if c.isdigit() and len(c) == 6), reverse=True)
+    raros = sorted(c for c in claves if not (c.isdigit() and len(c) == 6))
+    return [(c, mes_reversa_legible(c)) for c in normales] + [(c, c) for c in raros]
+
+
+def _filtrar_por_mes_reversa(lineas, args):
+    """Deja las líneas que tienen alguna reversa en el mes pedido.
+
+    Va en Python y no en la consulta porque el mes está guardado como texto y
+    escrito de varias formas: lo cargado antes de este cambio trae "05.2026" y
+    lo nuevo "202605". Comparar el texto en SQL dejaría fuera justamente las
+    líneas viejas, que son las que ella va a buscar.
+    """
+    pedido = (args.get("mes_reversa") or "").strip()
+    if not pedido:
+        return lineas
+    return [
+        l for l in lineas
+        if any(mes_normalizado(r.mes) == pedido for r in l.reversas)
+    ]
+
+
 @bp.route("/")
 @require_permission("contabilidad", "ver")
 def index():
@@ -179,14 +232,15 @@ def index():
 @bp.route("/provision-ingresos")
 @require_permission("contabilidad", "ver")
 def provision_ingresos():
-    lineas = (
+    lineas = _filtrar_por_mes_reversa(
         _aplicar_filtros(_query_base(), request.args)
         .order_by(ProvisionIngreso.mes_ano.desc(), ProvisionIngreso.cbte_prov, ProvisionIngreso.ot)
-        .all()
+        .all(),
+        request.args,
     )
     totales = {
         "provision": sum(l.monto_provision or 0 for l in lineas),
-        "reversa": sum(l.reversa or 0 for l in lineas),
+        "reversa": sum(l.reversado for l in lineas),
         "saldo": sum(l.saldo or 0 for l in lineas),
         "cerradas": sum(1 for l in lineas if (l.saldo or 0) <= 0),
         "pendientes": sum(1 for l in lineas if (l.saldo or 0) > 0),
@@ -210,11 +264,14 @@ def provision_ingresos():
         meses=_meses_disponibles(),
         anios=_anios_disponibles(),
         filtros=request.args,
+        meses_reversa=_meses_de_reversa_disponibles(),
         importar_form=ImportarProvisionesForm(),
         accion_form=AccionForm(),
         nueva_form=nueva_form,
+        es_admin=current_user.es_admin_o_superior,
         mes_legible=mes_legible,
         nombre_mes=nombre_mes,
+        mes_reversa_legible=mes_reversa_legible,
     )
 
 
@@ -258,12 +315,27 @@ def importar_provision_ingresos():
     for linea in lineas:
         datos = {k: v for k, v in linea.items() if k != "fila"}
         clave = (linea["mes_ano"], linea["cbte_prov"], linea["ot"])
+        # La reversa de la planilla va aparte: allá cabe una sola por línea, y
+        # acá pueden ser varias cargadas a mano. Dejarla mandar aplastaría ese
+        # detalle cada vez que se importa.
+        reversa_planilla = {
+            "monto": datos.pop("reversa", None),
+            # El mes se guarda normalizado, igual que al cargarlo a mano: así
+            # la pantalla lo muestra como "may-26" y no como "05.2026", que es
+            # como viene de la planilla.
+            "mes": mes_normalizado(datos.pop("mes_reversa", None)) or None,
+            "comprobante": datos.pop("cbte_reversa", None),
+        }
         registro = existentes.get(clave)
         if registro is None:
             registro = ProvisionIngreso(empresa_id=_empresa_id(), **datos)
             existentes[clave] = registro
             db.session.add(registro)
             nuevas += 1
+            # En una línea que no existía no hay historial que proteger, así
+            # que la reversa de la planilla estrena el suyo.
+            if reversa_planilla["monto"]:
+                registro.reversas.append(ReversaProvision(**reversa_planilla))
         else:
             for campo, valor in datos.items():
                 setattr(registro, campo, valor)
@@ -292,15 +364,10 @@ def guardar_provision_ingresos():
     pedidos = []
     for linea in todas:
         prefijo = f"linea-{linea.id}-"
-        if prefijo + "reversa" not in request.form:
+        if prefijo + "cbte_prov" not in request.form:
             continue  # línea que no está en la página que se envió
         if _linea_cerrada(linea):
             continue  # ya quedó en $0: no se toca salvo que la reabra un superadmin
-        linea.reversa = _parse_entero(request.form.get(prefijo + "reversa"))
-        linea.mes_reversa = (request.form.get(prefijo + "mes_reversa") or "").strip() or None
-        linea.cbte_reversa = (request.form.get(prefijo + "cbte_reversa") or "").strip() or None
-        linea.saldo = _saldo_de(linea)
-
         nuevo_cbte = (request.form.get(prefijo + "cbte_prov") or "").strip()
         nuevo_ot = (request.form.get(prefijo + "ot") or "").strip()
         if (nuevo_cbte, nuevo_ot) != (linea.cbte_prov, linea.ot):
@@ -435,13 +502,32 @@ def eliminar_provision_ingreso(linea_id):
     return redirect(url_for("contabilidad.provision_ingresos"))
 
 
+def _detalle_reversas(linea) -> str:
+    """Las reversas de la línea en una celda: "may-26 $1.000.000 cbte 109".
+
+    El Excel tiene una fila por provisión, así que el detalle no cabe en
+    columnas. Puesto así no se pierde: sin esto, bajarse la planilla dejaría
+    sólo el total y volvería al problema de no saber qué se reversó cuándo.
+    """
+    partes = []
+    for reversa in linea.reversas:
+        texto = f"{mes_reversa_legible(reversa.mes) or 'sin mes'} {format_clp(reversa.monto)}"
+        if reversa.comprobante:
+            texto += f" cbte {reversa.comprobante}"
+        if reversa.nota:
+            texto += f" ({reversa.nota})"
+        partes.append(texto)
+    return " · ".join(partes)
+
+
 @bp.route("/provision-ingresos/exportar.xlsx")
 @require_permission("contabilidad", "ver")
 def exportar_provision_ingresos():
-    lineas = (
+    lineas = _filtrar_por_mes_reversa(
         _aplicar_filtros(_query_base(), request.args)
         .order_by(ProvisionIngreso.mes_ano.desc(), ProvisionIngreso.cbte_prov, ProvisionIngreso.ot)
-        .all()
+        .all(),
+        request.args,
     )
     columnas = [
         col("Mes", ancho=12),
@@ -449,9 +535,13 @@ def exportar_provision_ingresos():
         col("Cbte Prov", ancho=12),
         col("OT", ancho=10),
         col("Monto Provisión", ancho=18, formato=CLP, total="suma"),
+        # Una provisión puede llevar varias reversas. La columna de siempre
+        # trae el total —es lo que cuadra con el saldo— y el detalle de cada
+        # una va aparte, para que bajarse el Excel no pierda el historial.
         col("Reversa", ancho=16, formato=CLP, total="suma"),
         col("Mes Reversa", ancho=18),
         col("Cbte Reversa", ancho=14),
+        col("Detalle de reversas", ancho=50),
         col("Cliente", ancho=38),
         col("Centro de Costos", ancho=20),
         col("Rut", ancho=14),
@@ -461,8 +551,11 @@ def exportar_provision_ingresos():
     filas = [
         [
             nombre_mes(l.mes_ano), l.mes_ano.year if l.mes_ano else None,
-            l.cbte_prov, l.ot, l.monto_provision, l.reversa,
-            l.mes_reversa, l.cbte_reversa, l.cliente, l.centro_costos, l.rut, l.obs, l.saldo,
+            l.cbte_prov, l.ot, l.monto_provision, l.reversado,
+            " y ".join(mes_reversa_legible(m) for m in l.meses_reversados) or None,
+            " y ".join(sorted({r.comprobante for r in l.reversas if r.comprobante})) or None,
+            _detalle_reversas(l) or None,
+            l.cliente, l.centro_costos, l.rut, l.obs, l.saldo,
         ]
         for l in lineas
     ]
@@ -1291,3 +1384,206 @@ def eliminar_conciliacion_sii(conciliacion_id):
     db.session.commit()
     flash(f"Se eliminó la conciliación de {etiqueta}.", "success")
     return redirect(url_for("contabilidad.conciliacion_sii"))
+
+
+# --- Reversas de una provisión ---------------------------------------------
+#
+# Una provisión se reversa a veces en partes, en meses distintos y con un
+# comprobante cada una. Antes cabía una sola y el mes se escribía a mano
+# ("may-26 y jun-26"), con lo que el monto de cada mes se perdía.
+
+MES_REVERSA = re.compile(r"^(?:(\d{4})[.\-/ ]?(\d{1,2})|(\d{1,2})[.\-/ ](\d{4}))$")
+# "may-26", "mayo 2026": es como viene escrito en la planilla de la que salió
+# esto, así que tiene que entenderse igual que la forma con números.
+MES_CON_NOMBRE = re.compile(r"^([^\W\d_]{3,12})[.\-/ ]+(\d{2}|\d{4})$", re.UNICODE)
+
+
+def mes_normalizado(texto: str) -> str:
+    """El mes escrito como AAAAMM, que es como se ordena y se agrupa.
+
+    Se escribe de muchas formas —"09.2026", "2026-09", "9/2026", "may-26"— y
+    todas son el mismo mes. Sin normalizar, la vista por mes abriría una
+    columna por cada forma de escribirlo. Lo que no se entiende se guarda tal
+    cual: es preferible una columna rara a perder el dato, y en lo que ya está
+    cargado hay casillas como "may-26 y jun-26" que son justamente lo que este
+    cambio viene a reemplazar.
+    """
+    limpio = " ".join(str(texto or "").split())
+    numeros = MES_REVERSA.match(limpio)
+    if numeros:
+        anio, mes = ((numeros.group(1), numeros.group(2)) if numeros.group(1)
+                     else (numeros.group(4), numeros.group(3)))
+        return _mes_como_aaaamm(anio, mes) or limpio[:60]
+    con_nombre = MES_CON_NOMBRE.match(limpio)
+    if con_nombre:
+        return (_mes_como_aaaamm(con_nombre.group(2), numero_de_mes(con_nombre.group(1)))
+                or limpio[:60])
+    return limpio[:60]
+
+
+def _mes_como_aaaamm(anio, mes) -> str:
+    """AAAAMM, con el año de dos dígitos entendido como de este siglo.
+
+    Devuelve "" si no es un mes de verdad: un "202613" guardado como si fuera
+    un mes abriría una columna que no corresponde a ninguno, y es mejor
+    dejarlo tal como se escribió.
+    """
+    if not mes:
+        return ""
+    anio, mes = int(anio), int(mes)
+    if anio < 100:
+        anio += 2000
+    if not 1 <= mes <= 12:
+        return ""
+    return f"{anio:04d}{mes:02d}"
+
+
+def mes_reversa_legible(texto) -> str:
+    """'202605' -> 'may-26', como se lee el mes en toda la planilla.
+
+    Lo que no sea un mes reconocible se muestra tal cual, sin inventarle una
+    fecha: es el caso de lo que venía escrito a mano.
+    """
+    limpio = str(texto or "").strip()
+    if len(limpio) == 6 and limpio.isdigit() and 1 <= int(limpio[4:]) <= 12:
+        return mes_legible(date(int(limpio[:4]), int(limpio[4:]), 1))
+    return limpio
+
+
+def _provision_de(provision_id):
+    return _query_base().filter_by(id=provision_id).first_or_404()
+
+
+@bp.route("/provision-ingresos/<int:provision_id>/reversa", methods=["POST"])
+@require_permission("contabilidad", "editar")
+def agregar_reversa_provision(provision_id):
+    """Agrega una reversa a la provisión. Se suman, no se reemplazan."""
+    if not AccionForm().validate_on_submit():
+        abort(400)
+
+    linea = _provision_de(provision_id)
+    monto = _parse_entero(request.form.get("monto"))
+    if not monto:
+        flash("Escribe el monto de la reversa.", "warning")
+        return redirect(url_for("contabilidad.provision_ingresos", **request.args))
+    if _linea_cerrada(linea):
+        # Ya está reversada por completo: una reversa más la dejaría reversada
+        # por sobre lo provisionado. Si lo que hay que arreglar es una reversa
+        # mal cargada, se elimina esa —lo hace un admin— y se vuelve a cargar.
+        flash(
+            f"La línea {linea.cbte_prov}/{linea.ot} ya está reversada por completo "
+            f"({format_clp(linea.reversado)} de {format_clp(linea.monto_provision)}): "
+            "no se le puede agregar otra reversa. Si alguna está mal cargada, "
+            "elimínala primero y vuelve a agregarla.",
+            "danger",
+        )
+        return redirect(url_for("contabilidad.provision_ingresos", **request.args))
+
+    linea.reversas.append(ReversaProvision(
+        monto=monto,
+        mes=mes_normalizado(request.form.get("mes")) or None,
+        comprobante=(request.form.get("comprobante") or "").strip()[:60] or None,
+        nota=(request.form.get("nota") or "").strip() or None,
+        creado_por_id=current_user.id,
+    ))
+    linea.saldo = _saldo_de(linea)
+    db.session.commit()
+
+    aviso = (f"Reversa de {format_clp(monto)} agregada a {linea.cbte_prov}/{linea.ot}. "
+             f"Lleva {format_clp(linea.reversado)} reversado de {format_clp(linea.monto_provision)}.")
+    if linea.reversado_de_mas:
+        # No se impide —puede ser un monto mal tecleado que se corrige con la
+        # siguiente— pero no puede pasar callado.
+        flash(aviso + f" Quedó reversada {format_clp(linea.reversado_de_mas)} POR SOBRE lo provisionado.",
+              "danger")
+    else:
+        flash(aviso, "success")
+    return redirect(url_for("contabilidad.provision_ingresos", **request.args))
+
+
+@bp.route("/provision-ingresos/reversa/<int:reversa_id>/eliminar", methods=["POST"])
+@require_permission("contabilidad", "editar")
+def eliminar_reversa_provision(reversa_id):
+    """Borra una reversa. Sólo admin: cambia el saldo de una provisión."""
+    if not current_user.es_admin_o_superior:
+        abort(403)
+    if not AccionForm().validate_on_submit():
+        abort(400)
+
+    reversa = (
+        ReversaProvision.query.join(ProvisionIngreso)
+        .filter(ReversaProvision.id == reversa_id, ProvisionIngreso.empresa_id == _empresa_id())
+        .first_or_404()
+    )
+    linea, monto = reversa.provision, reversa.monto
+    # Se saca de la colección, no con session.delete: así la línea deja de
+    # verla en el acto y el saldo se recalcula sobre lo que queda. Borrándola
+    # por separado, la colección en memoria seguía trayéndola y el saldo
+    # quedaba como si la reversa siguiera ahí.
+    linea.reversas.remove(reversa)
+    linea.saldo = _saldo_de(linea)
+    db.session.commit()
+    flash(f"Reversa de {format_clp(monto)} eliminada de {linea.cbte_prov}/{linea.ot}.", "success")
+    return redirect(url_for("contabilidad.provision_ingresos", **request.args))
+
+
+@bp.route("/provision-ingresos/por-mes")
+@require_permission("contabilidad", "ver")
+def provision_reversas_por_mes():
+    """Las reversas vistas como las mira contabilidad: una columna por mes.
+
+    Es la misma información de la pantalla principal, puesta como la planilla
+    que se usaba antes: cada provisión en una fila, cada mes de reversa en una
+    columna, el monto en la celda que cruza las dos, y el total a la derecha.
+    Así se ve de un vistazo en qué meses se fue reversando algo que se partió.
+    """
+    lineas = _filtrar_por_mes_reversa(
+        _aplicar_filtros(_query_base(), request.args)
+        .order_by(ProvisionIngreso.mes_ano.desc(), ProvisionIngreso.cbte_prov, ProvisionIngreso.ot)
+        .all(),
+        request.args,
+    )
+    # Se agrupa por el mes normalizado y no por el texto guardado: lo que se
+    # cargó antes de este cambio trae "05.2026" y lo nuevo "202605", y son el
+    # mismo mes. Agrupar por el texto abriría dos columnas para uno.
+    filas = []
+    for linea in lineas:
+        por_mes = {}
+        sin_mes = 0
+        for reversa in linea.reversas:
+            mes = mes_normalizado(reversa.mes)
+            if not mes:
+                # Sin mes anotado no cabe en ninguna columna, y perderla haría
+                # que el total de la fila no cuadre con el de la pantalla.
+                sin_mes += reversa.monto or 0
+                continue
+            casilla = por_mes.setdefault(mes, {"monto": 0, "comprobantes": [], "notas": []})
+            casilla["monto"] += reversa.monto or 0
+            if reversa.comprobante:
+                casilla["comprobantes"].append(reversa.comprobante)
+            if reversa.nota:
+                casilla["notas"].append(reversa.nota)
+        filas.append({"linea": linea, "por_mes": por_mes, "sin_mes": sin_mes})
+
+    # Sólo los meses que de verdad tienen algo: una columna por cada mes del
+    # calendario dejaría la tabla llena de guiones.
+    meses = sorted({m for f in filas for m in f["por_mes"]})
+
+    return render_template(
+        "contabilidad/provision_por_mes.html",
+        filas=filas,
+        meses=meses,
+        totales_mes={m: sum(f["por_mes"].get(m, {}).get("monto", 0) for f in filas) for m in meses},
+        total_sin_mes=sum(f["sin_mes"] for f in filas),
+        total_provision=sum(f["linea"].monto_provision or 0 for f in filas),
+        total_reversado=sum(f["linea"].reversado for f in filas),
+        total_saldo=sum(f["linea"].saldo or 0 for f in filas),
+        estado_actual=estado_filtrado(request.args),
+        meses_filtro=_meses_disponibles(),
+        meses_reversa=_meses_de_reversa_disponibles(),
+        anios=_anios_disponibles(),
+        filtros=request.args,
+        nombre_mes=nombre_mes,
+        mes_legible=mes_legible,
+        mes_reversa_legible=mes_reversa_legible,
+    )

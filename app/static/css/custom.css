@@ -1117,6 +1117,48 @@ input.campo-excel.esta-vacio::placeholder {
   font-weight: 600;
 }
 
+/* Las reversas de una provisión son varias y van una debajo de otra en su
+   celda. Con tope de ancho: sin él la columna se estiraba con la más larga y
+   la tabla se iba de la pantalla, dejando el saldo fuera de vista. */
+.celda-reversas {
+  min-width: 190px;
+  max-width: 240px;
+}
+.celda-reversas .badge {
+  font-size: 0.68rem;
+  padding: 0.12rem 0.35rem;
+}
+/* Plegado por defecto: las cuatro casillas para agregar son lo que más ancho
+   pedía, y no se usan en la mayoría de las filas. */
+.agregar-reversa > summary {
+  cursor: pointer;
+  list-style: none;
+}
+.agregar-reversa > summary::-webkit-details-marker {
+  display: none;
+}
+.agregar-reversa[open] > summary {
+  font-weight: 600;
+}
+
+/* Cliente y observación son los textos largos de la tabla. Se cortan con
+   puntos suspensivos y el texto completo queda en el title, que es mejor que
+   una tabla de 2.000px por un nombre de cliente. */
+.celda-recortada {
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Reversas por mes: la matriz de contabilidad. Una columna por mes, así que
+   las cifras se alinean por dígito para poder compararlas de una mirada. */
+.tabla-reversas-mes td.num,
+.tabla-reversas-mes tfoot td {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 /* Menú del celular: se ven los submódulos de todos los módulos, no solo los del
    abierto, porque ahí no hay un panel lateral donde desplegarlos aparte. */
 .sidebar-submodules.solo-celular {

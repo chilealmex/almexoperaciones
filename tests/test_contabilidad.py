@@ -1,13 +1,15 @@
 """Submódulo Contabilidad > Provisión de Ingresos: importar acumulando y editar 4 columnas."""
 
 import io
+import re
 import pytest
 from datetime import date
+from pathlib import Path
 
 from openpyxl import Workbook
 
 from app.extensions import db as _db
-from app.models.contabilidad import ProvisionIngreso
+from app.models.contabilidad import ProvisionIngreso, ReversaProvision
 from app.utils.provision_ingresos_excel import PlanillaInvalida, leer_provisiones, mes_legible
 from tests.conftest import login
 
@@ -125,7 +127,8 @@ def test_reimportar_no_duplica_ni_borra_lo_anterior(client, usuario_admin, empre
 
 
 def test_reimportar_actualiza_las_lineas_con_lo_que_trae_la_planilla(client, usuario_admin, empresa, db):
-    """La planilla es la fuente: al reimportar, lo editado a mano se reemplaza."""
+    """La planilla es la fuente de sus propias columnas: al reimportar, lo que
+    se haya editado a mano en ellas se reemplaza."""
     login(client, "admin@test.cl")
     client.post(
         "/contabilidad/provision-ingresos/importar",
@@ -133,21 +136,69 @@ def test_reimportar_actualiza_las_lineas_con_lo_que_trae_la_planilla(client, usu
         content_type="multipart/form-data", follow_redirects=True,
     )
     linea = ProvisionIngreso.query.filter_by(empresa_id=empresa.id).one()
-    linea.reversa = 91_035_000
-    linea.mes_reversa = "07.2026"
-    linea.saldo = 0
+    linea.cliente = "ESCRITO A MANO"
+    linea.monto_provision = 1
     _db.session.commit()
 
-    client.post(  # el mismo Excel, que trae la línea sin reversar
+    client.post(  # el mismo Excel
         "/contabilidad/provision-ingresos/importar",
         data={"archivo": (_planilla([FILA_2]), "provision.xlsx")},
         content_type="multipart/form-data", follow_redirects=True,
     )
     _db.session.refresh(linea)
-    assert linea.reversa is None            # quedó como en la planilla
-    assert linea.mes_reversa is None
-    assert linea.saldo == 91_035_000        # y el saldo se recalculó
-    assert ProvisionIngreso.query.count() == 1   # sin duplicar
+    assert linea.cliente == "MINERA LOS PELAMBRES"   # quedó como en la planilla
+    assert linea.monto_provision == 91_035_000
+    assert linea.saldo == 91_035_000                 # y el saldo se recalculó
+    assert ProvisionIngreso.query.count() == 1       # sin duplicar
+
+
+def test_reimportar_no_borra_las_reversas_cargadas_a_mano(client, usuario_admin, empresa, db):
+    """En la planilla cabe una sola reversa por línea; acá pueden ser varias.
+    Dejarla mandar aplastaría ese detalle en cada importación."""
+    login(client, "admin@test.cl")
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([FILA_2]), "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    linea = ProvisionIngreso.query.filter_by(empresa_id=empresa.id).one()
+    _reversar(client, linea, 40_000_000, mes="202605", comprobante="456")
+    _reversar(client, linea, 11_035_000, mes="202606", comprobante="789")
+
+    reversada = list(FILA_2)      # la planilla trae otra reversa, de una sola vez
+    reversada[4] = 91_035_000
+    reversada[5] = date(2026, 7, 1)
+    reversada[11] = 0
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([reversada]), "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    _db.session.refresh(linea)
+    assert len(linea.reversas) == 2                  # las dos siguen ahí
+    assert linea.reversado == 51_035_000             # y el total es el de ellas
+    assert linea.saldo == 91_035_000 - 51_035_000
+    assert "202607" not in [r.mes for r in linea.reversas]
+
+
+def test_la_reversa_de_la_planilla_estrena_el_historial_de_la_linea(client, usuario_admin, empresa, db):
+    """En una línea que no existía no hay historial que proteger, así que la
+    reversa que trae la planilla pasa a ser la primera de la línea."""
+    login(client, "admin@test.cl")
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([FILA_1]), "provision.xlsx")},   # reversada en 05.2026
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    linea = ProvisionIngreso.query.one()
+
+    assert len(linea.reversas) == 1
+    assert linea.reversas[0].monto == 3_700_000
+    assert linea.reversas[0].comprobante == "109"
+    # El mes queda normalizado, como el que se carga a mano: en la planilla
+    # viene "05.2026" y la pantalla lo muestra como may-26.
+    assert linea.reversas[0].mes == "202605"
+    assert ">may-26<" in client.get("/contabilidad/provision-ingresos?estado=todas").get_data(as_text=True)
 
 
 def test_importar_un_archivo_que_no_es_la_planilla_avisa(client, usuario_admin, empresa, db):
@@ -164,7 +215,20 @@ def test_importar_un_archivo_que_no_es_la_planilla_avisa(client, usuario_admin, 
 # --- Edición de las 4 columnas ------------------------------------------
 
 
-def test_solo_se_editan_reversa_mes_reversa_cbte_reversa_y_saldo(client, usuario_admin, empresa, db):
+
+def _reversar(client, linea, monto, mes="202606", comprobante="456", nota=None):
+    """Agrega una reversa como lo hace la pantalla: una a una, no reemplazando."""
+    datos = {"monto": str(monto), "mes": mes, "comprobante": comprobante}
+    if nota:
+        datos["nota"] = nota
+    return client.post(
+        f"/contabilidad/provision-ingresos/{linea.id}/reversa",
+        data=datos, follow_redirects=True,
+    )
+
+def test_guardar_no_toca_lo_que_viene_del_excel(client, usuario_admin, empresa, db):
+    """La reversa salió de la fila editable: ahora se agrega aparte. Lo que
+    sigue sin poder cambiarse ahí es lo que trae la planilla."""
     login(client, "admin@test.cl")
     client.post(
         "/contabilidad/provision-ingresos/importar",
@@ -176,9 +240,8 @@ def test_solo_se_editan_reversa_mes_reversa_cbte_reversa_y_saldo(client, usuario
     client.post(
         "/contabilidad/provision-ingresos/guardar",
         data={
-            f"linea-{linea.id}-reversa": "$91.035.000",
-            f"linea-{linea.id}-mes_reversa": "may-26 y jun-26",
-            f"linea-{linea.id}-cbte_reversa": "456-204",
+            f"linea-{linea.id}-cbte_prov": linea.cbte_prov,
+            f"linea-{linea.id}-ot": linea.ot,
             # Estos no son editables: aunque se envíen, deben ignorarse.
             f"linea-{linea.id}-monto_provision": "1",
             f"linea-{linea.id}-cliente": "OTRO CLIENTE",
@@ -186,16 +249,13 @@ def test_solo_se_editan_reversa_mes_reversa_cbte_reversa_y_saldo(client, usuario
         follow_redirects=True,
     )
     _db.session.refresh(linea)
-    assert linea.reversa == 91_035_000
-    assert linea.mes_reversa == "may-26 y jun-26"
-    assert linea.cbte_reversa == "456-204"
-    assert linea.saldo == 0
     assert linea.monto_provision == 91_035_000  # intacto
     assert linea.cliente == "MINERA LOS PELAMBRES"  # intacto
 
 
-def test_dejar_la_reversa_vacia_la_borra(client, usuario_admin, empresa, db):
-    """En una línea abierta se puede borrar la reversa; el saldo vuelve a la provisión."""
+def test_las_reversas_se_suman_en_vez_de_reemplazarse(client, usuario_admin, empresa, db):
+    """Es el cambio de fondo: una provisión se reversa a veces en partes, en
+    meses distintos. Antes cabía una sola y la segunda borraba la primera."""
     login(client, "admin@test.cl")
     client.post(
         "/contabilidad/provision-ingresos/importar",
@@ -203,25 +263,411 @@ def test_dejar_la_reversa_vacia_la_borra(client, usuario_admin, empresa, db):
         content_type="multipart/form-data", follow_redirects=True,
     )
     linea = ProvisionIngreso.query.filter_by(empresa_id=empresa.id).one()
-    client.post(
-        "/contabilidad/provision-ingresos/guardar",
-        data={f"linea-{linea.id}-reversa": "40000000", f"linea-{linea.id}-mes_reversa": "06.2026",
-              f"linea-{linea.id}-cbte_reversa": "456"},
-        follow_redirects=True,
-    )
-    _db.session.refresh(linea)
-    assert linea.reversa == 40_000_000
 
-    client.post(
-        "/contabilidad/provision-ingresos/guardar",
-        data={f"linea-{linea.id}-reversa": "", f"linea-{linea.id}-mes_reversa": "",
-              f"linea-{linea.id}-cbte_reversa": ""},
-        follow_redirects=True,
-    )
+    _reversar(client, linea, 40_000_000, mes="202605", comprobante="456")
+    _reversar(client, linea, 51_035_000, mes="202606", comprobante="789")
+
     _db.session.refresh(linea)
-    assert linea.reversa is None
-    assert linea.mes_reversa is None
+    assert len(linea.reversas) == 2
+    assert linea.reversado == 91_035_000
+    assert linea.saldo == 0
+    assert [r.mes for r in linea.reversas] == ["202605", "202606"]
+    assert [r.comprobante for r in linea.reversas] == ["456", "789"]
+
+
+def test_cada_reversa_puede_llevar_su_nota(client, usuario_admin, empresa, db):
+    """El respaldo de por qué ese monto quedó así: en una planilla eso se
+    discute de memoria."""
+    login(client, "admin@test.cl")
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([FILA_2]), "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    linea = ProvisionIngreso.query.filter_by(empresa_id=empresa.id).one()
+
+    _reversar(client, linea, 1_000_000, nota="Vino mal de contabilidad, se corrige en julio")
+
+    _db.session.refresh(linea)
+    assert linea.reversas[0].nota == "Vino mal de contabilidad, se corrige en julio"
+    texto = client.get("/contabilidad/provision-ingresos").get_data(as_text=True)
+    assert "Vino mal de contabilidad" in texto
+
+
+def test_el_admin_puede_borrar_una_reversa_y_el_saldo_vuelve(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([FILA_2]), "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    linea = ProvisionIngreso.query.filter_by(empresa_id=empresa.id).one()
+    _reversar(client, linea, 40_000_000)
+    _db.session.refresh(linea)
+    reversa_id = linea.reversas[0].id
+
+    client.post(f"/contabilidad/provision-ingresos/reversa/{reversa_id}/eliminar",
+                follow_redirects=True)
+
+    _db.session.refresh(linea)
+    assert linea.reversas == []
     assert linea.saldo == 91_035_000   # vuelve a quedar toda la provisión pendiente
+
+
+def test_reversar_de_mas_no_se_impide_pero_se_avisa(client, usuario_admin, empresa, db):
+    """Puede ser un monto mal tecleado que se corrige con la reversa siguiente.
+    Lo que no puede es pasar callado: que una planilla no avise es justamente
+    lo que hace que el error llegue lejos."""
+    login(client, "admin@test.cl")
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([FILA_2]), "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    linea = ProvisionIngreso.query.filter_by(empresa_id=empresa.id).one()
+
+    texto = _reversar(client, linea, 100_000_000).get_data(as_text=True)
+
+    _db.session.refresh(linea)
+    assert linea.reversado == 100_000_000
+    assert linea.reversado_de_mas == 8_965_000
+    assert "POR SOBRE lo provisionado" in texto
+
+
+def test_el_mes_se_guarda_normalizado(client, usuario_admin, empresa, db):
+    """Se escribe de muchas formas y todas son el mismo mes. Sin normalizar, la
+    vista por mes abriría una columna por cada forma de escribirlo."""
+    from app.contabilidad.routes import mes_normalizado
+
+    assert mes_normalizado("09.2026") == "202609"
+    assert mes_normalizado("2026-09") == "202609"
+    assert mes_normalizado("9/2026") == "202609"
+    assert mes_normalizado("202609") == "202609"
+    # Lo que no se entiende se guarda tal cual: mejor una columna rara que
+    # perder el dato.
+    assert mes_normalizado("may-26 y jun-26") == "may-26 y jun-26"
+
+
+def test_el_mes_se_entiende_escrito_con_letras(client):
+    """Es como viene en la planilla de la que salió esto: "may-26". Sin
+    entenderlo, la vista por mes abriría una columna "may-26" al lado de la de
+    mayo 2026, que es el mismo mes."""
+    from app.contabilidad.routes import mes_normalizado
+
+    assert mes_normalizado("may-26") == "202605"
+    assert mes_normalizado("may 2026") == "202605"
+    assert mes_normalizado("mayo-2026") == "202605"
+    assert mes_normalizado("Septiembre 2026") == "202609"
+    assert mes_normalizado("sept-26") == "202609"
+    # Y un mes que no existe no se inventa: se guarda tal cual.
+    assert mes_normalizado("2026-13") == "2026-13"
+    assert mes_normalizado("xyz-26") == "xyz-26"
+
+
+def test_el_mes_se_muestra_como_en_la_planilla(client):
+    """Guardado se ordena como 202605, pero nadie lee los meses así."""
+    from app.contabilidad.routes import mes_reversa_legible
+
+    assert mes_reversa_legible("202605") == "may-26"
+    assert mes_reversa_legible("202612") == "dic-26"
+    assert mes_reversa_legible("") == ""
+    assert mes_reversa_legible(None) == ""
+    # Lo que no es un mes no se disfraza de uno.
+    assert mes_reversa_legible("may-26 y jun-26") == "may-26 y jun-26"
+    assert mes_reversa_legible("202613") == "202613"
+
+
+# --- Filtrar por mes de reversa ------------------------------------------
+
+
+def _dos_reversadas_en_meses_distintos(client, empresa):
+    """Dos líneas, reversadas una en mayo y la otra en junio."""
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([FILA_2, FILA_3]), "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    pelambres = ProvisionIngreso.query.filter_by(ot="6119").one()
+    contitech = ProvisionIngreso.query.filter_by(ot="6136").one()
+    _reversar(client, pelambres, 1_000_000, mes="202605", comprobante="456")
+    _reversar(client, contitech, 290_000, mes="202606", comprobante="789")
+    return pelambres, contitech
+
+
+def _opciones_del_filtro(texto, nombre):
+    """Las opciones (valor, etiqueta) del desplegable de ese filtro, en orden."""
+    select = texto.split(f'name="{nombre}"', 1)[1].split("</select>", 1)[0]
+    return [
+        (m.group(1), m.group(2).strip())
+        for m in re.finditer(r'<option value="([^"]*)"[^>]*>([^<]*)</option>', select)
+    ]
+
+
+def test_se_puede_filtrar_por_mes_de_reversa(client, usuario_admin, empresa, db):
+    """La provisión se hace un mes y se reversa otro: son dos filtros, no uno."""
+    login(client, "admin@test.cl")
+    _dos_reversadas_en_meses_distintos(client, empresa)
+
+    mayo = client.get("/contabilidad/provision-ingresos?mes_reversa=202605").get_data(as_text=True)
+    assert "PELAMBRES" in mayo
+    assert "CONTITECH" not in mayo
+
+    junio = client.get("/contabilidad/provision-ingresos?mes_reversa=202606").get_data(as_text=True)
+    assert "CONTITECH" in junio
+    assert "PELAMBRES" not in junio
+
+
+def test_el_filtro_de_mes_de_reversa_no_depende_de_como_este_escrito(client, usuario_admin, empresa, db):
+    """Lo cargado antes de este cambio trae "05.2026" y lo nuevo "202605": son
+    el mismo mes, y el filtro tiene que encontrar las dos."""
+    login(client, "admin@test.cl")
+    pelambres, _ = _dos_reversadas_en_meses_distintos(client, empresa)
+    pelambres.reversas[0].mes = "05.2026"   # como quedó lo importado de la planilla
+    _db.session.commit()
+
+    mayo = client.get("/contabilidad/provision-ingresos?mes_reversa=202605").get_data(as_text=True)
+    assert "PELAMBRES" in mayo
+
+
+def test_el_desplegable_ofrece_los_meses_que_existen_una_sola_vez(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    pelambres, _ = _dos_reversadas_en_meses_distintos(client, empresa)
+    # Otra reversa del mismo mes, escrita como la dejó la planilla. Se guarda
+    # tal cual a propósito: es lo que trae lo cargado antes de este cambio, y
+    # el formulario normaliza al escribir, así que por ahí no se puede probar.
+    pelambres.reversas.append(ReversaProvision(monto=1, mes="05.2026"))
+    _db.session.commit()
+
+    texto = client.get("/contabilidad/provision-ingresos?estado=todas").get_data(as_text=True)
+
+    opciones = _opciones_del_filtro(texto, "mes_reversa")
+    # Dos meses, no tres: la forma vieja y la nueva del mismo mes son una sola
+    # opción. Si no, el filtro ofrecería "05.2026" aparte de "may-26" y cada
+    # una mostraría la mitad de las líneas.
+    assert opciones == [("", "Todos"), ("202606", "jun-26"), ("202605", "may-26")]
+
+
+def test_filtrar_por_mes_de_reversa_muestra_tambien_las_cerradas(client, usuario_admin, empresa, db):
+    """Buscar por mes de reversa es ir a ver algo ya reversado, y lo reversado
+    por completo está cerrado: con el filtro de siempre la pantalla saldría
+    vacía y parecería que ese mes no tiene nada."""
+    login(client, "admin@test.cl")
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([FILA_2]), "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    linea = ProvisionIngreso.query.one()
+    _reversar(client, linea, 91_035_000, mes="202605")   # queda cerrada
+    assert linea.saldo == 0
+
+    texto = client.get("/contabilidad/provision-ingresos?mes_reversa=202605").get_data(as_text=True)
+    assert "PELAMBRES" in texto
+
+    # Pero si pide expresamente las pendientes, se respeta lo que pidió.
+    pendientes = client.get(
+        "/contabilidad/provision-ingresos?mes_reversa=202605&estado=pendiente"
+    ).get_data(as_text=True)
+    assert "PELAMBRES" not in pendientes
+
+
+def test_el_excel_tambien_respeta_el_filtro_de_mes_de_reversa(client, usuario_admin, empresa, db):
+    """Si la pantalla muestra un mes, el Excel que se baja al lado tiene que
+    traer lo mismo: bajarse todo cuando se está mirando un mes es un error que
+    no se nota hasta que alguien suma la columna."""
+    from openpyxl import load_workbook
+
+    login(client, "admin@test.cl")
+    _dos_reversadas_en_meses_distintos(client, empresa)
+
+    respuesta = client.get("/contabilidad/provision-ingresos/exportar.xlsx?mes_reversa=202605")
+    hoja = load_workbook(io.BytesIO(respuesta.data)).active
+    texto = "\n".join(
+        str(c.value) for fila in hoja.iter_rows() for c in fila if c.value is not None
+    )
+    assert "PELAMBRES" in texto
+    assert "CONTITECH" not in texto
+
+
+def test_el_excel_trae_el_detalle_de_cada_reversa(client, usuario_admin, empresa, db):
+    """El Excel tiene una fila por provisión, así que el detalle va en una
+    celda: sin esto, bajarse la planilla dejaría sólo el total y volvería al
+    problema de no saber qué se reversó cuándo."""
+    from openpyxl import load_workbook
+
+    login(client, "admin@test.cl")
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([FILA_2]), "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    linea = ProvisionIngreso.query.one()
+    _reversar(client, linea, 40_000_000, mes="202605", comprobante="456")
+    _reversar(client, linea, 11_035_000, mes="202606", comprobante="789", nota="Vino mal")
+
+    respuesta = client.get("/contabilidad/provision-ingresos/exportar.xlsx")
+    hoja = load_workbook(io.BytesIO(respuesta.data)).active
+    celdas = [str(c.value) for fila in hoja.iter_rows() for c in fila if c.value is not None]
+    texto = "\n".join(celdas)
+
+    assert "Detalle de reversas" in texto
+    assert "may-26 $40.000.000 cbte 456" in texto
+    assert "jun-26 $11.035.000 cbte 789 (Vino mal)" in texto
+    assert "may-26 y jun-26" in texto      # la columna de meses, como se escribía antes
+    assert "51035000" in celdas            # el total reversado, no la última reversa
+
+
+# --- Las reversas vistas por mes, como la planilla de contabilidad -------
+
+
+def test_la_vista_por_mes_pone_una_columna_por_mes(client, usuario_admin, empresa, db):
+    """Lo que pidió: cada provisión en una fila, cada mes de reversa en una
+    columna, y el monto en la celda que cruza las dos."""
+    login(client, "admin@test.cl")
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([FILA_2]), "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    linea = ProvisionIngreso.query.one()
+    _reversar(client, linea, 40_000_000, mes="202605", comprobante="456")
+    _reversar(client, linea, 11_035_000, mes="202606", comprobante="789")
+
+    texto = client.get("/contabilidad/provision-ingresos/por-mes?estado=todas").get_data(as_text=True)
+
+    assert '<th class="num">may-26</th>' in texto
+    assert '<th class="num">jun-26</th>' in texto
+    assert "$40.000.000" in texto
+    assert "$11.035.000" in texto
+    assert "PELAMBRES" in texto
+    # El comprobante contable va como burbuja en la casilla, no en una columna.
+    assert ">456<" in texto and ">789<" in texto
+
+
+#: Antes de la primera columna de mes van mes, comprobante, OT, cliente y
+#: monto provisionado. Contarlas es lo que permite saber en qué columna cayó
+#: cada monto.
+COLUMNAS_ANTES_DE_LOS_MESES = 5
+
+
+def _celdas_de_los_meses(texto, ot):
+    """Las celdas de mes de la fila de esa OT, en el orden en que se muestran."""
+    cuerpo = texto[texto.index("<tbody>"):texto.index("</tbody>")]
+    fila = next(f for f in cuerpo.split("<tr>") if f">{ot}<" in f)
+    return fila.split("<td")[1:][COLUMNAS_ANTES_DE_LOS_MESES:]
+
+
+def test_en_la_vista_por_mes_cada_monto_cae_en_su_mes(client, usuario_admin, empresa, db):
+    """Es lo único que esta pantalla tiene que hacer bien: si los montos se
+    corren de columna, la pantalla miente y no se nota."""
+    login(client, "admin@test.cl")
+    _dos_reversadas_en_meses_distintos(client, empresa)
+
+    texto = client.get("/contabilidad/provision-ingresos/por-mes?estado=todas").get_data(as_text=True)
+
+    # Las columnas van en orden: mayo primero, junio después. Se mira el
+    # encabezado de la tabla y no la página entera, porque el desplegable del
+    # filtro trae los mismos meses en el orden inverso.
+    encabezado = texto[texto.index("<thead>"):texto.index("</thead>")]
+    assert encabezado.index(">may-26<") < encabezado.index(">jun-26<")
+
+    # La reversa de PELAMBRES es de mayo: su monto va en la columna de mayo y
+    # la de junio queda vacía. En CONTITECH, al revés.
+    mayo, junio = _celdas_de_los_meses(texto, "6119")[:2]
+    assert "$1.000.000" in mayo and "$1.000.000" not in junio
+    mayo, junio = _celdas_de_los_meses(texto, "6136")[:2]
+    assert "$290.000" not in mayo and "$290.000" in junio
+
+
+def test_la_vista_por_mes_junta_los_meses_escritos_distinto(client, usuario_admin, empresa, db):
+    """Agrupar por el texto guardado abriría dos columnas para el mismo mes:
+    lo viejo trae "05.2026" y lo nuevo "202605"."""
+    login(client, "admin@test.cl")
+    pelambres, _ = _dos_reversadas_en_meses_distintos(client, empresa)
+    # Escrito como lo dejó la planilla, guardado tal cual: el formulario
+    # normaliza al escribir, así que esta forma sólo llega por la migración de
+    # lo que ya estaba cargado, y es justo la que tiene que juntarse.
+    pelambres.reversas.append(ReversaProvision(monto=500_000, mes="05.2026", comprobante="457"))
+    _db.session.commit()
+
+    texto = client.get("/contabilidad/provision-ingresos/por-mes?estado=todas").get_data(as_text=True)
+
+    assert texto.count('<th class="num">may-26</th>') == 1
+    assert "$1.500.000" in texto      # los dos montos de mayo, sumados en la casilla
+    assert "05.2026" not in texto
+
+
+def test_la_vista_por_mes_suma_cada_columna(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    _dos_reversadas_en_meses_distintos(client, empresa)
+
+    texto = client.get("/contabilidad/provision-ingresos/por-mes?estado=todas").get_data(as_text=True)
+    pie = texto[texto.index("<tfoot>"):]
+
+    assert "$1.000.000" in pie        # total de mayo
+    assert "$290.000" in pie          # total de junio
+    assert "$91.325.000" in pie       # provisión total de las dos líneas
+
+
+def test_la_vista_por_mes_no_pierde_las_reversas_sin_mes(client, usuario_admin, empresa, db):
+    """Sin mes no caben en ninguna columna, y dejarlas fuera haría que el total
+    de la fila no cuadre con el del listado."""
+    login(client, "admin@test.cl")
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([FILA_2]), "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    linea = ProvisionIngreso.query.one()
+    _reversar(client, linea, 2_000_000, mes="", comprobante="456")
+
+    texto = client.get("/contabilidad/provision-ingresos/por-mes?estado=todas").get_data(as_text=True)
+
+    assert "Sin mes" in texto
+    assert "$2.000.000" in texto
+
+
+def test_la_nota_se_puede_leer_en_la_casilla(client, usuario_admin, empresa, db):
+    """Es el respaldo cuando lo que llegó de contabilidad viene equivocado."""
+    login(client, "admin@test.cl")
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([FILA_2]), "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    linea = ProvisionIngreso.query.one()
+    _reversar(client, linea, 1_000_000, mes="202605", nota="Mi jefe la puso en mayo, va en junio")
+
+    texto = client.get("/contabilidad/provision-ingresos/por-mes?estado=todas").get_data(as_text=True)
+
+    assert "Mi jefe la puso en mayo, va en junio" in texto
+
+
+def test_la_vista_por_mes_se_llega_desde_el_listado(client, usuario_admin, empresa, db):
+    """Si no hay cómo llegar, la pantalla no existe."""
+    login(client, "admin@test.cl")
+    texto = client.get("/contabilidad/provision-ingresos").get_data(as_text=True)
+
+    assert "/contabilidad/provision-ingresos/por-mes" in texto
+    assert "Ver reversas por mes" in texto
+
+
+def test_la_vista_por_mes_sin_reversas_no_revienta(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([FILA_2]), "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    respuesta = client.get("/contabilidad/provision-ingresos/por-mes?estado=todas")
+
+    assert respuesta.status_code == 200
+    assert "Todavía no hay reversas cargadas" in respuesta.get_data(as_text=True)
+
+
+def test_bodega_no_puede_ver_las_reversas_por_mes(client, usuario_bodega):
+    login(client, "bodega@test.cl")
+    assert client.get("/contabilidad/provision-ingresos/por-mes").status_code == 403
 
 
 # --- Pantalla ------------------------------------------------------------
@@ -344,7 +790,9 @@ def test_eliminar_una_linea_avisa_antes_y_dice_que_se_va_a_perder(client, usuari
     assert "Se eliminar\\u00e1 esta l\\u00ednea de la provisi\\u00f3n" in texto
     assert "no se puede deshacer" in texto
     assert "COLLAHUASI" in texto           # dice de qué línea se trata
-    assert "Tiene reversa registrada" in texto  # y que se pierde la reversa
+    # Y que se pierden las reversas, que son el trabajo que no vuelve con la
+    # planilla: ahí cabe una sola y acá puede haber varias.
+    assert "Tiene 1 reversa(s) por $3.700.000 en total, y se pierden todas" in texto
 
 
 def test_el_aviso_de_borrado_no_rompe_el_atributo_aunque_el_cliente_traiga_comillas(client, usuario_admin, empresa, db):
@@ -382,11 +830,8 @@ def test_el_saldo_sale_de_restar_la_reversa_a_la_provision(client, usuario_admin
     linea = ProvisionIngreso.query.filter_by(empresa_id=empresa.id).one()
     assert linea.saldo == 91_035_000
 
-    client.post(
-        "/contabilidad/provision-ingresos/guardar",
-        data={f"linea-{linea.id}-reversa": "$40.000.000"},
-        follow_redirects=True,
-    )
+    _reversar(client, linea, "$40.000.000")
+
     _db.session.refresh(linea)
     assert linea.saldo == 91_035_000 - 40_000_000  # no se escribe: se calcula
 
@@ -399,11 +844,8 @@ def test_al_reversar_todo_el_saldo_queda_en_cero_y_la_linea_se_cierra(client, us
         content_type="multipart/form-data", follow_redirects=True,
     )
     linea = ProvisionIngreso.query.filter_by(empresa_id=empresa.id).one()
-    client.post(
-        "/contabilidad/provision-ingresos/guardar",
-        data={f"linea-{linea.id}-reversa": "91035000"},
-        follow_redirects=True,
-    )
+    _reversar(client, linea, 91_035_000)
+
     _db.session.refresh(linea)
     assert linea.saldo == 0
 
@@ -412,8 +854,32 @@ def test_al_reversar_todo_el_saldo_queda_en_cero_y_la_linea_se_cierra(client, us
     assert "Cerrado" in texto
 
 
-def test_una_linea_cerrada_no_se_puede_modificar(client, usuario_admin, empresa, db):
-    """Saldo en $0: queda con candado y el servidor ignora cualquier cambio."""
+def test_se_cierra_recien_cuando_las_reversas_suman_la_provision(client, usuario_admin, empresa, db):
+    """Lo que motivó el cambio: una reversa en partes. Con la primera la línea
+    sigue abierta, y recién la última la cierra."""
+    login(client, "admin@test.cl")
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([FILA_2]), "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    linea = ProvisionIngreso.query.filter_by(empresa_id=empresa.id).one()
+
+    _reversar(client, linea, 41_035_000, mes="202605", comprobante="456")
+    _db.session.refresh(linea)
+    assert linea.saldo == 50_000_000, "con la primera parte la línea sigue abierta"
+
+    _reversar(client, linea, 50_000_000, mes="202606", comprobante="204")
+    _db.session.refresh(linea)
+    assert linea.reversado == 91_035_000
+    assert linea.saldo == 0
+    assert len(linea.reversas) == 2
+    assert linea.meses_reversados == ["202605", "202606"]
+
+
+def test_una_linea_cerrada_no_acepta_otra_reversa(client, usuario_admin, empresa, db):
+    """Saldo en $0: queda con candado. Otra reversa la dejaría reversada por
+    sobre lo provisionado, así que se rechaza y se dice qué hacer en su lugar."""
     login(client, "admin@test.cl")
     client.post(
         "/contabilidad/provision-ingresos/importar",
@@ -422,19 +888,38 @@ def test_una_linea_cerrada_no_se_puede_modificar(client, usuario_admin, empresa,
     )
     linea = ProvisionIngreso.query.filter_by(empresa_id=empresa.id).one()
     assert linea.saldo == 0
+    assert linea.reversado == 3_700_000   # la reversa de la planilla, ya cargada
+
+    texto = _reversar(client, linea, 1).get_data(as_text=True)
+
+    _db.session.refresh(linea)
+    assert linea.reversado == 3_700_000   # intacta
+    assert len(linea.reversas) == 1
+    assert linea.saldo == 0
+    assert "ya está reversada por completo" in texto
+    assert "elimínala primero" in texto
+
+
+def test_una_linea_cerrada_no_cambia_de_comprobante_ni_de_ot(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([FILA_1]), "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    linea = ProvisionIngreso.query.filter_by(empresa_id=empresa.id).one()
+    assert linea.saldo == 0
 
     client.post(
         "/contabilidad/provision-ingresos/guardar",
-        data={f"linea-{linea.id}-reversa": "1", f"linea-{linea.id}-cbte_reversa": "PISADO"},
+        data={f"linea-{linea.id}-cbte_prov": "PISADO", f"linea-{linea.id}-ot": "9999"},
         follow_redirects=True,
     )
     _db.session.refresh(linea)
-    assert linea.reversa == 3_700_000    # intacta
-    assert linea.cbte_reversa == "109"
-    assert linea.saldo == 0
+    assert (linea.cbte_prov, linea.ot) == ("67", "6095")
 
 
-def test_un_superadmin_si_puede_corregir_una_linea_cerrada(client, empresa, db):
+def test_un_superadmin_si_puede_reversar_una_linea_cerrada(client, empresa, db):
     """Hace falta para arreglar un monto mal escrito que dejó la línea en $0."""
     from tests.test_permissions import _crear_superadmin
 
@@ -448,17 +933,14 @@ def test_un_superadmin_si_puede_corregir_una_linea_cerrada(client, empresa, db):
     linea = ProvisionIngreso.query.filter_by(empresa_id=empresa.id).one()
     assert linea.saldo == 0
 
-    client.post(
-        "/contabilidad/provision-ingresos/guardar",
-        data={f"linea-{linea.id}-reversa": "1000000"},
-        follow_redirects=True,
-    )
+    _reversar(client, linea, 1_000_000)
+
     _db.session.refresh(linea)
-    assert linea.reversa == 1_000_000
-    assert linea.saldo == 3_700_000 - 1_000_000
+    assert linea.reversado == 4_700_000
+    assert linea.saldo == -1_000_000
 
 
-def test_la_columna_se_llama_monto_reversa_y_el_saldo_ya_no_se_escribe(client, usuario_admin, empresa, db):
+def test_la_columna_de_reversa_es_el_total_y_el_saldo_ya_no_se_escribe(client, usuario_admin, empresa, db):
     login(client, "admin@test.cl")
     client.post(
         "/contabilidad/provision-ingresos/importar",
@@ -468,10 +950,37 @@ def test_la_columna_se_llama_monto_reversa_y_el_saldo_ya_no_se_escribe(client, u
     linea = ProvisionIngreso.query.filter_by(empresa_id=empresa.id).one()
     texto = client.get("/contabilidad/provision-ingresos?estado=todas").get_data(as_text=True)
 
-    assert "<th class=\"num\">Monto Reversa</th>" in texto
-    assert f'name="linea-{linea.id}-saldo"' not in texto   # el saldo dejó de ser un campo
-    assert f'id="saldo-{linea.id}"' in texto               # ahora es una celda calculada
-    assert "data-confirmar-cambio" in texto                # y avisa antes de pisar un dato
+    # La columna ya no es "la" reversa: es el total de las que haya, y el
+    # detalle de cada una va en la de al lado.
+    assert '<th class="num">Total Reversado</th>' in texto
+    assert "<th>Reversas</th>" in texto
+    assert f'name="linea-{linea.id}-reversa"' not in texto  # dejó de ser una casilla de la fila
+    assert f'name="linea-{linea.id}-saldo"' not in texto    # el saldo dejó de ser un campo
+    assert f'id="saldo-{linea.id}"' in texto                # ahora es una celda calculada
+    assert "data-confirmar-cambio" in texto                 # y avisa antes de pisar un dato
+
+
+def test_las_casillas_para_agregar_no_ensanchan_la_tabla(client, usuario_admin, empresa, db):
+    """Pedido explícito: la tabla no tiene que verse tan ancha. Las cuatro
+    casillas para cargar una reversa son lo que más ancho pedía, y en una
+    tabla de 14 columnas eso dejaba el saldo fuera de la pantalla."""
+    login(client, "admin@test.cl")
+    client.post(
+        "/contabilidad/provision-ingresos/importar",
+        data={"archivo": (_planilla([FILA_2]), "provision.xlsx")},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    texto = client.get("/contabilidad/provision-ingresos?estado=todas").get_data(as_text=True)
+
+    # Plegadas: el formulario existe, pero dentro de un <details> cerrado.
+    assert 'class="agregar-reversa"' in texto
+    assert "agregar-reversa\" open" not in texto
+    assert 'name="monto"' in texto
+    # Y la celda del detalle tiene ancho tope en vez de estirarse con la
+    # reversa más larga.
+    assert 'class="celda-reversas"' in texto
+    estilos = (Path(__file__).resolve().parent.parent / "app/static/css/custom.css").read_text()
+    assert "max-width" in estilos.split(".celda-reversas {", 1)[1].split("}", 1)[0]
 
 
 # --- Plantilla descargable ----------------------------------------------
@@ -627,27 +1136,29 @@ def test_reimportar_no_borra_las_lineas_que_ya_no_vienen_en_la_planilla(client, 
 
 
 def test_al_actualizar_desde_la_planilla_el_saldo_se_recalcula(client, usuario_admin, empresa, db):
+    """El saldo no se copia de la planilla: sale de la provisión que trae menos
+    lo reversado. Si la planilla corrige el monto, el saldo se mueve con él."""
     login(client, "admin@test.cl")
-    sin_reversar = list(FILA_2)          # provisión 91.035.000, sin reversa
     client.post(
         "/contabilidad/provision-ingresos/importar",
-        data={"archivo": (_planilla([sin_reversar]), "provision.xlsx")},
+        data={"archivo": (_planilla([FILA_2]), "provision.xlsx")},
         content_type="multipart/form-data", follow_redirects=True,
     )
     linea = ProvisionIngreso.query.filter_by(empresa_id=empresa.id).one()
-    assert linea.saldo == 91_035_000
+    _reversar(client, linea, 40_000_000)
+    assert linea.saldo == 51_035_000
 
-    reversada = list(FILA_2)
-    reversada[4] = 91_035_000            # ahora la planilla la trae reversada
-    reversada[11] = 0
+    corregida = list(FILA_2)
+    corregida[3] = 100_000_000           # la planilla corrige el monto provisionado
+    corregida[11] = 999                  # y trae un saldo que no cuadra: se ignora
     client.post(
         "/contabilidad/provision-ingresos/importar",
-        data={"archivo": (_planilla([reversada]), "provision.xlsx")},
+        data={"archivo": (_planilla([corregida]), "provision.xlsx")},
         content_type="multipart/form-data", follow_redirects=True,
     )
     _db.session.refresh(linea)
-    assert linea.reversa == 91_035_000
-    assert linea.saldo == 0
+    assert linea.monto_provision == 100_000_000
+    assert linea.saldo == 100_000_000 - 40_000_000
 
 
 # --- Cargar una línea a mano, sin pasar por el Excel ---
@@ -704,11 +1215,10 @@ def test_la_linea_a_mano_se_puede_reversar_como_cualquier_otra(client, usuario_a
     client.post("/contabilidad/provision-ingresos/nueva", data=_datos_linea(), follow_redirects=True)
     linea = ProvisionIngreso.query.one()
 
-    client.post("/contabilidad/provision-ingresos/guardar",
-                data={f"linea-{linea.id}-reversa": "450000"}, follow_redirects=True)
+    _reversar(client, linea, 450000)
 
     linea = ProvisionIngreso.query.one()
-    assert linea.reversa == 450000
+    assert linea.reversado == 450000
     assert linea.saldo == 0
 
 
@@ -733,8 +1243,10 @@ def _dos_lineas(empresa, db):
     pendiente = ProvisionIngreso(empresa_id=empresa.id, mes_ano=date(2026, 6, 1),
                                  cbte_prov="1", ot="PEND", monto_provision=500, saldo=500)
     cerrada = ProvisionIngreso(empresa_id=empresa.id, mes_ano=date(2026, 6, 1),
-                               cbte_prov="2", ot="CERR", monto_provision=500,
-                               reversa=500, saldo=0)
+                               cbte_prov="2", ot="CERR", monto_provision=500, saldo=0)
+    # Reversada por completo: su reversa es una fila aparte, que es de lo
+    # que se trata este cambio.
+    cerrada.reversas.append(ReversaProvision(monto=500, mes="202606", comprobante="456"))
     db.session.add_all([pendiente, cerrada])
     db.session.commit()
 
@@ -771,9 +1283,11 @@ def test_el_filtro_de_cerradas_sigue_funcionando(client, usuario_admin, empresa,
 def test_los_desplegables_de_mes_y_anio_no_cargan_todas_las_lineas(client, usuario_admin, empresa, db):
     """Se arman con consultas DISTINCT, no trayendo el histórico a memoria."""
     for n in range(30):
-        db.session.add(ProvisionIngreso(
+        linea = ProvisionIngreso(
             empresa_id=empresa.id, mes_ano=date(2025 if n % 2 else 2026, (n % 12) + 1, 1),
-            cbte_prov=str(n), ot=f"OT{n}", monto_provision=100, saldo=0, reversa=100))
+            cbte_prov=str(n), ot=f"OT{n}", monto_provision=100, saldo=0)
+        linea.reversas.append(ReversaProvision(monto=100, mes="202601"))
+        db.session.add(linea)
     db.session.commit()
 
     login(client, "admin@test.cl")

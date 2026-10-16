@@ -9,8 +9,9 @@ class ProvisionIngreso(db.Model):
     lo que se editó a mano. La línea se reconoce por mes, comprobante de
     provisión y OT, que en la planilla no se repiten.
 
-    De todas las columnas, solo cuatro se editan desde la aplicación: reversa,
-    mes de reversa, comprobante de reversa y saldo. El resto viene del Excel.
+    Lo que se edita desde la aplicación son las reversas, que viven aparte
+    porque son varias (ver ReversaProvision), y el comprobante de provisión y
+    la OT cuando vienen mal escritos. El resto viene del Excel.
     """
 
     __tablename__ = "provisiones_ingreso"
@@ -32,18 +33,88 @@ class ProvisionIngreso(db.Model):
     obs = db.Column(db.String(255), nullable=True)
 
     # --- Se edita en pantalla ---
-    reversa = db.Column(db.Integer, nullable=True)
-    # Texto y no fecha: una provisión puede reversarse en más de un mes
-    # ("may-26 y jun-26"), igual que en la planilla de origen.
-    mes_reversa = db.Column(db.String(60), nullable=True)
-    cbte_reversa = db.Column(db.String(60), nullable=True)
     saldo = db.Column(db.Integer, nullable=False, default=0)
 
     creado_en = db.Column(db.DateTime, server_default=db.func.now())
     actualizado_en = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now())
 
+    reversas = db.relationship(
+        "ReversaProvision",
+        back_populates="provision",
+        cascade="all, delete-orphan",
+        order_by="ReversaProvision.mes",
+    )
+
+    @property
+    def reversado(self) -> int:
+        """Todo lo reversado hasta ahora. Es la suma, no la última."""
+        return sum(r.monto or 0 for r in self.reversas)
+
+    @property
+    def saldo_actual(self) -> int:
+        """Lo que queda por reversar: la provisión menos todo lo reversado."""
+        return (self.monto_provision or 0) - self.reversado
+
+    @property
+    def reversado_de_mas(self) -> int:
+        """Cuánto se pasó, si se reversó más de lo provisionado. 0 si no.
+
+        En la planilla de la que salió esto hay líneas así, y son errores de la
+        planilla, no un caso del negocio. El sistema no lo impide —puede ser un
+        monto mal tecleado que se corrige con la reversa siguiente— pero lo
+        muestra en rojo en vez de dejarlo pasar: que una planilla no avise es
+        justamente lo que hace que el error llegue lejos.
+        """
+        return max(0, self.reversado - (self.monto_provision or 0))
+
+    @property
+    def meses_reversados(self) -> list:
+        """Los meses en que se reversó, una sola vez cada uno y en orden."""
+        return sorted({r.mes for r in self.reversas if r.mes})
+
     def __repr__(self):
         return f"<ProvisionIngreso {self.cbte_prov}/{self.ot}>"
+
+
+class ReversaProvision(db.Model):
+    """Cada reversa de una provisión: cuánto, en qué mes y con qué comprobante.
+
+    Antes era una sola por línea, con el mes guardado como texto justamente
+    porque no alcanzaba: cuando la reversa se partía en varios meses había que
+    escribir "may-26 y jun-26" en una casilla, y entonces el monto de cada mes
+    ya no se sabía y el saldo quedaba a ojo.
+
+    Son varias, y el saldo es la provisión menos la suma. Eso es lo que permite
+    verlas como las ve el área de contabilidad: una columna por mes, el monto
+    en la celda que corresponde y el total a la derecha.
+    """
+
+    __tablename__ = "reversas_provision"
+
+    id = db.Column(db.Integer, primary_key=True)
+    provision_id = db.Column(
+        db.Integer, db.ForeignKey("provisiones_ingreso.id"), nullable=False, index=True
+    )
+
+    monto = db.Column(db.Integer, nullable=False, default=0)
+    # Texto y no fecha, igual que antes: lo que ya está cargado viene escrito
+    # de varias formas ("09.2026", "may-26") y convertirlo perdería lo que no
+    # calce. La pantalla lo normaliza al escribirlo nuevo.
+    mes = db.Column(db.String(60), nullable=True)
+    comprobante = db.Column(db.String(60), nullable=True)
+    # Por qué este monto quedó así. Es el respaldo cuando lo que llegó de
+    # contabilidad viene equivocado: en una planilla eso se discute de
+    # memoria, acá queda escrito al lado de la cifra que se discute.
+    nota = db.Column(db.Text, nullable=True)
+
+    creado_en = db.Column(db.DateTime, server_default=db.func.now())
+    creado_por_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"), nullable=True)
+
+    provision = db.relationship("ProvisionIngreso", back_populates="reversas")
+    creado_por = db.relationship("Usuario")
+
+    def __repr__(self):
+        return f"<ReversaProvision {self.mes} {self.monto}>"
 
 
 class PeriodoDifTc(db.Model):
