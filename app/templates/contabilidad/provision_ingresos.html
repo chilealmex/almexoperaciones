@@ -10,6 +10,9 @@
     <p class="page-sub">Cada importación agrega las líneas nuevas y actualiza las que ya estaban con lo que trae la planilla.</p>
   </div>
   <div class="d-flex gap-2 flex-wrap">
+    {# La misma información puesta como la planilla de contabilidad: una
+       columna por mes de reversa. Se mira de un vistazo lo que se partió. #}
+    <a href="{{ url_for('contabilidad.provision_reversas_por_mes', **filtros) }}" class="btn btn-outline-primary btn-sm">Ver reversas por mes</a>
     <a href="{{ url_for('contabilidad.plantilla_provision_ingresos') }}" class="btn btn-outline-secondary btn-sm">Descargar plantilla</a>
     <a href="{{ url_for('contabilidad.exportar_provision_ingresos', **filtros) }}" class="btn btn-outline-secondary btn-sm">Descargar Excel</a>
   </div>
@@ -20,7 +23,7 @@
     <div class="kpi"><div class="kpi-label">Monto provisión</div><div class="kpi-value">{{ totales.provision|clp }}</div></div>
   </div>
   <div class="col-6 col-lg-4">
-    <div class="kpi"><div class="kpi-label">Reversa</div><div class="kpi-value">{{ totales.reversa|clp }}</div></div>
+    <div class="kpi"><div class="kpi-label">Total reversado</div><div class="kpi-value">{{ totales.reversa|clp }}</div></div>
   </div>
   <div class="col-6 col-lg-4">
     <div class="kpi">
@@ -55,13 +58,15 @@
 {% endif %}
 
 <form method="get" class="row g-2 align-items-end mb-3" id="filtros-provision">
-  <div class="col-12 col-md-4">
+  <div class="col-12 col-md-3">
     <label class="form-label small mb-1">Buscar</label>
     <input type="text" name="texto" value="{{ filtros.get('texto', '') }}" class="form-control form-control-sm"
            placeholder="Cliente, OT, comprobante o RUT" data-autofiltro>
   </div>
+  {# Dos meses distintos, y hay que poder filtrar por cada uno: la provisión se
+     hace un mes y se reversa otro, a veces repartida en varios. #}
   <div class="col-6 col-md-2">
-    <label class="form-label small mb-1">Mes</label>
+    <label class="form-label small mb-1">Mes provisión</label>
     <select name="mes" class="form-select form-select-sm" data-autofiltro>
       <option value="">Todos</option>
       {% for clave, etiqueta in meses %}
@@ -70,11 +75,20 @@
     </select>
   </div>
   <div class="col-6 col-md-2">
-    <label class="form-label small mb-1">Año</label>
+    <label class="form-label small mb-1">Año provisión</label>
     <select name="anio" class="form-select form-select-sm" data-autofiltro>
       <option value="">Todos</option>
       {% for a in anios %}
       <option value="{{ a }}" {{ 'selected' if filtros.get('anio') == a|string }}>{{ a }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-6 col-md-2">
+    <label class="form-label small mb-1">Mes reversa</label>
+    <select name="mes_reversa" class="form-select form-select-sm" data-autofiltro>
+      <option value="">Todos</option>
+      {% for clave, etiqueta in meses_reversa %}
+      <option value="{{ clave }}" {{ 'selected' if filtros.get('mes_reversa') == clave }}>{{ etiqueta }}</option>
       {% endfor %}
     </select>
   </div>
@@ -170,7 +184,8 @@
             <tr>
               <th>Mes</th><th>Año</th><th>Cbte Prov</th><th>OT</th>
               <th class="num">Monto Provisión</th>
-              <th class="num">Monto Reversa</th><th>Mes Reversa</th><th>Cbte Reversa</th>
+              <th class="num">Total Reversado</th>
+              <th>Reversas</th>
               <th>Cliente</th><th>Centro de Costos</th><th>Rut</th><th>Obs</th>
               <th class="num">Saldo</th>
               <th>Estado</th>
@@ -204,30 +219,82 @@
                 {% else %}{{ l.ot }}{% endif %}
               </td>
               <td class="num">{{ l.monto_provision|clp }}</td>
-              {# Las cuatro columnas editables. El resto viene del Excel y es solo lectura. #}
+              {# La reversa ya no es una casilla: una provisión se reversa a veces
+                 en partes, en meses distintos y con un comprobante cada una. Acá
+                 va el total y debajo el detalle; el comprobante de cada una va
+                 como burbuja al lado de su monto. #}
               <td class="num">
-                <input type="text" inputmode="numeric" name="linea-{{ l.id }}-reversa"
-                       class="form-control form-control-sm text-end campo-excel campo-clp campo-monto-reversa"
-                       style="min-width:110px;" data-linea="{{ l.id }}"
-                       data-provision="{{ l.monto_provision or 0 }}"
-                       data-confirmar-cambio="el monto de reversa de {{ (l.cliente or 'esta línea')|replace('"', '') }} (OT {{ l.ot }})"
-                       value="{{ l.reversa|clp if l.reversa is not none else '' }}" {{ 'disabled' if not editable }}>
+                <strong class="{{ 'text-danger' if l.reversado_de_mas }}">{{ l.reversado|clp }}</strong>
+                {% if l.reversado_de_mas %}
+                <div class="small text-danger">{{ l.reversado_de_mas|clp }} de más</div>
+                {% endif %}
               </td>
-              <td>
-                <input type="text" name="linea-{{ l.id }}-mes_reversa" class="form-control form-control-sm campo-excel"
-                       data-confirmar-cambio="el mes de reversa (OT {{ l.ot }})"
-                       style="min-width:120px;" value="{{ l.mes_reversa or '' }}"
-                       {{ 'disabled' if not editable }}>
+              {# Esta celda tiene ancho tope: con las casillas de carga a la
+                 vista la tabla se iba a lo ancho y había que arrastrarla para
+                 llegar al saldo. El formulario vive plegado abajo. #}
+              <td class="celda-reversas">
+                {% for r in l.reversas %}
+                <div class="small d-flex align-items-center gap-1">
+                  <span class="text-muted" style="min-width:46px;">{{ mes_reversa_legible(r.mes) or '—' }}</span>
+                  <span>{{ r.monto|clp }}</span>
+                  {% if r.comprobante %}
+                  <span class="badge rounded-pill bg-light text-dark border fw-normal" title="Comprobante contable de esta reversa">{{ r.comprobante }}</span>
+                  {% endif %}
+                  {% if r.nota %}
+                  {# El respaldo de por qué esta cifra quedó así. En una planilla
+                     eso se discute de memoria; acá queda al lado del número. #}
+                  <span class="badge rounded-pill bg-warning-subtle text-dark border fw-normal" title="{{ r.nota }}">📝</span>
+                  {% endif %}
+                  {% if es_admin %}
+                  {# Dentro del formulario grande no se puede anidar otro, así
+                     que el botón apunta a su ruta con formaction. #}
+                  <button type="submit" class="btn btn-sm btn-link text-danger p-0 ms-auto"
+                          form="reversa-{{ l.id }}"
+                          formaction="{{ url_for('contabilidad.eliminar_reversa_provision', reversa_id=r.id, **filtros) }}"
+                          formnovalidate
+                          onclick="return confirm('¿Eliminar la reversa de {{ r.monto|clp }} del mes {{ mes_reversa_legible(r.mes) or 'sin mes' }}?\n\nEl saldo de la provisión vuelve a subir por ese monto.')"
+                          title="Eliminar esta reversa">✕</button>
+                  {% endif %}
+                </div>
+                {% else %}
+                <span class="text-muted small">Sin reversas</span>
+                {% endfor %}
+                {% if editable %}
+                <details class="agregar-reversa">
+                  <summary class="small text-primary">+ Agregar reversa</summary>
+                  <div class="row g-1 mt-1">
+                    <div class="col-6">
+                      <input type="text" name="mes" class="form-control form-control-sm"
+                             placeholder="may-26" aria-label="Mes de la reversa de la OT {{ l.ot }}"
+                             title="El mes en que se reversó: may-26, 05.2026 o 202605" form="reversa-{{ l.id }}">
+                    </div>
+                    <div class="col-6">
+                      <input type="text" inputmode="numeric" name="monto" class="form-control form-control-sm text-end"
+                             placeholder="Monto" aria-label="Monto de la reversa de la OT {{ l.ot }}"
+                             form="reversa-{{ l.id }}">
+                    </div>
+                    <div class="col-6">
+                      <input type="text" name="comprobante" class="form-control form-control-sm"
+                             placeholder="Cbte" aria-label="Comprobante de la reversa de la OT {{ l.ot }}"
+                             form="reversa-{{ l.id }}">
+                    </div>
+                    <div class="col-6">
+                      <input type="text" name="nota" class="form-control form-control-sm"
+                             placeholder="Nota" aria-label="Nota de la reversa de la OT {{ l.ot }}"
+                             title="Para dejar por escrito por qué este monto quedó así" form="reversa-{{ l.id }}">
+                    </div>
+                    <div class="col-12">
+                      <button type="submit" class="btn btn-sm btn-outline-primary w-100 py-0" form="reversa-{{ l.id }}"
+                              title="Agregar esta reversa">Agregar</button>
+                    </div>
+                  </div>
+                </details>
+                {% endif %}
               </td>
-              <td>
-                <input type="text" name="linea-{{ l.id }}-cbte_reversa" class="form-control form-control-sm campo-excel"
-                       data-confirmar-cambio="el comprobante de reversa (OT {{ l.ot }})"
-                       style="min-width:100px;" value="{{ l.cbte_reversa or '' }}" {{ 'disabled' if not editable }}>
-              </td>
-              <td>{{ l.cliente or '' }}</td>
+              <td class="celda-recortada" title="{{ l.cliente or '' }}">{{ l.cliente or '' }}</td>
               <td>{{ l.centro_costos or '' }}</td>
               <td>{{ l.rut or '' }}</td>
-              <td>{{ l.obs or '' }}</td>
+              <td class="celda-recortada" title="{{ l.obs or '' }}">{{ l.obs or '' }}</td>
               {# El saldo ya no se escribe: sale de restar la reversa a la provisión. #}
               <td class="num saldo-linea {{ 'saldo-cerrado' if cerrada }}" id="saldo-{{ l.id }}">
                 {{ (l.saldo or 0)|clp }}
@@ -248,8 +315,8 @@
 
 {{ nombre_mes(l.mes_ano) }} {{ l.mes_ano.year if l.mes_ano else '' }} · Cbte {{ l.cbte_prov }} · OT {{ l.ot }}
 {{ l.cliente or 'Sin cliente' }}
-Monto provisión: {{ l.monto_provision|clp }} · Saldo: {{ (l.saldo or 0)|clp }}{% if l.reversa is not none %}
-Tiene reversa registrada por {{ l.reversa|clp }}, y se perderá.{% endif %}
+Monto provisión: {{ l.monto_provision|clp }} · Saldo: {{ (l.saldo or 0)|clp }}{% if l.reversas %}
+Tiene {{ l.reversas|length }} reversa(s) por {{ l.reversado|clp }} en total, y se pierden todas.{% endif %}
 
 Esto no se puede deshacer. Si vuelves a importar la planilla, la línea se cargará de nuevo (sin lo que hayas editado a mano).
 
@@ -261,7 +328,7 @@ Esto no se puede deshacer. Si vuelves a importar la planilla, la línea se carga
               {% endif %}
             </tr>
             {% else %}
-            <tr><td colspan="15" class="text-center text-muted">
+            <tr><td colspan="14" class="text-center text-muted">
               Todavía no hay líneas cargadas. Importa la planilla para partir.
             </td></tr>
             {% endfor %}
@@ -272,7 +339,7 @@ Esto no se puede deshacer. Si vuelves a importar la planilla, la línea se carga
               <td colspan="4">TOTAL</td>
               <td class="num">{{ totales.provision|clp }}</td>
               <td class="num">{{ totales.reversa|clp }}</td>
-              <td colspan="6"></td>
+              <td colspan="5"></td>
               <td class="num">{{ totales.saldo|clp }}</td>
               <td></td>
               {% if puede_editar %}<td></td>{% endif %}
@@ -288,5 +355,16 @@ Esto no se puede deshacer. Si vuelves a importar la planilla, la línea se carga
     </div>
   </div>
 </form>
+
+{# Un formulario por línea, fuera del grande: HTML no deja anidar formularios,
+   y las casillas de arriba se enganchan a éste por su atributo form=. Así
+   agregar una reversa manda sólo esa reversa, y no todas las ediciones de la
+   página de paso. #}
+{% for l in lineas %}
+<form id="reversa-{{ l.id }}" method="post"
+      action="{{ url_for('contabilidad.agregar_reversa_provision', provision_id=l.id, **filtros) }}">
+  {{ accion_form.hidden_tag() }}
+</form>
+{% endfor %}
 
 {% endblock %}
