@@ -1,3 +1,4 @@
+import os
 from datetime import date
 
 from flask import render_template, send_from_directory, current_app, abort
@@ -260,3 +261,25 @@ def descargar_documento(documento_id):
     return send_from_directory(
         carpeta_base, documento.ruta_archivo, as_attachment=True, download_name=documento.nombre_archivo
     )
+
+
+@bp.route("/sw.js")
+def service_worker():
+    """El service worker, servido desde la raíz.
+
+    Tiene que salir de acá y no de /static: un service worker sólo manda sobre
+    las direcciones que cuelgan de la suya, así que uno servido en
+    /static/js/sw.js no vería el resto del sitio y el navegador no ofrecería
+    instalar la aplicación.
+
+    No guarda nada —ver el archivo—, así que no hay riesgo de que sirva
+    pantallas viejas.
+    """
+    respuesta = send_from_directory(
+        os.path.join(current_app.static_folder, "js"), "sw.js", mimetype="application/javascript"
+    )
+    # Que el propio archivo no quede cacheado: si se corrige algo acá, tiene que
+    # llegar al celular en la siguiente visita y no cuando al navegador le
+    # parezca.
+    respuesta.headers["Cache-Control"] = "no-store"
+    return respuesta
