@@ -348,7 +348,8 @@
       const body = JSON.stringify({
         recount: Object.fromEntries([...state.recount].map(([k, v]) => [k, {qty: v.qty, fecha: +v.fecha}])),
         pmp: Object.fromEntries(state.pmpEdit),
-        ajSi: [...state.ajSi], ajNo: [...state.ajNo], hechos: Object.fromEntries(state.hechos)
+        ajSi: [...state.ajSi], ajNo: [...state.ajNo], hechos: Object.fromEntries(state.hechos),
+        movCuando: Object.fromEntries(state.movCuando)
       });
       fetch(urlDe('estado'), {method:'POST', body, headers:{'Content-Type':'application/json', 'X-CSRFToken': CFG.csrf}, credentials:'same-origin'}).then(r => { if (r.ok) marcarActualizado(); }).catch(() => {});
     }, 800);
@@ -387,7 +388,13 @@
 
   // ---------- Estado ----------
   const state = {stock:[], mov:[], view:'reg', filter:{reg:'all', zero:'all', check:'all'}, mov2:null, ajustes:null, articulos:null, hechos:new Map(), ajSi:new Set(), ajNo:new Set(), docGroupsMain:[], checkRows:[], docGroups:[],
-    sort:{reg:{k:'code', d:1}, zero:{k:'fecha', d:1}, check:{k:'code', d:1}}, open:new Set(), pmpEdit:new Map(), recount:leerRecuentos(), rows:[], zero:[]};
+    sort:{reg:{k:'code', d:1}, zero:{k:'fecha', d:1}, check:{k:'code', d:1}}, open:new Set(), pmpEdit:new Map(), recount:leerRecuentos(), rows:[], zero:[],
+    // Documentos puestos a mano antes o después del conteo (clave del
+    // documento -> 'antes' | 'despues'). La fecha del documento es la del
+    // papel, no la hora en que pasó: un envío a producción fechado el día del
+    // conteo pudo salir de bodega antes o después de que se contara, y sólo
+    // quien contó lo sabe. Lo elegido manda sobre la regla de la fecha.
+    movCuando:new Map()};
 
   function fillBodegas(){
     const sel = $('optBodega'), prev = sel.value, count = new Map();
@@ -599,7 +606,16 @@
       }
       const counted = !!s && s.stock != null && s.fecha != null;
       const ck = counted ? dayKey(s.fecha) : null;
-      const after = m => { const dk = dayKey(m.fecha); return dk > ck || (dk === ck && sameAfter); };
+      // Lo puesto a mano manda sobre la fecha: la del documento es la del
+      // papel, y quien contó es el único que sabe si ese movimiento ya estaba
+      // hecho cuando pasó contando. Sin elección a mano, vale la regla de
+      // siempre (y la opción de arriba decide los del mismo día).
+      const after = m => {
+        const elegido = state.movCuando.get(docId(m));
+        if (elegido) return elegido === 'despues';
+        const dk = dayKey(m.fecha);
+        return dk > ck || (dk === ck && sameAfter);
+      };
       let ins = 0, outs = 0, sameDay = 0, sameNet = 0, idx = null, aj = 0, ajVal = 0;
       const ajDocs = docs.filter(m => m._aj);
       for (const m of ajDocs){ aj += m.kind === 'in' ? m.qty : -m.qty; ajVal += (m.kind === 'in' ? 1 : -1) * (m.valor || 0); }
@@ -2062,16 +2078,36 @@
     const span = (state.view === 'check' ? CHECK_COLS : REG_COLS).length;
     if (!r.docs.length) return `<tr class="detail"><td colspan="${span}"><span class="note">Este código no tiene documentos en el informe de Defontana, así que no se conoce su saldo en el sistema. Revisa su stock directamente en Defontana.</span></td></tr>`;
     const ck = r.counted ? dayKey(r.s.fecha) : null, sameAfter = $('optSame').value === 'after';
-    const when = m => { if (m._aj) return 'Ajuste'; if (ck == null) return ''; const dk = dayKey(m.fecha); return dk < ck ? 'Antes' : dk > ck ? 'Después' : sameAfter ? 'Mismo día (después)' : 'Mismo día (antes)'; };
+    // Lo que dice la fecha por sí sola. Si el documento está puesto a mano,
+    // esto igual se muestra entre paréntesis: así se ve qué se cambió y
+    // respecto de qué.
+    const porFecha = m => { const dk = dayKey(m.fecha); return dk < ck ? 'Antes' : dk > ck ? 'Después' : sameAfter ? 'Mismo día (después)' : 'Mismo día (antes)'; };
+    const when = m => { if (m._aj) return 'Ajuste'; if (ck == null) return ''; return porFecha(m); };
     const rows = r.docs.map(m => {
       const w = when(m), zero = valorReal(m) != null && Math.abs(valorReal(m)) < EPS && m.qty > EPS;
-      return `<tr class="${zero ? 'zero' : w.startsWith('Antes') || w === 'Mismo día (antes)' ? 'pre' : 'after'}">
+      // La fecha del documento es la del papel. Un envío a producción fechado
+      // el día del conteo pudo salir de bodega antes o después de que se
+      // contara, y de eso depende si el movimiento ya está en lo contado o
+      // hay que sumarlo aparte: es la diferencia entre ajustar bien y ajustar
+      // por el doble. Quien contó es el único que lo sabe, así que puede
+      // decirlo acá. Se aplica al documento completo, no sólo a este producto.
+      const elegido = ck == null || m._aj ? null : (state.movCuando.get(docId(m)) || '');
+      const pre = elegido ? elegido === 'antes' : w.startsWith('Antes') || w === 'Mismo día (antes)';
+      const celda = elegido === null
+        ? w
+        : `<select class="cuando${elegido ? ' puesto' : ''}" data-doc="${esc(docId(m))}"
+                   title="La fecha del documento no dice la hora. Si sabes que este movimiento pasó al otro lado del conteo, dilo acá: cambia lo que hay que ajustar.">
+             <option value=""${elegido ? '' : ' selected'}>${w}</option>
+             <option value="antes"${elegido === 'antes' ? ' selected' : ''}>Antes del conteo</option>
+             <option value="despues"${elegido === 'despues' ? ' selected' : ''}>Después del conteo</option>
+           </select>${elegido ? `<div class="small">a mano · por fecha: ${porFecha(m).toLowerCase()}</div>` : ''}`;
+      return `<tr class="${zero ? 'zero' : pre ? 'pre' : 'after'}">
         <td>${fmtDate(m.fecha)}</td><td>${esc(m.tipo)} <span class="small">#${esc(m.folio)}${(m.kind === 'in' ? m.dest : m.orig) && !/CENTRAL/i.test(m.kind === 'in' ? m.dest : m.orig) ? ' · ' + esc(m.kind === 'in' ? m.dest : m.orig) : ''}${norm(m.art) !== norm(r.code) ? ' · ' + esc(m.art) : ''}</span></td><td>${esc(m.ref)}</td>
         <td class="num ${m.kind === 'in' ? 'plus' : 'minus'}">${m.kind === 'in' ? '+' : '−'}${fmt(m.qty)}</td>
         <td class="num">${money(valorReal(m))}${zero ? ' <span class="flag">$0</span>' : ''}</td>
         <td class="num">${fmt(m.saldo)}</td>
         <td class="num">${m.saldo > EPS && m.valorInv != null ? money(m.valorInv / m.saldo) : '—'}</td>
-        <td>${w}</td></tr>`;
+        <td>${celda}</td></tr>`;
     }).join('');
     const head = r.counted ? `<div class="dethead">
       <span>Contado el <b>${fmtDate(r.s.fecha, true)}</b>${r.s.por ? ' por ' + esc(r.s.por) : ''}: <b>${fmt(r.s.stock)}</b></span>
@@ -2830,9 +2866,18 @@
       }
       guardarEstado(); render(); return;
     }
-    if (e.target.closest('input')) return; const tr = e.target.closest('tr.rx-row'); if (tr) toggle(tr); });
+    if (e.target.closest('input, select')) return; const tr = e.target.closest('tr.rx-row'); if (tr) toggle(tr); });
   $('tbody').addEventListener('keydown', e => { if (e.target.closest('input')) return; const tr = e.target.closest('tr.rx-row'); if (tr && (e.key === 'Enter' || e.key === ' ')){ e.preventDefault(); toggle(tr); } });
   $('tbody').addEventListener('change', e => {
+    // Un documento puesto a mano antes o después del conteo. Vale para el
+    // documento completo —pasó una sola vez, no una vez por producto—, así
+    // que si toca varios artículos, todos se recalculan.
+    const cuando = e.target.closest('select.cuando');
+    if (cuando){
+      const k = cuando.dataset.doc;
+      if (cuando.value) state.movCuando.set(k, cuando.value); else state.movCuando.delete(k);
+      guardarEstado(); render(); return;
+    }
     const rc = e.target.closest('input.recount');
     if (rc){
       const v = num(rc.value);
@@ -2884,6 +2929,7 @@
         if (e.ajNo) state.ajNo = new Set(e.ajNo);
         // Cada marca guarda la diferencia que tenía el producto al marcarlo (formato anterior: solo la lista de claves)
         if (e.hechos) state.hechos = Array.isArray(e.hechos) ? new Map(e.hechos.map(k => [k, null])) : new Map(Object.entries(e.hechos));
+        if (e.movCuando) state.movCuando = new Map(Object.entries(e.movCuando));
         if (e.ajSel && !e.ajSi) state.ajSi = new Set(e.ajSel);   // formato anterior
       } catch(_){}
     }
@@ -2902,6 +2948,6 @@
   // puerta, la matemática que decide los ajustes de inventario no se puede
   // comprobar más que a ojo.
   if (typeof module !== 'undefined' && module.exports){
-    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, parseArticulos, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, tipoAjCosto, avisoDeFechas, detectarAjustes, conAjustes, parseCostos, costoDeSuCompra, pmpEditable, costoPropuestoSinValor, renderStepsPanel, REG_COLS, regRow, state};
+    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, parseArticulos, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, tipoAjCosto, avisoDeFechas, detectarAjustes, conAjustes, parseCostos, costoDeSuCompra, pmpEditable, costoPropuestoSinValor, renderStepsPanel, REG_COLS, regRow, detail, state};
   }
 })();

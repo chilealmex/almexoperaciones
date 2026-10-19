@@ -103,6 +103,13 @@
 .regx .det tr.pre td{color:var(--muted)}
 .regx .det tr.after td{font-weight:600}
 .regx .det tr.zero td{background:var(--warn-soft)}
+/* Poner un movimiento antes o después del conteo. Se ve como texto hasta que
+   se toca: es un dato que casi siempre está bien y que, cuando está mal, hay
+   que poder corregir sin buscarlo. */
+.regx .det select.cuando{font:inherit;color:inherit;background:transparent;border:1px solid transparent;
+  border-radius:6px;padding:2px 4px;max-width:190px}
+.regx .det select.cuando:hover,.regx .det select.cuando:focus{border-color:var(--line);background:var(--surface)}
+.regx .det select.cuando.puesto{border-color:var(--accent);background:var(--accent-soft);font-weight:600}
 .regx .checkpanel{display:flex;flex-direction:column;gap:10px}
 .regx .ajbox{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
 .regx .ajbox h3{margin:0;font-size:13px;font-weight:700}
