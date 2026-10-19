@@ -147,6 +147,10 @@
           <option value="before">Ocurrieron antes de contar (ya están en el conteo)</option>
           <option value="after">Ocurrieron después de contar</option>
         </select>
+        {# Esto decide todos los del mismo día de una vez. Cuando uno no sigue
+           la regla, se cambia solo: abriendo el producto, en la columna
+           "Respecto al conteo" de cada movimiento. #}
+        <div class="small">Para uno en particular, cámbialo al abrir el producto.</div>
       </div>
       <label class="chk"><input type="checkbox" id="optAprob" checked> Solo documentos aprobados</label>
     </div>

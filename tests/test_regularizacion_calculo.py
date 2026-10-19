@@ -29,6 +29,7 @@ PRUEBAS = {
     "los costos se llenan en el Excel y se suben de vuelta": JS / "test_costos_excel.js",
     "los productos con unidades y sin valor van en su propio paso": JS / "test_sinvalor.js",
     "se ve en qué unidad está cada producto": JS / "test_unidad.js",
+    "un movimiento se puede poner a mano antes o después del conteo": JS / "test_cuando.js",
 }
 
 

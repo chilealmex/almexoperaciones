@@ -178,6 +178,45 @@ def test_guardar_el_estado_en_json(client, db, empresa, usuario_admin):
     assert client.post("/inventario/regularizacion/guardado/estado", data="no es json", content_type="application/json").status_code == 400
 
 
+def test_lo_puesto_a_mano_antes_o_despues_lo_ven_todos(client, db, empresa, usuario_admin, usuario_bodega):
+    """La fecha de un documento es la del papel: quien contó es el único que
+    sabe si ese movimiento ya estaba hecho. Esa decisión cambia cuánto hay que
+    ajustar, así que no puede quedar guardada en el navegador de uno solo."""
+    login(client, "admin@test.cl")
+    estado = {"recount": {}, "pmp": {}, "movCuando": {"ENVIO A PRODUCCION|74|20260818": "despues"}}
+    client.post("/inventario/regularizacion/guardado/estado",
+                data=json.dumps(estado), content_type="application/json")
+    client.get("/logout", follow_redirects=True)
+
+    login(client, "bodega@test.cl")
+    guardado = client.get("/inventario/regularizacion/guardado/estado").get_json()
+    assert guardado["movCuando"] == {"ENVIO A PRODUCCION|74|20260818": "despues"}
+
+
+def test_lo_puesto_a_mano_viaja_en_el_estado_que_se_guarda(client, db, empresa, usuario_admin):
+    """El cálculo corre en el navegador, así que esto se mira en su código: que
+    lo elegido se mande al guardar y se lea al volver. Sin las dos mitades, la
+    decisión se pierde al recargar y el ajuste cambia solo."""
+    from pathlib import Path
+
+    codigo = (Path(__file__).resolve().parent.parent / "app/static/js/regularizacion.js").read_text()
+    guardar = codigo.split("function guardarEstado()", 1)[1].split("\n  }", 1)[0]
+    cargar = codigo.split("async function cargarGuardado()", 1)[1]
+
+    assert "movCuando: Object.fromEntries(state.movCuando)" in guardar
+    assert "if (e.movCuando) state.movCuando = new Map(Object.entries(e.movCuando));" in cargar
+
+
+def test_la_pantalla_dice_que_cada_movimiento_se_puede_cambiar(client, db, empresa, usuario_admin):
+    """La opción de arriba decide todos los del mismo día de una vez; si no se
+    dice que hay otra por movimiento, nadie la va a buscar adentro del producto."""
+    login(client, "admin@test.cl")
+
+    texto = client.get("/inventario/regularizacion").get_data(as_text=True)
+
+    assert "Para uno en particular, cámbialo al abrir el producto." in texto
+
+
 def test_sin_permiso_de_edicion_no_se_guarda_pero_se_lee(client, db, empresa, usuario_bodega):
     db.session.add(RegularizacionArchivo(empresa_id=empresa.id, clave="informe", nombre="x.xlsx", contenido=b"guardado"))
     db.session.commit()
