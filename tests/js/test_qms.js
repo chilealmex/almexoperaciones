@@ -6,7 +6,7 @@
    o qué existe en uno y no en el otro. */
 const {porId} = require('./entorno.js');
 const R = require('../../app/static/js/regularizacion.js');
-const {parseQms, computeQms, cruceQms, qmsRow, compute, state} = R;
+const {parseQms, computeQms, cruceQms, qmsRow, regExport, compute, state} = R;
 
 let fallas = 0, hechas = 0;
 function comprobar(titulo, esperado, obtenido) {
@@ -181,6 +181,51 @@ console.log('\nUn lado vacío se dice, no se inventa un cero');
   const html = qmsRow(de(filas, 'SOLO-QMS'));
   comprobar('dice que no está', true, html.includes('no está'));
   comprobar('y no muestra un stock de Defontana', false, html.includes('>0<'));
+}
+
+console.log('\nEl Excel de Productos también trae el cruce con QMS');
+{
+  // Es donde ella mira el detalle producto por producto. Las dos unidades van
+  // de donde están actualizadas: la de QMS de su planilla y la de Defontana
+  // del Informe de Inventario, no la del documento más nuevo —que puede traer
+  // la unidad que el artículo tenía antes de que se la cambiaran—.
+  const articulos = R.parseArticulos([
+    ['Código Artículo', 'Descripción', 'Bodega', 'Saldo', 'Unidad', 'Valor unidad', 'Total'],
+    ['A-1', 'Producto', 'BODEGA CENTRAL', 9, 'KG', 100, 900]]);
+  const filas = cruce({
+    qms: [{code: 'A-1', stock: 12, um: 'RL', unit: 150}],
+    docs: [{art: 'A-1', qty: 9, valor: 900, valorInv: 900, saldo: 9, um: 'UN'}],
+    articulos,
+  });
+  const fila = regExport(state.rows.find(r => r.code === 'A-1'));
+
+  comprobar('y la pestaña del cruce usa la misma unidad actualizada', 'KG', de(filas, 'A-1').d.um);
+  comprobar('el código de QMS', 'A-1', fila['Código QMS']);
+  comprobar('la unidad de QMS, de su planilla', 'RL', fila['Unidad QMS']);
+  comprobar('la de Defontana, del Informe de Inventario y no la del documento',
+            'KG', fila['Unidad Defontana (Informe de Inventario)']);
+  comprobar('el stock de QMS', 12, fila['Stock QMS']);
+  comprobar('su valor unitario', 150, fila['Valor unitario QMS']);
+  comprobar('y cómo cruza', 'Unidad distinta', fila['Cruce con QMS']);
+  comprobar('sin perder lo que ya traía', 'A-1', fila['Código']);
+}
+
+console.log('\nY si un producto no está en QMS, lo dice');
+{
+  const filas = cruce({
+    qms: [{code: 'OTRO', stock: 1, um: 'UN', unit: 1}],
+    docs: [{art: 'A-1', qty: 9, valor: 900, valorInv: 900, saldo: 9, um: 'UN'}],
+  });
+  const fila = regExport(state.rows.find(r => r.code === 'A-1'));
+  comprobar('lo dice en la columna del cruce', 'No está en QMS', fila['Cruce con QMS']);
+  comprobar('y no inventa un código de QMS', '', fila['Código QMS']);
+}
+
+console.log('\nSin archivo de QMS las columnas quedan vacías, no con un cruce falso');
+{
+  cruce({docs: [{art: 'A-1', qty: 9, valor: 900, valorInv: 900, saldo: 9, um: 'UN'}]});
+  const fila = regExport(state.rows.find(r => r.code === 'A-1'));
+  comprobar('la columna del cruce queda vacía', '', fila['Cruce con QMS']);
 }
 
 console.log(`\n${hechas - fallas} de ${hechas} comprobaciones pasaron`);

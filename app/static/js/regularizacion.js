@@ -906,7 +906,12 @@
               // En qué unidad está. Manda la de Defontana: es el sistema donde
               // se hace el ajuste, así que es la unidad en la que hay que
               // escribirlo. Sin documentos no hay otra que la del conteo.
-              um: umDefTxt || (s ? s.um : '') || '', linea: s ? s.linea || '' : '', alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, umInfo, arts, artAjuste, pend, costDocs, manual, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs, ajPrevios, sysCalc, toOther,
+              um: umDefTxt || (s ? s.um : '') || '',
+              // La unidad tal como la muestra hoy el Informe de Inventario. Es
+              // la actualizada: los documentos traen la que tenían cuando se
+              // emitieron, y si la unidad del artículo se cambió después, la
+              // de los documentos viejos ya no es la de Defontana.
+              umInv: (fotoDe(docs) || {}).um || '', linea: s ? s.linea || '' : '', alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, umInfo, arts, artAjuste, pend, costDocs, manual, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs, ajPrevios, sysCalc, toOther,
         sysAtCount, sysNow, realNow, diff, st, pmp, edited, pmpSrc: edited ? 'Ingresado a mano' : pm ? pm.src : 'Sin costo en Defontana',
         valor: st === 'done' ? 0 : pend != null && pmp != null ? pend * pmp : diff != null && Math.abs(diff) > EPS && pmp != null ? diff * pmp : (st === 'ok' ? 0 : null), zeros, cost};
     };
@@ -1171,9 +1176,9 @@
       fotoPorKey = new Map();
       for (const a of state.articulos){
         const p = fotoPorKey.get(a.key);
-        if (!p) fotoPorKey.set(a.key, {key:a.key, art:a.art, name:a.name, stock:a.stock, valor:a.valor, costo:a.costo, valorReal: !!state.articulos.valorReal, codigos:[a.art]});
+        if (!p) fotoPorKey.set(a.key, {key:a.key, art:a.art, name:a.name, um:a.um || '', stock:a.stock, valor:a.valor, costo:a.costo, valorReal: !!state.articulos.valorReal, codigos:[a.art]});
         else {
-          p.stock += a.stock; p.valor += a.valor; p.codigos.push(a.art);
+          p.stock += a.stock; p.valor += a.valor; p.codigos.push(a.art); p.um = p.um || a.um || '';
           // El costo del conjunto es el promedio ponderado; sin unidades, el
           // mayor de los que haya, que es el único dato de costo que queda.
           p.costo = p.stock > EPS ? p.valor / p.stock : Math.max(p.costo, a.costo);
@@ -1196,7 +1201,7 @@
       if (!f) continue;
       if (!total) total = {...f, codigos:[...f.codigos]};
       else {
-        total.stock += f.stock; total.valor += f.valor; total.codigos.push(...f.codigos);
+        total.stock += f.stock; total.valor += f.valor; total.codigos.push(...f.codigos); total.um = total.um || f.um || '';
         total.costo = total.stock > EPS ? total.valor / total.stock : Math.max(total.costo, f.costo);
       }
     }
@@ -2057,6 +2062,7 @@
 
   function computeQms(){
     state.qmsRows = [];
+    state.qmsPorClave = new Map();
     if (!state.qms || !state.qms.length) return;
     // El Informe de Inventario trae una fila por bodega: el stock del producto
     // es la suma, no la de la primera bodega que aparezca.
@@ -2071,7 +2077,10 @@
       // Estar en el conteo no es estar en Defontana: un producto contado que
       // Defontana no tiene no aparece en ningún documento ni en su stock.
       if (!((r.docs && r.docs.length) || art.has(r.key))) continue;
-      def.set(r.key, {code:r.code, name:r.name, um:r.um, stock:hoyDe(r), unit:r.pmp});
+      // La unidad del Informe de Inventario manda sobre la de los documentos:
+      // es la que Defontana tiene hoy, y la de un documento viejo puede ser
+      // la que el artículo tenía antes de que se la cambiaran.
+      def.set(r.key, {code:r.code, name:r.name, um:r.umInv || r.um, stock:hoyDe(r), unit:r.pmp});
     }
     for (const [k, a] of art) if (!def.has(k)) def.set(k, {code:a.code, name:a.name, um:a.um, stock:a.stock,
                                                           unit: a.stock > EPS ? a.valor / a.stock : null});
@@ -2095,6 +2104,7 @@
         difUnit: q && d && q.unit != null && d.unit != null ? q.unit - d.unit : null});
     }
     state.qmsRows = filas;
+    state.qmsPorClave = new Map(filas.map(f => [f.key, f]));
   }
 
   const QMS_FILTERS = [
@@ -2844,6 +2854,26 @@
   }
 
   // ---------- Exportar ----------
+  // El cruce con QMS también en el Excel de Productos: es donde ella mira el
+  // detalle producto por producto, y tener que abrir otra pestaña para saber
+  // en qué unidad lo lleva el otro sistema hace que no se mire.
+  //
+  // Las dos unidades vienen de donde están actualizadas: la de QMS de su
+  // planilla y la de Defontana del Informe de Inventario, que es la foto de
+  // hoy (la de un documento viejo puede ser la que el artículo tenía antes de
+  // que se la cambiaran).
+  const columnasQms = r => {
+    const x = (state.qmsPorClave || new Map()).get(r.key), q = x && x.q;
+    return {
+      'Código QMS': q ? q.code : '',
+      'Unidad QMS': q ? q.um : '',
+      'Unidad Defontana (Informe de Inventario)': r.umInv || '',
+      'Stock QMS': q ? q.stock : '',
+      'Valor unitario QMS': q && q.unit != null ? Math.round(q.unit * 100) / 100 : '',
+      'Cruce con QMS': !state.qms ? '' : q ? QMS[x.st][1] : 'No está en QMS',
+    };
+  };
+
   const regExport = r => ({
     'Código': r.code, 'Nombre': r.name, 'Línea': r.linea || '', 'Otras formas del código': r.alias.join(', ') + (r.viaName ? (r.alias.length ? ' · ' : '') + 'cruzado por nombre' : ''), 'Qué hacer': ACTION[r.st][1], 'Causa probable': r.cause ? CAUSES[r.cause] : '',
     'Comprobante de ajuste': [...new Set(listaAj(r).map(m => `${m.tipo} #${m.folio}`))].join(', '), 'Fecha del ajuste': [...new Set(listaAj(r).map(m => fmtDate(m.fecha)))].join(', '),
@@ -2858,7 +2888,8 @@
     'Ajuste a hacer hoy': ajusteHoy(r) ?? '', 'Defontana al conteo': r.sysAtCount ?? '', 'Diferencia al conteo': r.diff ?? '',
     'PMP': r.pmp != null ? Math.round(r.pmp * 100) / 100 : '', 'Origen PMP': r.pmpSrc,
     'Valor ajuste': r.valor != null ? Math.round(r.valor) : '',
-    'Saldo última fila del informe': r.sysNow ?? ''
+    'Saldo última fila del informe': r.sysNow ?? '',
+    ...columnasQms(r)
   });
   const zeroExport = z => ({
     'Fecha': fmtDate(z.m.fecha), 'Documento': z.m.tipo, 'Folio': z.m.folio, 'Referencia': z.m.ref,
@@ -3211,6 +3242,6 @@
   // puerta, la matemática que decide los ajustes de inventario no se puede
   // comprobar más que a ojo.
   if (typeof module !== 'undefined' && module.exports){
-    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, parseArticulos, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, tipoAjCosto, avisoDeFechas, detectarAjustes, conAjustes, parseCostos, costoDeSuCompra, pmpEditable, costoPropuestoSinValor, renderStepsPanel, REG_COLS, regRow, detail, parseQms, computeQms, cruceQms, qmsRow, state};
+    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, parseArticulos, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, tipoAjCosto, avisoDeFechas, detectarAjustes, conAjustes, parseCostos, costoDeSuCompra, pmpEditable, costoPropuestoSinValor, renderStepsPanel, REG_COLS, regRow, detail, parseQms, computeQms, cruceQms, qmsRow, regExport, state};
   }
 })();
