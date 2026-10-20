@@ -78,6 +78,21 @@
   // "Totales", "Total general", "Totales (3180)": la fila de cierre que varios
   // informes ponen al final. No es un artículo.
   const ES_FILA_TOTAL = /^total(es)?\b/i;
+  // Una fecha de conteo anterior al 2000 no es una fecha: es lo que deja Excel
+  // cuando la celda viene en 0 (31-12-1899). En su archivo son 2.308 filas de
+  // 3.116, todas con stock 0 y sin quién contó: productos que no se contaron.
+  //
+  // Tomarlas por buenas tiene consecuencias: el producto pasa por contado en
+  // 1899, y entonces TODO movimiento posterior —o sea todos— queda "después
+  // del conteo". Así A2000ETQ-CATNOINFLAMABL, con 0 contado en 1899 y su
+  // ajuste de −310, terminaba pidiendo "aumentar 310". Sin fecha, el producto
+  // queda como no contado, que es lo que es, y no se le propone nada.
+  const PRIMER_ANO_POSIBLE = 2000;
+  function fechaDeConteo(v){
+    const d = parseDate(v);
+    return d && d.getFullYear() >= PRIMER_ANO_POSIBLE ? d : null;
+  }
+
   function parseStock(rows){
     const t = readTable(rows, ['CODIGO', 'STOCK FISICO']);
     if (!t) throw new Error('No encontré las columnas “Código” y “Stock físico”. ¿Es el archivo de Stock y conteo?');
@@ -93,7 +108,7 @@
       // producto fantasma con el stock de todo el inventario encima.
       if (ES_FILA_TOTAL.test(code)) continue;
       out.push({code, key:keyOf(code), name:r[c.name] ?? '', stock:num(r[c.stock]), estado:c.estado >= 0 ? r[c.estado] ?? '' : '',
-        por:c.por >= 0 ? r[c.por] ?? '' : '', fecha:c.fecha >= 0 ? parseDate(r[c.fecha]) : null, um:c.um >= 0 ? String(r[c.um] ?? '').trim() : '', linea:c.linea >= 0 ? String(r[c.linea] ?? '').trim() : ''});
+        por:c.por >= 0 ? r[c.por] ?? '' : '', fecha:c.fecha >= 0 ? fechaDeConteo(r[c.fecha]) : null, um:c.um >= 0 ? String(r[c.um] ?? '').trim() : '', linea:c.linea >= 0 ? String(r[c.linea] ?? '').trim() : ''});
     }
     return out;
   }
@@ -603,9 +618,15 @@
     if (dk < ck) return 'antes';
     return sameAfter ? 'despues' : 'antes';
   }
-  // Lo puesto a mano manda: la fecha del documento es la del papel, y quien
-  // contó es el único que sabe si ese movimiento ya estaba hecho.
-  const cuandoDe = (m, ck, sameAfter) => state.movCuando.get(docId(m)) || cuandoAutomatico(m, ck, sameAfter);
+  // Sólo los del mismo día del conteo se pueden poner a mano: ahí la fecha no
+  // alcanza —dice el día, no la hora— y el movimiento pudo pasar antes o
+  // después de que se contara. En otra fecha no hay nada que decidir, y poder
+  // cambiarlo sólo da formas de descuadrar la cuenta.
+  const seElige = (m, ck) => ck != null && dayKey(m.fecha) === ck;
+  // Puesto a mano manda sobre la regla: quien contó es el único que sabe si
+  // ese movimiento ya estaba hecho cuando pasó contando.
+  const cuandoDe = (m, ck, sameAfter) =>
+    (seElige(m, ck) ? state.movCuando.get(docId(m)) : null) || cuandoAutomatico(m, ck, sameAfter);
   const etiquetaCuando = (m, ck, sameAfter) => {
     const auto = cuandoAutomatico(m, ck, sameAfter) === 'despues';
     if (m._aj) return auto ? 'Ajuste (después)' : 'Ajuste (antes)';
@@ -673,7 +694,15 @@
       // siempre (y la opción de arriba decide los del mismo día).
       const after = m => cuandoDe(m, ck, sameAfter) === 'despues';
       let ins = 0, outs = 0, sameDay = 0, sameNet = 0, idx = null, aj = 0, ajVal = 0;
-      const ajDocs = docs.filter(m => m._aj);
+      // "Ya ajustado" es lo que se ajustó POR ESTE CONTEO, y eso sólo puede ser
+      // lo posterior a él. Un ajuste anterior ya está dentro del saldo que
+      // Defontana tenía al contar: si además se descuenta de lo que falta, el
+      // sistema pide deshacerlo. Pasó con AA-FBC-062: contado 180,2 el 13-10,
+      // Defontana tenía 180,2 —ya cuadrados— y el PARTE DE SALIDA #311 del
+      // 09-10 (−12,4) hacía que la pantalla pidiera "aumentar 12,4", o sea
+      // revertir un ajuste correcto hecho cuatro días antes.
+      const ajDocs = docs.filter(m => m._aj && (!counted || !m.fecha || after(m)));
+      const ajPrevios = docs.filter(m => m._aj && counted && m.fecha && !after(m));
       for (const m of ajDocs){ aj += m.kind === 'in' ? m.qty : -m.qty; ajVal += (m.kind === 'in' ? 1 : -1) * (m.valor || 0); }
       docs.forEach((m, j) => {
         if (!counted || !m.fecha) return;
@@ -817,6 +846,11 @@
         if (pend != null) st = Math.abs(pend) <= EPS ? 'done' : pend > 0 ? 'up' : 'down';
         if (st === 'done'){ dx.cause = null; dx.obs = dx.obs.filter(x => /^Ajuste de (cantidad|costo) ya hecho/.test(x)); }
       }
+      // El ajuste anterior al conteo se dice igual: está en los comprobantes y
+      // no aparecer en ninguna parte haría pensar que el sistema no lo vio.
+      if (ajPrevios.length) dx.obs.push(
+        `Antes de este conteo ya se había ajustado: ${esc(docTxtAj(ajPrevios))}. Eso ya está en el saldo ` +
+        `que Defontana tenía al contar, así que no cuenta como regularización de este conteo.`);
       // El stock valorizado contra lo que arrastran los movimientos. Entre dos
       // fechas pueden haberse borrado comprobantes o metido ajustes: el
       // arrastre no se entera y la foto sí, así que donde no coinciden hay algo
@@ -872,7 +906,7 @@
               // En qué unidad está. Manda la de Defontana: es el sistema donde
               // se hace el ajuste, así que es la unidad en la que hay que
               // escribirlo. Sin documentos no hay otra que la del conteo.
-              um: umDefTxt || (s ? s.um : '') || '', linea: s ? s.linea || '' : '', alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, umInfo, arts, artAjuste, pend, costDocs, manual, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs, sysCalc, toOther,
+              um: umDefTxt || (s ? s.um : '') || '', linea: s ? s.linea || '' : '', alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, umInfo, arts, artAjuste, pend, costDocs, manual, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs, ajPrevios, sysCalc, toOther,
         sysAtCount, sysNow, realNow, diff, st, pmp, edited, pmpSrc: edited ? 'Ingresado a mano' : pm ? pm.src : 'Sin costo en Defontana',
         valor: st === 'done' ? 0 : pend != null && pmp != null ? pend * pmp : diff != null && Math.abs(diff) > EPS && pmp != null ? diff * pmp : (st === 'ok' ? 0 : null), zeros, cost};
     };
@@ -1729,7 +1763,7 @@
       else if (r.cause === 'um') add('verify', 'Revisar la unidad de medida: el conteo parece estar en otra unidad. Convertir y recién después ajustar');
       else if (r.st === 'check') add('verify', 'Volver a contar: la diferencia puede deberse a un documento registrado después del conteo. Si se confirma, no ajustar');
       if (r.st === 'nodata') add('verify', 'Ver el saldo del producto en Defontana (no hay documentos en el informe)');
-      if (r.st === 'nocount') add('verify', 'Contar el producto');
+      if (r.st === 'nocount') add('verify', 'Contar el producto: sin conteo no hay con qué comparar, así que no se propone ajuste');
       if (r.st === 'nofile') add('verify', 'Revisar por qué no está en el conteo');
       // El informe no explica su propio saldo: la cuenta de "lo que debería
       // tener hoy" se apoya en los movimientos, así que acá no sirve.
@@ -1937,7 +1971,11 @@
   // ---------- Configuración de las vistas ----------
   const ACTION = {
     up:['a-up','Aumentar'], down:['a-down','Disminuir'], ok:['a-ok','Cuadrado'], check:['a-warn','Revisar antes de ajustar'],
-    done:['a-ok','Ya ajustado'], nodata:['a-warn','Sin saldo en Defontana'], nocount:['a-ok','Sin contar'], nofile:['a-warn','No está en el conteo']
+    // Sin contar no es "nada que hacer": es trabajo pendiente. Son los que no
+    // alcanzaron a contarse —en su toma, 2.308 de 3.116— y lo que corresponde
+    // con ellos es contarlos, no ajustarlos: sin conteo no hay contra qué
+    // comparar, y cualquier ajuste sería contra un saldo que nadie verificó.
+    done:['a-ok','Ya ajustado'], nodata:['a-warn','Sin saldo en Defontana'], nocount:['a-warn','Pendiente de revisión'], nofile:['a-warn','No está en el conteo']
   };
   const REG_FILTERS = [
     ['all', 'Todos', r => true, null],
@@ -1949,7 +1987,7 @@
     ['done', 'Ya ajustados', r => r.st === 'done' || !!(r.costDocs && r.costDocs.length), 'var(--in)'],
     ['nopmp', 'Falta PMP', r => (r.st === 'up' || r.st === 'down') && !(r.pmp > 0), 'var(--warn)'],
     ['nodata', 'Sin saldo en Defontana', r => r.st === 'nodata', 'var(--warn)'],
-    ['nocount', 'Sin contar', r => r.st === 'nocount', 'var(--muted)'],
+    ['nocount', 'Pendiente de revisión', r => r.st === 'nocount', 'var(--warn)'],
     ['nofile', 'No están en el conteo', r => r.st === 'nofile', 'var(--warn)'],
     ['alias', 'Código escrito distinto', r => r.alias.length > 0 || r.viaName || r.nCounted > 1, 'var(--accent)'],
     ['cost', 'Revisar costo ($0)', r => !!(r.cost && r.cost.need), 'var(--warn)'],
@@ -2272,12 +2310,12 @@
       // por el doble. Quien contó es el único que lo sabe, así que puede
       // decirlo acá. Se aplica al documento completo, no sólo a este producto.
       //
-      // El comprobante de ajuste también se puede mover. Antes no: se dejaba
-      // fijo por prudencia, y era al revés —el ajuste del mismo día es el caso
-      // que más se equivoca, y mover uno no cambia lo ya ajustado, sólo de qué
-      // lado del conteo quedó—. Pasa cuando el ajuste se hizo en la mañana,
-      // por otra cosa, y el conteo fue en la tarde.
-      const elegido = ck == null ? null : (state.movCuando.get(docId(m)) || '');
+      // Sólo en los del mismo día: en los demás la fecha ya lo dice, y una
+      // casilla en cada línea convertía una tabla de leer en una de decidir.
+      // El comprobante de ajuste del mismo día también se puede mover: es el
+      // que más se equivoca —el ajuste se hace después de contar, pero pudo
+      // hacerse en la mañana, por otra cosa, y el conteo en la tarde—.
+      const elegido = seElige(m, ck) ? (state.movCuando.get(docId(m)) || '') : null;
       const pre = cuandoDe(m, ck, sameAfter) === 'antes';
       const celda = elegido === null
         ? w

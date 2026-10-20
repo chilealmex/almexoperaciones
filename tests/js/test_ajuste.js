@@ -4,7 +4,7 @@
    posteriores no entran, porque ya están registrados en Defontana y volver a
    considerarlos pide ajustar dos veces por lo mismo. */
 const {porId} = require('./entorno.js');
-const {compute, ajusteDelConteo, pendiente, hoyDe, state} = require('../../app/static/js/regularizacion.js');
+const {compute, ajusteDelConteo, pendiente, hoyDe, parseStock, regRow, docSteps, state} = require('../../app/static/js/regularizacion.js');
 
 let fallas = 0, hechas = 0;
 function comprobar(titulo, esperado, obtenido) {
@@ -168,6 +168,39 @@ console.log('\nDespués de registrar el ajuste, no se puede volver a pedir');
   comprobar('Defontana tiene 15 hoy', 15, hoyDe(r));
   comprobar('lo que falta ajustar es 0', 0, pendiente(r));
   comprobar('y debería tener 15 hoy, no 17', 15, r.realNow);
+}
+
+console.log('\nUna fecha de conteo imposible no es un conteo');
+{
+  /* En su archivo, 2.308 filas de 3.116 traen la fecha en 0, que Excel lee
+     como 31-12-1899, con stock 0 y sin quién contó: son los productos que no
+     se contaron. Dándolas por buenas, el producto pasa por contado en 1899 y
+     todos sus movimientos quedan "después del conteo"; así uno con su ajuste
+     ya hecho terminaba pidiendo que se deshiciera. */
+  const filas = parseStock([
+    ['Código', 'Nombre', 'Stock físico', 'Contado por', 'Fecha y hora del conteo'],
+    ['SIN-CONTAR', 'No se contó', 0, '', 0],
+    ['CONTADO', 'Sí se contó', 7, 'Claudio Leyton', '13-10-2026 13:34'],
+  ]);
+  comprobar('la fila con fecha 0 queda sin fecha', null, filas[0].fecha);
+  comprobar('y la contada de verdad la conserva', 2026, filas[1].fecha.getFullYear());
+
+  // Y entonces no se le propone nada: no hay contra qué comparar.
+  state.stock = filas;
+  state.recount = new Map(); state.hechos = new Map(); state.pmpEdit = new Map(); state.movCuando = new Map();
+  porId.set('optBodega', Object.assign(porId.get('optBodega') || {}, {value: '*'}));
+  porId.set('optAprob', Object.assign(porId.get('optAprob') || {}, {checked: false}));
+  const mov = [{art: 'SIN-CONTAR', key: filas[0].key, nameKey: '', tipo: 'PARTE DE ENTRADA', folio: '1',
+                fecha: DIA(2026, 1, 29), kind: 'in', qty: 310, saldo: 310, valor: 0, costo: 0,
+                orig: '', dest: 'CENTRAL', estado: 'Aprobado', motivo: '', _aj: false}];
+  const r = compute(mov).rows.find(x => x.code === 'SIN-CONTAR');
+  comprobar('el producto queda como no contado', false, r.counted);
+  comprobar('y no se propone ajuste', null, ajusteDelConteo(r));
+
+  // Pedido así: lo que no se contó queda pendiente de revisión, no cuadrado.
+  comprobar('se muestra como pendiente de revisión', true, regRow(r).includes('Pendiente de revisión'));
+  comprobar('y lo que corresponde es contarlo', true,
+            docSteps(r).some(x => x.txt && x.txt.startsWith('Contar el producto')));
 }
 
 console.log(`\n${hechas - fallas} de ${hechas} comprobaciones pasaron`);

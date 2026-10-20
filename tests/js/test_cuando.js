@@ -19,6 +19,12 @@ function comprobar(titulo, esperado, obtenido) {
   else console.log(`  ✔ ${titulo}`);
 }
 
+// Con decimales la resta binaria deja colas (192,6 − 180,2 = 12,400000000000006).
+// No es un error del cálculo y la pantalla las redondea al mostrar.
+function comprobarCerca(titulo, esperado, obtenido) {
+  comprobar(titulo, true, obtenido != null && Math.abs(obtenido - esperado) < 1e-9);
+}
+
 const DIA = (a, m, d) => new Date(a, m - 1, d);
 
 function escenario({contado, fechaConteo, saldoInicial, docs, mismoDia = 'before', cuando = {}}) {
@@ -78,20 +84,24 @@ console.log('\nLo elegido manda sobre la perilla de "todos los del mismo día"')
   comprobar('puesto a mano en "antes", el ajuste vuelve a 0', 0, ajusteDelConteo(aMano));
 }
 
-console.log('\nTambién sirve para un movimiento de otro día');
+console.log('\nSólo se elige en los del mismo día: en otra fecha no hay nada que decidir');
 {
-  // El documento quedó fechado al día siguiente, pero la mercadería salió
-  // antes de que pasaran contando. Por fecha entraría como posterior.
+  // Pedido así: la duda es cuando el movimiento es del día del conteo, porque
+  // la fecha dice el día y no la hora. En otra fecha ya está claro, y una
+  // casilla en cada línea convierte una tabla de leer en una de decidir.
   const base = {contado: 10, fechaConteo: DIA(2026, 8, 18), saldoInicial: 20,
-                docs: [{kind: 'out', qty: 10, folio: 74, fecha: DIA(2026, 8, 19)}]};
+                docs: [{kind: 'out', qty: 10, folio: 74, fecha: DIA(2026, 8, 19), valor: 35000}]};
 
   const porFecha = escenario(base);
   comprobar('por la fecha, Defontana tenía 20 al conteo', 20, porFecha.sysAtCount);
   comprobar('y el ajuste sale −10', -10, ajusteDelConteo(porFecha));
 
   const aMano = escenario({...base, cuando: {[CLAVE('ENVIO A PRODUCCION', '74', 2026, 8, 19)]: 'antes'}});
-  comprobar('puesto como anterior, Defontana tenía 10', 10, aMano.sysAtCount);
-  comprobar('y no hay nada que ajustar', 0, ajusteDelConteo(aMano));
+  comprobar('no se puede cambiar: sigue contando como posterior', 20, aMano.sysAtCount);
+
+  const html = detail(porFecha);
+  comprobar('y su fila no trae desplegable', false, html.includes('select class="cuando"'));
+  comprobar('sólo dice de qué lado quedó', true, html.includes('<td>Después</td>'));
 }
 
 console.log('\nUna elección sólo afecta a su documento');
@@ -170,15 +180,39 @@ console.log('\nEl ajuste del mismo día va DESPUÉS del conteo, aunque la perill
   comprobar('y hoy Defontana debería tener 0, no 310', 0, r.realNow);
 }
 
-console.log('\nUn ajuste de otro día anterior sigue siendo historia');
+console.log('\nUn ajuste anterior al conteo es historia, no "lo que ya se ajustó"');
 {
-  // Ajustado en agosto, contado en octubre: ese ajuste ya estaba hecho cuando
-  // se contó, así que forma parte del saldo que Defontana tenía al contar.
+  /* El caso de AA-FBC-062, con sus archivos: contó 180,2 el 13-10-2026 y
+     Defontana tenía 180,2 —ya cuadrados—. El PARTE DE SALIDA #311 de −12,4 es
+     del 09-10, cuatro días ANTES de ese conteo: su efecto ya está dentro del
+     saldo que Defontana tenía al contar.
+
+     Contándolo como "ya ajustado por este conteo" el sistema pedía "aumentar
+     12,4": deshacer un ajuste correcto hecho cuatro días antes. */
   const r = escenario({
-    contado: 10, fechaConteo: DIA(2026, 10, 13), saldoInicial: 30,
-    docs: [{kind: 'out', qty: 10, folio: 300, fecha: DIA(2026, 8, 1), tipo: 'PARTE DE SALIDA', ajuste: true}],
+    contado: 180.2, fechaConteo: DIA(2026, 10, 13), saldoInicial: 192.6,
+    docs: [{kind: 'out', qty: 12.4, folio: 311, fecha: DIA(2026, 10, 9), tipo: 'PARTE DE SALIDA', ajuste: true}],
   });
-  comprobar('Defontana tenía 20 al contar', 20, r.sysAtCount);
+  comprobar('Defontana tenía 180,2 al contar', 180.2, r.sysAtCount);
+  comprobar('y lo contado coincide: no hay diferencia', 0, ajusteDelConteo(r));
+  comprobar('el ajuste anterior no cuenta como ya ajustado', 0, r.aj);
+  comprobar('así que no falta nada', 0, pendiente(r));
+  comprobar('y hoy Defontana debería tener 180,2, no 192,6', 180.2, r.realNow);
+  comprobar('igual se deja dicho que hubo un ajuste antes', 1, r.ajPrevios.length);
+  comprobar('y se explica en la pantalla', true,
+            r.obs.some(o => o.includes('Antes de este conteo ya se había ajustado')));
+}
+
+console.log('\nY el ajuste posterior sí es lo que ya se ajustó');
+{
+  const r = escenario({
+    contado: 180.2, fechaConteo: DIA(2026, 10, 1), saldoInicial: 192.6,
+    docs: [{kind: 'out', qty: 12.4, folio: 311, fecha: DIA(2026, 10, 9), tipo: 'PARTE DE SALIDA', ajuste: true}],
+  });
+  comprobar('Defontana tenía 192,6 al contar', 192.6, r.sysAtCount);
+  comprobarCerca('había que ajustar −12,4', -12.4, ajusteDelConteo(r));
+  comprobar('ya está hecho', -12.4, r.aj);
+  comprobarCerca('y no falta nada', 0, pendiente(r));
 }
 
 console.log('\nUn comprobante de ajuste también se puede mover a mano');
