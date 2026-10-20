@@ -9,7 +9,7 @@
    Hasta ahora había una sola perilla para todos los del mismo día. Esto deja
    decidirlo documento por documento, y lo elegido manda sobre la fecha. */
 const {porId} = require('./entorno.js');
-const {compute, ajusteDelConteo, detail, state} = require('../../app/static/js/regularizacion.js');
+const {compute, ajusteDelConteo, pendiente, detail, state} = require('../../app/static/js/regularizacion.js');
 
 let fallas = 0, hechas = 0;
 function comprobar(titulo, esperado, obtenido) {
@@ -37,7 +37,7 @@ function escenario({contado, fechaConteo, saldoInicial, docs, mismoDia = 'before
     saldo += d.kind === 'in' ? d.qty : -d.qty;
     return {art: 'ART-1', key: 'ART1', nameKey: 'ARTICULO', tipo: d.tipo || 'ENVIO A PRODUCCION',
             folio: String(d.folio != null ? d.folio : 100 + i),
-            fecha: d.fecha, kind: d.kind, qty: d.qty, saldo, valor: 0, costo: 0,
+            fecha: d.fecha, kind: d.kind, qty: d.qty, saldo, valor: d.valor || 0, costo: 0,
             orig: 'CENTRAL', dest: 'CENTRAL', estado: 'Aprobado', motivo: '', _aj: !!d.ajuste};
   });
   return compute(movimientos).rows[0];
@@ -122,8 +122,10 @@ console.log('\nLo que debería tener hoy también cambia');
 
 console.log('\nEn la pantalla, cada movimiento trae con qué cambiarlo');
 {
+  // Con valor: sin él la fila se pinta como "valorizada en $0", que es otro
+  // aviso y tapa el color de antes/después.
   const base = {contado: 10, fechaConteo: DIA(2026, 8, 18), saldoInicial: 20,
-                docs: [{kind: 'out', qty: 10, folio: 74, fecha: DIA(2026, 8, 18)}]};
+                docs: [{kind: 'out', qty: 10, folio: 74, fecha: DIA(2026, 8, 18), valor: 35000}]};
   const clave = CLAVE('ENVIO A PRODUCCION', '74', 2026, 8, 18);
 
   const html = detail(escenario(base));
@@ -133,22 +135,67 @@ console.log('\nEn la pantalla, cada movimiento trae con qué cambiarlo');
   comprobar('y las dos opciones para cambiarlo', true,
             html.includes('>Antes del conteo</option>') && html.includes('>Después del conteo</option>'));
 
+  // Los posteriores al conteo van resaltados y los anteriores en gris: es
+  // cómo se ve de un vistazo qué entra en la cuenta del ajuste y qué no.
+  comprobar('la fila del anterior va en gris', true, html.includes('<tr class="pre">'));
+
   const puesto = detail(escenario({...base, cuando: {[clave]: 'despues'}}));
+  comprobar('movido a después, la fila cambia de lado', true, puesto.includes('<tr class="after">'));
   comprobar('puesto a mano, queda marcado', true, puesto.includes('class="cuando puesto"'));
   comprobar('con su opción elegida', true, puesto.includes('<option value="despues" selected>'));
   comprobar('y dice qué decía la fecha', true, puesto.includes('por fecha: mismo día (antes)'));
 }
 
-console.log('\nUn comprobante de ajuste no se cambia de lado');
+console.log('\nEl ajuste del mismo día va DESPUÉS del conteo, aunque la perilla diga antes');
 {
-  // No es un movimiento del día a día: es la corrección que se hizo. Dejarlo
-  // mover sólo daría formas de descuadrar la cuenta de lo ya ajustado.
-  const html = detail(escenario({
-    contado: 10, fechaConteo: DIA(2026, 8, 18), saldoInicial: 20,
-    docs: [{kind: 'out', qty: 10, folio: 74, fecha: DIA(2026, 8, 20), tipo: 'PARTE DE SALIDA', ajuste: true}],
-  }));
-  comprobar('no trae desplegable', false, html.includes('select class="cuando"'));
-  comprobar('y sigue diciendo que es un ajuste', true, html.includes('<td>Ajuste</td>'));
+  /* El caso de A2000ETQ-CATNOINFLAMABL, con sus archivos:
+       - PARTE DE ENTRADA #40 del 29-01-2026: +310 (Defontana queda en 310)
+       - contó 0 el 13-10-2026
+       - PARTE DE SALIDA #316 del mismo 13-10: −310, y está en el archivo de
+         ajustes, o sea es la corrección de ese conteo.
+
+     El ajuste es correcto y no falta nada. Tomándolo como anterior al conteo,
+     Defontana aparecía en 0 al momento de contar, cuadrada con lo contado, y
+     el sistema concluía que el ajuste no hacía falta: pedía "aumentar 310",
+     o sea volver a meter 310 unidades que no existen. */
+  const r = escenario({
+    contado: 0, fechaConteo: DIA(2026, 10, 13), saldoInicial: 0,
+    docs: [{kind: 'in', qty: 310, folio: 40, fecha: DIA(2026, 1, 29), tipo: 'PARTE DE ENTRADA'},
+           {kind: 'out', qty: 310, folio: 316, fecha: DIA(2026, 10, 13), tipo: 'PARTE DE SALIDA', ajuste: true}],
+  });
+  comprobar('Defontana tenía 310 al momento de contar', 310, r.sysAtCount);
+  comprobar('la diferencia al contar era −310', -310, ajusteDelConteo(r));
+  comprobar('ya está ajustada', -310, r.aj);
+  comprobar('no falta nada por ajustar', 0, pendiente(r));
+  comprobar('y hoy Defontana debería tener 0, no 310', 0, r.realNow);
+}
+
+console.log('\nUn ajuste de otro día anterior sigue siendo historia');
+{
+  // Ajustado en agosto, contado en octubre: ese ajuste ya estaba hecho cuando
+  // se contó, así que forma parte del saldo que Defontana tenía al contar.
+  const r = escenario({
+    contado: 10, fechaConteo: DIA(2026, 10, 13), saldoInicial: 30,
+    docs: [{kind: 'out', qty: 10, folio: 300, fecha: DIA(2026, 8, 1), tipo: 'PARTE DE SALIDA', ajuste: true}],
+  });
+  comprobar('Defontana tenía 20 al contar', 20, r.sysAtCount);
+}
+
+console.log('\nUn comprobante de ajuste también se puede mover a mano');
+{
+  // Pasa cuando el ajuste se hizo en la mañana, por otra cosa, y el conteo fue
+  // en la tarde: entonces sí estaba hecho antes de contar.
+  const base = {contado: 0, fechaConteo: DIA(2026, 10, 13), saldoInicial: 0,
+                docs: [{kind: 'in', qty: 310, folio: 40, fecha: DIA(2026, 1, 29), tipo: 'PARTE DE ENTRADA'},
+                       {kind: 'out', qty: 310, folio: 316, fecha: DIA(2026, 10, 13), tipo: 'PARTE DE SALIDA', ajuste: true}]};
+  const clave = CLAVE('PARTE DE SALIDA', '316', 2026, 10, 13);
+
+  const aMano = escenario({...base, cuando: {[clave]: 'antes'}});
+  comprobar('puesto como anterior, Defontana tenía 0 al contar', 0, aMano.sysAtCount);
+
+  const html = detail(escenario(base));
+  comprobar('el ajuste trae su desplegable', true, html.includes(`data-doc="${clave}"`));
+  comprobar('y dice de qué lado quedó', true, html.includes('>Ajuste (después)</option>'));
 }
 
 console.log(`\n${hechas - fallas} de ${hechas} comprobaciones pasaron`);
