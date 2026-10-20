@@ -552,6 +552,36 @@
       }
     }
   }
+  // ---------- De qué lado del conteo quedó cada movimiento ----------
+  //
+  // Una sola regla para los dos lados: lo que calcula el ajuste y lo que dice
+  // la pantalla. Estaban escritas dos veces y ya se habían separado.
+  function cuandoAutomatico(m, ck, sameAfter){
+    const dk = dayKey(m.fecha);
+    // El ajuste del mismo día va después del conteo: es la corrección DE ese
+    // conteo, se registra cuando ya se contó. Tomándolo como anterior,
+    // Defontana aparecía cuadrada al momento de contar —el ajuste ya le había
+    // bajado el saldo— y el sistema concluía que el ajuste no hacía falta:
+    // pedía deshacerlo. Pasó con A2000ETQ-CATNOINFLAMABL: contó 0, Defontana
+    // tenía 310, el PARTE DE SALIDA #316 del mismo día los sacó, y la pantalla
+    // pedía "aumentar 310", o sea volver a meter lo que no existe. La perilla
+    // de "documentos del mismo día" no lo arregla: es para los movimientos del
+    // día a día, no para la corrección.
+    if (m._aj && dk === ck) return 'despues';
+    if (dk > ck) return 'despues';
+    if (dk < ck) return 'antes';
+    return sameAfter ? 'despues' : 'antes';
+  }
+  // Lo puesto a mano manda: la fecha del documento es la del papel, y quien
+  // contó es el único que sabe si ese movimiento ya estaba hecho.
+  const cuandoDe = (m, ck, sameAfter) => state.movCuando.get(docId(m)) || cuandoAutomatico(m, ck, sameAfter);
+  const etiquetaCuando = (m, ck, sameAfter) => {
+    const auto = cuandoAutomatico(m, ck, sameAfter) === 'despues';
+    if (m._aj) return auto ? 'Ajuste (después)' : 'Ajuste (antes)';
+    if (dayKey(m.fecha) === ck) return auto ? 'Mismo día (después)' : 'Mismo día (antes)';
+    return auto ? 'Después' : 'Antes';
+  };
+
   function compute(movList){
     valorarMovimientos(movList);
     const unidadReciente = unidadesRecientes();
@@ -610,12 +640,7 @@
       // papel, y quien contó es el único que sabe si ese movimiento ya estaba
       // hecho cuando pasó contando. Sin elección a mano, vale la regla de
       // siempre (y la opción de arriba decide los del mismo día).
-      const after = m => {
-        const elegido = state.movCuando.get(docId(m));
-        if (elegido) return elegido === 'despues';
-        const dk = dayKey(m.fecha);
-        return dk > ck || (dk === ck && sameAfter);
-      };
+      const after = m => cuandoDe(m, ck, sameAfter) === 'despues';
       let ins = 0, outs = 0, sameDay = 0, sameNet = 0, idx = null, aj = 0, ajVal = 0;
       const ajDocs = docs.filter(m => m._aj);
       for (const m of ajDocs){ aj += m.kind === 'in' ? m.qty : -m.qty; ajVal += (m.kind === 'in' ? 1 : -1) * (m.valor || 0); }
@@ -2078,11 +2103,10 @@
     const span = (state.view === 'check' ? CHECK_COLS : REG_COLS).length;
     if (!r.docs.length) return `<tr class="detail"><td colspan="${span}"><span class="note">Este código no tiene documentos en el informe de Defontana, así que no se conoce su saldo en el sistema. Revisa su stock directamente en Defontana.</span></td></tr>`;
     const ck = r.counted ? dayKey(r.s.fecha) : null, sameAfter = $('optSame').value === 'after';
-    // Lo que dice la fecha por sí sola. Si el documento está puesto a mano,
-    // esto igual se muestra entre paréntesis: así se ve qué se cambió y
-    // respecto de qué.
-    const porFecha = m => { const dk = dayKey(m.fecha); return dk < ck ? 'Antes' : dk > ck ? 'Después' : sameAfter ? 'Mismo día (después)' : 'Mismo día (antes)'; };
-    const when = m => { if (m._aj) return 'Ajuste'; if (ck == null) return ''; return porFecha(m); };
+    // Lo que decide el sistema por su cuenta. Si el documento está puesto a
+    // mano, esto igual se muestra abajo: así se ve qué se cambió y respecto de
+    // qué. Es la misma regla que usa el cálculo, no una copia.
+    const when = m => ck == null ? '' : etiquetaCuando(m, ck, sameAfter);
     const rows = r.docs.map(m => {
       const w = when(m), zero = valorReal(m) != null && Math.abs(valorReal(m)) < EPS && m.qty > EPS;
       // La fecha del documento es la del papel. Un envío a producción fechado
@@ -2091,8 +2115,14 @@
       // hay que sumarlo aparte: es la diferencia entre ajustar bien y ajustar
       // por el doble. Quien contó es el único que lo sabe, así que puede
       // decirlo acá. Se aplica al documento completo, no sólo a este producto.
-      const elegido = ck == null || m._aj ? null : (state.movCuando.get(docId(m)) || '');
-      const pre = elegido ? elegido === 'antes' : w.startsWith('Antes') || w === 'Mismo día (antes)';
+      //
+      // El comprobante de ajuste también se puede mover. Antes no: se dejaba
+      // fijo por prudencia, y era al revés —el ajuste del mismo día es el caso
+      // que más se equivoca, y mover uno no cambia lo ya ajustado, sólo de qué
+      // lado del conteo quedó—. Pasa cuando el ajuste se hizo en la mañana,
+      // por otra cosa, y el conteo fue en la tarde.
+      const elegido = ck == null ? null : (state.movCuando.get(docId(m)) || '');
+      const pre = cuandoDe(m, ck, sameAfter) === 'antes';
       const celda = elegido === null
         ? w
         : `<select class="cuando${elegido ? ' puesto' : ''}" data-doc="${esc(docId(m))}"
@@ -2100,7 +2130,7 @@
              <option value=""${elegido ? '' : ' selected'}>${w}</option>
              <option value="antes"${elegido === 'antes' ? ' selected' : ''}>Antes del conteo</option>
              <option value="despues"${elegido === 'despues' ? ' selected' : ''}>Después del conteo</option>
-           </select>${elegido ? `<div class="small">a mano · por fecha: ${porFecha(m).toLowerCase()}</div>` : ''}`;
+           </select>${elegido ? `<div class="small">a mano · por fecha: ${etiquetaCuando(m, ck, sameAfter).toLowerCase()}</div>` : ''}`;
       return `<tr class="${zero ? 'zero' : pre ? 'pre' : 'after'}">
         <td>${fmtDate(m.fecha)}</td><td>${esc(m.tipo)} <span class="small">#${esc(m.folio)}${(m.kind === 'in' ? m.dest : m.orig) && !/CENTRAL/i.test(m.kind === 'in' ? m.dest : m.orig) ? ' · ' + esc(m.kind === 'in' ? m.dest : m.orig) : ''}${norm(m.art) !== norm(r.code) ? ' · ' + esc(m.art) : ''}</span></td><td>${esc(m.ref)}</td>
         <td class="num ${m.kind === 'in' ? 'plus' : 'minus'}">${m.kind === 'in' ? '+' : '−'}${fmt(m.qty)}</td>
