@@ -4,7 +4,7 @@
    posteriores no entran, porque ya están registrados en Defontana y volver a
    considerarlos pide ajustar dos veces por lo mismo. */
 const {porId} = require('./entorno.js');
-const {compute, ajusteDelConteo, pendiente, hoyDe, parseStock, regRow, docSteps, state} = require('../../app/static/js/regularizacion.js');
+const {compute, ajusteDelConteo, pendiente, hoyDe, parseStock, parseArticulos, regRow, docSteps, state} = require('../../app/static/js/regularizacion.js');
 
 let fallas = 0, hechas = 0;
 function comprobar(titulo, esperado, obtenido) {
@@ -168,6 +168,70 @@ console.log('\nDespués de registrar el ajuste, no se puede volver a pedir');
   comprobar('Defontana tiene 15 hoy', 15, hoyDe(r));
   comprobar('lo que falta ajustar es 0', 0, pendiente(r));
   comprobar('y debería tener 15 hoy, no 17', 15, r.realNow);
+}
+
+console.log('\nContado y Defontana no lo tiene: la entrada es por todo lo contado');
+{
+  /* BRC-003: contó 9 el 21-08-2026 y el producto no tiene un solo documento
+     en el informe ni saldo en el stock valorizado. Antes quedaba como "Sin
+     saldo en Defontana" y no se proponía nada: 24 productos y 163 unidades
+     contadas sin ninguna propuesta. */
+  const articulos = parseArticulos([
+    ['Código Artículo', 'Descripción', 'Bodega', 'Saldo', 'Unidad', 'Valor unidad', 'Total'],
+    ['OTRO', 'Otro producto', 'BODEGA CENTRAL', 5, 'UN', 100, 500],
+    // El informe lista también los que están en cero: por eso faltar significa
+    // que Defontana no tiene el artículo.
+    ['EN-CERO', 'Sin stock', 'BODEGA CENTRAL', 0, 'UN', 0, 0]]);
+  state.stock = parseStock([['Código', 'Nombre', 'Stock físico', 'Contado por', 'Fecha y hora del conteo'],
+                            ['BRC-003', 'Broca', 9, 'Claudio Leyton', '21-08-2026 10:00']]);
+  state.recount = new Map(); state.hechos = new Map(); state.pmpEdit = new Map(); state.movCuando = new Map();
+  state.articulos = articulos;
+  porId.set('optBodega', Object.assign(porId.get('optBodega') || {}, {value: '*'}));
+  porId.set('optAprob', Object.assign(porId.get('optAprob') || {}, {checked: false}));
+
+  const r = compute([{art: 'OTRO', key: state.stock[0].key + 'X', nameKey: '', tipo: 'PARTE DE ENTRADA',
+                      folio: '1', fecha: DIA(2026, 1, 2), kind: 'in', qty: 5, saldo: 5, valor: 500,
+                      costo: 100, orig: '', dest: 'CENTRAL', estado: 'Aprobado', motivo: '', _aj: false}])
+    .rows.find(x => x.code === 'BRC-003');
+  comprobar('Defontana tenía 0 al conteo', 0, r.sysAtCount);
+  comprobar('hay que ingresar los 9 contados', 9, ajusteDelConteo(r));
+  comprobar('y se dice por qué', true,
+            r.obs.some(o => o.includes('Defontana no tiene este producto')));
+
+  // Si el stock valorizado sí lo tiene, el ajuste es la diferencia contra ese
+  // saldo: sin movimientos, lo que Defontana tiene hoy es lo que tenía al
+  // contar. Proponer la entrada entera metería unidades que ya están.
+  state.stock = parseStock([['Código', 'Nombre', 'Stock físico', 'Contado por', 'Fecha y hora del conteo'],
+                            ['OTRO', 'Otro producto', 9, 'Claudio Leyton', '21-08-2026 10:00']]);
+  const conFoto = compute([]).rows.find(x => x.code === 'OTRO');
+  comprobar('Defontana tenía los 5 del stock valorizado', 5, conFoto.sysAtCount);
+  comprobar('así que faltan 4, no 9', 4, ajusteDelConteo(conFoto));
+  comprobar('y se dice de dónde salió ese saldo', true,
+            conFoto.obs.some(o => o.includes('su saldo sale del stock valorizado')));
+
+  // Con documentos en el informe no se usa la foto: el producto se mueve, y
+  // el saldo de hoy no es el que tenía al contar.
+  state.stock = parseStock([['Código', 'Nombre', 'Stock físico', 'Contado por', 'Fecha y hora del conteo'],
+                            ['SIN-SALDO', 'Con documentos sin saldo', 9, 'Claudio Leyton', '21-08-2026 10:00']]);
+  const conDocs = compute([{art: 'SIN-SALDO', key: state.stock[0].key, nameKey: '', tipo: 'PARTE DE ENTRADA',
+                            folio: '2', fecha: DIA(2026, 1, 2), kind: 'in', qty: 3, saldo: null, valor: 0,
+                            costo: 0, orig: '', dest: 'CENTRAL', estado: 'Aprobado', motivo: '', _aj: false}])
+    .rows.find(x => x.code === 'SIN-SALDO');
+  comprobar('con movimientos no se inventa el saldo', null, ajusteDelConteo(conDocs));
+
+  state.stock = parseStock([['Código', 'Nombre', 'Stock físico', 'Contado por', 'Fecha y hora del conteo'],
+                            ['BRC-003', 'Broca', 9, 'Claudio Leyton', '21-08-2026 10:00']]);
+  // Sin stock valorizado cargado no se puede afirmar: se queda como estaba.
+  state.articulos = null;
+  const sinFoto = compute([]).rows.find(x => x.code === 'BRC-003');
+  comprobar('sin el Informe de Inventario no se propone nada', null, ajusteDelConteo(sinFoto));
+
+  // Y con un informe filtrado (sin artículos en cero) tampoco: faltar no dice nada.
+  state.articulos = parseArticulos([
+    ['Código Artículo', 'Descripción', 'Bodega', 'Saldo', 'Unidad', 'Valor unidad', 'Total'],
+    ['OTRO', 'Otro producto', 'BODEGA CENTRAL', 5, 'UN', 100, 500]]);
+  const filtrado = compute([]).rows.find(x => x.code === 'BRC-003');
+  comprobar('con el informe filtrado tampoco', null, ajusteDelConteo(filtrado));
 }
 
 console.log('\nUna fecha de conteo imposible no es un conteo');

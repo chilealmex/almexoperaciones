@@ -773,6 +773,25 @@
       const own = s ? new Set(s.variants.map(norm)) : new Set();
       const alias = [...(s ? s.variants.filter(v => norm(v) !== norm(s.code)) : []), ...[...byArt.keys()].filter(a => !own.has(a) && (s || a !== norm(docs[0].art)))];
       const viaName = docs.some(m => m._byName);
+      // Contado, sin un solo documento en el informe y sin saldo en el stock
+      // valorizado: Defontana no tiene ese producto. Entonces lo contado no es
+      // un "no se sabe" sino una entrada por todo.
+      //
+      // Se exige que el Informe de Inventario liste también los artículos en
+      // cero: si viniera filtrado a lo que tiene stock, faltar no diría nada y
+      // se propondrían entradas que no corresponden. En sus archivos son 24
+      // productos con 163 unidades contadas que no tenían ninguna propuesta.
+      let nuevoEnDefontana = false, saldoDeLaFoto = null;
+      if (counted && sysAtCount == null && !docs.length && invListaLosCeros()){
+        // Sin un solo movimiento en el informe, el saldo del stock valorizado
+        // es también el que Defontana tenía al contar: nada se movió entre
+        // una fecha y otra. Si el producto no está en ese informe —y el
+        // informe lista los artículos en cero—, Defontana no lo tiene.
+        const foto = fotoDeClave(s.key);
+        sysAtCount = foto ? foto.stock : 0;
+        nuevoEnDefontana = !foto;
+        saldoDeLaFoto = foto ? foto.stock : null;
+      }
       const diff = counted && sysAtCount != null ? s.stock - sysAtCount : null;
       // Lo que Defontana debería mostrar hoy: su saldo de hoy más la diferencia
       // que quedó al contar. Da lo mismo que sumarle los movimientos al conteo
@@ -854,6 +873,14 @@
         if (pend != null) st = Math.abs(pend) <= EPS ? 'done' : pend > 0 ? 'up' : 'down';
         if (st === 'done'){ dx.cause = null; dx.obs = dx.obs.filter(x => /^Ajuste de (cantidad|costo) ya hecho/.test(x)); }
       }
+      // Por qué se propone entrar todo lo contado: el producto no existe en
+      // Defontana. Sin decirlo, la entrada aparece sin explicación.
+      if (nuevoEnDefontana) dx.obs.unshift(
+        'Defontana no tiene este producto: no aparece en el informe de documentos ni en el stock ' +
+        'valorizado (que sí lista los artículos en cero). Lo contado entra completo.');
+      else if (saldoDeLaFoto != null) dx.obs.unshift(
+        `Este producto no tiene movimientos en el informe: su saldo sale del stock valorizado, ` +
+        `donde Defontana tiene ${fmt(saldoDeLaFoto)}.`);
       // Un ajuste que deja el saldo bajo cero es imposible: no se puede sacar
       // más de lo que hay. Si sale uno, está mal el dato o está mal la cuenta,
       // y lo que corresponde es decirlo, no proponerlo. Es lo que preguntó
@@ -1179,8 +1206,19 @@
     return {saldo, valor};
   }
 
-  function fotoDe(docs){
-    if (!state.articulos || !state.articulos.length || !docs || !docs.length) return null;
+  // El stock valorizado indexado por clave de producto, para poder preguntarle
+  // por uno que no tiene ningún documento en el informe.
+  function fotoDeClave(clave){
+    if (!state.articulos || !state.articulos.length) return null;
+    armarFoto();
+    return fotoPorKey.get(clave) || null;
+  }
+  // El Informe de Inventario lista también los artículos en cero. Cuando es
+  // así, que un producto NO esté en él significa que Defontana no lo tiene;
+  // en uno filtrado a lo que tiene stock, faltar no dice nada.
+  const invListaLosCeros = () => !!(state.articulos && state.articulos.length && state.articulos.completo);
+
+  function armarFoto(){
     if (!fotoPorKey || fotoPorKey._de !== state.articulos){
       // El mismo producto puede venir en el stock valorizado con varios
       // códigos —0506507001 y 506507001, o 42400-014 Rev.2 / 42400-014Rev.2 /
@@ -1201,6 +1239,11 @@
       }
       fotoPorKey._de = state.articulos;
     }
+  }
+
+  function fotoDe(docs){
+    if (!state.articulos || !state.articulos.length || !docs || !docs.length) return null;
+    armarFoto();
     // El producto puede estar en el informe de documentos con varios códigos
     // —DURALUMINIO-6082 y N-DURALUMINIO-6082 son el mismo— y en el inventario
     // bajo uno solo. Hay que sumar lo que haya de cada uno: mirando sólo el
