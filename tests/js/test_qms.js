@@ -183,6 +183,43 @@ console.log('\nUn lado vacío se dice, no se inventa un cero');
   comprobar('y no muestra un stock de Defontana', false, html.includes('>0<'));
 }
 
+console.log('\nDónde está cada producto: QMS, Defontana, los dos o ninguno');
+{
+  // Lo pedido: nada más que eso. "En ninguno" es el caso raro —está en la
+  // lista del conteo y ningún sistema lo tiene— y por eso se separa.
+  const articulos = R.parseArticulos([
+    ['Código Artículo', 'Descripción', 'Bodega', 'Saldo', 'Unidad', 'Valor unidad', 'Total'],
+    ['SOLO-DEF', 'Sólo en Defontana', 'BODEGA CENTRAL', 2, 'UN', 100, 200],
+    ['EN-CERO', 'Sin stock', 'BODEGA CENTRAL', 0, 'UN', 0, 0]]);
+  cruce({
+    qms: [{code: 'EN-LOS-DOS', stock: 9, um: 'UN', unit: 100},
+          {code: 'SOLO-QMS', stock: 3, um: 'UN', unit: 100}],
+    docs: [{art: 'EN-LOS-DOS', qty: 9, valor: 900, valorInv: 900, saldo: 9, um: 'UN'}],
+    conteo: [{code: 'EN-LOS-DOS', stock: 9}, {code: 'SOLO-QMS', stock: 3},
+             {code: 'SOLO-DEF', stock: 2}, {code: 'EN-NINGUNO', stock: 1}],
+    articulos,
+  });
+  const donde = c => R.regExport(state.rows.find(r => r.code === c))['Está en'];
+  comprobar('el que está en los dos', 'QMS y Defontana', donde('EN-LOS-DOS'));
+  comprobar('el que sólo tiene QMS', 'Sólo QMS', donde('SOLO-QMS'));
+  comprobar('el que sólo tiene Defontana', 'Sólo Defontana', donde('SOLO-DEF'));
+  comprobar('y el raro, que no está en ninguno', 'En ninguno', donde('EN-NINGUNO'));
+  comprobar('en la tabla se ve igual', true,
+            R.regRow(state.rows.find(r => r.code === 'EN-NINGUNO')).includes('En ninguno'));
+}
+
+console.log('\nSin archivo de QMS no se afirma dónde está');
+{
+  cruce({docs: [{art: 'A-1', qty: 9, valor: 900, valorInv: 900, saldo: 9, um: 'UN'}],
+         conteo: [{code: 'A-1', stock: 9}]});
+  comprobar('la columna queda vacía', '', R.regExport(state.rows.find(r => r.code === 'A-1'))['Está en']);
+  // Y en la tabla tampoco se inventa: sin el archivo no hay nada que decir
+  // sobre QMS, y decir "Sólo Defontana" sería afirmarlo sin haberlo mirado.
+  const fila = R.regRow(state.rows.find(r => r.code === 'A-1'));
+  comprobar('y en la tabla no aparece ninguna etiqueta', false,
+            ['QMS y Defontana', 'Sólo QMS', 'Sólo Defontana', 'En ninguno'].some(x => fila.includes(x)));
+}
+
 console.log('\nEl Excel de Productos también trae el cruce con QMS');
 {
   // Es donde ella mira el detalle producto por producto. Las dos unidades van
