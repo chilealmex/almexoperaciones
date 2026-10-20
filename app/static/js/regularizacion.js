@@ -2051,6 +2051,7 @@
     ['nopmp', 'Falta PMP', r => (r.st === 'up' || r.st === 'down') && !(r.pmp > 0), 'var(--warn)'],
     ['nodata', 'Sin saldo en Defontana', r => r.st === 'nodata', 'var(--warn)'],
     ['nocount', 'Pendiente de revisión', r => r.st === 'nocount', 'var(--warn)'],
+    ['sinsistema', 'En ninguno de los dos sistemas', r => dondeEsta(r) === 'ninguno', 'var(--out)'],
     ['nofile', 'No están en el conteo', r => r.st === 'nofile', 'var(--warn)'],
     ['alias', 'Código escrito distinto', r => r.alias.length > 0 || r.viaName || r.nCounted > 1, 'var(--accent)'],
     ['cost', 'Revisar costo ($0)', r => !!(r.cost && r.cost.need), 'var(--warn)'],
@@ -2134,7 +2135,7 @@
     for (const r of state.rows){
       // Estar en el conteo no es estar en Defontana: un producto contado que
       // Defontana no tiene no aparece en ningún documento ni en su stock.
-      if (!((r.docs && r.docs.length) || art.has(r.key))) continue;
+      if (!estaEnDefontana(r)) continue;
       // La unidad del Informe de Inventario manda sobre la de los documentos:
       // es la que Defontana tiene hoy, y la de un documento viejo puede ser
       // la que el artículo tenía antes de que se la cambiaran.
@@ -2164,6 +2165,26 @@
     state.qmsRows = filas;
     state.qmsPorClave = new Map(filas.map(f => [f.key, f]));
   }
+
+  // Estar en el conteo no es estar en Defontana: el conteo es una lista de lo
+  // que se fue a contar, y un producto que Defontana ya no tiene no aparece
+  // en ningún documento suyo ni en su stock valorizado.
+  const estaEnDefontana = r => !!((r.docs && r.docs.length) || fotoDeClave(r.key));
+  // Dónde existe el producto, y nada más que eso. "En ninguno" es el caso
+  // raro —está en la lista del conteo pero ningún sistema lo tiene— y por eso
+  // se marca distinto: o está en uno, o está en el otro, o está en los dos.
+  const DONDE = {
+    ambos: ['a-ok', 'QMS y Defontana'],
+    qms: ['a-warn', 'Sólo QMS'],
+    defontana: ['a-warn', 'Sólo Defontana'],
+    ninguno: ['a-down', 'En ninguno'],
+  };
+  const dondeEsta = r => {
+    if (!state.qms || !state.qms.length) return null;   // sin el archivo no se puede decir
+    const x = (state.qmsPorClave || new Map()).get(r.key);
+    const enQms = !!(x && x.q), enDef = estaEnDefontana(r);
+    return enQms && enDef ? 'ambos' : enQms ? 'qms' : enDef ? 'defontana' : 'ninguno';
+  };
 
   const QMS_FILTERS = [
     ['all', 'Todos', r => true, null],
@@ -2252,6 +2273,7 @@
     ['code', 'Producto', '', r => r.code],
     ['linea', 'Línea', '', r => r.linea || null],
     ['um', 'Unidad', '', r => r.um || null],
+    ['donde', 'Está en', '', r => dondeEsta(r)],
     ['contado', 'Contado', 'num', r => r.s ? r.s.stock : null],
     ['movs', 'Movimientos desde el conteo', 'num', r => r.counted ? r.ins - r.outs : null],
     ['real', alCorte('Debería tener Defontana hoy'), 'num', r => r.realNow],
@@ -2334,6 +2356,7 @@
       <td><div class="code">${esc(r.code)}</div><div class="pname">${esc(r.name)}</div>${aliasNote(r)}</td>
       ${lineaCell(r.linea)}
       <td class="linea um">${r.um ? esc(r.um) : '<span class="mut">—</span>'}${r.umInfo ? '<div class="small alias">contado en ' + esc(r.umInfo.de) + '</div>' : ''}</td>
+      <td>${(() => { const d = dondeEsta(r); return d ? `<span class="pill ${DONDE[d][0]}">${DONDE[d][1]}</span>` : '<span class="mut">—</span>'; })()}</td>
       <td class="num">${r.counted ? fmt(r.s.stock) + '<div class="small">' + fmtDate(r.s.fecha) + (r.s.recontado ? ' · recuento' : '') + '</div>' + (r.umInfo ? '<div class="small alias">en ' + esc(r.umInfo.de) + ' · Defontana en ' + esc(r.umInfo.a) + (r.umInfo.f ? ' (convertido)' : '') + '</div>' : '') : '<span class="mut">—</span>'}${r.s && r.s.recontado && r.s.original && r.s.original.stock != null ? '<div class="small">antes: ' + fmt(r.s.original.stock) + ' el ' + fmtDate(r.s.original.fecha) + '</div>' : ''}${r.s ? `<input class="recount" type="number" step="any" min="0" inputmode="decimal" data-key="${esc(r.key)}" value="${r.s.recontado ? r.s.stock : ''}" placeholder="Recuento" title="Recuento de hoy" aria-label="Recuento de hoy de ${esc(r.code)}">` : ''}</td>
       <td class="num">${r.counted ? (r.ins || r.outs ? (r.ins ? '<span class="plus">+' + fmt(r.ins) + '</span> ' : '') + (r.outs ? '<span class="minus">−' + fmt(r.outs) + '</span>' : '') : '<span class="mut">sin movimientos</span>') + (r.ajDocs.length ? '<div class="small">ajuste ya hecho: ' + sgn(r.aj) + '</div>' : '') : '<span class="mut">—</span>'}</td>
       <td class="num"><b>${fmt(r.realNow)}</b></td>
@@ -2923,6 +2946,7 @@
   const columnasQms = r => {
     const x = (state.qmsPorClave || new Map()).get(r.key), q = x && x.q;
     return {
+      'Está en': !state.qms ? '' : DONDE[dondeEsta(r)][1],
       'Código QMS': q ? q.code : '',
       'Unidad QMS': q ? q.um : '',
       'Unidad Defontana (Informe de Inventario)': r.umInv || '',
