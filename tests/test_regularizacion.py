@@ -193,6 +193,38 @@ def test_lo_puesto_a_mano_antes_o_despues_lo_ven_todos(client, db, empresa, usua
     assert guardado["movCuando"] == {"ENVIO A PRODUCCION|74|20260818": "despues"}
 
 
+def test_el_stock_de_qms_se_guarda_como_los_demas_archivos(client, db, empresa, usuario_admin):
+    """Es el otro sistema, y se sube igual que los informes de Defontana: sin
+    guardarse habría que volver a subirlo en cada visita, y los demás no lo
+    verían nunca."""
+    login(client, "admin@test.cl")
+    respuesta = client.post(
+        "/inventario/regularizacion/guardado/qms",
+        data={"archivo": (io.BytesIO(b"stock de qms"), "Distribucion_Valor_Stock.csv")},
+        content_type="multipart/form-data",
+    )
+
+    assert respuesta.status_code == 200
+    config = _config_de_la_pagina(client.get("/inventario/regularizacion").get_data(as_text=True))
+    assert config["guardados"]["qms"]["nombre"] == "Distribucion_Valor_Stock.csv"
+    assert client.get("/inventario/regularizacion/guardado/qms").data == b"stock de qms"
+
+    assert client.post("/inventario/regularizacion/guardado/qms", data={"borrar": "1"}).status_code == 200
+    assert client.get("/inventario/regularizacion/guardado/qms").status_code == 404
+
+
+def test_la_pantalla_tiene_la_vista_de_cruce_con_qms(client, db, empresa, usuario_admin):
+    login(client, "admin@test.cl")
+
+    texto = client.get("/inventario/regularizacion").get_data(as_text=True)
+
+    assert 'data-view="qms"' in texto
+    assert "Cruce con QMS" in texto
+    assert 'id="fileQms"' in texto
+    # Y se dice que no toca el ajuste: es una mirada, no un cálculo.
+    assert "No entra en el cálculo del ajuste" in texto
+
+
 def test_lo_puesto_a_mano_viaja_en_el_estado_que_se_guarda(client, db, empresa, usuario_admin):
     """El cálculo corre en el navegador, así que esto se mira en su código: que
     lo elegido se mande al guardar y se lea al volver. Sin las dos mitades, la

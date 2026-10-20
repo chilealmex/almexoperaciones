@@ -130,9 +130,9 @@
       // aparecían como "con unidades y sin valor" y el plan proponía cargarles
       // un costo que ya tienen.
       ? {art:t.col('Código Artículo'), desc:t.col('Descripción'), bod:t.col('Bodega'),
-         stock:t.col('Saldo'), costo:t.col('Valor unidad'),
+         stock:t.col('Saldo'), costo:t.col('Valor unidad'), um:t.col('Unidad', 'U. Medida', 'Unidad Medida'),
          total:t.col('Total', 'Valorización', 'Valorizado', 'Valor total')}
-      : {art:t.col('Artículo'), desc:t.col('Descripción'), bod:-1,
+      : {art:t.col('Artículo'), desc:t.col('Descripción'), bod:-1, um:t.col('Unidad', 'U. Medida'),
          stock:t.col('Stock Disponible'), costo:t.col('Costo Vigente'), total:-1};
     if (c.costo < 0) throw new Error(inv ? 'No encontré la columna “Valor unidad”.' : 'No encontré la columna “Costo Vigente”.');
     const out = [];
@@ -149,6 +149,7 @@
       const unit = total != null && stock > 0 ? total / stock : costo;
       out.push({art, key:keyOf(art), name:c.desc >= 0 ? String(r[c.desc] ?? '').trim() : '',
         bodega: c.bod >= 0 ? String(r[c.bod] ?? '').trim() : '',
+        um: c.um >= 0 ? String(r[c.um] ?? '').trim() : '',
         stock: stock ?? 0, costo: unit ?? 0,
         valor: total != null ? total : (stock ?? 0) * (costo ?? 0)});
     }
@@ -235,6 +236,36 @@
   function umFactor(de, a){
     const x = UM_BASE[de], y = UM_BASE[a];
     return x && y && x[0] === y[0] ? x[1] / y[1] : null;
+  }
+
+  // ---------- Stock de QMS ----------
+  //
+  // QMS es el otro sistema. Acá no entra en ningún cálculo: es para mirar lado
+  // a lado lo que dice cada uno —código, unidad, cantidad y valor unitario— y
+  // ver dónde no coinciden, o dónde un producto existe en uno y no en el otro.
+  // Lo que se ajusta en Defontana se sigue decidiendo con el conteo físico.
+  function parseQms(rows){
+    const t = readTable(rows, ['CODIGO UNICO', 'STOCK']) || readTable(rows, ['CODIGO', 'STOCK']);
+    if (!t) throw new Error('No encontré las columnas “Código Único” y “Stock”. ¿Es la Distribución de Valor de Stock de QMS?');
+    const c = {code:t.col('Código Único', 'Codigo Unico', 'Código', 'Codigo'), desc:t.col('Descripción', 'Descripcion', 'Nombre'),
+      stock:t.col('Stock', 'Cantidad', 'Saldo'), um:t.col('Unidad', 'Unidad de medida', 'U. Medida', 'UM'),
+      unit:t.col('Valor unitario', 'Valor Unitario', 'Costo unitario'),
+      total:t.col('Valor Total Stock CLP', 'Valor total', 'Valorizado'),
+      linea:t.col('Linea Negocio', 'Línea Negocio', 'Línea de negocio'), cat:t.col('Categoria', 'Categoría')};
+    const out = [];
+    for (const r of t.rows){
+      const code = String(r[c.code] ?? '').trim(); if (!code) continue;
+      const stock = num(r[c.stock]), total = c.total >= 0 ? num(r[c.total]) : null, unit = c.unit >= 0 ? num(r[c.unit]) : null;
+      out.push({code, key:keyOf(code), name:c.desc >= 0 ? String(r[c.desc] ?? '').trim() : '',
+        stock: stock ?? 0, um: c.um >= 0 ? String(r[c.um] ?? '').trim() : '',
+        // El valor unitario viene en el archivo; si faltara, se saca del total.
+        unit: unit != null ? unit : (total != null && stock > 0 ? total / stock : null),
+        total: total != null ? total : (stock ?? 0) * (unit ?? 0),
+        linea: c.linea >= 0 ? String(r[c.linea] ?? '').trim() : '',
+        categoria: c.cat >= 0 ? String(r[c.cat] ?? '').trim() : ''});
+    }
+    if (!out.length) throw new Error('El archivo no trae filas con datos.');
+    return out;
   }
 
   function filasDeHoja(wb, nombre){
@@ -387,8 +418,8 @@
 
 
   // ---------- Estado ----------
-  const state = {stock:[], mov:[], view:'reg', filter:{reg:'all', zero:'all', check:'all'}, mov2:null, ajustes:null, articulos:null, hechos:new Map(), ajSi:new Set(), ajNo:new Set(), docGroupsMain:[], checkRows:[], docGroups:[],
-    sort:{reg:{k:'code', d:1}, zero:{k:'fecha', d:1}, check:{k:'code', d:1}}, open:new Set(), pmpEdit:new Map(), recount:leerRecuentos(), rows:[], zero:[],
+  const state = {stock:[], mov:[], view:'reg', filter:{reg:'all', zero:'all', check:'all', qms:'dif'}, qms:null, qmsRows:[], mov2:null, ajustes:null, articulos:null, hechos:new Map(), ajSi:new Set(), ajNo:new Set(), docGroupsMain:[], checkRows:[], docGroups:[],
+    sort:{reg:{k:'code', d:1}, zero:{k:'fecha', d:1}, check:{k:'code', d:1}, qms:{k:'code', d:1}}, open:new Set(), pmpEdit:new Map(), recount:leerRecuentos(), rows:[], zero:[],
     // Documentos puestos a mano antes o después del conteo (clave del
     // documento -> 'antes' | 'despues'). La fecha del documento es la del
     // papel, no la hora en que pasó: un envío a producción fechado el día del
@@ -1956,6 +1987,131 @@
     ['review', 'Revisar si hace falta', r => r.ck === 'review', 'var(--warn)'],
     ['other', 'Ajustados sin conteo', r => r.ck === 'other', 'var(--warn)']
   ];
+  // ---------- Cruce con QMS ----------
+  //
+  // A modo de mirada, no de cálculo: lo que se ajusta en Defontana se sigue
+  // decidiendo con el conteo físico. Acá se ponen los dos sistemas lado a lado
+  // —código, unidad, cantidad y valor unitario— para ver dónde no coinciden y
+  // qué existe en uno y no en el otro.
+  const QMS = {
+    falta:['a-down', 'No está en Defontana', 'bad'],
+    sobra:['a-down', 'No está en QMS', 'bad'],
+    unidad:['a-warn', 'Unidad distinta', 'warn'],
+    cantidad:['a-warn', 'Cantidad distinta', 'warn'],
+    valor:['a-warn', 'Valor unitario distinto', 'warn'],
+    igual:['a-ok', 'Coinciden', 'good'],
+  };
+  // Dos valores unitarios no son "distintos" por unos pesos de redondeo: cada
+  // sistema calcula el suyo. Se marca lo que se nota.
+  const VALOR_TOLERANCIA = 0.01;   // 1%
+
+  function cruceQms(q, d){
+    if (!d) return 'falta';
+    if (!q) return 'sobra';
+    const gq = umGrupo(q.um), gd = umGrupo(d.um);
+    const mismaUm = !q.um || !d.um || gq === gd || umMismoConteo(gq, gd);
+    if (!mismaUm) return 'unidad';
+    if (Math.abs((q.stock || 0) - (d.stock || 0)) > 1e-6) return 'cantidad';
+    const vq = q.unit, vd = d.unit;
+    if (vq != null && vd != null && Math.abs(vq - vd) > Math.max(1, VALOR_TOLERANCIA * Math.max(Math.abs(vq), Math.abs(vd)))) return 'valor';
+    return 'igual';
+  }
+
+  function computeQms(){
+    state.qmsRows = [];
+    if (!state.qms || !state.qms.length) return;
+    // El Informe de Inventario trae una fila por bodega: el stock del producto
+    // es la suma, no la de la primera bodega que aparezca.
+    const art = new Map();
+    for (const a of (state.articulos || [])){
+      const x = art.get(a.key);
+      if (x){ x.stock += a.stock || 0; x.valor += a.valor || 0; x.um = x.um || a.um; }
+      else art.set(a.key, {code:a.art, name:a.name, um:a.um, stock:a.stock || 0, valor:a.valor || 0});
+    }
+    const def = new Map();
+    for (const r of state.rows){
+      // Estar en el conteo no es estar en Defontana: un producto contado que
+      // Defontana no tiene no aparece en ningún documento ni en su stock.
+      if (!((r.docs && r.docs.length) || art.has(r.key))) continue;
+      def.set(r.key, {code:r.code, name:r.name, um:r.um, stock:hoyDe(r), unit:r.pmp});
+    }
+    for (const [k, a] of art) if (!def.has(k)) def.set(k, {code:a.code, name:a.name, um:a.um, stock:a.stock,
+                                                          unit: a.stock > EPS ? a.valor / a.stock : null});
+    // El mismo código puede venir en varias líneas o categorías de QMS.
+    const qms = new Map();
+    for (const q of state.qms){
+      const x = qms.get(q.key);
+      if (x){ x.stock += q.stock || 0; x.total += q.total || 0; x.um = x.um || q.um; x.filas++; }
+      else qms.set(q.key, {...q, filas: 1});
+    }
+    for (const [k, q] of qms) if (q.filas > 1 && q.stock > EPS) q.unit = q.total / q.stock;
+
+    const filas = [];
+    for (const k of new Set([...qms.keys(), ...def.keys()])){
+      const q = qms.get(k) || null, d = def.get(k) || null;
+      const st = cruceQms(q, d);
+      filas.push({key:k, q, d, st,
+        code: q ? q.code : d.code, name: (q && q.name) || (d && d.name) || '',
+        linea: (q && q.linea) || (d && d.linea) || '',
+        difStock: q && d ? (q.stock || 0) - (d.stock || 0) : null,
+        difUnit: q && d && q.unit != null && d.unit != null ? q.unit - d.unit : null});
+    }
+    state.qmsRows = filas;
+  }
+
+  const QMS_FILTERS = [
+    ['all', 'Todos', r => true, null],
+    ['dif', 'No coinciden', r => r.st !== 'igual', 'var(--out)'],
+    ['falta', 'Sólo en QMS', r => r.st === 'falta', 'var(--out)'],
+    ['sobra', 'Sólo en Defontana', r => r.st === 'sobra', 'var(--out)'],
+    ['unidad', 'Unidad distinta', r => r.st === 'unidad', 'var(--warn)'],
+    ['cantidad', 'Cantidad distinta', r => r.st === 'cantidad', 'var(--warn)'],
+    ['valor', 'Valor unitario distinto', r => r.st === 'valor', 'var(--warn)'],
+    ['igual', 'Coinciden', r => r.st === 'igual', 'var(--in)'],
+  ];
+  const QMS_COLS = [
+    ['code', 'Producto', '', r => r.code],
+    ['linea', 'Línea', '', r => r.linea || null],
+    ['codqms', 'Código QMS', '', r => r.q ? r.q.code : null],
+    ['coddef', 'Código Defontana', '', r => r.d ? r.d.code : null],
+    ['umqms', 'Unidad QMS', '', r => r.q ? r.q.um : null],
+    ['umdef', 'Unidad Defontana', '', r => r.d ? r.d.um : null],
+    ['stqms', 'Stock QMS', 'num', r => r.q ? r.q.stock : null],
+    ['stdef', 'Stock Defontana', 'num', r => r.d ? r.d.stock : null],
+    ['difst', 'Diferencia', 'num', r => r.difStock],
+    ['vqms', 'Valor unitario QMS', 'num', r => r.q ? r.q.unit : null],
+    ['vdef', 'Valor unitario Defontana', 'num', r => r.d ? r.d.unit : null],
+    ['st', 'Cruce', '', r => r.st],
+  ];
+  const qmsRow = r => {
+    const [cls, txt] = QMS[r.st];
+    const mismaUm = r.q && r.d && r.q.um && r.d.um && umGrupo(r.q.um) !== umGrupo(r.d.um);
+    return `<tr>
+      <td><div class="code">${esc(r.code)}</div><div class="pname">${esc(r.name)}</div></td>
+      ${lineaCell(r.linea)}
+      <td>${r.q ? `<span class="code">${esc(r.q.code)}</span>` : '<span class="mut">no está</span>'}</td>
+      <td>${r.d ? `<span class="code">${esc(r.d.code)}</span>` : '<span class="mut">no está</span>'}</td>
+      <td${mismaUm ? ' class="difum"' : ''}>${r.q && r.q.um ? esc(r.q.um) : '<span class="mut">—</span>'}</td>
+      <td${mismaUm ? ' class="difum"' : ''}>${r.d && r.d.um ? esc(r.d.um) : '<span class="mut">—</span>'}</td>
+      <td class="num">${r.q ? fmt(r.q.stock) : '<span class="mut">—</span>'}</td>
+      <td class="num">${r.d ? fmt(r.d.stock) : '<span class="mut">—</span>'}</td>
+      <td class="num diff">${r.difStock == null ? '<span class="mut">—</span>' : sgn(r.difStock)}</td>
+      <td class="num">${r.q && r.q.unit != null ? cuTxt(r.q.unit) : '<span class="mut">—</span>'}</td>
+      <td class="num">${r.d && r.d.unit != null ? cuTxt(r.d.unit) : '<span class="mut">—</span>'}</td>
+      <td><span class="pill ${cls}">${txt}</span></td></tr>`;
+  };
+  const qmsExport = r => ({
+    'Código': r.code, 'Nombre': r.name, 'Línea': r.linea || '',
+    'Código QMS': r.q ? r.q.code : '', 'Código Defontana': r.d ? r.d.code : '',
+    'Unidad QMS': r.q ? r.q.um : '', 'Unidad Defontana': r.d ? r.d.um : '',
+    'Stock QMS': r.q ? r.q.stock : '', 'Stock Defontana': r.d ? r.d.stock : '',
+    'Diferencia de stock': r.difStock == null ? '' : r.difStock,
+    'Valor unitario QMS': r.q && r.q.unit != null ? Math.round(r.q.unit * 100) / 100 : '',
+    'Valor unitario Defontana': r.d && r.d.unit != null ? Math.round(r.d.unit * 100) / 100 : '',
+    'Diferencia de valor unitario': r.difUnit == null ? '' : Math.round(r.difUnit * 100) / 100,
+    'Categoría QMS': r.q ? r.q.categoria : '', 'Cruce': QMS[r.st][1],
+  });
+
   const CHECK_COLS = [
     ['code', 'Producto', '', r => r.code],
     ['linea', 'Línea', '', r => r.linea || null],
@@ -2537,7 +2693,8 @@
     const base = compute(mov);
     state.rows = base.rows; state.zero = base.zero; state.orphan = base.orphan;
     computeCheck();
-    const reg = state.view === 'reg', chk = state.view === 'check';
+    computeQms();
+    const reg = state.view === 'reg', chk = state.view === 'check', qms = state.view === 'qms';
     document.querySelectorAll('.view').forEach(b => b.setAttribute('aria-selected', b.dataset.view === state.view));
     $('checkPanel').hidden = !chk;
     renderStepsPanel(reg);
@@ -2552,7 +2709,9 @@
     if (dash){ renderDash(); $('foot').innerHTML = ''; return; }
     if (plan){ renderPlan(); $('foot').innerHTML = ''; return; }
     if (chk) renderAjDocs('ajDocs', state.mov2 ? state.docGroups : [], false);
-    const all = reg ? state.rows : chk ? state.checkRows : state.zero, F = reg ? REG_FILTERS : chk ? CHECK_FILTERS : ZERO_FILTERS, cols = reg ? REG_COLS : chk ? CHECK_COLS : ZERO_COLS;
+    const all = reg ? state.rows : chk ? state.checkRows : qms ? state.qmsRows : state.zero,
+      F = reg ? REG_FILTERS : chk ? CHECK_FILTERS : qms ? QMS_FILTERS : ZERO_FILTERS,
+      cols = reg ? REG_COLS : chk ? CHECK_COLS : qms ? QMS_COLS : ZERO_COLS;
 
     // Resumen
     if (chk){
@@ -2567,6 +2726,14 @@
         <button class="rx-card bad" type="button" data-go="double"><span class="lbl">Posible doble ajuste</span><span class="big">${fmt(n('double'))}</span><span class="note">contar de nuevo para confirmar</span></button>
         <div class="rx-card"><span class="lbl">Ajustes en Defontana</span><span class="big">${money(ajDocs.reduce((a, g) => a + g.valor, 0))}</span><span class="note">${fmt(ajDocs.length)} ${ajDocs.length === 1 ? 'documento' : 'documentos'}</span></div>`;
       }
+    } else if (qms){
+      const n = k => all.filter(r => r.st === k).length;
+      $('summary').innerHTML = `
+        <div class="rx-card"><span class="lbl">Productos cruzados</span><span class="big">${fmt(all.length)}</span><span class="note">${fmt(all.filter(r => r.q && r.d).length)} están en los dos sistemas</span></div>
+        <button class="rx-card bad" type="button" data-go="falta"><span class="lbl">Sólo en QMS</span><span class="big">${fmt(n('falta'))}</span><span class="note">Defontana no los tiene</span></button>
+        <button class="rx-card bad" type="button" data-go="sobra"><span class="lbl">Sólo en Defontana</span><span class="big">${fmt(n('sobra'))}</span><span class="note">QMS no los tiene</span></button>
+        <button class="rx-card down" type="button" data-go="unidad"><span class="lbl">Unidad distinta</span><span class="big">${fmt(n('unidad'))}</span><span class="note">cada sistema lo mide de otra forma</span></button>
+        <button class="rx-card down" type="button" data-go="cantidad"><span class="lbl">Cantidad distinta</span><span class="big">${fmt(n('cantidad'))}</span><span class="note">${fmt(n('valor'))} con otro valor unitario</span></button>`;
     } else if (reg){
       const bad = all.filter(r => r.st === 'up' || r.st === 'down' || r.st === 'check'), up = bad.filter(r => r.st === 'up'), down = bad.filter(r => r.st === 'down'), chk = bad.filter(r => r.st === 'check');
       const sum = L => L.reduce((a, r) => a + (r.valor || 0), 0);
@@ -2611,21 +2778,28 @@
     }
     const q = strip($('optSearch').value);
     const zer = state.view === 'zero';
+    if (qms) state.open.clear();
     const lin = $('optLinea').value;
     const rows = sorted(all.filter(r => f(r) && (!lin || (r.linea || '') === lin) && (!q || strip(r.code).includes(q) || strip(r.name).includes(q) || (zer && strip(r.m.tipo + ' ' + r.m.ref + ' ' + r.m.folio).includes(q)))), cols);
     state.visible = rows;
     const tb = $('tbody');
-    if (!chk && !state.mov.length){ tb.innerHTML = `<tr><td colspan="${cols.length}" class="empty">Sube arriba el Informe de Documentos de Defontana (archivo 2) para cruzarlo con el conteo.</td></tr>`; }
+    if (qms && !state.qms){ tb.innerHTML = `<tr><td colspan="${cols.length}" class="empty">Sube arriba el archivo de QMS (Distribución de Valor de Stock) para verlo lado a lado con Defontana. No entra en ningún cálculo: es sólo para comparar.</td></tr>`; }
+    else if (!chk && !qms && !state.mov.length){ tb.innerHTML = `<tr><td colspan="${cols.length}" class="empty">Sube arriba el Informe de Documentos de Defontana (archivo 2) para cruzarlo con el conteo.</td></tr>`; }
     else if (chk && !state.mov2){ tb.innerHTML = `<tr><td colspan="${cols.length}" class="empty">Sube arriba el Informe de Documentos de Defontana descargado de nuevo, ya con los ajustes hechos. El programa buscará los documentos de ajuste y revisará producto por producto si quedó cuadrado.</td></tr>`; }
     else if (!rows.length){ tb.innerHTML = `<tr><td colspan="${cols.length}" class="empty">No hay productos en esta vista.</td></tr>`; }
     else {
       const parts = [];
-      for (const r of rows){ parts.push(reg ? regRow(r) : chk ? checkRow(r) : zeroRow(r)); if (!zer && state.open.has(r.key)) parts.push(detail(r)); }
+      for (const r of rows){
+        parts.push(reg ? regRow(r) : chk ? checkRow(r) : qms ? qmsRow(r) : zeroRow(r));
+        if (!zer && !qms && state.open.has(r.key)) parts.push(detail(r));
+      }
       tb.innerHTML = parts.join('');
     }
 
     $('foot').innerHTML = chk
       ? '<b>Cómo se verifica.</b> “Debería tener Defontana” = Contado + ingresos − egresos registrados después del conteo, sin contar los documentos de ajuste. “Tiene Defontana” es el saldo de Defontana al conteo más todos los documentos posteriores, incluidos los ajustes (se calcula con los documentos para no depender del orden de las filas; si la última fila del informe muestra otro saldo, se avisa). Si son iguales, quedó bien. “Posible doble ajuste” significa que cuadra en el cálculo, pero la diferencia del conteo calzaba con un documento registrado después del conteo: si esa mercadería ya había salido o entrado al contar, el ajuste la contó dos veces. Solo se listan los productos que estaban descuadrados o que tuvieron ajuste.'
+      : qms
+      ? '<b>Qué muestra.</b> El stock de QMS lado a lado con el de Defontana, sólo para mirar: no entra en el cálculo del ajuste, que se sigue decidiendo con el conteo físico. Los códigos se cruzan igual que en el resto del módulo —sin mayúsculas, tildes, espacios, puntos, guiones ni ceros a la izquierda— y respetando las parejas confirmadas en “Unificar códigos”. El stock de Defontana es el de todas las bodegas y su valor unitario es el PMP; los de QMS salen del archivo. Se marca “unidad distinta” cuando las dos unidades no son la misma ni equivalentes (UN y UNIDAD son la misma; UN y KG no). El valor unitario se da por igual si no se aleja más de 1%: cada sistema lo calcula por su cuenta y unos pesos de redondeo no son una diferencia.'
       : reg
       ? '<b>Cómo se calcula.</b> “Debería tener Defontana hoy” = lo contado + las entradas − las salidas registradas después del conteo: es lo que tendría Defontana si el ajuste se hubiera hecho al contar. “Tiene Defontana hoy” es el saldo con todos los documentos del informe (debajo, el saldo que tenía al momento del conteo). “Ajuste a hacer hoy” = Debería tener − Tiene: si es positivo, Parte de Entrada; si es negativo, Parte de Salida. El saldo de Defontana es el del producto en todas las bodegas. El PMP es Valor Inventario / Saldo Inventario del último documento con saldo; puedes corregirlo en la tabla. Los códigos se cruzan sin considerar mayúsculas, tildes, espacios, puntos, comas, guiones, guiones bajos ni ceros a la izquierda; si un artículo de Defontana no cruza por código, se cruza por nombre. Haz clic en un producto para ver sus documentos.'
       : '<b>Cómo se calcula.</b> Son los documentos cuyo “Valor Movimiento” es $0. El valor que debió tener = cantidad × PMP del producto antes del documento (si no hay, el primero que aparece después). Un egreso a $0 suele ocurrir cuando el producto no tenía saldo o su PMP era $0.';
@@ -2664,7 +2838,8 @@
     'Documentos de ajuste': r.ajDocs.map(m => m.tipo + ' #' + m.folio).join(', '),
     'Debería tener Defontana': r.expected ?? '', 'Tiene Defontana': r.sysCalc ?? r.sysNow ?? '', 'Saldo última fila del informe': r.sysNow ?? '', 'Diferencia que queda': r.gap ?? ''
   });
-  const exportRows = () => (state.visible || []).map(state.view === 'reg' ? regExport : state.view === 'check' ? checkExport : zeroExport);
+  const exportRows = () => (state.visible || []).map(
+    state.view === 'reg' ? regExport : state.view === 'check' ? checkExport : state.view === 'qms' ? qmsExport : zeroExport);
 
   $('btnXlsx').addEventListener('click', () => {
     const rows = exportRows(); if (!rows.length) return;
@@ -2704,6 +2879,7 @@
         if (key === 'mov2'){ if (!state.mov || !state.mov.length) { state.mov = data; fillBodegas(); } }
         render();
         if (key === 'ajustes') $('btnClearAjustes').hidden = false;
+        if (key === 'qms') $('btnClearQms').hidden = false;
         if (key === 'articulos'){
           $('btnClearArticulos').hidden = false;
           // La hora es lo que distingue una foto de otra: sin ella no se sabe
@@ -2711,7 +2887,7 @@
           st.textContent = file.name + ' · ' + fmt(data.length) + ' artículos con stock y costo · ' +
             (data.fecha ? 'sacado de Defontana el ' + data.fecha : 'sin fecha de generación en el archivo');
         }
-        const clave = {stock:'conteo', mov:'informe', mov2:'informe_ajustes', ajustes:'ajustes', articulos:'articulos'}[key];
+        const clave = {stock:'conteo', mov:'informe', mov2:'informe_ajustes', ajustes:'ajustes', articulos:'articulos', qms:'qms'}[key];
         if (clave){ avisoGuardado(st, guardarArchivo(clave, file)); if (key === 'mov2') guardarEstado(); }
       }).catch(e => { drop.classList.remove('ok'); drop.classList.add('err'); st.textContent = e.message || 'No se pudo leer el archivo.'; });
     };
@@ -2725,6 +2901,14 @@
   setupLoader('fileMov', 'dropMov', 'stMov', parseMov, 'mov', 'líneas de documentos');
   setupLoader('fileMov2', 'dropMov2', 'stMov2', parseMov, 'mov2', 'líneas de documentos');
   const cargarAjustes = setupLoader('fileAjustes', 'dropAjustes', 'stAjustes', parseMov, 'ajustes', 'líneas de ajuste (se toman como regularización ya hecha)');
+  const SIN_QMS = 'Distribución de Valor de Stock de QMS: se muestra al lado de Defontana para comparar. No entra en el cálculo del ajuste';
+  setupLoader('fileQms', 'dropQms', 'stQms', parseQms, 'qms', 'productos de QMS');
+  $('btnClearQms').addEventListener('click', () => {
+    state.qms = null; $('btnClearQms').hidden = true; $('dropQms').classList.remove('ok');
+    $('stQms').textContent = SIN_QMS;
+    if (CFG && CFG.guardar){ const fd = new FormData(); fd.append('borrar', '1'); fetch(urlDe('qms'), {method:'POST', body:fd, headers:{'X-CSRFToken': CFG.csrf}, credentials:'same-origin'}).catch(() => {}); }
+    render();
+  });
   const SIN_ARTICULOS = 'Informe de Inventario de Defontana: el saldo y el valor que tiene ahora. Manda sobre lo que se arrastra de los movimientos';
   setupLoader('fileArticulos', 'dropArticulos', 'stArticulos', parseArticulos, 'articulos', 'artículos con saldo y valor');
   $('btnClearArticulos').addEventListener('click', () => {
@@ -2822,7 +3006,16 @@
         ['Para qué sirve', 'El Informe de Documentos son movimientos, y el valor de hoy sale de arrastrarlos. Si entre medio se borró o se modificó un comprobante, el arrastre queda mal y esta foto no.'],
         ['Fecha de generación', 'Se lee de la cabecera del archivo: es la hora a la que Defontana sacó la foto, y es contra ese momento que se compara.'],
         ['Qué manda', 'Para el costo manda esta foto. Donde no coincide con los movimientos se avisa con el filtro “No cuadra con el stock valorizado”.'],
-        ['Bodegas', 'Si un artículo aparece en varias bodegas, se suman sus saldos y sus totales.']]}
+        ['Bodegas', 'Si un artículo aparece en varias bodegas, se suman sus saldos y sus totales.']]},
+    qms: {archivo: 'ejemplo-stock-qms.xlsx', filas: [
+      ['Linea Negocio', 'Categoria', 'Valor Total Stock CLP', 'Stock', 'Valor unitario', 'Descripción', 'Unidad', 'Código Único'],
+      ['FUSION', 'LAGGING', 12198996, 31, 393516, 'Producto de ejemplo', 'RL', 'CLP-CTEE-72'],
+      ['PRENSAS', 'REPUESTOS', 12998485, 16, 812405.31, 'Otro producto', 'UN', '24174-001']],
+      ayuda: [['', 'Es la Distribución de Valor de Stock de QMS, tal cual se descarga (también sirve en CSV).'],
+        ['Para qué sirve', 'Sólo para mirar: pone el stock de QMS al lado del de Defontana —código, unidad, cantidad y valor unitario— y muestra qué existe en uno y no en el otro. No cambia el ajuste, que se decide con el conteo físico.'],
+        ['Código Único', 'Es el código con que se cruza. Se compara sin mayúsculas, tildes, espacios, puntos, guiones ni ceros a la izquierda, y respetando las parejas confirmadas en “Unificar códigos”.'],
+        ['Unidad', 'Se avisa cuando las dos unidades no son la misma ni equivalentes: UN y UNIDAD son la misma, UN y KG no.'],
+        ['Valor unitario', 'Si no viene, se calcula como Valor Total Stock / Stock.']]}
   };
   $('plantillas').addEventListener('click', e => {
     const b = e.target.closest('[data-plantilla]'); if (!b) return;
@@ -2949,6 +3142,8 @@
     if (state.ajustes && !CFG.historial) $('btnClearAjustes').hidden = false;
     await leerInforme('articulos', 'articulos', 'dropArticulos', 'stArticulos', parseArticulos, 'artículos con saldo y valor');
     if (state.articulos && !CFG.historial) $('btnClearArticulos').hidden = false;
+    await leerInforme('qms', 'qms', 'dropQms', 'stQms', parseQms, 'productos de QMS');
+    if (state.qms && !CFG.historial) $('btnClearQms').hidden = false;
     if (!state.mov.length && state.mov2) state.mov = state.mov2;
     if (g.estado){
       try {
@@ -2978,6 +3173,6 @@
   // puerta, la matemática que decide los ajustes de inventario no se puede
   // comprobar más que a ojo.
   if (typeof module !== 'undefined' && module.exports){
-    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, parseArticulos, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, tipoAjCosto, avisoDeFechas, detectarAjustes, conAjustes, parseCostos, costoDeSuCompra, pmpEditable, costoPropuestoSinValor, renderStepsPanel, REG_COLS, regRow, detail, state};
+    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, parseArticulos, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, tipoAjCosto, avisoDeFechas, detectarAjustes, conAjustes, parseCostos, costoDeSuCompra, pmpEditable, costoPropuestoSinValor, renderStepsPanel, REG_COLS, regRow, detail, parseQms, computeQms, cruceQms, qmsRow, state};
   }
 })();
