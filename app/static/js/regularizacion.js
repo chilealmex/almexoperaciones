@@ -701,8 +701,16 @@
       // Defontana tenía 180,2 —ya cuadrados— y el PARTE DE SALIDA #311 del
       // 09-10 (−12,4) hacía que la pantalla pidiera "aumentar 12,4", o sea
       // revertir un ajuste correcto hecho cuatro días antes.
-      const ajDocs = docs.filter(m => m._aj && (!counted || !m.fecha || after(m)));
-      const ajPrevios = docs.filter(m => m._aj && counted && m.fecha && !after(m));
+      // Un traspaso entre bodegas no regulariza nada: mueve el producto de un
+      // lado a otro y el inventario total queda igual. El saldo ya lo trata
+      // así (no suma ni resta); contarlo como "ya ajustado" era pedir el
+      // ajuste de más. Pasó con AA-BRP-50100: contó 0, Defontana tenía 1
+      // —había que disminuir 1— y el TRASPASO ENTRE BODEGAS #2 de +1, que
+      // estaba en el archivo de ajustes, hacía que pidiera disminuir 2, o sea
+      // dejar a Defontana en −1.
+      const esAjuste = m => m._aj && !m.traspaso;
+      const ajDocs = docs.filter(m => esAjuste(m) && (!counted || !m.fecha || after(m)));
+      const ajPrevios = docs.filter(m => esAjuste(m) && counted && m.fecha && !after(m));
       for (const m of ajDocs){ aj += m.kind === 'in' ? m.qty : -m.qty; ajVal += (m.kind === 'in' ? 1 : -1) * (m.valor || 0); }
       docs.forEach((m, j) => {
         if (!counted || !m.fecha) return;
@@ -846,6 +854,13 @@
         if (pend != null) st = Math.abs(pend) <= EPS ? 'done' : pend > 0 ? 'up' : 'down';
         if (st === 'done'){ dx.cause = null; dx.obs = dx.obs.filter(x => /^Ajuste de (cantidad|costo) ya hecho/.test(x)); }
       }
+      // Un ajuste que deja el saldo bajo cero es imposible: no se puede sacar
+      // más de lo que hay. Si sale uno, está mal el dato o está mal la cuenta,
+      // y lo que corresponde es decirlo, no proponerlo. Es lo que preguntó
+      // ella —"¿por qué debo disminuir 2 si tengo 1?"— y tenía razón.
+      if (counted && realNow != null && realNow < -EPS) dx.obs.unshift(
+        `Ojo: ese ajuste dejaría a Defontana en ${fmt(realNow)}, y no puede haber menos de cero. ` +
+        `Revisa el conteo y los movimientos del producto antes de hacerlo.`);
       // El ajuste anterior al conteo se dice igual: está en los comprobantes y
       // no aparecer en ninguna parte haría pensar que el sistema no lo vio.
       if (ajPrevios.length) dx.obs.push(

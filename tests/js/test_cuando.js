@@ -40,11 +40,15 @@ function escenario({contado, fechaConteo, saldoInicial, docs, mismoDia = 'before
 
   let saldo = saldoInicial;
   const movimientos = docs.map((d, i) => {
-    saldo += d.kind === 'in' ? d.qty : -d.qty;
+    // Un traspaso no mueve el saldo del informe: cambia de bodega, no de
+    // inventario. Si el escenario lo sumara, el informe diría otra cosa que
+    // la realidad y la prueba estaría comprobando un archivo imposible.
+    if (!d.traspaso) saldo += d.kind === 'in' ? d.qty : -d.qty;
     return {art: 'ART-1', key: 'ART1', nameKey: 'ARTICULO', tipo: d.tipo || 'ENVIO A PRODUCCION',
             folio: String(d.folio != null ? d.folio : 100 + i),
             fecha: d.fecha, kind: d.kind, qty: d.qty, saldo, valor: d.valor || 0, costo: 0,
-            orig: 'CENTRAL', dest: 'CENTRAL', estado: 'Aprobado', motivo: '', _aj: !!d.ajuste};
+            orig: 'CENTRAL', dest: 'CENTRAL', estado: 'Aprobado', motivo: '',
+            traspaso: !!d.traspaso, _aj: !!d.ajuste};
   });
   return compute(movimientos).rows[0];
 }
@@ -213,6 +217,44 @@ console.log('\nY el ajuste posterior sí es lo que ya se ajustó');
   comprobarCerca('había que ajustar −12,4', -12.4, ajusteDelConteo(r));
   comprobar('ya está hecho', -12.4, r.aj);
   comprobarCerca('y no falta nada', 0, pendiente(r));
+}
+
+console.log('\nUn traspaso entre bodegas no es un ajuste');
+{
+  /* El caso de AA-BRP-50100: contó 0, Defontana tenía 1 —había que disminuir
+     1— y el TRASPASO ENTRE BODEGAS #2 de +1, que venía en el archivo de
+     ajustes, hacía que pidiera disminuir 2: dejar a Defontana en −1.
+
+     Un traspaso mueve el producto de una bodega a otra y el inventario total
+     queda igual. El saldo ya lo trata así; contarlo como "ya ajustado" pedía
+     el ajuste de más. */
+  const r = escenario({
+    contado: 0, fechaConteo: DIA(2026, 10, 8), saldoInicial: 1,
+    docs: [{kind: 'in', qty: 1, folio: 2, fecha: DIA(2026, 10, 8), tipo: 'TRASPASO ENTRE BODEGAS',
+            ajuste: true, traspaso: true, valor: 5000}],
+  });
+  comprobar('el traspaso no cuenta como ya ajustado', 0, r.aj);
+  comprobar('hay que disminuir 1, no 2', -1, pendiente(r));
+  comprobar('y Defontana queda en 0, no en −1', 0, r.realNow);
+  // Y sin saldo negativo no hay aviso: si saliera en todas las filas, dejaría
+  // de leerse justo en la que importa.
+  comprobar('sin aviso de saldo negativo', false,
+            r.obs.some(o => o.includes('no puede haber menos de cero')));
+}
+
+console.log('\nUn ajuste que dejaría el saldo bajo cero se avisa');
+{
+  // Contó 0 y después salieron 8: no se puede despachar lo que no hay. El
+  // dato está mal en alguna parte, y lo que corresponde es decirlo antes de
+  // que alguien cargue un ajuste que deja el saldo bajo cero.
+  const r = escenario({
+    contado: 0, fechaConteo: DIA(2026, 10, 8), saldoInicial: 10,
+    docs: [{kind: 'out', qty: 8, folio: 9, fecha: DIA(2026, 10, 9), tipo: '52 Guia de Despacho Electronica',
+            valor: 5000}],
+  });
+  comprobar('la cuenta da un saldo negativo', true, r.realNow < 0);
+  comprobar('y se avisa en la línea', true,
+            r.obs.some(o => o.includes('no puede haber menos de cero')));
 }
 
 console.log('\nUn comprobante de ajuste también se puede mover a mano');
