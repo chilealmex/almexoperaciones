@@ -3110,6 +3110,16 @@
   const regExport = r => ({
     'Código': r.code, 'Nombre': r.name, 'Línea': r.linea || '', 'Otras formas del código': r.alias.join(', ') + (r.viaName ? (r.alias.length ? ' · ' : '') + 'cruzado por nombre' : ''), 'Qué hacer': ACTION[r.st][1], 'Causa probable': r.cause ? CAUSES[r.cause] : '',
     'Comprobante de ajuste': [...new Set(listaAj(r).map(m => `${m.tipo} #${m.folio}`))].join(', '), 'Fecha del ajuste': [...new Set(listaAj(r).map(m => fmtDate(m.fecha)))].join(', '),
+    // Lo que ya se ajustó con los comprobantes del archivo de ajustes, para
+    // poder informar de lo hecho y no sólo de lo que falta. El monto es el del
+    // propio comprobante, no una estimación con el PMP: es lo que Defontana
+    // registró. En sus archivos son 315 productos, −$32.354.049 netos (36
+    // entradas por $50.384.422 y 279 salidas por −$82.738.471).
+    //
+    // Cada celda se decide por su cuenta: hay un comprobante que viene sin
+    // monto, y ahí la cantidad tiene que verse igual.
+    'Cantidad ya ajustada': Math.abs(r.aj) > EPS ? r.aj : '',
+    'Valor ya ajustado': Math.abs(r.ajVal) > EPS ? Math.round(r.ajVal) : '',
     'Observaciones': r.obs.map(x => x.replace(/<[^>]+>/g, '')).join(' '),
     'Qué hacer, en orden': stepsText(r), 'Revisar costo': r.cost ? (r.cost.need ? 'Sí' : 'No') : '', 'Detalle costo': r.cost ? r.cost.txt.join(' ') : '',
     'Costo a usar (c/u)': r.cost && r.cost.need ? r.cost.costos.map(c => (c.v != null ? Math.round(c.v * 100) / 100 : 'factura') + ' (' + c.doc + ')').join(' · ') : '',

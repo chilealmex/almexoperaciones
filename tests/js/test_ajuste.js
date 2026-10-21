@@ -4,7 +4,7 @@
    posteriores no entran, porque ya están registrados en Defontana y volver a
    considerarlos pide ajustar dos veces por lo mismo. */
 const {porId} = require('./entorno.js');
-const {compute, ajusteDelConteo, pendiente, hoyDe, parseStock, parseArticulos, regRow, docSteps, state} = require('../../app/static/js/regularizacion.js');
+const {compute, ajusteDelConteo, pendiente, hoyDe, parseStock, parseArticulos, regRow, regExport, docSteps, state} = require('../../app/static/js/regularizacion.js');
 
 let fallas = 0, hechas = 0;
 function comprobar(titulo, esperado, obtenido) {
@@ -265,6 +265,67 @@ console.log('\nUna fecha de conteo imposible no es un conteo');
   comprobar('se muestra como pendiente de revisión', true, regRow(r).includes('Pendiente de revisión'));
   comprobar('y lo que corresponde es contarlo', true,
             docSteps(r).some(x => x.txt && x.txt.startsWith('Contar el producto')));
+}
+
+/* ---- Lo que YA se ajustó, en el Excel ----
+
+   El archivo de ajustes trae los comprobantes con que se regularizaron las
+   diferencias. La pantalla ya los mostraba; al Excel no bajaban, y son los que
+   hacen falta para informar de lo hecho —no sólo de lo que falta—. El monto es
+   el del propio comprobante, no una estimación con el PMP. */
+
+function conAjusteHecho({contado = 5, saldoInicial = 10, ajuste}){
+  porId.set('optBodega', Object.assign(porId.get('optBodega') || {}, {value: '*'}));
+  porId.set('optAprob', Object.assign(porId.get('optAprob') || {}, {checked: false}));
+  porId.set('optSame', Object.assign(porId.get('optSame') || {}, {value: 'before'}));
+  state.stock = [{code: 'ART-1', key: 'ART1', name: 'ARTICULO', stock: contado,
+                  fecha: DIA(2026, 9, 1), por: 'Bodega', estado: 'Contado', um: '', linea: ''}];
+  state.recount = new Map(); state.manual = new Set(); state.hechos = new Map();
+  state.pmpEdit = new Map(); state.movCuando = new Map(); state.articulos = null;
+  const movs = [{art: 'ART-1', key: 'ART1', nameKey: 'ARTICULO', tipo: 'PARTE DE ENTRADA', folio: '100',
+                 fecha: DIA(2026, 8, 1), kind: 'in', qty: saldoInicial, saldo: saldoInicial,
+                 valor: saldoInicial * 1000, valorInv: saldoInicial * 1000, costo: 0,
+                 orig: '', dest: 'CENTRAL', estado: 'Aprobado', motivo: '', i: 0, _aj: false}];
+  if (ajuste) movs.push({art: 'ART-1', key: 'ART1', nameKey: 'ARTICULO', tipo: ajuste.tipo || 'PARTE DE SALIDA',
+    folio: ajuste.folio || '311', fecha: DIA(2026, 9, 10), kind: ajuste.kind || 'out', qty: ajuste.qty,
+    saldo: saldoInicial + (ajuste.kind === 'in' ? ajuste.qty : -ajuste.qty),
+    valor: ajuste.valor, valorInv: 0, costo: 0,
+    orig: '', dest: 'CENTRAL', estado: 'Aprobado', motivo: 'AJUSTE', i: 1, _aj: true});
+  return compute(movs).rows[0];
+}
+
+console.log('\nEl Excel dice cuánto se ajustó y por cuánto');
+{
+  const r = conAjusteHecho({ajuste: {qty: 5, valor: 5800}});
+  const x = regExport(r);
+  comprobar('la cantidad, con signo de salida', -5, x['Cantidad ya ajustada']);
+  comprobar('y el monto del comprobante', -5800, x['Valor ya ajustado']);
+  comprobar('el comprobante sigue saliendo', true, String(x['Comprobante de ajuste']).includes('#311'));
+}
+
+console.log('\nUna entrada queda en positivo');
+{
+  const r = conAjusteHecho({contado: 15, ajuste: {kind: 'in', qty: 5, valor: 5800, tipo: 'PARTE DE ENTRADA'}});
+  const x = regExport(r);
+  comprobar('la cantidad', 5, x['Cantidad ya ajustada']);
+  comprobar('y el monto', 5800, x['Valor ya ajustado']);
+}
+
+console.log('\nUn comprobante sin monto no esconde la cantidad');
+{
+  // En sus archivos hay uno así: PARTE DE SALIDA sin valor. La celda del monto
+  // queda vacía en vez de un 0 inventado, y la cantidad se ve igual.
+  const r = conAjusteHecho({ajuste: {qty: 5, valor: 0}});
+  const x = regExport(r);
+  comprobar('la cantidad se ve', -5, x['Cantidad ya ajustada']);
+  comprobar('y el monto queda vacío', '', x['Valor ya ajustado']);
+}
+
+console.log('\nSin ajustes hechos, las dos celdas quedan vacías');
+{
+  const x = regExport(conAjusteHecho({ajuste: null}));
+  comprobar('sin cantidad', '', x['Cantidad ya ajustada']);
+  comprobar('sin monto', '', x['Valor ya ajustado']);
 }
 
 console.log(`\n${hechas - fallas} de ${hechas} comprobaciones pasaron`);
