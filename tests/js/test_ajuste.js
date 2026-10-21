@@ -274,7 +274,7 @@ console.log('\nUna fecha de conteo imposible no es un conteo');
    hacen falta para informar de lo hecho —no sólo de lo que falta—. El monto es
    el del propio comprobante, no una estimación con el PMP. */
 
-function conAjusteHecho({contado = 5, saldoInicial = 10, ajuste}){
+function conAjusteHecho({contado = 5, saldoInicial = 10, ajuste, costo = null}){
   porId.set('optBodega', Object.assign(porId.get('optBodega') || {}, {value: '*'}));
   porId.set('optAprob', Object.assign(porId.get('optAprob') || {}, {checked: false}));
   porId.set('optSame', Object.assign(porId.get('optSame') || {}, {value: 'before'}));
@@ -291,6 +291,11 @@ function conAjusteHecho({contado = 5, saldoInicial = 10, ajuste}){
     saldo: saldoInicial + (ajuste.kind === 'in' ? ajuste.qty : -ajuste.qty),
     valor: ajuste.valor, valorInv: 0, costo: 0,
     orig: '', dest: 'CENTRAL', estado: 'Aprobado', motivo: 'AJUSTE', i: 1, _aj: true});
+  // Un ajuste de costo no mueve unidades: entra con cantidad 0 y sólo valor.
+  if (costo) movs.push({art: 'ART-1', key: 'ART1', nameKey: 'ARTICULO', tipo: costo.tipo || 'AJUSTE COSTO ENTRADA',
+    folio: costo.folio || '1', fecha: DIA(2026, 9, 8), kind: costo.kind || 'in', qty: 0,
+    saldo: saldoInicial, valor: costo.valor, valorInv: costo.valor, costo: 0,
+    orig: '', dest: 'CENTRAL', estado: 'Aprobado', motivo: 'AJUSTE DE COSTO', i: 2, _aj: false, _ajc: true});
   return compute(movs).rows[0];
 }
 
@@ -301,6 +306,18 @@ console.log('\nEl Excel dice cuánto se ajustó y por cuánto');
   comprobar('la cantidad, con signo de salida', -5, x['Cantidad ya ajustada']);
   comprobar('y el monto del comprobante', -5800, x['Valor ya ajustado']);
   comprobar('el comprobante sigue saliendo', true, String(x['Comprobante de ajuste']).includes('#311'));
+}
+
+console.log('\nEl Excel dice quién contó');
+{
+  const x = regExport(conAjusteHecho({ajuste: {qty: 5, valor: 5800}}));
+  comprobar('el nombre, al lado de la fecha', 'Bodega', x['Contado por']);
+  comprobar('y la fecha sigue estando', true, String(x['Fecha conteo']).startsWith('01-09-2026'));
+  // Si el producto no se contó, no hay quién: la celda queda vacía aunque la
+  // planilla traiga un nombre en esa fila.
+  const sin = regExport(conAjusteHecho({contado: null, ajuste: null}));
+  comprobar('sin conteo, sin nombre', '', sin['Contado por']);
+  comprobar('y sin fecha', '', sin['Fecha conteo']);
 }
 
 console.log('\nUna entrada queda en positivo');
@@ -321,11 +338,32 @@ console.log('\nUn comprobante sin monto no esconde la cantidad');
   comprobar('y el monto queda vacío', '', x['Valor ya ajustado']);
 }
 
+console.log('\nEl ajuste de costo ya hecho también sale, en su propia columna');
+{
+  // RESP-FLL-3M-6900: le arreglaron el costo con un AJUSTE COSTO ENTRADA por
+  // $4.173.180 y ese número sólo salía dentro de la frase de Observaciones.
+  const r = conAjusteHecho({ajuste: {qty: 2, valor: 252920}, costo: {valor: 4173180}});
+  const x = regExport(r);
+  comprobar('el monto del ajuste de costo', 4173180, x['Ajuste de costo ya hecho']);
+  comprobar('no se mezcla con el de las unidades', -252920, x['Valor ya ajustado']);
+  comprobar('y no mueve la cantidad', -2, x['Cantidad ya ajustada']);
+  comprobar('el comprobante también se nombra', true,
+            String(x['Comprobante de ajuste']).includes('AJUSTE COSTO ENTRADA'));
+}
+
+console.log('\nUna salida de costo resta');
+{
+  const r = conAjusteHecho({ajuste: null, costo: {valor: 100000, kind: 'out', tipo: 'AJUSTE COSTO SALIDA'}});
+  comprobar('queda en negativo', -100000, regExport(r)['Ajuste de costo ya hecho']);
+}
+
 console.log('\nSin ajustes hechos, las dos celdas quedan vacías');
 {
   const x = regExport(conAjusteHecho({ajuste: null}));
   comprobar('sin cantidad', '', x['Cantidad ya ajustada']);
   comprobar('sin monto', '', x['Valor ya ajustado']);
+  // Vacía, no 0: un 0 se suma como si fuera un dato y no lo es.
+  comprobar('y sin ajuste de costo', '', x['Ajuste de costo ya hecho']);
 }
 
 console.log(`\n${hechas - fallas} de ${hechas} comprobaciones pasaron`);
