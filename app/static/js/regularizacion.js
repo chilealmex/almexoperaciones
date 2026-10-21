@@ -122,6 +122,10 @@
   // en el 97,5% de las cantidades y el 97,6% de los valores; lo que vale es ese
   // 2,4% restante, donde Defontana tiene stock o valor que los movimientos no
   // explican, y la hora, para saber contra qué momento se está comparando.
+  // Cómo viene marcado en la columna Bodega un código creado que no tiene
+  // stock en ninguna bodega: no está en ninguna, así que no hay bodega que
+  // poner.
+  const SIN_STOCK = /SIN\s*STOCK|SIN\s*BODEGA/i;
   function parseArticulos(rows){
     // Defontana da dos informes de stock valorizado y sirven los dos:
     //   - Informe de Inventario: Código Artículo / Bodega / Saldo / Valor unidad
@@ -151,22 +155,47 @@
          stock:t.col('Stock Disponible'), costo:t.col('Costo Vigente'), total:-1};
     if (c.costo < 0) throw new Error(inv ? 'No encontré la columna “Valor unidad”.' : 'No encontré la columna “Costo Vigente”.');
     const out = [];
+    let declaranCero = 0;
     for (const r of t.rows){
       const art = String(r[c.art] ?? '').trim(); if (!art) continue;
       const stock = num(r[c.stock]), costo = num(r[c.costo]);
       const total = c.total >= 0 ? num(r[c.total]) : null;
-      if (stock == null && costo == null && total == null) continue;
+      const name = c.desc >= 0 ? String(r[c.desc] ?? '').trim() : '';
+      const bodega = c.bod >= 0 ? String(r[c.bod] ?? '').trim() : '';
+      // Un código creado que no tiene stock en ninguna bodega viene con la
+      // bodega en "SIN STOCK-SIN BODEGA" y con Saldo, Valor unidad y Total
+      // vacíos. Son los códigos que hay que tener para cruzar con QMS cuáles
+      // están creados: en su informe del 20-10 09:20 son 1.274 de 2.918 filas,
+      // y descartar la fila por no traer montos las botaba todas, así que el
+      // informe completo entraba como si fuera el de sólo los que tienen stock.
+      // La marca vale como "no tiene stock" sólo si de verdad no lo tiene: en
+      // uno de sus intentos quedó puesta en todas las filas, incluidas las de
+      // 13 y 50 unidades, y ahí no dice nada.
+      const sinBodega = SIN_STOCK.test(bodega) && !(stock > EPS);
+      // Una fila sin ningún monto es un código sin stock cuando hay de qué
+      // reconocerla —la marca, el nombre o la bodega—; si no trae nada de eso
+      // es el pie del informe, no un artículo.
+      if (stock == null && costo == null && total == null && !sinBodega && !name && !bodega) continue;
       // Cuando viene el valorizado, el costo de una unidad se saca de él y no
       // de la columna "Valor Unidad": esa columna llega en 0 aunque el
       // producto esté valorizado, y entonces el producto parece sin costo. El
       // valorizado dividido por el saldo es el PMP, que es lo que Defontana
       // tiene de verdad.
       const unit = total != null && stock > 0 ? total / stock : costo;
-      out.push({art, key:keyOf(art), name:c.desc >= 0 ? String(r[c.desc] ?? '').trim() : '',
-        bodega: c.bod >= 0 ? String(r[c.bod] ?? '').trim() : '',
+      out.push({art, key:keyOf(art), name,
+        // La marca no es una bodega: es la manera de decir que no está en
+        // ninguna.
+        bodega: sinBodega ? '' : bodega,
         um: c.um >= 0 ? String(r[c.um] ?? '').trim() : '',
         stock: stock ?? 0, costo: unit ?? 0,
         valor: total != null ? total : (stock ?? 0) * (costo ?? 0)});
+      // Un 0 escrito en el saldo y la marca de sin bodega son las dos maneras
+      // en que el informe DICE que un código no tiene stock. Una celda de
+      // saldo vacía no lo dice: en su informe del 20-10 12:03 hay 5 así
+      // —15060, 21677-018, 46040-064, INS-036, INS-123— y ese informe trae
+      // sólo los artículos con stock, así que tomarlas como prueba de que
+      // están todos los códigos es apoyar la conclusión en 5 celdas en blanco.
+      if (sinBodega || stock === 0) declaranCero++;
     }
     if (!out.length) throw new Error('El informe no trae filas con datos.');
     out.fecha = fechaDeGeneracion(rows);
@@ -175,13 +204,14 @@
     // stock por costo, que con stock 0 da 0 y no sirve para ver el valor que
     // quedó sin unidades.
     out.valorReal = c.total >= 0;
-    // Si el informe trae filas con saldo 0, está completo: lista todo el
-    // maestro, y entonces que un producto NO esté significa que Defontana no
-    // lo tiene. Si no trae ninguna, viene filtrado a lo que tiene stock, y la
-    // ausencia no dice nada —sus dos informes del mismo día se diferencian en
-    // esto: el de las 09:20 trae 1.109 filas y ninguna en cero; el de las
-    // 10:37 trae 3.145, de las cuales 2.037 están en cero—.
-    out.completo = out.some(a => !(a.stock > EPS));
+    // Si el informe declara códigos sin stock, trae todo el maestro, y
+    // entonces que un código NO esté significa que en Defontana no existe. Si
+    // no declara ninguno, viene filtrado a lo que tiene stock y la ausencia
+    // sólo significa no tener stock —sus dos informes del 20-10 se diferencian
+    // en esto: el de las 09:20 trae 2.918 códigos, 1.816 de ellos sin stock;
+    // el de las 12:03 trae 1.104, todos con stock—.
+    out.sinStock = declaranCero;
+    out.completo = declaranCero > 0;
     return out;
   }
   // "Fecha de generación: 06-10-2026, 04:17 p. m." en las primeras filas.
@@ -3035,8 +3065,14 @@
           $('btnClearArticulos').hidden = false;
           // La hora es lo que distingue una foto de otra: sin ella no se sabe
           // contra qué momento se está comparando.
-          st.textContent = file.name + ' · ' + fmt(data.length) + ' artículos con stock y costo · ' +
-            (data.fecha ? 'sacado de Defontana el ' + data.fecha : 'sin fecha de generación en el archivo');
+          // Cuántos códigos sin stock trae es lo que distingue el informe
+          // completo del filtrado a lo que tiene stock, y de eso depende que
+          // se pueda cruzar con QMS qué códigos existen en cada sistema. Si no
+          // se dice acá, la diferencia entre los dos archivos es invisible.
+          st.textContent = file.name + ' · ' + fmt(data.length) + ' códigos' +
+            (data.sinStock ? ', ' + fmt(data.sinStock) + ' de ellos sin stock'
+                           : ' · trae sólo los que tienen stock: para cruzar con QMS los códigos creados, bájalo con todos') +
+            ' · ' + (data.fecha ? 'sacado de Defontana el ' + data.fecha : 'sin fecha de generación en el archivo');
         }
         const clave = {stock:'conteo', mov:'informe', mov2:'informe_ajustes', ajustes:'ajustes', articulos:'articulos', qms:'qms'}[key];
         if (clave){ avisoGuardado(st, guardarArchivo(clave, file)); if (key === 'mov2') guardarEstado(); }
@@ -3060,7 +3096,7 @@
     if (CFG && CFG.guardar){ const fd = new FormData(); fd.append('borrar', '1'); fetch(urlDe('qms'), {method:'POST', body:fd, headers:{'X-CSRFToken': CFG.csrf}, credentials:'same-origin'}).catch(() => {}); }
     render();
   });
-  const SIN_ARTICULOS = 'Informe de Inventario de Defontana: el saldo y el valor que tiene ahora. Manda sobre lo que se arrastra de los movimientos';
+  const SIN_ARTICULOS = 'Informe de Inventario de Defontana: el saldo y el valor que tiene ahora. Manda sobre lo que se arrastra de los movimientos. Bájalo con todos los códigos creados, incluidos los que no tienen stock: son los que permiten cruzar con QMS cuáles existen en cada sistema';
   setupLoader('fileArticulos', 'dropArticulos', 'stArticulos', parseArticulos, 'articulos', 'artículos con saldo y valor');
   $('btnClearArticulos').addEventListener('click', () => {
     state.articulos = null; $('btnClearArticulos').hidden = true; $('dropArticulos').classList.remove('ok');
