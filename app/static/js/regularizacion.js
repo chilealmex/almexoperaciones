@@ -1366,6 +1366,33 @@
   // en uno filtrado a lo que tiene stock, faltar no dice nada.
   const invListaLosCeros = () => !!(state.articulos && state.articulos.length && state.articulos.completo);
 
+  // En qué bodegas tiene Defontana el artículo, según el Informe de
+  // Inventario: viene una fila por bodega. Los códigos sin stock llegan con la
+  // marca de sin bodega —no están en ninguna— y por eso se distinguen de los
+  // que directamente no están en el informe.
+  let bodegasPorKey = null;
+  function armarBodegas(){
+    if (bodegasPorKey && bodegasPorKey._de === state.articulos) return;
+    bodegasPorKey = new Map();
+    bodegasPorKey._de = state.articulos;
+    for (const a of (state.articulos || [])){
+      if (!a.bodega) continue;
+      const m = bodegasPorKey.get(a.key) || new Map();
+      m.set(a.bodega, (m.get(a.bodega) || 0) + a.stock);
+      bodegasPorKey.set(a.key, m);
+    }
+  }
+  const bodegasDe = r => {
+    if (!state.articulos || !state.articulos.length) return '';
+    armarBodegas();
+    const m = bodegasPorKey.get(r.key);
+    if (!m || !m.size) return fotoDeClave(r.key) ? 'Sin stock en ninguna bodega' : '';
+    // Con una sola bodega, el nombre pelado: así la columna se puede filtrar.
+    // Con varias, cuánto hay en cada una, que es el dato que hace falta —en su
+    // informe del 07-10 había seis bodegas—.
+    return m.size === 1 ? [...m.keys()][0] : [...m].map(([b, q]) => `${b} (${fmt(q)})`).join(', ');
+  };
+
   function armarFoto(){
     if (!fotoPorKey || fotoPorKey._de !== state.articulos){
       // El mismo producto puede venir en el stock valorizado con varios
@@ -3147,6 +3174,7 @@
     'PMP': r.pmp != null ? Math.round(r.pmp * 100) / 100 : '', 'Origen PMP': r.pmpSrc,
     'Valor ajuste': r.valor != null ? Math.round(r.valor) : '',
     'Saldo última fila del informe': r.sysNow ?? '',
+    'Bodegas': bodegasDe(r),
     ...columnasQms(r)
   });
   const zeroExport = z => ({
