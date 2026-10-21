@@ -852,6 +852,20 @@
           if (c && c.pmp) pm = {v: c.pmp, src: 'PMP calculado con los movimientos'};
         }
       }
+      // El PMP que vale es el del Informe de Inventario: es el costo que
+      // Defontana tiene hoy. El de los documentos sale de la última fila que
+      // traiga saldo y valor, y esa fila puede ser vieja —en sus archivos, 48
+      // de los 296 productos con ajuste pendiente se estaban valorizando con
+      // un costo de marzo o julio, $2.003.507 de diferencia en el ajuste—.
+      //
+      // Sólo cuando el producto tiene stock ahí: un código sin stock no tiene
+      // costo que sacar del archivo, y ahí siguen mandando los documentos. Y
+      // sólo con la columna del valorizado, porque "Valor Unidad" llega en 0
+      // aunque el producto esté valorizado y daría un costo que no es.
+      const fotoPmp = docs.length ? fotoDe(docs) : fotoDeClave(key);
+      if (fotoPmp && fotoPmp.valorReal && fotoPmp.stock > EPS && fotoPmp.costo > EPS)
+        pm = {v: fotoPmp.costo,
+              src: 'PMP del Informe de Inventario' + (state.articulos && state.articulos.fecha ? ' del ' + state.articulos.fecha : '')};
       const edited = state.pmpEdit.has(key);
       const pmp = edited ? state.pmpEdit.get(key) : pm ? pm.v : null;
       let st;

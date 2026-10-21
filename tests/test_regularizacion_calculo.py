@@ -26,6 +26,7 @@ PRUEBAS = {
     "el ajuste de costo se mide contra lo que Defontana tiene hoy": JS / "test_recosteo.js",
     "se avisa cuando al informe le faltan movimientos": JS / "test_faltanmov.js",
     "el stock valorizado manda sobre lo que arrastran los movimientos": JS / "test_valorizado.js",
+    "el PMP con que se valoriza el ajuste sale del Informe de Inventario": JS / "test_pmp_inventario.js",
     "los costos se llenan en el Excel y se suben de vuelta": JS / "test_costos_excel.js",
     "los productos con unidades y sin valor van en su propio paso": JS / "test_sinvalor.js",
     "se ve en qué unidad está cada producto": JS / "test_unidad.js",
