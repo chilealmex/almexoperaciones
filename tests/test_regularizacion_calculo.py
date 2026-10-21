@@ -25,6 +25,7 @@ PRUEBAS = {
     "cada paso se marca por su cuenta": JS / "test_marcas.js",
     "el ajuste de costo se mide contra lo que Defontana tiene hoy": JS / "test_recosteo.js",
     "se avisa cuando al informe le faltan movimientos": JS / "test_faltanmov.js",
+    "los archivos se suben de a uno y se avisa si uno no quedó guardado": JS / "test_subidas.js",
     "el stock valorizado manda sobre lo que arrastran los movimientos": JS / "test_valorizado.js",
     "el PMP con que se valoriza el ajuste sale del Informe de Inventario": JS / "test_pmp_inventario.js",
     "los costos se llenan en el Excel y se suben de vuelta": JS / "test_costos_excel.js",
