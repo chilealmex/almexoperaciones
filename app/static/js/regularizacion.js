@@ -2479,6 +2479,12 @@
   }
   // Comprobantes con que se ajustó el producto (cantidad y costo), con su fecha
   const listaAj = r => [...(r.ajDocs || []), ...(r.costDocs || [])];
+  // Lo que movieron en plata los comprobantes de ajuste de costo: la entrada
+  // sube el valor del inventario y la salida lo baja. No mueven unidades, así
+  // que no entran en "Valor ya ajustado" —ése son las unidades que entraron o
+  // salieron— pero son plata ajustada igual, y hay que poder sumarla. En sus
+  // archivos del 21-10 son 197 productos y $52.259.819.
+  const valorAjCosto = r => (r.costDocs || []).reduce((t, m) => t + (m.kind === 'in' ? 1 : -1) * (m.valor || 0), 0);
   const comprobantesAj = r => {
     const L = listaAj(r); if (!L.length) return '';
     const vistos = new Set(), items = [];
@@ -3120,13 +3126,22 @@
     // monto, y ahí la cantidad tiene que verse igual.
     'Cantidad ya ajustada': Math.abs(r.aj) > EPS ? r.aj : '',
     'Valor ya ajustado': Math.abs(r.ajVal) > EPS ? Math.round(r.ajVal) : '',
+    // El ajuste de costo iba sólo en la frase de Observaciones —"Ajuste de
+    // costo ya hecho: AJUSTE COSTO ENTRADA #1 del 08-10-2026 ($4.173.180)"— y
+    // una frase no se suma ni se filtra.
+    'Ajuste de costo ya hecho': Math.abs(valorAjCosto(r)) > EPS ? Math.round(valorAjCosto(r)) : '',
     'Observaciones': r.obs.map(x => x.replace(/<[^>]+>/g, '')).join(' '),
     'Qué hacer, en orden': stepsText(r), 'Revisar costo': r.cost ? (r.cost.need ? 'Sí' : 'No') : '', 'Detalle costo': r.cost ? r.cost.txt.join(' ') : '',
     'Costo a usar (c/u)': r.cost && r.cost.need ? r.cost.costos.map(c => (c.v != null ? Math.round(c.v * 100) / 100 : 'factura') + ' (' + c.doc + ')').join(' · ') : '',
     'PMP correcto hoy': r.cost && r.cost.corr ? Math.round(r.cost.corr.pmp * 100) / 100 : '',
     'Ajuste de valor': r.cost && r.cost.corr ? Math.round(r.cost.corr.ajuste) : '',
     'Cantidad a ajustar': r.st === 'done' ? 0 : (r.pend ?? r.diff) != null && Math.abs(r.pend ?? r.diff) > EPS ? Math.abs(r.pend ?? r.diff) : '',
-    'Contado': r.s ? r.s.stock : '', 'Fecha conteo': r.counted ? fmtDate(r.s.fecha, true) : '', 'Recuento': r.s && r.s.recontado ? 'Sí' : '',
+    'Contado': r.s ? r.s.stock : '', 'Fecha conteo': r.counted ? fmtDate(r.s.fecha, true) : '',
+    // Quién contó. Estaba sólo en la ficha del producto, al abrirlo; en el
+    // Excel, que es con lo que se informa, no aparecía. En su conteo del
+    // 21-10 son 787 productos con nombre, de seis personas.
+    'Contado por': r.counted && r.s ? r.s.por || '' : '',
+    'Recuento': r.s && r.s.recontado ? 'Sí' : '',
     'Movimientos desde el conteo': r.counted ? r.ins - r.outs : '', 'Debería tener Defontana hoy': r.realNow ?? '', 'Tiene Defontana hoy': hoyDe(r) ?? '',
     'Ajuste a hacer hoy': ajusteHoy(r) ?? '', 'Defontana al conteo': r.sysAtCount ?? '', 'Diferencia al conteo': r.diff ?? '',
     'PMP': r.pmp != null ? Math.round(r.pmp * 100) / 100 : '', 'Origen PMP': r.pmpSrc,
