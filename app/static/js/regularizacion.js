@@ -154,6 +154,29 @@
       : {art:t.col('Artículo'), desc:t.col('Descripción'), bod:-1, um:t.col('Unidad', 'U. Medida'),
          stock:t.col('Stock Disponible'), costo:t.col('Costo Vigente'), total:-1};
     if (c.costo < 0) throw new Error(inv ? 'No encontré la columna “Valor unidad”.' : 'No encontré la columna “Costo Vigente”.');
+    // Y a veces manda las dos columnas de valor con los títulos cambiados de
+    // lugar. El informe del 21-10 08:03 dice "Valorización | Valor Unidad" y
+    // trae 5.596,25 | 72.751,25, que es al revés: 13 unidades a 5.596,25 son
+    // 72.751,25. Creyéndole al título, el PMP de ese producto daba 430,48 (el
+    // valor unitario dividido por el saldo) en vez de 5.596,25.
+    //
+    // Los datos lo dicen solos: el total tiene que ser el saldo por el valor
+    // unitario. Se cuenta cuántas filas cumplen cada lectura y manda la que
+    // gane. En ese informe son 1.097 contra 162 —y esas 162 son productos con
+    // saldo 1, donde las dos lecturas dan lo mismo—; en los otros siete
+    // informes suyos gana la que dice el título y no cambia nada.
+    const cuadra = (a, b) => Math.abs(a - b) < Math.max(1, 0.01 * Math.abs(b));
+    let columnasCambiadas = false;
+    if (c.total >= 0){
+      let comoDice = 0, invertido = 0;
+      for (const r of t.rows){
+        const s = num(r[c.stock]), u = num(r[c.costo]), tt = num(r[c.total]);
+        if (!(s > 0) || !u || !tt) continue;
+        if (cuadra(s * u, tt)) comoDice++;
+        if (cuadra(s * tt, u)) invertido++;
+      }
+      if (invertido > comoDice){ const x = c.total; c.total = c.costo; c.costo = x; columnasCambiadas = true; }
+    }
     const out = [];
     let declaranCero = 0;
     for (const r of t.rows){
@@ -212,6 +235,9 @@
     // el de las 12:03 trae 1.104, todos con stock—.
     out.sinStock = declaranCero;
     out.completo = declaranCero > 0;
+    // Para poder decirlo en la pantalla: el archivo venía con los títulos
+    // cambiados y se leyó por los datos.
+    out.columnasCambiadas = columnasCambiadas;
     return out;
   }
   // "Fecha de generación: 06-10-2026, 04:17 p. m." en las primeras filas.
@@ -3164,7 +3190,11 @@
           // completo del filtrado a lo que tiene stock, y de eso depende que
           // se pueda cruzar con QMS qué códigos existen en cada sistema. Si no
           // se dice acá, la diferencia entre los dos archivos es invisible.
-          st.textContent = file.name + ' · ' + fmt(data.length) + ' códigos' +
+          // Si el archivo vino con los títulos de las columnas de valor
+          // cambiados, hay que decirlo: se leyó bien, pero conviene que ella
+          // sepa que Defontana lo está exportando así.
+          const cambiadas = data.columnasCambiadas ? ' · ojo: traía “Valorización” y “Valor Unidad” cambiadas de lugar; se leyó por los datos' : '';
+          st.textContent = file.name + ' · ' + fmt(data.length) + ' códigos' + cambiadas +
             (data.sinStock ? ', ' + fmt(data.sinStock) + ' de ellos sin stock'
                            : ' · trae sólo los que tienen stock: para cruzar con QMS los códigos creados, bájalo con todos') +
             ' · ' + (data.fecha ? 'sacado de Defontana el ' + data.fecha : 'sin fecha de generación en el archivo');
