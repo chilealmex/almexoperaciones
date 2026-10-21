@@ -11,7 +11,7 @@
    Con sus archivos reales los dos coinciden en el 97,5% de las cantidades y el
    97,6% de los valores; el 2% que no coincide es lo que se avisa. */
 const {porId} = require('./entorno.js');
-const {compute, parseMov, parseArticulos, parseStock, comoEstaHoy, valorizacionImposible, avisoDeFechas, state} =
+const {compute, parseMov, parseArticulos, parseStock, comoEstaHoy, valorizacionImposible, avisoDeFechas, regExport, state} =
   require('../../app/static/js/regularizacion.js');
 
 let fallas = 0, hechas = 0;
@@ -608,6 +608,56 @@ escenario('Las filas sin datos no cuentan para decidir', () => {
     ['BIEN', 'CON COSTO', 'BODEGA CENTRAL', 13, 'UN', 5596.25, 72751.25]);
   comprobar('decide con la fila que sí tiene los dos números', true, a.columnasCambiadas);
   comprobar('y la otra se lee con esa misma lectura', 0, a[0].valor);
+});
+
+/* ---- En qué bodegas está el artículo ----
+
+   El Informe de Inventario trae una fila por bodega. La columna del Excel las
+   lista; con varias, dice cuánto hay en cada una. */
+
+function conInventario(articulos, contado = 10){
+  porId.set('optBodega', Object.assign(porId.get('optBodega') || {}, {value: '*'}));
+  porId.set('optAprob', Object.assign(porId.get('optAprob') || {}, {checked: false}));
+  porId.set('optSame', Object.assign(porId.get('optSame') || {}, {value: 'before'}));
+  state.stock = [{code: 'AAA', key: 'AAA', name: 'PROD AAA', stock: contado,
+                  fecha: new Date(2026, 9, 8), por: 'B', estado: 'Contado', um: '', linea: ''}];
+  state.recount = new Map(); state.manual = new Set(); state.hechos = new Map();
+  state.pmpEdit = new Map(); state.movCuando = new Map(); state.ajustes = null; state.qms = null;
+  state.articulos = articulos;
+  const docs = [{art: 'AAA', key: 'AAA', nameKey: 'PROD AAA', tipo: 'PARTE DE ENTRADA', folio: '1',
+                 fecha: new Date(2026, 7, 1), kind: 'in', qty: 10, saldo: 10, valor: 1000, valorInv: 1000,
+                 costo: 0, orig: '', dest: 'CENTRAL', estado: 'Aprobado', motivo: '', i: 0, _aj: false}];
+  state.mov = docs;
+  return regExport(compute(docs).rows[0]);
+}
+
+escenario('Una bodega: el nombre pelado, para poder filtrar', () => {
+  const x = conInventario(invHoja(INV_CAB('Valor unidad', 'Total'),
+    ['AAA', 'PROD AAA', 'BODEGA CENTRAL', 10, 'UN', 100, 1000]));
+  comprobar('la bodega', 'BODEGA CENTRAL', x['Bodegas']);
+});
+
+escenario('Varias bodegas: cada una con lo que tiene', () => {
+  const x = conInventario(invHoja(INV_CAB('Valor unidad', 'Total'),
+    ['AAA', 'PROD AAA', 'BODEGA CENTRAL', 6, 'UN', 100, 600],
+    ['AAA', 'PROD AAA', 'BODEGA INSUMOS', 4, 'UN', 100, 400]));
+  comprobar('las dos, con sus cantidades', 'BODEGA CENTRAL (6), BODEGA INSUMOS (4)', x['Bodegas']);
+});
+
+escenario('Un código creado sin stock no está en ninguna bodega', () => {
+  const x = conInventario(invHoja(INV_CAB('Valor unidad', 'Total'),
+    ['AAA', 'PROD AAA', 'SIN STOCK-SIN BODEGA', '', '', '', ''],
+    ['OTRO', 'OTRO', 'BODEGA CENTRAL', 5, 'UN', 100, 500]));
+  comprobar('lo dice', 'Sin stock en ninguna bodega', x['Bodegas']);
+});
+
+escenario('Si el artículo no está en el informe, la celda queda vacía', () => {
+  const x = conInventario(invHoja(INV_CAB('Valor unidad', 'Total'),
+    ['OTRO', 'OTRO', 'BODEGA CENTRAL', 5, 'UN', 100, 500]));
+  comprobar('vacía, no inventa', '', x['Bodegas']);
+  // Y sin informe cargado, tampoco.
+  comprobar('sin informe, vacía', '', conInventario(null)['Bodegas']);
+  state.articulos = null;
 });
 
 console.log(`\n${hechas - fallas} de ${hechas} comprobaciones pasaron`);
