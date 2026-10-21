@@ -381,6 +381,7 @@ MODULOS = (
             "admin.nuevo_usuario",
             "admin.editar_usuario",
             "admin.permisos_usuario",
+            "admin.empresas",
         ),
         "submodulos": (),
     },

@@ -30,6 +30,20 @@
     {{ form.rol_id.label(class="form-label") }}
     {{ form.rol_id(class="form-select") }}
   </div>
+  {# Qué datos ve esta cuenta. Sólo lo muestra el superadmin: cambiarla no es
+     editar un dato de la ficha, es cambiar el inventario, los contratos y la
+     contabilidad que esa persona va a ver. #}
+  {% if form.empresa_id.choices %}
+  <div class="mb-3">
+    {{ form.empresa_id.label(class="form-label") }}
+    {{ form.empresa_id(class="form-select",
+                       **{'data-confirmar-cambio': 'la empresa de esta cuenta. Pasa a ver el inventario, los contratos y la contabilidad de la otra empresa, y deja de ver los de ésta (no se borra ni se mueve nada)'}) }}
+    <div class="form-text">
+      Todo lo que muestra el sistema está filtrado por esta empresa. Dos cuentas en
+      empresas distintas trabajan sobre datos distintos sin que la pantalla lo diga.
+    </div>
+  </div>
+  {% endif %}
   <div class="mb-3">
     {{ form.password.label(class="form-label") }}
     {{ form.password(class="form-control") }}

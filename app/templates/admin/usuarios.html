@@ -8,6 +8,31 @@
   {% endif %}
 </div>
 
+{# Todo lo que muestra el sistema está filtrado por la empresa del usuario. Dos
+   cuentas en empresas distintas trabajan sobre datos distintos sin que nada lo
+   diga: cada una ve una pantalla que se ve perfectamente normal. Pasó —una
+   importó sus planillas y los demás siguieron viendo las de antes— y desde
+   afuera parecía que el sistema no se actualizaba. #}
+{% if empresas_con_usuarios|length > 1 %}
+<div class="alert alert-danger">
+  <strong>⚠️ Las cuentas están repartidas en {{ empresas_con_usuarios|length }} empresas.</strong>
+  Cada una ve sólo los datos de la suya: lo que una importa, las otras no lo ven nunca,
+  y la pantalla no avisa nada.
+  <ul class="mb-2 mt-2">
+    {% for empresa_id, nombre in empresas_con_usuarios %}
+    <li>
+      {{ nombre }} — {{ usuarios|selectattr('empresa_id', 'equalto', empresa_id)|list|length }} cuenta(s)
+      {% if empresa_id == mi_empresa_id %}<span class="badge bg-primary">la tuya</span>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% if current_user.es_superadmin %}
+  <a href="{{ url_for('admin.empresas') }}" class="btn btn-sm btn-danger">Ver qué tiene cargado cada empresa</a>
+  <span class="small ms-2">Para dejarlas todas juntas, edita cada cuenta y cámbiale la empresa.</span>
+  {% endif %}
+</div>
+{% endif %}
+
 <div class="table-responsive">
   <table class="table table-striped align-middle">
     <thead>
@@ -15,6 +40,7 @@
         <th>Nombre</th>
         <th>Usuario</th>
         <th class="d-none d-md-table-cell">Correo</th>
+        <th>Empresa</th>
         <th class="d-none d-md-table-cell">Rol</th>
         <th class="d-none d-md-table-cell">Estado</th>
         <th></th>
@@ -26,6 +52,12 @@
         <td>{{ u.nombre_completo }}</td>
         <td>{{ u.nombre_usuario }}</td>
         <td class="d-none d-md-table-cell">{{ u.email or '—' }}</td>
+        <td>
+          {{ u.empresa.razon_social if u.empresa else '—' }}
+          {% if u.empresa_id != mi_empresa_id %}
+          <span class="badge bg-danger" title="Esta cuenta ve los datos de otra empresa: no ve lo que tú cargas, ni tú lo que carga ella.">otra empresa</span>
+          {% endif %}
+        </td>
         <td class="d-none d-md-table-cell">{{ u.rol.nombre }}</td>
         <td class="d-none d-md-table-cell">
           <span class="badge {{ 'bg-success' if u.activo else 'bg-secondary' }}">{{ 'Activo' if u.activo else 'Inactivo' }}</span>
@@ -42,7 +74,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="6" class="text-center text-muted">No hay usuarios registrados.</td></tr>
+      <tr><td colspan="7" class="text-center text-muted">No hay usuarios registrados.</td></tr>
       {% endfor %}
     </tbody>
   </table>
