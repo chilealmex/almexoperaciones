@@ -538,5 +538,77 @@ escenario('Sin fecha en la cabecera manda el último movimiento', () => {
   state.mov = []; state.articulos = null;
 });
 
+/* ---- Las dos columnas de valor con los títulos cambiados ----
+
+   Defontana a veces manda "Valorización | Valor Unidad" con los datos al
+   revés. El informe del 21-10 08:03 trae 5.596,25 | 72.751,25 para un
+   producto con 13 unidades: el total de 13 a 5.596,25 son 72.751,25, así que
+   la columna que dice "Valorización" tiene el valor unitario. Creyéndole al
+   título, el PMP de ese producto daba 430,48. */
+
+const INV_CAB = (a, b) => ['Código Artículo', 'Descripción', 'Bodega', 'Saldo', 'Unidad', a, b];
+const invHoja = (cab, ...filas) => parseArticulos([
+  ['Informe de Inventario'], ['Empresa: Shaw Almex Chile SpA'],
+  ['Fecha de generación: 21-10-2026, 08:03 a. m.'], [], cab, ...filas]);
+
+escenario('Con los títulos cambiados, manda lo que dicen los datos', () => {
+  const a = invHoja(INV_CAB('Valorización', 'Valor Unidad'),
+    ['00-FSR-OTH-01', 'TUERCAS', 'BODEGA CENTRAL', 13, 'UN', 5596.25, 72751.25],
+    ['OTRO', 'OTRO', 'BODEGA CENTRAL', 4, 'UN', 1000, 4000]);
+  comprobar('se da cuenta', true, a.columnasCambiadas);
+  comprobar('el valorizado es el total', 72751.25, a[0].valor);
+  comprobar('y el costo es el unitario', 5596.25, a[0].costo);
+  comprobar('el segundo también', 4000, a[1].valor);
+});
+
+escenario('En un archivo cambiado, el producto sin stock también se lee bien', () => {
+  // Sin unidades no se puede dividir el total, así que el costo sale de la
+  // columna del valor unitario: si el intercambio se hace a medias, ese
+  // producto queda con costo 0 y se pierde el caso "sigue valorizado y no
+  // quedan unidades".
+  const a = invHoja(INV_CAB('Valorización', 'Valor Unidad'),
+    ['CON', 'CON STOCK', 'BODEGA CENTRAL', 13, 'UN', 5596.25, 72751.25],
+    ['SIN', 'SIN STOCK', 'BODEGA CENTRAL', 0, 'UN', 4200, 0]);
+  comprobar('lo marca', true, a.columnasCambiadas);
+  const sin = a.find(x => x.art === 'SIN');
+  comprobar('el costo unitario se conserva', 4200, sin.costo);
+  comprobar('y el valorizado es 0', 0, sin.valor);
+});
+
+escenario('Con los títulos correctos no se toca nada', () => {
+  const a = invHoja(INV_CAB('Valor unidad', 'Total'),
+    ['00-FSR-OTH-01', 'TUERCAS', 'BODEGA CENTRAL', 13, 'UN', 5596.25, 72751.25],
+    ['OTRO', 'OTRO', 'BODEGA CENTRAL', 4, 'UN', 1000, 4000]);
+  comprobar('no cambia nada', false, a.columnasCambiadas);
+  comprobar('el valorizado', 72751.25, a[0].valor);
+  comprobar('el costo', 5596.25, a[0].costo);
+
+  // La otra forma de nombrarlas, con los datos como corresponde.
+  const b = invHoja(INV_CAB('Valorización', 'Valor Unidad'),
+    ['00-FSR-OTH-01', 'TUERCAS', 'BODEGA CENTRAL', 13, 'UN', 72751.25, 5596.25]);
+  comprobar('"Valorización" primero tampoco se toca', false, b.columnasCambiadas);
+  comprobar('y se lee bien', 72751.25, b[0].valor);
+});
+
+escenario('Cuando los datos no pueden distinguir, manda el título', () => {
+  // Con saldo 1 el total y el unitario son el mismo número: las dos lecturas
+  // cuadran, así que no hay nada que corregir y se respeta la cabecera.
+  const a = invHoja(INV_CAB('Valorización', 'Valor Unidad'),
+    ['UNO', 'UNO', 'BODEGA CENTRAL', 1, 'UN', 500, 500],
+    ['DOS', 'DOS', 'BODEGA CENTRAL', 1, 'UN', 900, 900]);
+  comprobar('no se inventa un cambio', false, a.columnasCambiadas);
+  comprobar('el valorizado es el de la columna que lo dice', 500, a[0].valor);
+});
+
+escenario('Las filas sin datos no cuentan para decidir', () => {
+  // "Valor Unidad" llega en 0 para muchos productos: esas filas no dicen nada
+  // y no pueden arrastrar la decisión.
+  const a = invHoja(INV_CAB('Valorización', 'Valor Unidad'),
+    ['CERO', 'SIN COSTO', 'BODEGA CENTRAL', 7, 'UN', 70000, 0],
+    ['BIEN', 'CON COSTO', 'BODEGA CENTRAL', 13, 'UN', 5596.25, 72751.25]);
+  comprobar('decide con la fila que sí tiene los dos números', true, a.columnasCambiadas);
+  comprobar('y la otra se lee con esa misma lectura', 0, a[0].valor);
+});
+
 console.log(`\n${hechas - fallas} de ${hechas} comprobaciones pasaron`);
 process.exit(fallas ? 1 : 0);
