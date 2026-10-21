@@ -360,6 +360,18 @@
     out.sort((a,b) => (a.fecha||0) - (b.fecha||0) || a.i - b.i);
     out.fecha = fechaDeGeneracion(rows);
     out.fechaGen = fechaGenerada(out.fecha);
+    // Líneas repetidas: la señal de que el informe se bajó dos veces. Una
+    // línea repetida es el mismo documento, artículo, cantidad y fecha Y el
+    // mismo saldo arrastrado. Que un documento traiga dos veces el mismo
+    // artículo pasa —en sus informes sanos hay 35 o 36 casos—, pero con otro
+    // saldo; incluyéndolo, los tres informes sanos dan 0 y el que se bajó
+    // duplicado da 2.798 de 12.975 líneas. Por eso no hace falta un umbral.
+    const vistas = new Set();
+    out.repetidas = 0;
+    for (const m of out){
+      const firma = [m.tipo, m.folio, m.art, m.kind, m.qty, m.fecha && m.fecha.getTime(), m.saldo].join('|');
+      if (vistas.has(firma)) out.repetidas++; else vistas.add(firma);
+    }
     return out;
   }
 
@@ -380,11 +392,41 @@
   // para no tener que volver a subirlos. En la versión suelta no existe y todo queda en el navegador.
   const CFG = (() => { try { const el = document.getElementById('regx-config'); return el ? JSON.parse(el.textContent) : null; } catch(_){ return null; } })();
   const urlDe = clave => CFG.url.replace('__CLAVE__', clave);
+  // Render atiende una petición por proceso. Soltando los cinco archivos
+  // seguidos salen cinco POST a la vez: los primeros entran y los otros
+  // esperan, y los grandes se caen. Pasó el 20-10: de los cinco quedó guardado
+  // sólo AJUSTES, el más chico (71 KB), y el Informe de Documentos de 1,3 MB
+  // no. De a uno no se pisan.
+  let cola = Promise.resolve();
+  const enFila = fn => { const p = cola.then(fn, fn); cola = p.then(() => {}, () => {}); return p; };
+  const esperar = ms => new Promise(r => setTimeout(r, ms));
+  // Qué pasó. Antes se tiraba el código de error a la basura y la pantalla
+  // decía "no se pudo guardar" a secas, así que no había cómo saber la causa.
+  const MOTIVO = {
+    400: 'el servidor rechazó el archivo', 403: 'no tienes permiso para guardar',
+    404: 'la pantalla quedó vieja: recárgala', 413: 'el archivo es muy grande',
+    500: 'error del servidor', 502: 'el servidor no alcanzó a responder',
+    503: 'el servidor estaba ocupado', 504: 'el servidor tardó demasiado',
+  };
+  const motivoDe = s => (MOTIVO[s] || 'error del servidor') + ' (' + s + ')';
+  // Un corte de red o un 5xx se reintenta —el servidor puede estar
+  // despertando—; un 4xx es permiso, sesión o el archivo, y no se arregla solo.
   function guardarArchivo(clave, file){
     if (!CFG || !CFG.guardar) return Promise.resolve(null);
-    const fd = new FormData(); fd.append('archivo', file, file.name);
-    return fetch(urlDe(clave), {method:'POST', body:fd, headers:{'X-CSRFToken': CFG.csrf}, credentials:'same-origin'})
-      .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
+    return enFila(async () => {
+      let ultimo = 'no se pudo guardar';
+      for (let intento = 0; intento < 3; intento++){
+        if (intento) await esperar(2000 * intento);
+        try {
+          const fd = new FormData(); fd.append('archivo', file, file.name);
+          const r = await fetch(urlDe(clave), {method:'POST', body:fd, headers:{'X-CSRFToken': CFG.csrf}, credentials:'same-origin'});
+          if (r.ok) return r.json();
+          ultimo = motivoDe(r.status);
+          if (r.status < 500) break;
+        } catch(_){ ultimo = 'no hubo respuesta del servidor'; }
+      }
+      throw new Error(ultimo);
+    });
   }
   let estadoTimer = null;
   function guardarEstado(){
@@ -397,13 +439,34 @@
         ajSi: [...state.ajSi], ajNo: [...state.ajNo], hechos: Object.fromEntries(state.hechos),
         movCuando: Object.fromEntries(state.movCuando)
       });
-      fetch(urlDe('estado'), {method:'POST', body, headers:{'Content-Type':'application/json', 'X-CSRFToken': CFG.csrf}, credentials:'same-origin'}).then(r => { if (r.ok) marcarActualizado(); }).catch(() => {});
+      // En la misma fila que los archivos: si sale mientras se está subiendo
+      // uno grande, le quita el proceso que ese archivo necesita.
+      enFila(() => fetch(urlDe('estado'), {method:'POST', body, headers:{'Content-Type':'application/json', 'X-CSRFToken': CFG.csrf}, credentials:'same-origin'})
+        .then(r => { if (r.ok) marcarActualizado(); })).catch(() => {});
     }, 800);
   }
-  const avisoGuardado = (st, p) => {
+  // Lo que quedó cargado en la pantalla pero no en el sistema. Importa decirlo
+  // fuerte: al recargar vuelve el archivo anterior, y seguir trabajando sobre
+  // un informe viejo da ajustes contra movimientos que ya no existen.
+  const sinGuardar = new Map();
+  function pintarSinGuardar(){
+    const el = document.getElementById('avisoGuardar'); if (!el) return;
+    const nombres = [...sinGuardar.values()];
+    el.hidden = !nombres.length;
+    if (!nombres.length) return;
+    el.textContent = nombres.length === 1
+      ? `${nombres[0]} quedó cargado en esta pantalla pero NO se guardó en el sistema. Si recargas, vuelve el anterior. Súbelo de nuevo.`
+      : `Estos archivos quedaron cargados en esta pantalla pero NO se guardaron en el sistema: ${nombres.join(', ')}. Si recargas, vuelven los anteriores. Súbelos de nuevo.`;
+  }
+  const avisoGuardado = (st, p, clave, nombre) => {
     if (!CFG) return;
     if (!CFG.guardar){ st.textContent += ' · no se guarda (sin permiso de edición)'; return; }
-    p.then(r => { if (r){ st.textContent += ' · guardado en el sistema'; marcarActualizado(); } }).catch(() => { st.textContent += ' · no se pudo guardar'; });
+    p.then(r => { if (r){ st.textContent += ' · guardado en el sistema'; sinGuardar.delete(clave); pintarSinGuardar(); marcarActualizado(); } })
+     .catch(e => {
+       st.textContent += ' · NO se guardó: ' + ((e && e.message) || 'no se pudo guardar');
+       sinGuardar.set(clave, nombre || clave);
+       pintarSinGuardar();
+     });
   };
   // Arriba de la página: cuándo fue la última actualización guardada
   function marcarActualizado(){
@@ -1179,6 +1242,21 @@
       `${cuanto} de diferencia. Al de documentos le faltan los movimientos de esos días, así que ` +
       `parte de los productos que no cuadran puede ser sólo eso. Vuelve a bajarlo para que los dos ` +
       `queden al mismo momento.`;
+  }
+
+  // El informe bajado dos veces. Cada movimiento contado doble infla el saldo
+  // que se arrastra, y con eso la diferencia contra el conteo: con el suyo del
+  // 20-10 —12.975 líneas, 2.798 repetidas— el ajuste valorizado daba
+  // $149.752.130 en vez de $5.075.976, veintinueve veces más. No se arregla
+  // solo: borrar líneas a ciegas sería peor que avisar. Pero no puede pasar
+  // desapercibido, porque todo lo que se calcula después queda mal.
+  function avisoDeDuplicados(){
+    const cuales = [['El Informe de Documentos', state.mov], ['El informe con los ajustes', state.mov2],
+                    ['El archivo de ajustes', state.ajustes]].filter(([, l]) => l && l.repetidas > 0);
+    if (!cuales.length) return null;
+    return cuales.map(([nombre, l]) => `${nombre} trae ${fmt(l.repetidas)} líneas repetidas de ${fmt(l.length)}`).join('. ') +
+      '. Es la señal de que el archivo se bajó dos veces: cada movimiento contado doble infla el saldo y el ajuste. ' +
+      'Vuelve a bajarlo de Defontana y súbelo de nuevo.';
   }
 
   // La foto del stock valorizado, por artículo. Cuando está, manda sobre lo que
@@ -2830,6 +2908,9 @@
     const aviso = avisoDeFechas();
     $('avisoFechas').textContent = aviso || '';
     $('avisoFechas').hidden = !aviso;
+    const dup = avisoDeDuplicados();
+    $('avisoDuplicados').textContent = dup || '';
+    $('avisoDuplicados').hidden = !dup;
     const dash = state.view === 'dash', plan = state.view === 'plan' || dash;
     $('planBox').hidden = state.view !== 'plan'; $('dashBox').hidden = !dash;
     $('filtersBar').hidden = plan; $('tablebox').hidden = plan; $('summary').hidden = plan; $('copyNote').hidden = plan;
@@ -3039,7 +3120,7 @@
             (data.fecha ? 'sacado de Defontana el ' + data.fecha : 'sin fecha de generación en el archivo');
         }
         const clave = {stock:'conteo', mov:'informe', mov2:'informe_ajustes', ajustes:'ajustes', articulos:'articulos', qms:'qms'}[key];
-        if (clave){ avisoGuardado(st, guardarArchivo(clave, file)); if (key === 'mov2') guardarEstado(); }
+        if (clave){ avisoGuardado(st, guardarArchivo(clave, file), clave, file.name); if (key === 'mov2') guardarEstado(); }
       }).catch(e => { drop.classList.remove('ok'); drop.classList.add('err'); st.textContent = e.message || 'No se pudo leer el archivo.'; });
     };
     input.addEventListener('change', () => { handle(input.files[0]); input.value = ''; });
@@ -3324,6 +3405,6 @@
   // puerta, la matemática que decide los ajustes de inventario no se puede
   // comprobar más que a ojo.
   if (typeof module !== 'undefined' && module.exports){
-    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, parseArticulos, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, tipoAjCosto, avisoDeFechas, detectarAjustes, conAjustes, parseCostos, costoDeSuCompra, pmpEditable, costoPropuestoSinValor, renderStepsPanel, REG_COLS, regRow, detail, parseQms, computeQms, cruceQms, qmsRow, regExport, state};
+    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, parseArticulos, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, tipoAjCosto, avisoDeFechas, avisoDeDuplicados, guardarArchivo, detectarAjustes, conAjustes, parseCostos, costoDeSuCompra, pmpEditable, costoPropuestoSinValor, renderStepsPanel, REG_COLS, regRow, detail, parseQms, computeQms, cruceQms, qmsRow, regExport, state};
   }
 })();
