@@ -99,7 +99,11 @@
     const c = {code:t.col('Código'), name:t.col('Nombre'), stock:t.col('Stock físico'), estado:t.col('Estado del conteo'),
       por:t.col('Contado por'), fecha:t.col('Fecha y hora del conteo','Fecha del conteo','Fecha'),
       um:t.col('Unidad', 'Unidad Medida', 'Unidad de medida', 'Unidad QMS', 'U. Medida', 'UM', 'Unidad Defontana'),
-      linea:t.col('Línea de negocio', 'Linea de negocio', 'Linea Negocio', 'Línea', 'Linea')};
+      linea:t.col('Línea de negocio', 'Linea de negocio', 'Linea Negocio', 'Línea', 'Linea'),
+      // Dónde está guardado. La bodega es el recinto y la ubicación el lugar
+      // dentro de él ("Estante A3 / Nivel 2"): contando son dos datos
+      // distintos, y en el informe hacen falta los dos para ir a buscarlo.
+      ubicacion:t.col('Ubicación', 'Ubicacion'), bodega:t.col('Bodega', 'Nombre Bodega')};
     const out = [];
     for (const r of t.rows){
       const code = String(r[c.code] ?? '').trim(); if (!code) continue;
@@ -108,7 +112,9 @@
       // producto fantasma con el stock de todo el inventario encima.
       if (ES_FILA_TOTAL.test(code)) continue;
       out.push({code, key:keyOf(code), name:r[c.name] ?? '', stock:num(r[c.stock]), estado:c.estado >= 0 ? r[c.estado] ?? '' : '',
-        por:c.por >= 0 ? r[c.por] ?? '' : '', fecha:c.fecha >= 0 ? fechaDeConteo(r[c.fecha]) : null, um:c.um >= 0 ? String(r[c.um] ?? '').trim() : '', linea:c.linea >= 0 ? String(r[c.linea] ?? '').trim() : ''});
+        por:c.por >= 0 ? r[c.por] ?? '' : '', fecha:c.fecha >= 0 ? fechaDeConteo(r[c.fecha]) : null, um:c.um >= 0 ? String(r[c.um] ?? '').trim() : '', linea:c.linea >= 0 ? String(r[c.linea] ?? '').trim() : '',
+        ubicacion:c.ubicacion >= 0 ? String(r[c.ubicacion] ?? '').trim() : '',
+        bodega:c.bodega >= 0 ? String(r[c.bodega] ?? '').trim() : ''});
     }
     return out;
   }
@@ -780,6 +786,10 @@
       const previos = todos.filter(x => dayKey(x.fecha) !== ultimoDia);
       const main = done[0] || list[0];
       const g = {code:main.code, key:main.key, name:main.name, por:main.por, estado:main.estado, um:main.um || '', linea:(list.find(x => x.linea) || main).linea || '',
+        // Igual que la línea: el mismo producto puede venir con varios
+        // códigos y sólo uno traer dónde está guardado.
+        ubicacion:(list.find(x => x.ubicacion) || main).ubicacion || '',
+        bodega:(list.find(x => x.bodega) || main).bodega || '',
         stock: done.length ? done.reduce((a, x) => a + x.stock, 0) : null,
         fecha: done.length ? new Date(Math.max(...done.map(x => +x.fecha))) : null,
         variants: list.map(x => x.code), nCounted: done.length, previos};
@@ -1086,7 +1096,7 @@
               // la actualizada: los documentos traen la que tenían cuando se
               // emitieron, y si la unidad del artículo se cambió después, la
               // de los documentos viejos ya no es la de Defontana.
-              umInv: (fotoDe(docs) || {}).um || '', linea: s ? s.linea || '' : '', alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, umInfo, arts, artAjuste, pend, costDocs, manual, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs, ajPrevios, sysCalc, toOther,
+              umInv: (fotoDe(docs) || {}).um || '', linea: s ? s.linea || '' : '', ubicacion: s ? s.ubicacion || '' : '', bodegaConteo: s ? s.bodega || '' : '', alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, umInfo, arts, artAjuste, pend, costDocs, manual, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs, ajPrevios, sysCalc, toOther,
         sysAtCount, sysNow, realNow, diff, st, pmp, edited, pmpSrc: edited ? 'Ingresado a mano' : pm ? pm.src : 'Sin costo en Defontana',
         valor: st === 'done' ? 0 : pend != null && pmp != null ? pend * pmp : diff != null && Math.abs(diff) > EPS && pmp != null ? diff * pmp : (st === 'ok' ? 0 : null), zeros, cost};
     };
@@ -1383,10 +1393,14 @@
     }
   }
   const bodegasDe = r => {
-    if (!state.articulos || !state.articulos.length) return '';
+    // Sin Informe de Inventario cargado, lo único que se sabe es dónde se fue
+    // a contar, que viene en el conteo.
+    if (!state.articulos || !state.articulos.length) return r.bodegaConteo || '';
     armarBodegas();
     const m = bodegasPorKey.get(r.key);
-    if (!m || !m.size) return fotoDeClave(r.key) ? 'Sin stock en ninguna bodega' : '';
+    // Lo que el Informe de Inventario no conoce puede saberlo el conteo: ahí
+    // la columna queda con la bodega donde se fue a contar en vez de vacía.
+    if (!m || !m.size) return fotoDeClave(r.key) ? 'Sin stock en ninguna bodega' : (r.bodegaConteo || '');
     // Con una sola bodega, el nombre pelado: así la columna se puede filtrar.
     // Con varias, cuánto hay en cada una, que es el dato que hace falta —en su
     // informe del 07-10 había seis bodegas—.
@@ -3183,6 +3197,7 @@
     'Valor ajuste': r.valor != null ? Math.round(r.valor) : '',
     'Saldo última fila del informe': r.sysNow ?? '',
     'Bodegas': bodegasDe(r),
+    'Ubicación': r.ubicacion || '',
     ...columnasQms(r)
   });
   const zeroExport = z => ({
@@ -3354,10 +3369,10 @@
   const CABECERA_INFORME = [['Informe de Documentos de Inventario'], ['Empresa: (tu empresa)'], ['Fecha de generación: ' + fmtDate(new Date())], COLS_INFORME];
   const PLANTILLAS = {
     conteo: {archivo: 'ejemplo-conteo-fisico.xlsx', filas: [
-      ['Código', 'Nombre', 'Unidad Medida', 'Stock físico', 'Fecha y hora del conteo', 'Línea de negocio'],
-      ['INS-001', 'Producto de ejemplo', 'UN', 12, '19-08-2026 17:42', 'INSUMOS PRODUCCION'],
-      ['20006-220-1-1', 'Cable de ejemplo', 'FT', 38, '06-08-2026 11:45', 'INSUMOS PRODUCCION']],
-      ayuda: [['Columna', 'Qué va'], ['Código', 'Código del producto (obligatorio)'], ['Stock físico', 'Lo que se contó (obligatorio)'], ['Fecha y hora del conteo', 'Cuándo se contó: los documentos posteriores se toman como movimientos después del conteo'], ['Unidad Medida', 'Unidad en que se contó (opcional)'], ['Línea de negocio', 'Opcional, para filtrar'], ['', 'Dentro del ERP el conteo se toma solo desde Stock y conteo: no hace falta subirlo.']]},
+      ['Código', 'Nombre', 'Unidad Medida', 'Stock físico', 'Fecha y hora del conteo', 'Línea de negocio', 'Bodega', 'Ubicación'],
+      ['INS-001', 'Producto de ejemplo', 'UN', 12, '19-08-2026 17:42', 'INSUMOS PRODUCCION', 'BODEGA CENTRAL', 'Estante A3 / Nivel 2'],
+      ['20006-220-1-1', 'Cable de ejemplo', 'FT', 38, '06-08-2026 11:45', 'INSUMOS PRODUCCION', 'BODEGA INSUMOS', 'Rack B2']],
+      ayuda: [['Columna', 'Qué va'], ['Código', 'Código del producto (obligatorio)'], ['Stock físico', 'Lo que se contó (obligatorio)'], ['Fecha y hora del conteo', 'Cuándo se contó: los documentos posteriores se toman como movimientos después del conteo'], ['Unidad Medida', 'Unidad en que se contó (opcional)'], ['Línea de negocio', 'Opcional, para filtrar'], ['Bodega', 'El recinto donde está (opcional). Sale en el Excel de Productos'], ['Ubicación', 'El lugar dentro de la bodega, por ejemplo “Estante A3 / Nivel 2” (opcional)'], ['', 'Dentro del ERP el conteo se toma solo desde Stock y conteo: no hace falta subirlo.']]},
     informe: {archivo: 'ejemplo-informe-de-documentos.xlsx', filas: [...CABECERA_INFORME,
       ['PARTE DE ENTRADA', 'Aprobado', 55, '16-02-2026', '', 'BODEGA CENTRAL', 'COMPRA', 'Ingreso', '77.458.590-7 - PROVEEDOR', '', '', 'INS-001', 'Producto de ejemplo', 20, 'UN', 21600, 20, 21600],
       ['PARTE DE SALIDA', 'Aprobado', 27, '08-06-2026', 'BODEGA CENTRAL', '', 'SALIDA', 'Egreso', '', 'OT 6230', '', 'INS-001', 'Producto de ejemplo', 8, 'UN', 8640, 12, 12960]],

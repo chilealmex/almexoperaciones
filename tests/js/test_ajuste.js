@@ -393,5 +393,69 @@ console.log('\nSin ajustes hechos, las dos celdas quedan vacías');
   comprobar('y sin ajuste de costo', '', x['Ajuste de costo ya hecho']);
 }
 
+/* ---- Dónde está guardado el producto ----
+
+   La bodega es el recinto y la ubicación el lugar dentro de él ("Estante A3 /
+   Nivel 2"): para ir a buscar algo hacen falta los dos. La bodega sale del
+   Informe de Inventario, que es lo que Defontana tiene hoy; cuando ese informe
+   no conoce el producto, vale la del conteo. La ubicación sólo la sabe quien
+   contó, así que sale del conteo. */
+
+const CONTEO_CAB = ['Código', 'Nombre', 'Stock físico', 'Bodega', 'Ubicación'];
+
+function conConteo(...filas){
+  porId.set('optBodega', Object.assign(porId.get('optBodega') || {}, {value: '*'}));
+  porId.set('optAprob', Object.assign(porId.get('optAprob') || {}, {checked: false}));
+  porId.set('optSame', Object.assign(porId.get('optSame') || {}, {value: 'before'}));
+  state.stock = parseStock([CONTEO_CAB, ...filas]);
+  state.recount = new Map(); state.manual = new Set(); state.hechos = new Map();
+  state.pmpEdit = new Map(); state.movCuando = new Map(); state.ajustes = null;
+  state.articulos = null; state.qms = null; state.mov = [];
+  return compute([]).rows;
+}
+
+console.log('\nEl Excel dice en qué bodega y en qué ubicación está');
+{
+  const r = conConteo(['AAA', 'PROD AAA', 5, 'BODEGA CENTRAL', 'Estante A3 / Nivel 2'])[0];
+  const x = regExport(r);
+  comprobar('la ubicación, del conteo', 'Estante A3 / Nivel 2', x['Ubicación']);
+  comprobar('y la bodega', 'BODEGA CENTRAL', x['Bodegas']);
+}
+
+console.log('\nCon dos códigos del mismo producto, basta que uno traiga el dato');
+{
+  // "INS-001" e "INS 001" son el mismo producto: se juntan en una fila. Si la
+  // ubicación sólo viene en una de las dos, es la que vale —quedarse con la
+  // del primero deja la celda vacía teniendo el dato.
+  const filas = conConteo(
+    ['INS-001', 'PROD', 5, '', ''],
+    ['INS 001', 'PROD', 0, 'BODEGA CENTRAL', 'Estante A3']);
+  comprobar('quedó una sola fila', 1, filas.length);
+  const x = regExport(filas[0]);
+  comprobar('la ubicación es la que existe', 'Estante A3', x['Ubicación']);
+  comprobar('y la bodega también', 'BODEGA CENTRAL', x['Bodegas']);
+}
+
+console.log('\nUn conteo sin esas columnas no inventa nada');
+{
+  const r = conConteo(['AAA', 'PROD AAA', 5, '', ''])[0];
+  const x = regExport(r);
+  comprobar('sin ubicación', '', x['Ubicación']);
+  comprobar('sin bodega', '', x['Bodegas']);
+}
+
+console.log('\nEl Informe de Inventario manda sobre la bodega del conteo');
+{
+  // Es lo que Defontana tiene hoy; el conteo dice dónde se fue a buscar.
+  const r = conConteo(['AAA', 'PROD AAA', 5, 'BODEGA VIEJA', 'Estante A3'])[0];
+  state.articulos = parseArticulos([
+    ['Código Artículo', 'Descripción', 'Bodega', 'Saldo', 'Unidad', 'Valor unidad', 'Total'],
+    ['AAA', 'PROD AAA', 'BODEGA CENTRAL', 5, 'UN', 100, 500]]);
+  const x = regExport(compute([]).rows[0]);
+  comprobar('manda la del informe', 'BODEGA CENTRAL', x['Bodegas']);
+  comprobar('y la ubicación sigue saliendo del conteo', 'Estante A3', x['Ubicación']);
+  state.articulos = null;
+}
+
 console.log(`\n${hechas - fallas} de ${hechas} comprobaciones pasaron`);
 process.exit(fallas ? 1 : 0);
