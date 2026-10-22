@@ -86,7 +86,7 @@ def _rastro_de_importaciones():
 
 # --- Stock: cruce QMS / Defontana, conteo físico y diferencias en una sola vista ---
 
-FILTROS_STOCK = ("todos", "diferencias", "sin_contar", "contados")
+FILTROS_STOCK = ("todos", "diferencias", "sin_contar", "contados", "activos_fijos")
 
 
 def filtro_stock(args, por_defecto="todos") -> str:
@@ -146,6 +146,7 @@ COLUMNAS_STOCK = {
     "cantidad_fisica": ItemConteoInventario.cantidad_fisica,
     "contado_en": ItemConteoInventario.contado_en,
     "ubicacion": ItemConteoInventario.ubicacion,
+    "bodega": ItemConteoInventario.bodega,
     "linea_negocio": ItemConteoInventario.linea_negocio,
 }
 
@@ -204,6 +205,8 @@ def _consulta_stock(args, filtro_por_defecto="todos", esconder_vacios_por_defect
         base = base.filter(ItemConteoInventario.cantidad_fisica.is_(None))
     elif filtro == "contados":
         base = base.filter(ItemConteoInventario.cantidad_fisica.isnot(None))
+    elif filtro == "activos_fijos":
+        base = base.filter(ItemConteoInventario.activo_fijo.is_(True))
     elif filtro == "diferencias":
         # descuadre entre sistemas, o el físico contado no coincide con alguno de ellos
         base = base.filter(
@@ -243,6 +246,7 @@ def stock():
         "sin_contar": sum(1 for i in todos if not i.contado),
         "contados": sum(1 for i in todos if i.contado),
         "vacios": sum(1 for i in todos if not _tiene_stock(i)),
+        "activos_fijos": sum(1 for i in todos if i.activo_fijo),
     }
     # Se finalizó una toma y todavía no se sube ninguna planilla: la pantalla
     # vacía sin explicación se parece a una rota.
@@ -566,9 +570,11 @@ ETIQUETAS_STOCK = {
     "diferencias": "Solo con diferencias",
     "sin_contar": "Solo sin contar",
     "contados": "Solo contados",
+    "activos_fijos": "Solo activos fijos",
     "f_codigo": "Código",
     "f_nombre": "Nombre",
     "f_ubicacion": "Ubicación",
+    "f_bodega": "Bodega",
     "f_linea": "Línea de negocio",
     "f_unidad": "Unidad",
     "f_categoria": "Categoría",
@@ -614,8 +620,10 @@ def stock_excel():
         col("Estado del conteo", ancho=18),
         col("Contado por", ancho=26),
         col("Fecha y hora del conteo", ancho=22),
+        col("Bodega", ancho=24),
         col("Ubicación", ancho=28),
         col("Línea de negocio", ancho=24),
+        col("Activo fijo", ancho=12),
     ]
     filas = [
         [
@@ -640,8 +648,10 @@ def stock_excel():
             "Contado" if i.contado else "Pendiente",
             i.quien_conto,
             format_fecha_hora(i.contado_en),
+            i.bodega or "",
             i.ubicacion or "",
             i.linea_negocio or "",
+            "Sí" if i.activo_fijo else "",
         ]
         for i in items
     ]
@@ -656,6 +666,22 @@ def stock_excel():
             "sin los artículos en cero en los dos sistemas" if _sin_vacios else "",
         ),
     )
+
+
+@bp.route("/stock/<int:item_id>/activo-fijo", methods=["POST"])
+@require_permission("inventario", "editar")
+def stock_activo_fijo(item_id):
+    """Marca o desmarca el artículo como activo fijo, desde la misma fila."""
+    item = ItemConteoInventario.query.filter_by(
+        id=item_id, empresa_id=current_user.empresa_id
+    ).first_or_404()
+    datos = request.get_json(silent=True) or {}
+    # Se manda el valor que debe quedar y no un "da vuelta lo que haya": si dos
+    # personas tocan la misma fila, alternar deja el resultado al azar del orden
+    # en que lleguen los clics.
+    item.activo_fijo = bool(datos.get("activo_fijo"))
+    db.session.commit()
+    return jsonify({"ok": True, "activo_fijo": item.activo_fijo})
 
 
 @bp.route("/stock/<int:item_id>/contar", methods=["POST"])
@@ -741,6 +767,7 @@ FILTROS_COLUMNA = {
     "f_categoria": ItemConteoInventario.categoria,
     "f_linea": ItemConteoInventario.linea_negocio,
     "f_ubicacion": ItemConteoInventario.ubicacion,
+    "f_bodega": ItemConteoInventario.bodega,
 }
 
 
@@ -1670,10 +1697,10 @@ def conteo_plantilla_qms():
         # caía en la sucursal: contando, eso manda a recorrer la bodega entera.
         [
             "Código único", "Descripción", "Stock", "Linea Negocio", "Sucursal",
-            "Ubicación", "Unidad", "Categoría", "Valor Unitario", "Valor Total",
+            "Bodega", "Ubicación", "Unidad", "Categoría", "Valor Unitario", "Valor Total",
         ],
         fila_ejemplo=["ROP-BCAN-M", "Roldana cable acero", 12, "Repuestos", "Bodega Central",
-                      "Estante A3 / Nivel 2", "UN", "Componentes", 15000, 180000],
+                      "Bodega Central", "Estante A3 / Nivel 2", "UN", "Componentes", 15000, 180000],
     )
 
 

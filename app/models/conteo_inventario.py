@@ -219,6 +219,10 @@ class ItemConteoInventario(db.Model, _CalculosConteoMixin):
     nombre = db.Column(db.String(255), nullable=True)
     linea_negocio = db.Column(db.String(120), nullable=True)
     ubicacion = db.Column(db.String(255), nullable=True)
+    # En qué bodega está, que es otra pregunta que la ubicación: la bodega es el
+    # recinto y la ubicación el lugar dentro de él ("Estante A3 / Nivel 2").
+    # Defontana ya la mandaba en sus planillas y se leía sin guardarla.
+    bodega = db.Column(db.String(255), nullable=True)
     categoria = db.Column(db.String(120), nullable=True)
     # BigInteger y no Integer: el entero normal de PostgreSQL llega a
     # 2.147.483.647 y un valor mayor no se guarda mal, revienta la importación
@@ -253,6 +257,14 @@ class ItemConteoInventario(db.Model, _CalculosConteoMixin):
     # anterior. Entre medio pueden haberlo eliminado o desactivado, y arrastrar
     # el maestro viejo hace contar artículos que ya no existen.
     importado_en_la_toma = db.Column(db.Boolean, nullable=False, default=True)
+    # Marcado a mano como activo fijo. No es stock de bodega: una máquina o una
+    # herramienta mayor aparece igual en las planillas de los dos sistemas, y
+    # quien cuenta necesita distinguirla de lo que sí es inventario.
+    #
+    # Va en el artículo y no en la toma: que algo sea un activo fijo no cambia
+    # de una toma a otra. Por eso sobrevive a finalizar la toma y a las
+    # importaciones siguientes, que sólo tocan cantidades.
+    activo_fijo = db.Column(db.Boolean, nullable=False, default=False)
 
     @property
     def falta_en(self) -> str:

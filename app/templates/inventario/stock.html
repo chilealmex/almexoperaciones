@@ -113,6 +113,7 @@
   {{ t.pill('Con diferencias', 'diferencias', filtro, resumen.con_diferencia) }}
   {{ t.pill('Sin contar', 'sin_contar', filtro, resumen.sin_contar) }}
   {{ t.pill('Contados', 'contados', filtro, resumen.contados) }}
+  {{ t.pill('Activos fijos', 'activos_fijos', filtro, resumen.activos_fijos) }}
 </div>
 
 {# Esconder lo que está en cero es una decisión aparte de los filtros de
@@ -195,11 +196,15 @@
              el dato con el que se camina a buscarlo, no un dato de apoyo.
              Al final y sólo sobre 1700px de ventana, quedaba fuera del
              borde justo en la pantalla donde se usa. #}
+          {{ t.th('Bodega', 'bodega', orden, direccion) }}
           {{ t.th('Ubicación', 'ubicacion', orden, direccion) }}
           {{ t.th('Unidad', 'unidad_qms', orden, direccion) }}
           {{ t.th('QMS', 'cantidad_qms', orden, direccion, 'num') }}
           {{ t.th('Defontana', 'cantidad_defontana', orden, direccion, 'num') }}
           <th class="num">Dif. sistemas</th>
+          {# Un activo fijo no es stock de bodega. Se marca desde la misma
+             fila porque quien se da cuenta es quien está contando. #}
+          <th class="text-center">Activo fijo</th>
           {{ t.th('Físico', 'cantidad_fisica', orden, direccion, 'num') }}
           <th class="d-none d-xl-table-cell">Registrado por</th>
           {{ t.th('Fecha y hora', 'contado_en', orden, direccion, 'd-none d-xl-table-cell') }}
@@ -209,11 +214,13 @@
           {{ t.filtro('f_codigo', filtros_columna, 'filtros-stock', 'Código') }}
           {{ t.sin_filtro() }}
           {{ t.filtro('f_nombre', filtros_columna, 'filtros-stock', 'Nombre') }}
+          {{ t.filtro('f_bodega', filtros_columna, 'filtros-stock', 'Bodega') }}
           {{ t.filtro('f_ubicacion', filtros_columna, 'filtros-stock', 'Ubicación') }}
           {{ t.filtro('f_unidad', filtros_columna, 'filtros-stock', 'Unidad') }}
           {{ t.sin_filtro('num') }}
           {{ t.sin_filtro('num') }}
           {{ t.sin_filtro('num') }}
+          {{ t.sin_filtro() }}
           {{ t.sin_filtro('num') }}
           {{ t.sin_filtro() }}
           {{ t.sin_filtro() }}
@@ -228,6 +235,7 @@
           <td class="text-nowrap fw-semibold">{{ codigos[i.id][0] or '—' }}</td>
           <td class="text-nowrap fw-semibold">{{ codigos[i.id][1] or '—' }}</td>
           <td class="celda-nombre" title="{{ i.nombre or '' }}">{{ i.nombre or '—' }}</td>
+          <td class="celda-bodega" title="{{ i.bodega or '' }}">{{ i.bodega or '—' }}</td>
           <td class="celda-ubicacion" title="{{ i.ubicacion or '' }}">{{ i.ubicacion or '—' }}</td>
           <td class="text-nowrap">
             {% if i.unidades_coinciden %}
@@ -245,6 +253,17 @@
             <span class="badge bg-danger">{{ i.diferencia_sistemas|cantidad_signo }}</span>
             {% else %}
             <span class="badge bg-success">0</span>
+            {% endif %}
+          </td>
+          <td class="text-center celda-activo-fijo">
+            {% if puede('inventario', 'editar') %}
+            <button type="button" class="btn btn-sm boton-activo-fijo {{ 'btn-warning' if i.activo_fijo else 'btn-outline-secondary' }}"
+                    data-url="{{ url_for('inventario.stock_activo_fijo', item_id=i.id) }}"
+                    data-activo="{{ '1' if i.activo_fijo else '0' }}"
+                    aria-pressed="{{ 'true' if i.activo_fijo else 'false' }}"
+                    title="Marcar {{ i.codigo }} como activo fijo">{{ 'Activo fijo' if i.activo_fijo else 'Marcar' }}</button>
+            {% else %}
+            {{ 'Activo fijo' if i.activo_fijo else '—' }}
             {% endif %}
           </td>
           <td class="num celda-fisico" style="min-width: 7rem;">
@@ -271,7 +290,7 @@
           <td class="solo-pantalla-ancha celda-linea" title="{{ i.linea_negocio or '' }}">{{ i.linea_negocio or '—' }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="11" class="text-center text-muted py-4">Sin resultados{% if q %} para "{{ q }}"{% endif %}.</td></tr>
+        <tr><td colspan="13" class="text-center text-muted py-4">Sin resultados{% if q %} para "{{ q }}"{% endif %}.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -305,8 +324,20 @@
       {% else %}
       <span class="badge bg-danger" title="QMS declara {{ i.unidad_qms }} y Defontana {{ i.unidad_defontana }}">{{ i.unidad_qms }} ≠ {{ i.unidad_defontana }}</span>
       {% endif %}
+      {% if i.bodega %}<span>· {{ i.bodega }}</span>{% endif %}
       {% if i.ubicacion %}<span>· {{ i.ubicacion }}</span>{% endif %}
       {% if i.linea_negocio %}<span>· {{ i.linea_negocio }}</span>{% endif %}
+    </div>
+
+    <div class="stock-card-meta">
+      {% if puede('inventario', 'editar') %}
+      <button type="button" class="btn btn-sm boton-activo-fijo {{ 'btn-warning' if i.activo_fijo else 'btn-outline-secondary' }}"
+              data-url="{{ url_for('inventario.stock_activo_fijo', item_id=i.id) }}"
+              data-activo="{{ '1' if i.activo_fijo else '0' }}"
+              aria-pressed="{{ 'true' if i.activo_fijo else 'false' }}">{{ 'Activo fijo' if i.activo_fijo else 'Marcar activo fijo' }}</button>
+      {% elif i.activo_fijo %}
+      <span class="badge bg-warning text-dark">Activo fijo</span>
+      {% endif %}
     </div>
 
     <div class="stock-card-grid">
@@ -495,6 +526,37 @@
       }
     });
   }
+
+  // Marcar activo fijo. Se manda el valor que debe quedar, no "da vuelta lo
+  // que haya": con dos personas en la misma fila, alternar deja el resultado
+  // al azar del orden de los clics.
+  document.querySelectorAll('.boton-activo-fijo').forEach(function (boton) {
+    boton.addEventListener('click', function () {
+      var queda = boton.dataset.activo !== '1';
+      boton.disabled = true;
+      fetch(boton.dataset.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
+        credentials: 'same-origin',
+        body: JSON.stringify({ activo_fijo: queda })
+      }).then(function (r) {
+        if (!r.ok) throw new Error(r.status);
+        return r.json();
+      }).then(function (datos) {
+        var esta = !!datos.activo_fijo;
+        boton.dataset.activo = esta ? '1' : '0';
+        boton.setAttribute('aria-pressed', esta ? 'true' : 'false');
+        boton.classList.toggle('btn-warning', esta);
+        boton.classList.toggle('btn-outline-secondary', !esta);
+        // En la tabla el texto es corto; en la tarjeta del celular se explica.
+        boton.textContent = esta ? 'Activo fijo' : (boton.closest('.stock-card') ? 'Marcar activo fijo' : 'Marcar');
+      }).catch(function () {
+        boton.textContent = 'No se pudo guardar';
+      }).then(function () {
+        boton.disabled = false;
+      });
+    });
+  });
 
   document.querySelectorAll('.input-fisico').forEach(function (input) {
     input._valorPrevio = input.value;
