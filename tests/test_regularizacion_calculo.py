@@ -33,6 +33,7 @@ PRUEBAS = {
     "se ve en qué unidad está cada producto": JS / "test_unidad.js",
     "un movimiento se puede poner a mano antes o después del conteo": JS / "test_cuando.js",
     "el stock de QMS se cruza con el de Defontana": JS / "test_qms.js",
+    "la hoja de ajustes vs sugerido dice de dónde salió la diferencia": JS / "test_ajustes_vs_sugerido.js",
     "los códigos creados sin stock entran igual": JS / "test_codigos.js",
 }
 
