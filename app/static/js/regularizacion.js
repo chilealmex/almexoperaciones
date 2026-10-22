@@ -2915,7 +2915,7 @@
     hoja('Por comprobante', [...D.comps.values()].map(c => ({'Tipo documento': c.tipo, 'Folio': c.folio, 'Fecha': fmtDate(c.fecha), 'Tipo de ajuste': c.clase, 'Productos': c.p.size, 'Líneas': c.lin, 'Unidades': c.clase === 'Costo' ? '' : c.u, 'Valor': r0(c.v)})));
     hoja('Por línea', [...D.lineas.entries()].map(([k, l]) => ({'Línea': k, 'Productos': l.p.size, 'Entradas': r0(l.in), 'Salidas': r0(-l.out), 'Costo': r0(l.cost), 'Neto': r0(l.in - l.out + l.cost)})));
     if (D.raros.length) hoja('Valores que no calzan', D.raros.map(x => ({'Código en el archivo': x.m.art, 'Descripción en el archivo': x.m.desc || '', 'Producto con que se cruzó': x.r.code, 'Archivo': rarosFuente(x).replace(/^en (el )?/, ''), 'Comprobante': `${x.m.tipo} #${x.m.folio}`, 'Fecha': fmtDate(x.m.fecha), 'Cantidad': x.m.qty, 'Valor en el informe': r0(x.v), 'Costo unitario': r0(x.cu), 'PMP del producto': r0(x.pmp), 'Valor esperado': r0(x.esperado)})));
-    hoja('Ajustes vs sugerido', D.cmp.map(x => ({'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Sugerido': x.sug == null ? '' : x.sug, 'Ajustado': Math.round(x.aj * 1e4) / 1e4, 'Diferencia': x.dif == null ? '' : x.dif, 'Valor sugerido': x.vSug == null ? '' : r0(x.vSug), 'Valor ajustado': r0(x.vAj), 'Valor unitario sugerido': x.r.pmp > 0 ? Math.round(x.r.pmp * 100) / 100 : '', 'Valor unitario ajustado': cuAj(x) ?? '', 'Comprobantes': [...new Set((x.r.ajDocs || []).map(m => m.tipo + ' #' + m.folio))].join(', '), 'Estado': CMP_ESTADO[x.estado][1], 'Diferencia de valor por costo': x.costo ? r0(x.costo.dv) : '', 'Detalle del costo': x.costo ? costoTxt(x).replace(/<[^>]+>/g, '') : ''})));
+    hoja('Ajustes vs sugerido', D.cmp.map(cmpExport));
     hoja('Detalle', D.detalle.map(x => ({'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '', 'Tipo de ajuste': x.clase, 'Comprobante': `${x.m.tipo} #${x.m.folio}`, 'Fecha': fmtDate(x.m.fecha), 'Unidades': x.u, 'Valor': r0(x.v), 'Valor unitario': x.u ? Math.round(x.v / x.u * 100) / 100 : ''})));
     XLSX.writeFile(wb, 'resumen-ajustes-' + fmtDate(new Date()) + '.xlsx');
   }
@@ -3160,6 +3160,29 @@
     };
   };
 
+  const redondo = v => Math.round(v);
+  // Una fila de "Ajustes vs sugerido": lo que el sistema proponía contra lo
+  // que se ajustó de verdad. Lleva también de dónde salió la diferencia —qué
+  // se contó, dónde está y qué tenía Defontana en ese momento— y el cruce con
+  // QMS, que son las mismas columnas del Excel de Productos: escritas una sola
+  // vez, no pueden decir cosas distintas en una hoja y en la otra.
+  const cmpExport = x => ({
+    'Código': x.r.code, 'Nombre': x.r.name, 'Línea': x.r.linea || '',
+    'Bodega': bodegasDe(x.r),
+    'Contado': x.r.s ? x.r.s.stock : '',
+    'Fecha conteo': x.r.counted ? fmtDate(x.r.s.fecha, true) : '',
+    'Defontana al conteo': x.r.sysAtCount ?? '',
+    'Sugerido': x.sug == null ? '' : x.sug, 'Ajustado': Math.round(x.aj * 1e4) / 1e4,
+    'Diferencia': x.dif == null ? '' : x.dif,
+    'Valor sugerido': x.vSug == null ? '' : redondo(x.vSug), 'Valor ajustado': redondo(x.vAj),
+    'Valor unitario sugerido': x.r.pmp > 0 ? Math.round(x.r.pmp * 100) / 100 : '',
+    'Valor unitario ajustado': cuAj(x) ?? '',
+    'Comprobantes': [...new Set((x.r.ajDocs || []).map(m => m.tipo + ' #' + m.folio))].join(', '),
+    'Estado': CMP_ESTADO[x.estado][1],
+    'Diferencia de valor por costo': x.costo ? redondo(x.costo.dv) : '',
+    'Detalle del costo': x.costo ? costoTxt(x).replace(/<[^>]+>/g, '') : '',
+    ...columnasQms(x.r),
+  });
   const regExport = r => ({
     'Código': r.code, 'Nombre': r.name, 'Línea': r.linea || '', 'Otras formas del código': r.alias.join(', ') + (r.viaName ? (r.alias.length ? ' · ' : '') + 'cruzado por nombre' : ''), 'Qué hacer': ACTION[r.st][1], 'Causa probable': r.cause ? CAUSES[r.cause] : '',
     'Comprobante de ajuste': [...new Set(listaAj(r).map(m => `${m.tipo} #${m.folio}`))].join(', '), 'Fecha del ajuste': [...new Set(listaAj(r).map(m => fmtDate(m.fecha)))].join(', '),
@@ -3561,6 +3584,6 @@
   // puerta, la matemática que decide los ajustes de inventario no se puede
   // comprobar más que a ojo.
   if (typeof module !== 'undefined' && module.exports){
-    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, parseArticulos, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, tipoAjCosto, avisoDeFechas, avisoDeDuplicados, guardarArchivo, detectarAjustes, conAjustes, parseCostos, costoDeSuCompra, pmpEditable, costoPropuestoSinValor, renderStepsPanel, REG_COLS, regRow, detail, parseQms, computeQms, cruceQms, qmsRow, regExport, state};
+    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, parseArticulos, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, tipoAjCosto, avisoDeFechas, avisoDeDuplicados, guardarArchivo, detectarAjustes, conAjustes, parseCostos, costoDeSuCompra, pmpEditable, costoPropuestoSinValor, renderStepsPanel, REG_COLS, regRow, detail, parseQms, computeQms, cruceQms, qmsRow, regExport, cmpExport, state};
   }
 })();
