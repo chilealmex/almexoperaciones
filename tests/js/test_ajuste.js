@@ -286,11 +286,12 @@ function conAjusteHecho({contado = 5, saldoInicial = 10, ajuste, costo = null}){
                  fecha: DIA(2026, 8, 1), kind: 'in', qty: saldoInicial, saldo: saldoInicial,
                  valor: saldoInicial * 1000, valorInv: saldoInicial * 1000, costo: 0,
                  orig: '', dest: 'CENTRAL', estado: 'Aprobado', motivo: '', i: 0, _aj: false}];
-  if (ajuste) movs.push({art: 'ART-1', key: 'ART1', nameKey: 'ARTICULO', tipo: ajuste.tipo || 'PARTE DE SALIDA',
+  const ajustes = ajuste ? (Array.isArray(ajuste) ? ajuste : [ajuste]) : [];
+  for (const ajuste of ajustes) movs.push({art: 'ART-1', key: 'ART1', nameKey: 'ARTICULO', tipo: ajuste.tipo || 'PARTE DE SALIDA',
     folio: ajuste.folio || '311', fecha: DIA(2026, 9, 10), kind: ajuste.kind || 'out', qty: ajuste.qty,
     saldo: saldoInicial + (ajuste.kind === 'in' ? ajuste.qty : -ajuste.qty),
     valor: ajuste.valor, valorInv: 0, costo: 0,
-    orig: '', dest: 'CENTRAL', estado: 'Aprobado', motivo: 'AJUSTE', i: 1, _aj: true});
+    orig: '', dest: 'CENTRAL', estado: 'Aprobado', motivo: 'AJUSTE', i: 1 + movs.length, _aj: true});
   // Un ajuste de costo no mueve unidades: entra con cantidad 0 y sólo valor.
   if (costo) movs.push({art: 'ART-1', key: 'ART1', nameKey: 'ARTICULO', tipo: costo.tipo || 'AJUSTE COSTO ENTRADA',
     folio: costo.folio || '1', fecha: DIA(2026, 9, 8), kind: costo.kind || 'in', qty: 0,
@@ -326,6 +327,32 @@ console.log('\nUna entrada queda en positivo');
   const x = regExport(r);
   comprobar('la cantidad', 5, x['Cantidad ya ajustada']);
   comprobar('y el monto', 5800, x['Valor ya ajustado']);
+}
+
+console.log('\nEntradas y salidas, cada una en su columna');
+{
+  // El neto no sirve para informar: un producto con las dos cosas —como
+  // SA2000ETQ-CAT-NO_INFLAMAB, con una entrada de $56.320 y una salida de
+  // $99.200— aparecía como una sola salida de $42.880.
+  const r = conAjusteHecho({contado: 10, ajuste: [
+    {kind: 'in', qty: 176, valor: 56320, tipo: 'PARTE DE ENTRADA', folio: '475'},
+    {kind: 'out', qty: 310, valor: 99200, tipo: 'PARTE DE SALIDA', folio: '312'}]});
+  const x = regExport(r);
+  comprobar('la entrada, por su lado', 56320, x['Entradas ya ajustadas']);
+  comprobar('la salida, por el suyo', -99200, x['Salidas ya ajustadas']);
+  comprobar('y el neto sigue estando', -42880, x['Valor ya ajustado']);
+  comprobar('la cantidad neta no cambia', -134, x['Cantidad ya ajustada']);
+}
+
+console.log('\nCon una sola dirección, la otra columna queda vacía');
+{
+  const soloSalida = regExport(conAjusteHecho({ajuste: {qty: 5, valor: 5800}}));
+  comprobar('sin entradas', '', soloSalida['Entradas ya ajustadas']);
+  comprobar('con su salida', -5800, soloSalida['Salidas ya ajustadas']);
+  const soloEntrada = regExport(conAjusteHecho({contado: 15,
+    ajuste: {kind: 'in', qty: 5, valor: 5800, tipo: 'PARTE DE ENTRADA'}}));
+  comprobar('con su entrada', 5800, soloEntrada['Entradas ya ajustadas']);
+  comprobar('sin salidas', '', soloEntrada['Salidas ya ajustadas']);
 }
 
 console.log('\nUn comprobante sin monto no esconde la cantidad');
