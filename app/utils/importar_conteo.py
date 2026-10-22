@@ -364,6 +364,15 @@ def leer_qms(file_storage) -> dict:
         "ubicacion_bodega" if "ubicacion_bodega" in encabezados
         else _buscar_columna(encabezados, "ubicaci")
     )
+    # La bodega es el recinto y la ubicación el lugar dentro de él. El export
+    # de QMS trae "ubicacion_bodega", que es la ubicación: si se buscara
+    # "bodega" a secas, esa columna se leería como las dos cosas y la bodega
+    # quedaría repitiendo el estante.
+    columna_bodega = next(
+        (c for c in encabezados
+         if "bodega" in c.lower() and "ubicaci" not in c.lower() and c != columna_ubicacion),
+        None,
+    )
     columna_unidad = _buscar_columna(encabezados, "unidad")
     columna_categoria = _buscar_columna(encabezados, "categor")
     columna_costo = _buscar_columna(encabezados, "valor", "unitario")
@@ -388,6 +397,7 @@ def leer_qms(file_storage) -> dict:
                 # artículo, y ponerla dejaba la misma palabra repetida en todas
                 # las filas, que contando es igual a no tener ninguna.
                 "ubicacion": _texto(fila.get(columna_ubicacion), 255) if columna_ubicacion else "",
+                "bodega": _texto(fila.get(columna_bodega), 255) if columna_bodega else "",
                 "categoria": _texto(fila.get(columna_categoria), 120) if columna_categoria else "",
                 "unidad": _texto(fila.get(columna_unidad), 20) if columna_unidad else "",
                 "costo": None,
@@ -436,6 +446,7 @@ def importar_qms(file_storage, empresa_id: int, solo_no_contados: bool = False) 
             item.nombre = datos["nombre"] or None
             item.linea_negocio = datos["linea_negocio"] or None
             item.ubicacion = datos["ubicacion"] or None
+            item.bodega = datos["bodega"] or None
             item.categoria = datos["categoria"] or None
             item.unidad_qms = datos["unidad"] or None
             item.costo_unitario_qms = datos["costo"]
@@ -467,6 +478,10 @@ def importar_qms(file_storage, empresa_id: int, solo_no_contados: bool = False) 
             # anteriores —la sucursal, el nombre de la bodega de Defontana— sin
             # ninguna forma de limpiarlas.
             "ubicacion": datos["ubicacion"] or None,
+            # Lo que ya estaba no se borra con una planilla que no trae la
+            # columna: la bodega se escribió una vez y no tiene por qué
+            # perderse al subir un archivo que no la incluye.
+            "bodega": datos["bodega"] or item.bodega,
             "categoria": datos["categoria"] or item.categoria,
             "unidad_qms": datos["unidad"] or item.unidad_qms,
             "costo_unitario_qms": datos["costo"] if datos["costo"] is not None else item.costo_unitario_qms,
@@ -542,6 +557,15 @@ def leer_defontana(file_storage) -> dict:
     return acumulado
 
 
+def _bodegas(datos) -> str:
+    """Las bodegas donde Defontana tiene el artículo, separadas por coma.
+
+    Un artículo puede estar en varias y el informe trae una fila por cada una.
+    Quedarse con la primera mandaría a buscarlo a la bodega equivocada.
+    """
+    return ", ".join(sorted(datos.get("bodegas") or ()))[:255]
+
+
 def importar_defontana(file_storage, empresa_id: int, solo_no_contados: bool = False) -> dict:
     """Carga en el maestro el inventario por bodega de Defontana."""
     acumulado = leer_defontana(file_storage)
@@ -570,6 +594,7 @@ def importar_defontana(file_storage, empresa_id: int, solo_no_contados: bool = F
             item.nombre = datos["nombre"] or None
             item.unidad_defontana = datos["unidad"] or None
             item.costo_unitario_defontana = datos["costo"]
+            item.bodega = _bodegas(datos) or None
             nuevos.append(item)
             filas_creadas += 1
             continue
@@ -592,6 +617,7 @@ def importar_defontana(file_storage, empresa_id: int, solo_no_contados: bool = F
             ),
             "en_defontana": True,
             "importado_en_la_toma": True,
+            "bodega": _bodegas(datos) or item.bodega,
         })
 
     if nuevos:
@@ -734,7 +760,7 @@ def unificar_grupo(items: list, usuario_id=None) -> ItemConteoInventario:
         principal.contado_por_texto = contador.contado_por_texto
         principal.contado_en = contador.contado_en
 
-    for campo in ("nombre", "linea_negocio", "ubicacion", "categoria", "unidad_qms",
+    for campo in ("nombre", "linea_negocio", "ubicacion", "bodega", "categoria", "unidad_qms",
                   "unidad_defontana", "costo_unitario_qms", "costo_unitario_defontana"):
         if getattr(principal, campo) in (None, ""):
             setattr(principal, campo, _primero(getattr(i, campo) for i in ordenados))
