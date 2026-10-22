@@ -2511,6 +2511,12 @@
   // que no entran en "Valor ya ajustado" —ése son las unidades que entraron o
   // salieron— pero son plata ajustada igual, y hay que poder sumarla. En sus
   // archivos del 21-10 son 197 productos y $52.259.819.
+  // Lo ajustado por entradas y por salidas, cada uno por su lado. "Valor ya
+  // ajustado" trae el neto del producto, y con eso no se puede informar
+  // cuánto entró y cuánto salió: hay productos con las dos cosas —en sus
+  // archivos, SA2000ETQ-CAT-NO_INFLAMAB tiene una entrada de $56.320 y una
+  // salida de $99.200, y en el neto se ve una sola salida de $42.880—.
+  const valorAj = (r, kind) => (r.ajDocs || []).reduce((t, m) => m.kind === kind ? t + (m.valor || 0) : t, 0);
   const valorAjCosto = r => (r.costDocs || []).reduce((t, m) => t + (m.kind === 'in' ? 1 : -1) * (m.valor || 0), 0);
   const comprobantesAj = r => {
     const L = listaAj(r); if (!L.length) return '';
@@ -3153,6 +3159,8 @@
     // monto, y ahí la cantidad tiene que verse igual.
     'Cantidad ya ajustada': Math.abs(r.aj) > EPS ? r.aj : '',
     'Valor ya ajustado': Math.abs(r.ajVal) > EPS ? Math.round(r.ajVal) : '',
+    'Entradas ya ajustadas': valorAj(r, 'in') > EPS ? Math.round(valorAj(r, 'in')) : '',
+    'Salidas ya ajustadas': valorAj(r, 'out') > EPS ? -Math.round(valorAj(r, 'out')) : '',
     // El ajuste de costo iba sólo en la frase de Observaciones —"Ajuste de
     // costo ya hecho: AJUSTE COSTO ENTRADA #1 del 08-10-2026 ($4.173.180)"— y
     // una frase no se suma ni se filtra.
