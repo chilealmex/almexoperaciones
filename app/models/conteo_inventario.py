@@ -360,6 +360,12 @@ class TomaInventarioDetalle(db.Model, _CalculosConteoMixin):
     categoria = db.Column(db.String(120), nullable=True)
     linea_negocio = db.Column(db.String(120), nullable=True)
     ubicacion = db.Column(db.String(255), nullable=True)
+    bodega = db.Column(db.String(255), nullable=True)
+    # Nulo a propósito, y no falso: así se distingue una toma cerrada antes de
+    # que existiera esta columna —donde no se sabe— de un artículo que no es
+    # activo fijo. En el informe, lo que no se guardó se completa con la marca
+    # que el artículo tiene hoy.
+    activo_fijo = db.Column(db.Boolean, nullable=True)
 
     unidad_qms = db.Column(db.String(20), nullable=True)
     unidad_defontana = db.Column(db.String(20), nullable=True)

@@ -317,6 +317,8 @@ def toma_cerrar():
             categoria=i.categoria,
             linea_negocio=i.linea_negocio,
             ubicacion=i.ubicacion,
+            bodega=i.bodega,
+            activo_fijo=i.activo_fijo,
             unidad_qms=i.unidad_qms,
             unidad_defontana=i.unidad_defontana,
             costo_unitario_qms=i.costo_unitario_qms,
@@ -501,6 +503,28 @@ def historial_detalle(toma_id):
 def historial_excel(toma_id):
     toma = TomaInventario.query.filter_by(id=toma_id, empresa_id=current_user.empresa_id).first_or_404()
 
+    # Las tomas cerradas antes de que la foto guardara la bodega y la marca de
+    # activo fijo no las tienen. Como las dos son propiedades del artículo y no
+    # del conteo —no cambian de una toma a otra—, se completan con lo que el
+    # artículo tiene hoy en vez de dejar la columna en blanco.
+    vivos = {
+        i.codigo: i
+        for i in ItemConteoInventario.query.filter_by(empresa_id=current_user.empresa_id).all()
+    }
+
+    def _bodega(d):
+        if d.bodega:
+            return d.bodega
+        vivo = vivos.get(d.codigo)
+        return (vivo.bodega or "") if vivo else ""
+
+    def _activo_fijo(d):
+        marcado = d.activo_fijo
+        if marcado is None:
+            vivo = vivos.get(d.codigo)
+            marcado = vivo.activo_fijo if vivo else False
+        return "Sí" if marcado else ""
+
     columnas = [
         col("Código", ancho=20, total="texto"),
         col("Nombre", ancho=44),
@@ -515,7 +539,9 @@ def historial_excel(toma_id):
         col("Fecha y hora del conteo", ancho=22),
         col("Categoría", ancho=24),
         col("Línea de negocio", ancho=24),
+        col("Bodega", ancho=24),
         col("Ubicación", ancho=28),
+        col("Activo fijo", ancho=12),
     ]
     filas = [
         [
@@ -532,7 +558,9 @@ def historial_excel(toma_id):
             format_fecha_hora(d.contado_en),
             d.categoria or "",
             d.linea_negocio or "",
+            _bodega(d),
             d.ubicacion or "",
+            _activo_fijo(d),
         ]
         for d in toma.detalles
     ]
