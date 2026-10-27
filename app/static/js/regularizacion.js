@@ -2458,9 +2458,18 @@
   }
 
   const lineaCell = l => `<td class="linea">${l ? esc(l) : '<span class="mut">—</span>'}</td>`;
+  // La línea de negocio viene de dos lados y pueden decir cosas distintas: la
+  // del conteo es la que quedó guardada cuando se armó la toma, y la de QMS la
+  // que ese sistema tiene ahora. El Informe de Inventario no trae línea, así
+  // que no hay una tercera.
+  const lineaQms = r => {
+    const x = (state.qmsPorClave || new Map()).get(r.key);
+    return (x && x.q && x.q.linea) || '';
+  };
   const REG_COLS = [
     ['code', 'Producto', '', r => r.code],
-    ['linea', 'Línea', '', r => r.linea || null],
+    ['linea', 'Línea (conteo)', '', r => r.linea || null],
+    ['lineaqms', 'Línea QMS', '', r => lineaQms(r) || null],
     ['um', 'Unidad', '', r => r.um || null],
     ['donde', 'Está en', '', r => dondeEsta(r)],
     ['contado', 'Contado', 'num', r => r.s ? r.s.stock : null],
@@ -2556,6 +2565,7 @@
     return `<tr class="rx-row s-${r.st}${state.open.has(r.key) ? ' open' : ''}" data-key="${esc(r.key)}" tabindex="0">
       <td><div class="code">${esc(r.code)}</div><div class="pname">${esc(r.name)}</div>${aliasNote(r)}</td>
       ${lineaCell(r.linea)}
+      ${lineaCell(lineaQms(r))}
       <td class="linea um">${r.um ? esc(r.um) : '<span class="mut">—</span>'}${r.umInfo ? '<div class="small alias">contado en ' + esc(r.umInfo.de) + '</div>' : ''}</td>
       <td>${(() => { const d = dondeEsta(r); return d ? `<span class="pill ${DONDE[d][0]}">${DONDE[d][1]}</span>` : '<span class="mut">—</span>'; })()}</td>
       <td class="num">${r.counted ? fmt(r.s.stock) + '<div class="small">' + fmtDate(r.s.fecha) + (r.s.recontado ? ' · recuento' : '') + '</div>' + (r.umInfo ? '<div class="small alias">en ' + esc(r.umInfo.de) + ' · Defontana en ' + esc(r.umInfo.a) + (r.umInfo.f ? ' (convertido)' : '') + '</div>' : '') : '<span class="mut">—</span>'}${r.s && r.s.recontado && r.s.original && r.s.original.stock != null ? '<div class="small">antes: ' + fmt(r.s.original.stock) + ' el ' + fmtDate(r.s.original.fecha) + '</div>' : ''}${r.s ? `<input class="recount" type="number" step="any" min="0" inputmode="decimal" data-key="${esc(r.key)}" value="${r.s.recontado ? r.s.stock : ''}" placeholder="Recuento" title="Recuento de hoy" aria-label="Recuento de hoy de ${esc(r.code)}">` : ''}</td>
@@ -3152,6 +3162,7 @@
     return {
       'Está en': !state.qms ? '' : DONDE[dondeEsta(r)][1],
       'Código QMS': q ? q.code : '',
+      'Línea QMS': q ? q.linea || '' : '',
       'Unidad QMS': q ? q.um : '',
       'Unidad Defontana (Informe de Inventario)': r.umInv || '',
       'Stock QMS': q ? q.stock : '',

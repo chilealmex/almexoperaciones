@@ -265,5 +265,56 @@ console.log('\nSin archivo de QMS las columnas quedan vacías, no con un cruce f
   comprobar('la columna del cruce queda vacía', '', fila['Cruce con QMS']);
 }
 
+/* ---- Las dos líneas de negocio ----
+
+   Viene de dos lados y pueden decir cosas distintas: la del conteo es la que
+   quedó guardada cuando se armó la toma, y la de QMS la que ese sistema tiene
+   ahora. El Informe de Inventario no trae línea, así que no hay una tercera. */
+
+console.log('\nLa línea del conteo y la de QMS, cada una por su lado');
+{
+  cruce({
+    qms: [{code: 'INS-001', stock: 10, um: 'UN', unit: 1000, linea: 'PRENSAS'}],
+    conteo: [{code: 'INS-001', stock: 10, linea: 'INSUMOS PRODUCCION'}],
+    docs: [{art: 'INS-001', qty: 10, saldo: 10, valor: 10000, valorInv: 10000}],
+  });
+  const r = state.rows.find(x => x.code === 'INS-001');
+  const x = R.regExport(r);
+  comprobar('la del conteo', 'INSUMOS PRODUCCION', x['Línea']);
+  comprobar('la de QMS', 'PRENSAS', x['Línea QMS']);
+  comprobar('y las dos salen en la tabla', true,
+    R.regRow(r).includes('INSUMOS PRODUCCION') && R.regRow(r).includes('PRENSAS'));
+  // La columna de la tabla se usa además para ordenar y para copiar: tiene
+  // que traer la de QMS, no repetir la del conteo.
+  const col = clave => R.REG_COLS.find(c => c[0] === clave)[3](r);
+  comprobar('la columna "Línea QMS" trae la de QMS', 'PRENSAS', col('lineaqms'));
+  comprobar('y la de al lado sigue siendo la del conteo', 'INSUMOS PRODUCCION', col('linea'));
+}
+
+console.log('\nSin archivo de QMS, esa columna queda vacía');
+{
+  cruce({
+    conteo: [{code: 'INS-001', stock: 10, linea: 'INSUMOS PRODUCCION'}],
+    docs: [{art: 'INS-001', qty: 10, saldo: 10, valor: 10000, valorInv: 10000}],
+  });
+  const x = R.regExport(state.rows.find(r => r.code === 'INS-001'));
+  comprobar('sin línea de QMS', '', x['Línea QMS']);
+  comprobar('pero la del conteo sigue', 'INSUMOS PRODUCCION', x['Línea']);
+}
+
+console.log('\nUn producto que no está en QMS tampoco la inventa');
+{
+  cruce({
+    qms: [{code: 'OTRO', stock: 1, um: 'UN', unit: 100, linea: 'PRENSAS'}],
+    conteo: [{code: 'INS-001', stock: 10, linea: 'INSUMOS PRODUCCION'}],
+    docs: [{art: 'INS-001', qty: 10, saldo: 10, valor: 10000, valorInv: 10000}],
+  });
+  const r = state.rows.find(x => x.code === 'INS-001');
+  comprobar('vacía en el Excel', '', R.regExport(r)['Línea QMS']);
+  // Y tampoco se le pega la línea de otro producto que sí está en QMS.
+  comprobar('vacía en la tabla', null, R.REG_COLS.find(c => c[0] === 'lineaqms')[3](r));
+  comprobar('la tabla no muestra la línea ajena', false, R.regRow(r).includes('PRENSAS'));
+}
+
 console.log(`\n${hechas - fallas} de ${hechas} comprobaciones pasaron`);
 process.exit(fallas ? 1 : 0);
