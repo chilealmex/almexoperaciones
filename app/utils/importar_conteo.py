@@ -112,6 +112,13 @@ def _es_xlsx(file_storage) -> bool:
     return inicio == b"PK"
 
 
+# Hasta dónde se busca la cabecera, y cuántas columnas tiene que traer para
+# contar como tal. Tres basta: los títulos de arriba ocupan una sola celda y
+# cualquier planilla de stock trae al menos código, descripción y cantidad.
+_FILAS_PARA_BUSCAR_CABECERA = 30
+_COLUMNAS_MINIMAS_DE_CABECERA = 3
+
+
 def _filas_desde_xlsx(file_storage):
     """(encabezados, filas) desde un .xlsx: cada fila es un dict encabezado -> valor nativo."""
     from openpyxl import load_workbook
@@ -119,7 +126,20 @@ def _filas_desde_xlsx(file_storage):
     libro = load_workbook(file_storage.stream, data_only=True, read_only=True)
     hoja = libro.active
     filas = hoja.iter_rows(values_only=True)
-    encabezados = [str(c).strip() if c is not None else "" for c in next(filas, [])]
+    # La cabecera no siempre está en la primera fila. El Informe de Inventario
+    # de Defontana empieza con tres líneas de título —el nombre del informe, la
+    # empresa y la fecha de generación— y recién después vienen los nombres de
+    # las columnas. Esas líneas tienen una sola celda; la cabecera tiene varias,
+    # y por eso se reconoce sin tener que saber cómo se llaman las columnas.
+    encabezados = []
+    for _ in range(_FILAS_PARA_BUSCAR_CABECERA):
+        fila = next(filas, None)
+        if fila is None:
+            break
+        nombres = [str(c).strip() if c is not None else "" for c in fila]
+        if sum(1 for n in nombres if n) >= _COLUMNAS_MINIMAS_DE_CABECERA:
+            encabezados = nombres
+            break
 
     def generador():
         for fila in filas:
@@ -504,14 +524,71 @@ def importar_qms(file_storage, empresa_id: int, solo_no_contados: bool = False) 
     }
 
 
+def _sin_tildes(texto: str) -> str:
+    """El nombre de una columna en minúsculas y sin tildes, para compararlo.
+
+    Defontana escribe la misma columna "CodArticulo" en un informe y
+    "Código Artículo" en otro.
+    """
+    plano = unicodedata.normalize("NFKD", str(texto or ""))
+    return "".join(c for c in plano if not unicodedata.combining(c)).lower()
+
+
+def _buscar_columna_plana(campos, *palabras_clave):
+    """Como _buscar_columna, pero sin que las tildes cambien el resultado."""
+    for campo in campos or []:
+        nombre = _sin_tildes(campo)
+        if all(palabra in nombre for palabra in palabras_clave):
+            return campo
+    return None
+
+
+def _columnas_de_valor_cambiadas(filas, col_saldo, col_unitario, col_total) -> bool:
+    """¿Los datos dicen lo contrario que los títulos de las dos columnas de valor?
+
+    Se cuenta cuántas filas cumplen cada lectura —el total es el saldo por el
+    unitario, o al revés— y gana la que tenga más. Las filas con saldo 1 cumplen
+    las dos y no inclinan nada; las que no traen los dos números no se miran.
+    """
+
+    def cuadra(a, b):
+        return abs(a - b) < max(1, 0.01 * abs(b))
+
+    como_dice = invertido = 0
+    for fila in filas:
+        saldo = _a_cantidad(fila.get(col_saldo, "0"))
+        unitario = _a_monto(fila.get(col_unitario))
+        total = _a_monto(fila.get(col_total))
+        if not saldo or float(saldo) <= 0 or not unitario or not total:
+            continue
+        saldo = float(saldo)
+        if cuadra(saldo * unitario, total):
+            como_dice += 1
+        if cuadra(saldo * total, unitario):
+            invertido += 1
+    return invertido > como_dice
+
+
 def leer_defontana(file_storage) -> dict:
     """Lee la planilla de Defontana y devuelve {código: datos}, sin tocar la base."""
     encabezados, reader = _leer_filas(file_storage, codificaciones_csv=("cp1252", "latin-1", "utf-8-sig"))
 
-    columna_codigo = next((c for c in encabezados if "codarticulo" in c.lower()), None)
+    # Defontana da dos planillas y las dos sirven: el export de stock por bodega
+    # ("CodArticulo", "Saldo Stock", "Nombre Bodega") y el Informe de Inventario
+    # ("Código Artículo", "Saldo", "Bodega", "Valorización"). El segundo es el
+    # que ya se usa en Regularización, así que pedir el otro obligaba a bajar
+    # dos veces lo mismo.
+    columna_codigo = (
+        next((c for c in encabezados if "codarticulo" in _sin_tildes(c)), None)
+        or _buscar_columna_plana(encabezados, "codigo", "articulo")
+        or next((c for c in encabezados if _sin_tildes(c).strip() == "articulo"), None)
+    )
     columna_nombre = next((c for c in encabezados if "descripci" in c.lower()), None)
     columna_stock = next((c for c in encabezados if "saldo" in c.lower()), None)
-    columna_bodega = next((c for c in encabezados if "nombre bodega" in c.lower()), None)
+    columna_bodega = (
+        next((c for c in encabezados if "nombre bodega" in c.lower()), None)
+        or next((c for c in encabezados if _sin_tildes(c).strip() == "bodega"), None)
+    )
     columna_unidad = _buscar_columna(encabezados, "unidad")
     # Defontana exporta el costo con nombres distintos según el informe
     columna_costo = (
@@ -519,13 +596,27 @@ def leer_defontana(file_storage) -> dict:
         or _buscar_columna(encabezados, "costo", "promedio")
         or _buscar_columna(encabezados, "costo")
         or _buscar_columna(encabezados, "valor", "unitario")
+        or _buscar_columna(encabezados, "valor", "unidad")
     )
-    columna_valor_total = _buscar_columna(encabezados, "valor", "total") or _buscar_columna(
-        encabezados, "total", "costo"
+    columna_valor_total = (
+        _buscar_columna(encabezados, "valor", "total")
+        or _buscar_columna(encabezados, "total", "costo")
+        or next((c for c in encabezados if _sin_tildes(c).strip() in ("total", "valorizacion", "valorizado")), None)
     )
 
     if not columna_codigo or not columna_stock:
         raise ValueError("No se encontraron las columnas de código/stock esperadas en el archivo de Defontana.")
+
+    reader = list(reader)
+    # El Informe de Inventario a veces llega con los títulos de las dos
+    # columnas de valor cambiados de lugar: dice "Valorización | Valor Unidad"
+    # y trae el unitario en la primera. Leerlo por el título deja el costo
+    # dividido por el saldo —5.596,25 entre 13 unidades daba 430,48—. Lo decide
+    # la aritmética: el total tiene que ser el saldo por el unitario.
+    if columna_costo and columna_valor_total and _columnas_de_valor_cambiadas(
+        reader, columna_stock, columna_costo, columna_valor_total
+    ):
+        columna_costo, columna_valor_total = columna_valor_total, columna_costo
 
     acumulado = {}
     for fila in reader:
@@ -547,7 +638,10 @@ def leer_defontana(file_storage) -> dict:
             acumulado[codigo]["bodegas"].add(bodega)
 
         costo = _a_monto(fila.get(columna_costo)) if columna_costo else None
-        if costo is None and columna_valor_total and cantidad:
+        # En el Informe de Inventario la columna del valor unitario llega en 0
+        # para muchos productos valorizados: ahí el costo de verdad es el
+        # valorizado dividido por el saldo.
+        if not costo and columna_valor_total and cantidad:
             total = _a_monto(fila.get(columna_valor_total))
             if total:
                 costo = round(total / cantidad)
