@@ -9,6 +9,36 @@
   // Clave para cruzar códigos: sin tildes, sin espacios, puntos, guiones, guiones bajos ni ceros a la izquierda
   const claveCruda = v => String(v ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^0+(?=.)/, '');
 
+  // La clave del maestro: la misma idea que usa el importador. Saca lo que no
+  // se ve —espacios, invisibles, tildes, mayúsculas— y los ceros con que se
+  // rellena cada tramo, pero RESPETA los signos: para el resto del sistema
+  // "TCA-HEX-3-4" y "TCA-HEX-3/4" son dos artículos distintos.
+  const INVISIBLES = /[\u00ad\u200b-\u200f\u2060\ufeff]/g;
+  const GUIONES = /[\u2010-\u2015\u2212]/g;
+  const claveEstricta = v => String(v ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(INVISIBLES, '').replace(GUIONES, '-').replace(/^'+/, '').replace(/\s+/g, '').toUpperCase()
+    .split(/([^0-9A-Z])/).map(p => p.startsWith('0') ? (p.replace(/^0+/, '') || '0') : p).join('');
+
+  // Dos códigos que vienen por separado DENTRO DE UN MISMO ARCHIVO son dos
+  // artículos: el sistema que lo exportó tiene dos fichas, no una escrita de
+  // dos maneras. Sin esto la pantalla juntaba TCA-HEX-3-4 con TCA-HEX-3/4 —los
+  // dos vienen en el conteo y los dos vienen en Defontana— y mostraba el
+  // conteo de uno como "conteo anterior no usado" del otro, sin manera de
+  // separarlos desde ninguna pantalla.
+  //
+  // Es sólo para los que chocan dentro de un mismo archivo. Entre archivos
+  // distintos manda la llave suelta, que es la que hace cruzar "AA-STN-2-5,5"
+  // de QMS con "AA-STN-2-5.5" de Defontana: ahí la coma y el punto son la
+  // misma pieza escrita por dos sistemas. En sus archivos del 20-10 hay 31
+  // grupos que chocan; 14 vienen repetidos dentro de un archivo y se separan,
+  // los otros 17 son parejas entre sistemas y siguen cruzando.
+  const clavesEnDisputa = new Set();
+  const claveBase = v => {
+    const k = claveCruda(v);
+    return clavesEnDisputa.has(k) ? claveEstricta(v) : k;
+  };
+  const enDisputa = v => clavesEnDisputa.has(claveCruda(v));
+
   // Las parejas que alguien confirmó en Unificar códigos. Esta pantalla cruza
   // por su cuenta, lo que alcanza para los códigos que sólo cambian en signos o
   // ceros, pero no sabe de las uniones hechas a mano: sin esto, el mismo
@@ -16,21 +46,60 @@
   //
   // Se encadenan porque un código puede dar dos saltos: la pareja confirmada lo
   // lleva al de QMS, y si esa línea se unió después con otra, sigue.
-  const unionesConfirmadas = (() => {
-    const mapa = new Map();
+  const paresConfirmados = (() => {
     try {
       const el = document.getElementById('regx-config');
-      const pares = (el ? (JSON.parse(el.textContent).uniones || []) : []);
-      for (const [de, a] of pares){
-        const origen = claveCruda(de), destino = claveCruda(a);
-        if (origen && destino && origen !== destino) mapa.set(origen, destino);
-      }
-    } catch (_) {}
-    return mapa;
+      return el ? (JSON.parse(el.textContent).uniones || []) : [];
+    } catch (_) { return []; }
   })();
+  const unionesConfirmadas = new Map();
+  // Se rehace cuando aparece una disputa: la unión confirmada sigue valiendo,
+  // pero sus códigos pasan a la clave estricta y el mapa tiene que ir de una a
+  // la otra. Lo confirmado a mano manda sobre la separación automática.
+  function armarUniones(){
+    unionesConfirmadas.clear();
+    for (const [de, a] of paresConfirmados){
+      const origen = claveBase(de), destino = claveBase(a);
+      if (origen && destino && origen !== destino) unionesConfirmadas.set(origen, destino);
+    }
+  }
+  armarUniones();
+
+  // Lo que trae un archivo recién leído: si dos de sus códigos caen en la misma
+  // clave suelta pero son distintos para el maestro, esa clave queda en disputa
+  // y desde ahí todos los archivos la miran por la clave estricta. La disputa
+  // puede aparecer con el último archivo subido, así que los que ya estaban
+  // cargados se vuelven a numerar.
+  function anotarChoques(filas){
+    const porClave = new Map();
+    for (const f of filas || []){
+      const code = f && (f.code ?? f.art);
+      if (!code) continue;
+      const k = claveCruda(code);
+      if (!k || clavesEnDisputa.has(k)) continue;
+      const vistos = porClave.get(k) || new Set();
+      vistos.add(claveEstricta(code));
+      porClave.set(k, vistos);
+    }
+    let nuevas = false;
+    for (const [k, vistos] of porClave) if (vistos.size > 1){ clavesEnDisputa.add(k); nuevas = true; }
+    if (nuevas){ armarUniones(); renumerar(); }
+    return nuevas;
+  }
+  // Las claves ya repartidas dejan de servir cuando aparece una disputa: se
+  // vuelven a sacar del código, que es lo único que no cambia.
+  function renumerar(){
+    for (const filas of [state.stock, state.mov, state.mov2, state.ajustes, state.articulos, state.qms]){
+      if (!filas || !filas.length) continue;
+      for (const f of filas){
+        const code = f && (f.code ?? f.art);
+        if (code) f.key = keyOf(code);
+      }
+    }
+  }
 
   function keyOf(v){
-    let k = claveCruda(v);
+    let k = claveBase(v);
     const vistas = new Set();
     while (unionesConfirmadas.has(k) && !vistas.has(k)){ vistas.add(k); k = unionesConfirmadas.get(k); }
     return k;
@@ -773,7 +842,11 @@
     for (const m of movList){
       if (onlyAprob && m.estado && !/aprob/i.test(m.estado)) continue;
       m._k = m.key; m._byName = false;
-      if (!groups.has(m.key) && byName.get(m.nameKey)){ m._k = byName.get(m.nameKey); m._byName = true; }
+      // Cruzar por nombre es el último recurso para un artículo que no cruza
+      // por código, pero no sirve entre dos códigos que ya se separaron: se
+      // llaman igual —TCA-HEX-3-4 y TCA-HEX-3/4 son los dos "TUERCA HEXAGONAL
+      // 3/4"— así que el nombre volvería a juntarlos por detrás.
+      if (!groups.has(m.key) && byName.get(m.nameKey) && !enDisputa(m.art)){ m._k = byName.get(m.nameKey); m._byName = true; }
       if (!byKey.has(m._k)) byKey.set(m._k, []);
       byKey.get(m._k).push(m);
     }
@@ -3283,6 +3356,7 @@
         const data = leerDeCualquierHoja(wb, parser);
         if (!data.length) throw new Error('El archivo no tiene filas con datos.');
         state[key] = data;
+        anotarChoques(data);
         drop.classList.remove('err'); drop.classList.add('ok');
         st.textContent = file.name + ' · ' + fmt(data.length) + ' ' + label;
         state.open.clear();
@@ -3550,6 +3624,7 @@
         const wb = XLSX.read(await r.arrayBuffer(), {type:'array'});
         const data = leerDeCualquierHoja(wb, parser);
         state[key] = data;
+        anotarChoques(data);
         $(dropId).classList.add('ok');
         // La foto del stock valorizado se identifica por cuándo se sacó de
         // Defontana, no por cuándo se subió acá.
@@ -3595,6 +3670,6 @@
   // puerta, la matemática que decide los ajustes de inventario no se puede
   // comprobar más que a ojo.
   if (typeof module !== 'undefined' && module.exports){
-    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, parseArticulos, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, tipoAjCosto, avisoDeFechas, avisoDeDuplicados, guardarArchivo, detectarAjustes, conAjustes, parseCostos, costoDeSuCompra, pmpEditable, costoPropuestoSinValor, renderStepsPanel, REG_COLS, regRow, detail, parseQms, computeQms, cruceQms, qmsRow, regExport, cmpExport, state};
+    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, parseArticulos, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, tipoAjCosto, avisoDeFechas, avisoDeDuplicados, guardarArchivo, detectarAjustes, conAjustes, parseCostos, costoDeSuCompra, pmpEditable, costoPropuestoSinValor, renderStepsPanel, REG_COLS, regRow, detail, parseQms, computeQms, cruceQms, qmsRow, regExport, cmpExport, anotarChoques, keyOf, state};
   }
 })();

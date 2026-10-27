@@ -35,6 +35,7 @@ PRUEBAS = {
     "el stock de QMS se cruza con el de Defontana": JS / "test_qms.js",
     "la hoja de ajustes vs sugerido dice de dónde salió la diferencia": JS / "test_ajustes_vs_sugerido.js",
     "los códigos creados sin stock entran igual": JS / "test_codigos.js",
+    "dos códigos del mismo archivo son dos artículos": JS / "test_separados.js",
 }
 
 
@@ -66,3 +67,4 @@ def test_las_comprobaciones_del_navegador_existen():
     assert "se suben de vuelta" in (JS / "test_costos_excel.js").read_text(encoding="utf-8")
     assert "su propia compra" in (JS / "test_sinvalor.js").read_text(encoding="utf-8")
     assert "Saldo Inventario salta" in (JS / "test_faltanmov.js").read_text(encoding="utf-8")
+    assert "conteo anterior no usado" in (JS / "test_separados.js").read_text(encoding="utf-8")
