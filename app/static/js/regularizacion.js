@@ -328,7 +328,11 @@
       stock:t.col('Stock', 'Cantidad', 'Saldo'), um:t.col('Unidad', 'Unidad de medida', 'U. Medida', 'UM'),
       unit:t.col('Valor unitario', 'Valor Unitario', 'Costo unitario'),
       total:t.col('Valor Total Stock CLP', 'Valor total', 'Valorizado'),
-      linea:t.col('Linea Negocio', 'Línea Negocio', 'Línea de negocio'), cat:t.col('Categoria', 'Categoría')};
+      linea:t.col('Linea Negocio', 'Línea Negocio', 'Línea de negocio'), cat:t.col('Categoria', 'Categoría'),
+      // Dónde está guardado. QMS la trae como "ubicacion_bodega" —"Sala Fría",
+      // "R3-E1/R3-F1"— y es el único archivo que la tiene: Defontana dice en
+      // qué bodega está, no en qué parte de la bodega.
+      ubicacion:t.col('ubicacion_bodega', 'Ubicación', 'Ubicacion', 'Ubicación bodega')};
     const out = [];
     for (const r of t.rows){
       const code = String(r[c.code] ?? '').trim(); if (!code) continue;
@@ -339,7 +343,8 @@
         unit: unit != null ? unit : (total != null && stock > 0 ? total / stock : null),
         total: total != null ? total : (stock ?? 0) * (unit ?? 0),
         linea: c.linea >= 0 ? String(r[c.linea] ?? '').trim() : '',
-        categoria: c.cat >= 0 ? String(r[c.cat] ?? '').trim() : ''});
+        categoria: c.cat >= 0 ? String(r[c.cat] ?? '').trim() : '',
+        ubicacion: c.ubicacion >= 0 ? String(r[c.ubicacion] ?? '').trim() : ''});
     }
     if (!out.length) throw new Error('El archivo no trae filas con datos.');
     return out;
@@ -482,7 +487,19 @@
         try {
           const fd = new FormData(); fd.append('archivo', file, file.name);
           const r = await fetch(urlDe(clave), {method:'POST', body:fd, headers:{'X-CSRFToken': CFG.csrf}, credentials:'same-origin'});
-          if (r.ok) return r.json();
+          if (r.ok){
+            // Con la sesión caída el POST termina redirigido a la pantalla de
+            // entrar, que contesta 200 con HTML: parece que guardó y no guardó
+            // nada. Se veía como "Unexpected token '<', "<!doctype"...", que no
+            // le dice a nadie que hay que volver a entrar. Y no se reintenta:
+            // eso no se arregla solo.
+            const tipo = (r.headers && r.headers.get && r.headers.get('Content-Type')) || '';
+            if (tipo.toLowerCase().includes('html')){
+              ultimo = 'la sesión expiró: vuelve a entrar y súbelo de nuevo';
+              break;
+            }
+            return r.json();
+          }
           ultimo = motivoDe(r.status);
           if (r.status < 500) break;
         } catch(_){ ultimo = 'no hubo respuesta del servidor'; }
@@ -1392,6 +1409,12 @@
       bodegasPorKey.set(a.key, m);
     }
   }
+  // Dónde está guardado, según QMS. Defontana dice en qué bodega está el
+  // artículo; en qué parte de la bodega sólo lo sabe QMS.
+  const ubicacionDe = r => {
+    const x = (state.qmsPorClave || new Map()).get(r.key);
+    return (x && x.q && x.q.ubicacion) || r.ubicacion || '';
+  };
   const bodegasDe = r => {
     // Sin Informe de Inventario cargado, lo único que se sabe es dónde se fue
     // a contar, que viene en el conteo.
@@ -3231,7 +3254,10 @@
     'Valor ajuste': r.valor != null ? Math.round(r.valor) : '',
     'Saldo última fila del informe': r.sysNow ?? '',
     'Bodegas': bodegasDe(r),
-    'Ubicación': r.ubicacion || '',
+    // La ubicación la sabe QMS, que es donde se anota dónde quedó guardado el
+    // artículo; el conteo la trae sólo si la planilla con que se armó la
+    // incluía. Manda la de QMS y el conteo queda de respaldo.
+    'Ubicación': ubicacionDe(r),
     ...columnasQms(r)
   });
   const zeroExport = z => ({

@@ -84,6 +84,22 @@ async function diceElMotivo(){
   comprobar('un código desconocido igual se muestra', 'error del servidor (418)', otro);
 }
 
+async function sesionCaida(){
+  console.log('\nCon la sesión caída se dice eso, no un error de JSON');
+  // El POST termina redirigido a la pantalla de entrar, que contesta 200 con
+  // HTML. Antes se veía "Unexpected token '<', "<!doctype"...".
+  let n = 0;
+  global.fetch = () => { n++; return Promise.resolve({
+    ok: true,
+    headers: {get: () => 'text/html; charset=utf-8'},
+    json: () => Promise.reject(new SyntaxError('Unexpected token \'<\'')),
+  }); };
+  let msg = null;
+  try { await guardarArchivo('conteo', archivo('conteo.xlsx')); } catch(e){ msg = e.message; }
+  comprobar('un solo intento: no se arregla solo', 1, n);
+  comprobar('y dice qué hacer', 'la sesión expiró: vuelve a entrar y súbelo de nuevo', msg);
+}
+
 async function sinRed(){
   console.log('\nSin respuesta del servidor se reintenta y después se avisa');
   let n = 0;
@@ -137,6 +153,7 @@ function duplicados(){
   await reintenta();
   await noReintentaPermiso();
   await diceElMotivo();
+  await sesionCaida();
   await sinRed();
   duplicados();
   console.log(`\n${hechas - fallas}/${hechas} comprobaciones`);
