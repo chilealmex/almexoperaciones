@@ -156,9 +156,16 @@
       // un costo que ya tienen.
       ? {art:t.col('Código Artículo'), desc:t.col('Descripción'), bod:t.col('Bodega'),
          stock:t.col('Saldo'), costo:t.col('Valor unidad'), um:t.col('Unidad', 'U. Medida', 'Unidad Medida'),
-         total:t.col('Total', 'Valorización', 'Valorizado', 'Valor total')}
+         total:t.col('Total', 'Valorización', 'Valorizado', 'Valor total'),
+         // Desde el 27-10 el informe se saca con la línea de negocio de
+         // Defontana. Es la tercera: la del conteo quedó guardada al armar la
+         // toma y la de QMS la tiene ese sistema, y las tres pueden decir
+         // cosas distintas. En el informe de ese día trae línea en 1.602 de
+         // 1.616 filas, con 31 líneas distintas.
+         linea:t.col('Línea de Negocio', 'Linea Negocio', 'Línea')}
       : {art:t.col('Artículo'), desc:t.col('Descripción'), bod:-1, um:t.col('Unidad', 'U. Medida'),
-         stock:t.col('Stock Disponible'), costo:t.col('Costo Vigente'), total:-1};
+         stock:t.col('Stock Disponible'), costo:t.col('Costo Vigente'), total:-1,
+         linea:t.col('Línea de Negocio', 'Linea Negocio', 'Línea')};
     if (c.costo < 0) throw new Error(inv ? 'No encontré la columna “Valor unidad”.' : 'No encontré la columna “Costo Vigente”.');
     // Y a veces manda las dos columnas de valor con los títulos cambiados de
     // lugar. El informe del 21-10 08:03 dice "Valorización | Valor Unidad" y
@@ -172,22 +179,45 @@
     // saldo 1, donde las dos lecturas dan lo mismo—; en los otros siete
     // informes suyos gana la que dice el título y no cambia nada.
     const cuadra = (a, b) => Math.abs(a - b) < Math.max(1, 0.01 * Math.abs(b));
-    let columnasCambiadas = false;
+    let columnasCambiadas = false, columnasDescuadradas = false;
     if (c.total >= 0){
-      let comoDice = 0, invertido = 0;
+      let comoDice = 0, invertido = 0, ninguna = 0;
       for (const r of t.rows){
         const s = num(r[c.stock]), u = num(r[c.costo]), tt = num(r[c.total]);
         if (!(s > 0) || !u || !tt) continue;
-        if (cuadra(s * u, tt)) comoDice++;
-        if (cuadra(s * tt, u)) invertido++;
+        const asiDice = cuadra(s * u, tt), alReves = cuadra(s * tt, u);
+        if (asiDice) comoDice++;
+        if (alReves) invertido++;
+        if (!asiDice && !alReves) ninguna++;
       }
-      if (invertido > comoDice){ const x = c.total; c.total = c.costo; c.costo = x; columnasCambiadas = true; }
+      // El informe del 27-10 10:42 —el primero sacado con la columna de línea
+      // de negocio— vino con la columna "Total" corrida: sus montos son de
+      // otras filas. Ahí ninguna de las dos lecturas cuadra (0 y 2 contra 414
+      // filas), y multiplicar no sirve para decidir cuál columna es el
+      // valorizado. Lo dicen las filas sin stock: el valorizado está en 0
+      // donde el saldo está en 0 —en ese informe, 731 de 731 en la primera
+      // columna contra 376 de 731 en la segunda—. En sus trece informes sanos
+      // ninguna fila queda sin cuadrar y nada de esto se usa.
+      if (ninguna > comoDice + invertido){
+        columnasDescuadradas = true;
+        const cerosDe = col => {
+          let enCero = 0, total = 0;
+          for (const r of t.rows){ if (num(r[c.stock]) === 0){ total++; if (!num(r[col])) enCero++; } }
+          return total ? enCero / total : null;
+        };
+        const pCosto = cerosDe(c.costo), pTotal = cerosDe(c.total);
+        if (pCosto != null && pTotal != null && pCosto > pTotal){ const x = c.total; c.total = c.costo; c.costo = x; }
+        // La otra columna no es el valor unitario de nadie: son montos de
+        // otras filas. El costo sale del valorizado dividido por el saldo, que
+        // es lo que se hace siempre.
+        c.costo = -1;
+      } else if (invertido > comoDice){ const x = c.total; c.total = c.costo; c.costo = x; columnasCambiadas = true; }
     }
     const out = [];
     let declaranCero = 0;
     for (const r of t.rows){
       const art = String(r[c.art] ?? '').trim(); if (!art) continue;
-      const stock = num(r[c.stock]), costo = num(r[c.costo]);
+      const stock = num(r[c.stock]), costo = c.costo >= 0 ? num(r[c.costo]) : null;
       const total = c.total >= 0 ? num(r[c.total]) : null;
       const name = c.desc >= 0 ? String(r[c.desc] ?? '').trim() : '';
       const bodega = c.bod >= 0 ? String(r[c.bod] ?? '').trim() : '';
@@ -216,6 +246,7 @@
         // ninguna.
         bodega: sinBodega ? '' : bodega,
         um: c.um >= 0 ? String(r[c.um] ?? '').trim() : '',
+        linea: c.linea >= 0 ? String(r[c.linea] ?? '').trim() : '',
         stock: stock ?? 0, costo: unit ?? 0,
         valor: total != null ? total : (stock ?? 0) * (costo ?? 0)});
       // Un 0 escrito en el saldo y la marca de sin bodega son las dos maneras
@@ -244,6 +275,10 @@
     // Para poder decirlo en la pantalla: el archivo venía con los títulos
     // cambiados y se leyó por los datos.
     out.columnasCambiadas = columnasCambiadas;
+    // Para poder decirlo en la pantalla: las dos columnas de valor no
+    // multiplican, así que el informe salió mal de Defontana y conviene
+    // bajarlo de nuevo.
+    out.columnasDescuadradas = columnasDescuadradas;
     return out;
   }
   // "Fecha de generación: 06-10-2026, 04:17 p. m." en las primeras filas.
@@ -1441,9 +1476,10 @@
       fotoPorKey = new Map();
       for (const a of state.articulos){
         const p = fotoPorKey.get(a.key);
-        if (!p) fotoPorKey.set(a.key, {key:a.key, art:a.art, name:a.name, um:a.um || '', stock:a.stock, valor:a.valor, costo:a.costo, valorReal: !!state.articulos.valorReal, codigos:[a.art]});
+        if (!p) fotoPorKey.set(a.key, {key:a.key, art:a.art, name:a.name, um:a.um || '', linea:a.linea || '', stock:a.stock, valor:a.valor, costo:a.costo, valorReal: !!state.articulos.valorReal, codigos:[a.art]});
         else {
           p.stock += a.stock; p.valor += a.valor; p.codigos.push(a.art); p.um = p.um || a.um || '';
+          p.linea = p.linea || a.linea || '';
           // El costo del conjunto es el promedio ponderado; sin unidades, el
           // mayor de los que haya, que es el único dato de costo que queda.
           p.costo = p.stock > EPS ? p.valor / p.stock : Math.max(p.costo, a.costo);
@@ -2489,10 +2525,13 @@
     const x = (state.qmsPorClave || new Map()).get(r.key);
     return (x && x.q && x.q.linea) || '';
   };
+  // Y la de Defontana, desde que el Informe de Inventario la trae.
+  const lineaInv = r => (fotoDeClave(r.key) || {}).linea || '';
   const REG_COLS = [
     ['code', 'Producto', '', r => r.code],
     ['linea', 'Línea (conteo)', '', r => r.linea || null],
     ['lineaqms', 'Línea QMS', '', r => lineaQms(r) || null],
+    ['lineainv', 'Línea Defontana', '', r => lineaInv(r) || null],
     ['um', 'Unidad', '', r => r.um || null],
     ['donde', 'Está en', '', r => dondeEsta(r)],
     ['contado', 'Contado', 'num', r => r.s ? r.s.stock : null],
@@ -2589,6 +2628,7 @@
       <td><div class="code">${esc(r.code)}</div><div class="pname">${esc(r.name)}</div>${aliasNote(r)}</td>
       ${lineaCell(r.linea)}
       ${lineaCell(lineaQms(r))}
+      ${lineaCell(lineaInv(r))}
       <td class="linea um">${r.um ? esc(r.um) : '<span class="mut">—</span>'}${r.umInfo ? '<div class="small alias">contado en ' + esc(r.umInfo.de) + '</div>' : ''}</td>
       <td>${(() => { const d = dondeEsta(r); return d ? `<span class="pill ${DONDE[d][0]}">${DONDE[d][1]}</span>` : '<span class="mut">—</span>'; })()}</td>
       <td class="num">${r.counted ? fmt(r.s.stock) + '<div class="small">' + fmtDate(r.s.fecha) + (r.s.recontado ? ' · recuento' : '') + '</div>' + (r.umInfo ? '<div class="small alias">en ' + esc(r.umInfo.de) + ' · Defontana en ' + esc(r.umInfo.a) + (r.umInfo.f ? ' (convertido)' : '') + '</div>' : '') : '<span class="mut">—</span>'}${r.s && r.s.recontado && r.s.original && r.s.original.stock != null ? '<div class="small">antes: ' + fmt(r.s.original.stock) + ' el ' + fmtDate(r.s.original.fecha) + '</div>' : ''}${r.s ? `<input class="recount" type="number" step="any" min="0" inputmode="decimal" data-key="${esc(r.key)}" value="${r.s.recontado ? r.s.stock : ''}" placeholder="Recuento" title="Recuento de hoy" aria-label="Recuento de hoy de ${esc(r.code)}">` : ''}</td>
@@ -3186,6 +3226,9 @@
       'Está en': !state.qms ? '' : DONDE[dondeEsta(r)][1],
       'Código QMS': q ? q.code : '',
       'Línea QMS': q ? q.linea || '' : '',
+      // La de Defontana sale del Informe de Inventario, que es el único
+      // archivo suyo que la trae.
+      'Línea Defontana (Informe de Inventario)': lineaInv(r),
       'Unidad QMS': q ? q.um : '',
       'Unidad Defontana (Informe de Inventario)': r.umInv || '',
       'Stock QMS': q ? q.stock : '',
@@ -3330,7 +3373,12 @@
           // cambiados, hay que decirlo: se leyó bien, pero conviene que ella
           // sepa que Defontana lo está exportando así.
           const cambiadas = data.columnasCambiadas ? ' · ojo: traía “Valorización” y “Valor Unidad” cambiadas de lugar; se leyó por los datos' : '';
-          st.textContent = file.name + ' · ' + fmt(data.length) + ' códigos' + cambiadas +
+          // Descuadrada es otra cosa que cambiada de lugar: los montos de la
+          // segunda columna son de otras filas, no de ésta. El valorizado se
+          // pudo sacar igual —es la columna que está en 0 donde el saldo está
+          // en 0— pero el archivo salió mal de Defontana y hay que decirlo.
+          const descuadradas = data.columnasDescuadradas ? ' · OJO: la columna del valor viene descuadrada, con montos de otras filas; se usó la que sí cuadra con los saldos, pero conviene bajar el informe de nuevo' : '';
+          st.textContent = file.name + ' · ' + fmt(data.length) + ' códigos' + cambiadas + descuadradas +
             (data.sinStock ? ', ' + fmt(data.sinStock) + ' de ellos sin stock'
                            : ' · trae sólo los que tienen stock: para cruzar con QMS los códigos creados, bájalo con todos') +
             ' · ' + (data.fecha ? 'sacado de Defontana el ' + data.fecha : 'sin fecha de generación en el archivo');

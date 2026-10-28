@@ -28,6 +28,7 @@ PRUEBAS = {
     "los archivos se suben de a uno y se avisa si uno no quedó guardado": JS / "test_subidas.js",
     "el stock valorizado manda sobre lo que arrastran los movimientos": JS / "test_valorizado.js",
     "el PMP con que se valoriza el ajuste sale del Informe de Inventario": JS / "test_pmp_inventario.js",
+    "la línea de negocio de Defontana sale del Informe de Inventario": JS / "test_linea_defontana.js",
     "los costos se llenan en el Excel y se suben de vuelta": JS / "test_costos_excel.js",
     "los productos con unidades y sin valor van en su propio paso": JS / "test_sinvalor.js",
     "se ve en qué unidad está cada producto": JS / "test_unidad.js",
@@ -63,6 +64,7 @@ def test_las_comprobaciones_del_navegador_existen():
     assert "no esconde el ajuste de cantidad" in (JS / "test_marcas.js").read_text(encoding="utf-8")
     assert "reproduce el valor de Defontana" in (JS / "test_recosteo.js").read_text(encoding="utf-8")
     assert "manda la foto" in (JS / "test_valorizado.js").read_text(encoding="utf-8")
+    assert "montos de otras filas" in (JS / "test_linea_defontana.js").read_text(encoding="utf-8")
     assert "se suben de vuelta" in (JS / "test_costos_excel.js").read_text(encoding="utf-8")
     assert "su propia compra" in (JS / "test_sinvalor.js").read_text(encoding="utf-8")
     assert "Saldo Inventario salta" in (JS / "test_faltanmov.js").read_text(encoding="utf-8")
