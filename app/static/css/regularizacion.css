@@ -105,6 +105,10 @@
 .regx .det tr.zero td{background:var(--warn-soft)}
 /* Los movimientos del mes, los de cada sistema uno al lado del otro: es lo que
    hay que comparar para saber cuál de los dos documentos falta. */
+/* Marcar un activo fijo va en la celda del producto, que es la primera: es una
+   propiedad del producto y hay que poder ponerla sin arrastrar la tabla. */
+.regx .afijo{margin-top:4px;font-size:11px;padding:1px 7px}
+.regx .afijo.on{border-color:var(--accent);background:var(--accent-soft);color:var(--ink);font-weight:600}
 .regx .mesdets{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 @media (max-width:860px){.regx .mesdets{grid-template-columns:1fr}}
 .regx .mesdet h4{margin:0 0 6px;font-size:13px}

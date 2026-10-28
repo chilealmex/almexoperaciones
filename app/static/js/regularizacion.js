@@ -2234,7 +2234,7 @@
   const botonPaso = (r, p, txt, titulo) => `<button type="button" class="rx-btn ghost sm hecho" data-hecho="${esc(r.key)}" data-paso="${p}" title="${titulo}">${txt}</button>`;
   // Marcar un producto como activo fijo. Es del producto, no del conteo: lo
   // que esté guardado en la bodega de activos fijos no se cuenta con el resto.
-  const botonActivoFijo = r => `<button type="button" class="rx-btn ghost sm afijo" data-afijo="${esc(r.key)}" title="${r.activoFijo ? 'Dejar de tratarlo como activo fijo' : 'Es un activo fijo: lo que Defontana tenga en la bodega de activos fijos se suma a lo contado, porque el conteo de la bodega no pasa por ahí'}">${r.activoFijo ? '★ Activo fijo' : '☆ Activo fijo'}</button>`;
+  const botonActivoFijo = r => `<button type="button" class="rx-btn ghost sm afijo${r.activoFijo ? ' on' : ''}" data-afijo="${esc(r.key)}" title="${r.activoFijo ? 'Dejar de tratarlo como activo fijo' : 'Es un activo fijo: lo que Defontana tenga en la bodega de activos fijos se suma a lo contado, porque el conteo de la bodega no pasa por ahí'}">${r.activoFijo ? '★ Activo fijo' : '☆ Activo fijo'}</button>`;
   const stepsCell = (steps, r) => `<ol class="steps">${steps.map(x => {
     const p = PASO_DE[x.k];
     return `<li><span class="stepk ${STEP[x.k].cls}">${STEP[x.k].label}</span> ${esc(x.txt)}` +
@@ -2964,7 +2964,7 @@
       return `<div class="cause">${CAUSES[r.cause]}</div><div class="why">${main}</div>${rest.length ? '<div class="more-obs">' + rest.join('<br>') + '</div>' : ''}${costo}`;
     };
     return `<tr class="rx-row s-${r.st}${state.open.has(r.key) ? ' open' : ''}" data-key="${esc(r.key)}" tabindex="0">
-      <td><div class="code">${esc(r.code)}</div><div class="pname">${esc(r.name)}</div>${aliasNote(r)}</td>
+      <td><div class="code">${esc(r.code)}</div><div class="pname">${esc(r.name)}</div>${aliasNote(r)}${botonActivoFijo(r)}</td>
       ${lineaCell(r.linea)}
       ${lineaCell(lineaQms(r))}
       ${lineaCell(lineaInv(r))}
@@ -2977,7 +2977,7 @@
       <td class="num diff ${r.st === 'check' ? 'mut' : aj > EPS ? 'plus' : aj < -EPS ? 'minus' : 'mut'}">${aj == null ? '—' : Math.abs(aj) <= EPS ? '0' : r.st === 'check' ? '<span class="small">a confirmar</span><div class="small">(' + sgn(aj) + ' si no se explica)</div>' : sgn(aj)}</td>
       <td><span class="pill ${cls}">${label}${qty}</span>${comprobantesAj(r)}${r.sameDay && r.counted ? '<span class="flag" title="Hay documentos el mismo día del conteo">· mismo día</span>' : ''}</td>
       <td class="obs">${obsCell(r)}</td>
-      <td class="tomake">${stepsCell(docSteps(r), r)}${marcasCell(r)}${r.s ? botonPaso(r, 'todo', r.manual ? 'Desmarcar todo' : '✓ Todo regularizado', r.manual ? 'Volver a mostrarlo como pendiente' : 'Ya regularizaste todo este producto en Defontana') : ''}${r.s ? botonActivoFijo(r) : ''}</td>
+      <td class="tomake">${stepsCell(docSteps(r), r)}${marcasCell(r)}${r.s ? botonPaso(r, 'todo', r.manual ? 'Desmarcar todo' : '✓ Todo regularizado', r.manual ? 'Volver a mostrarlo como pendiente' : 'Ya regularizaste todo este producto en Defontana') : ''}</td>
       <td class="num">${costCell(r)}</td>
       <td class="num">${pmpEditable(r) ? pmpInput(r.key, r.edited ? r.pmp : (costoPropuestoSinValor(r) ?? r.pmp), r.edited, r.code) : '<span class="mut">' + (r.pmp != null ? money(r.pmp) : '—') + '</span>'}</td>
       <td class="num diff ${r.valor > 0.5 ? 'plus' : r.valor < -0.5 ? 'minus' : 'mut'}">${r.st === 'up' || r.st === 'down' || r.st === 'check' ? money(r.valor) : '—'}</td></tr>`;
