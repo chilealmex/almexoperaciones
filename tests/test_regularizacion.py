@@ -213,6 +213,41 @@ def test_el_stock_de_qms_se_guarda_como_los_demas_archivos(client, db, empresa, 
     assert client.get("/inventario/regularizacion/guardado/qms").status_code == 404
 
 
+def test_los_movimientos_de_qms_se_guardan_como_los_demas_archivos(client, db, empresa, usuario_admin):
+    """Ingresos y Egresos de QMS: los movimientos del otro sistema.
+
+    Es el archivo con que se compara, mes a mes, lo que movió cada sistema. Si
+    no se guardara habría que volver a subirlo en cada visita.
+    """
+    login(client, "admin@test.cl")
+    respuesta = client.post(
+        "/inventario/regularizacion/guardado/qmsmov",
+        data={"archivo": (io.BytesIO(b"ingresos y egresos"), "Ingresos_y_Egresos_QMS.xlsx")},
+        content_type="multipart/form-data",
+    )
+
+    assert respuesta.status_code == 200
+    config = _config_de_la_pagina(client.get("/inventario/regularizacion").get_data(as_text=True))
+    assert config["guardados"]["qmsmov"]["nombre"] == "Ingresos_y_Egresos_QMS.xlsx"
+    assert client.get("/inventario/regularizacion/guardado/qmsmov").data == b"ingresos y egresos"
+
+    assert client.post("/inventario/regularizacion/guardado/qmsmov", data={"borrar": "1"}).status_code == 200
+    assert client.get("/inventario/regularizacion/guardado/qmsmov").status_code == 404
+
+
+def test_la_pantalla_tiene_la_vista_de_movimientos_del_mes(client, db, empresa, usuario_admin):
+    login(client, "admin@test.cl")
+
+    texto = client.get("/inventario/regularizacion").get_data(as_text=True)
+
+    assert 'data-view="mes"' in texto
+    assert "Movimientos del mes" in texto
+    assert 'id="fileQmsMov"' in texto
+    # El selector de mes y el archivo con que se compara.
+    assert 'id="optMes"' in texto
+    assert "Ingresos y Egresos de QMS" in texto
+
+
 def test_la_pantalla_tiene_la_vista_de_cruce_con_qms(client, db, empresa, usuario_admin):
     login(client, "admin@test.cl")
 

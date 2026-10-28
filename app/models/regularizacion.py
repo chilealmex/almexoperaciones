@@ -25,7 +25,7 @@ class RegularizacionArchivo(db.Model):
     __tablename__ = "regularizacion_archivos"
     __table_args__ = (db.UniqueConstraint("empresa_id", "clave", name="uq_regularizacion_empresa_clave"),)
 
-    CLAVES = ("conteo", "informe", "informe_ajustes", "ajustes", "articulos", "qms", "estado")
+    CLAVES = ("conteo", "informe", "informe_ajustes", "ajustes", "articulos", "qms", "qmsmov", "estado")
 
     id = db.Column(db.Integer, primary_key=True)
     empresa_id = db.Column(db.Integer, db.ForeignKey("empresas.id"), nullable=False)

@@ -385,6 +385,63 @@
     return out;
   }
 
+  // ---------- Ingresos y Egresos de QMS: los movimientos del otro sistema ----------
+  //
+  // Defontana da sus movimientos en el Informe de Documentos; QMS los da en un
+  // archivo de dos hojas, "Ingresos" y "Egresos", cada una con sus propios
+  // títulos. No comparten numeración con Defontana —QMS referencia la orden de
+  // compra o la de trabajo, no el folio del comprobante— así que el cruce no
+  // puede ser por número de documento.
+  function parseMovQms(rows){
+    const ent = readTable(rows, ['CODIGO_UNICO', 'CANTIDADINGRESO']) ||
+                readTable(rows, ['CODIGO UNICO', 'CANTIDAD INGRESO']);
+    const sal = ent ? null : (readTable(rows, ['CODIGO UNICO', 'CANTIDAD EGRESO']) ||
+                              readTable(rows, ['CODIGO_UNICO', 'CANTIDADEGRESO']));
+    const t = ent || sal;
+    if (!t) throw new Error('No encontré las columnas de los movimientos de QMS. ¿Es el archivo de Ingresos y Egresos, con sus dos hojas?');
+    const kind = ent ? 'in' : 'out';
+    const c = ent
+      ? {code:t.col('codigo_unico', 'Codigo Unico', 'Código Único'), desc:t.col('descripcion_eng', 'Descripción', 'Descripcion'),
+         fecha:t.col('FechaIngreso', 'Fecha Ingreso', 'Fecha'), qty:t.col('CantidadIngreso', 'Cantidad Ingreso', 'Cantidad'),
+         unit:t.col('ValorUnitarioCLP', 'Valor Unitario CLP', 'Valor Unitario'), total:-1,
+         um:t.col('unidad_medida.simbolo', 'Unidad', 'Unidad de medida'), linea:t.col('Linea Negocio', 'Línea Negocio'),
+         ot:t.col('OTNro_nro', 'OTNro', 'OT'), oc:t.col('oc_almex', 'OC', 'Orden de compra')}
+      : {code:t.col('Codigo Unico', 'codigo_unico', 'Código Único'), desc:t.col('Descripcion', 'Descripción', 'descripcion_eng'),
+         fecha:t.col('Fecha Egreso', 'FechaEgreso', 'Fecha'), qty:t.col('Cantidad Egreso', 'CantidadEgreso', 'Cantidad'),
+         unit:t.col('Valor Unitario', 'ValorUnitarioCLP'), total:t.col('Valor Egreso', 'ValorEgreso'),
+         um:t.col('Unidad', 'unidad_medida.simbolo'), linea:t.col('Linea Negocio', 'Línea Negocio'),
+         ot:t.col('OTNro', 'OTNro_nro', 'OT'), oc:t.col('oc_almex', 'OC')};
+    const out = [];
+    for (const r of t.rows){
+      // El export de QMS trae el código con espacios de más —" PT-CSB-R3,8"—,
+      // que no cambian de qué artículo se habla.
+      const code = String(r[c.code] ?? '').trim(); if (!code) continue;
+      const fecha = parseDate(r[c.fecha]);
+      const qty = Math.abs(num(r[c.qty]) ?? 0);
+      if (!fecha || !(qty > EPS)) continue;
+      const unit = c.unit >= 0 ? num(r[c.unit]) : null;
+      const total = c.total >= 0 ? num(r[c.total]) : null;
+      const ot = c.ot >= 0 ? String(r[c.ot] ?? '').trim() : '';
+      const oc = c.oc >= 0 ? String(r[c.oc] ?? '').trim() : '';
+      out.push({code, key:keyOf(code), name:c.desc >= 0 ? String(r[c.desc] ?? '').trim() : '',
+        fecha, kind, qty, um:c.um >= 0 ? String(r[c.um] ?? '').trim() : '',
+        linea:c.linea >= 0 ? String(r[c.linea] ?? '').trim() : '',
+        // Con qué está respaldado el movimiento en QMS, y con qué se puede
+        // cruzar contra Defontana. En los egresos la columna OTNro es la orden
+        // de trabajo de verdad: 1.168 de sus números existen como OT en el
+        // informe de Defontana. En los ingresos, la columna OTNro_nro es otra
+        // numeración —de 2.743 números, 11 existen como OT— así que ésa no
+        // cruza nada; ahí lo que cruza es la orden de compra.
+        ot: kind === 'out' ? ot : '', oc,
+        idQms: kind === 'in' ? ot : '',
+        ref: kind === 'out' && ot ? 'OT ' + ot : oc ? 'OC ' + oc : ot ? 'N° ' + ot : '',
+        valor: total != null ? Math.abs(total) : (unit != null ? unit * qty : null),
+        unit: unit != null ? unit : (total != null && qty > EPS ? Math.abs(total) / qty : null)});
+    }
+    if (!out.length) throw new Error('La hoja no trae movimientos con fecha y cantidad.');
+    return out;
+  }
+
   function filasDeHoja(wb, nombre){
     return XLSX.utils.sheet_to_json(wb.Sheets[nombre], {header:1, raw:true, defval:null, blankrows:false});
   }
@@ -401,6 +458,21 @@
         if (datos.length) return datos;
       } catch (e) { primerError = primerError || e; }
     }
+    if (primerError) throw primerError;
+    throw new Error('El archivo no tiene filas con datos.');
+  }
+
+  // Los movimientos de QMS vienen repartidos en dos hojas —"Ingresos" y
+  // "Egresos"— y las dos hacen falta: con quedarse con la primera que se deja
+  // leer, el archivo entra a medias y la mitad de los movimientos del mes
+  // aparecen como si no existieran.
+  function leerDeTodasLasHojas(wb, parser){
+    let todo = [], primerError = null;
+    for (const nombre of wb.SheetNames){
+      try { todo = todo.concat(parser(filasDeHoja(wb, nombre))); }
+      catch (e) { primerError = primerError || e; }
+    }
+    if (todo.length) return todo;
     if (primerError) throw primerError;
     throw new Error('El archivo no tiene filas con datos.');
   }
@@ -435,6 +507,11 @@
     const g = t.col;
     const c = {tipo:g('Tipo Documento'), estado:g('Estado'), folio:g('Folio'), fecha:g('Fecha'), orig:g('Bod. Origen','Bodega Origen'),
       dest:g('Bod. Destino','Bodega Destino'), mov:g('Movimiento'), motivo:g('Motivo'), ref:g('Referencia'), prov:g('Proveedor'), cli:g('Cliente'),
+      // La orden de compra, para poder cruzar las entradas con QMS igual que
+      // las salidas se cruzan por OT. En su informe del 27-10 esta columna
+      // viene vacía en las 1.535 líneas del mes, así que hoy no cruza nada;
+      // si Defontana empieza a llenarla, el cruce por OC entra solo.
+      oc:g('N Doc. Compra', 'N° Doc. Compra', 'Orden de Compra'), req:g('N Requisicion', 'N° Requisición'),
       art:g('Artículo'), desc:g('Descripción'), cant:g('Cant. Movimiento','Cantidad'), um:g('U. Medida'), valor:g('Valor Movimiento'),
       saldo:g('Saldo Inventario'), valorInv:g('Valor Inventario')};
     if (c.cant < 0 || c.fecha < 0) throw new Error('No encontré las columnas “Fecha” y “Cant. Movimiento”.');
@@ -456,7 +533,7 @@
         // informe lo confirma: en esa fila el Saldo Inventario no se mueve.
         traspaso: !!(orig && dest),
         tipo:at(r,'tipo'), motivo:String(at(r,'motivo')).trim(), estado:at(r,'estado'), folio:at(r,'folio'), orig, dest,
-        ref:at(r,'ref') || at(r,'cli') || at(r,'prov'), tercero:String(at(r,'prov') || at(r,'cli')).trim(), desc:at(r,'desc'), nameKey:keyOf(at(r,'desc')), um:at(r,'um'),
+        ref:at(r,'ref') || at(r,'cli') || at(r,'prov'), oc:at(r,'oc'), tercero:String(at(r,'prov') || at(r,'cli')).trim(), desc:at(r,'desc'), nameKey:keyOf(at(r,'desc')), um:at(r,'um'),
         valor:c.valor >= 0 ? num(at(r,'valor')) : null, saldo:num(at(r,'saldo')), valorInv:c.valorInv >= 0 ? num(at(r,'valorInv')) : null});
     });
     out.sort((a,b) => (a.fecha||0) - (b.fecha||0) || a.i - b.i);
@@ -610,8 +687,11 @@
 
 
   // ---------- Estado ----------
-  const state = {stock:[], mov:[], view:'reg', filter:{reg:'all', zero:'all', check:'all', qms:'dif'}, qms:null, qmsRows:[], mov2:null, ajustes:null, articulos:null, hechos:new Map(), ajSi:new Set(), ajNo:new Set(), docGroupsMain:[], checkRows:[], docGroups:[],
-    sort:{reg:{k:'code', d:1}, zero:{k:'fecha', d:1}, check:{k:'code', d:1}, qms:{k:'code', d:1}}, open:new Set(), pmpEdit:new Map(), recount:leerRecuentos(), rows:[], zero:[],
+  const state = {stock:[], mov:[], view:'reg', filter:{reg:'all', zero:'all', check:'all', qms:'dif', mes:'dif'}, qms:null, qmsRows:[], mov2:null, ajustes:null, articulos:null,
+    // Los movimientos de QMS (Ingresos y Egresos) y el mes que se está
+    // comparando con los de Defontana.
+    qmsMov:null, mesRows:[], mes:'', hechos:new Map(), ajSi:new Set(), ajNo:new Set(), docGroupsMain:[], checkRows:[], docGroups:[],
+    sort:{reg:{k:'code', d:1}, zero:{k:'fecha', d:1}, check:{k:'code', d:1}, qms:{k:'code', d:1}, mes:{k:'ref', d:1}}, open:new Set(), pmpEdit:new Map(), recount:leerRecuentos(), rows:[], zero:[],
     // Documentos puestos a mano antes o después del conteo (clave del
     // documento -> 'antes' | 'despues'). La fecha del documento es la del
     // papel, no la hora en que pasó: un envío a producción fechado el día del
@@ -2229,6 +2309,184 @@
     return list;
   }
 
+  // ---------- Movimientos del mes: QMS contra Defontana ----------
+  //
+  // Los dos sistemas no comparten la numeración de sus comprobantes, pero sí
+  // la orden de trabajo: Defontana la escribe en "Referencia" —"OT 6368"— y
+  // QMS la trae en su columna OTNro. Esa es la pieza con que se cruzan. En
+  // octubre de 2026 son 536 líneas de Defontana con OT y 29 OT distintas, 22
+  // de ellas también en QMS.
+  //
+  // Lo que no trae OT —compras, guías de despacho, y sobre todo los
+  // comprobantes del ajuste de inventario— se compara por producto, aparte:
+  // ahí no hay número común que mirar.
+  const MES_NOMBRE = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio',
+                      'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+  const mesDe = d => d ? d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') : '';
+  const mesTexto = m => { const [a, n] = String(m).split('-'); return (MES_NOMBRE[+n - 1] || '') + ' ' + a; };
+  // "OT 6368", "ot6368", "OT 06368" son la misma orden; en QMS viene el número
+  // solo. Se compara el número, sin ceros de adelante.
+  const numeroOT = v => { const m = /^\s*OT\s*0*(\d+)/i.exec(String(v ?? '')); return m ? m[1] : ''; };
+  const soloNumero = v => { const t = String(v ?? '').trim(); return /^0*\d+$/.test(t) ? t.replace(/^0+(?=\d)/, '') : ''; };
+
+  // Los movimientos de Defontana del mes que mueven unidades. Fuera:
+  //  - los traspasos entre bodegas, que no entran ni salen del inventario;
+  //  - los ajustes de costo, que no mueven unidades (vienen en cantidad 0).
+  function defoDelMes(mes){
+    return (state.mov || []).filter(m => mesDe(m.fecha) === mes && !m.traspaso && Math.abs(m.qty) > EPS);
+  }
+  const qmsDelMes = mes => (state.qmsMov || []).filter(m => mesDe(m.fecha) === mes);
+
+  // Desde cuándo tiene sentido comparar. Hasta el ajuste de octubre no se
+  // hacían todos los documentos que correspondían a los movimientos: por eso
+  // se ajustó el inventario. Comparar hacia atrás sólo muestra ese desorden,
+  // que ya quedó cerrado con el ajuste, así que el mes del ajuste es el
+  // primero que se ofrece.
+  function mesDelAjuste(){
+    let max = '';
+    for (const m of state.mov || []) if (m._aj && m.fecha){ const x = mesDe(m.fecha); if (x > max) max = x; }
+    return max;
+  }
+
+  // Los meses que tienen movimientos en alguno de los dos archivos, del más
+  // nuevo al más viejo, desde el del ajuste en adelante.
+  function mesesConMovimientos(){
+    const set = new Set();
+    for (const m of state.mov || []) if (m.fecha && Math.abs(m.qty) > EPS) set.add(mesDe(m.fecha));
+    for (const m of state.qmsMov || []) if (m.fecha) set.add(mesDe(m.fecha));
+    const desde = mesDelAjuste();
+    return [...set].filter(x => x && (!desde || x >= desde)).sort().reverse();
+  }
+
+  // Cantidad con signo: lo que entra suma, lo que sale resta. Así "lo mismo"
+  // es una resta y no hay que mirar además el tipo de movimiento.
+  const conSigno = m => (m.kind === 'in' ? 1 : -1) * Math.abs(m.qty || 0);
+  const ESTADO_MES = {
+    ok: ['ok', 'Cuadra'],
+    dif: ['warn', 'Cantidad distinta'],
+    falta_qms: ['bad', 'Falta en QMS'],
+    falta_defo: ['bad', 'Falta en Defontana'],
+  };
+
+  function comparacionDelMes(mes){
+    const defo = defoDelMes(mes), qms = qmsDelMes(mes);
+    // La referencia de cada lado. Un espacio de numeración sólo sirve para
+    // cruzar si los dos sistemas lo usan ese mes: con las OT pasa —Defontana
+    // las escribe en "Referencia" y QMS en OTNro—, con las OC no, porque la
+    // columna de Defontana viene vacía. Preguntándolo a los datos, el día que
+    // Defontana la llene el cruce por OC entra solo, y mientras tanto esas
+    // entradas se comparan por producto.
+    const refDefo = m => numeroOT(m.ref) ? 'OT ' + numeroOT(m.ref)
+                       : soloNumero(m.oc) ? 'OC ' + soloNumero(m.oc) : '';
+    const refQms = m => soloNumero(m.ot) ? 'OT ' + soloNumero(m.ot)
+                      : soloNumero(m.oc) ? 'OC ' + soloNumero(m.oc) : '';
+    const espacios = new Set();
+    for (const tipo of ['OT', 'OC']){
+      const enDefo = defo.some(m => refDefo(m).startsWith(tipo));
+      const enQms = qms.some(m => refQms(m).startsWith(tipo));
+      if (enDefo && enQms) espacios.add(tipo);
+    }
+    const sirve = r => r && espacios.has(r.slice(0, 2));
+    const porOt = new Map(), porProd = new Map();
+    const nombre = new Map();
+    const anota = (mapa, clave, base) => {
+      let p = mapa.get(clave);
+      if (!p) mapa.set(clave, p = Object.assign({d: 0, q: 0, dMovs: [], qMovs: [], ajuste: false}, base));
+      return p;
+    };
+    for (const m of defo){
+      if (m.desc) nombre.set(m.key, nombre.get(m.key) || m.desc);
+      const r = refDefo(m);
+      const p = sirve(r)
+        ? anota(porOt, r + '|' + m.key, {ot: r, key: m.key, code: m.art})
+        : anota(porProd, m.key, {key: m.key, code: m.art});
+      p.d += conSigno(m);
+      p.dMovs.push(m);
+      // Los comprobantes del ajuste de inventario son el ponerse al día con lo
+      // que no se documentó antes: no tienen par en QMS y no son un documento
+      // que alguien olvidó. Van aparte, y son lo que hay que dejar en QMS.
+      if (m._aj) p.ajuste = true;
+    }
+    for (const m of qms){
+      if (m.name) nombre.set(m.key, nombre.get(m.key) || m.name);
+      const r = refQms(m);
+      const p = sirve(r)
+        ? anota(porOt, r + '|' + m.key, {ot: r, key: m.key, code: m.code})
+        : anota(porProd, m.key, {key: m.key, code: m.code});
+      p.q += conSigno(m);
+      p.qMovs.push(m);
+    }
+    const cerrar = p => {
+      p.name = nombre.get(p.key) || '';
+      p.dif = p.q - p.d;
+      p.st = !p.qMovs.length ? 'falta_qms'
+           : !p.dMovs.length ? 'falta_defo'
+           : Math.abs(p.dif) > EPS ? 'dif' : 'ok';
+      p.docs = [...new Set(p.dMovs.map(m => m.tipo + ' #' + m.folio))];
+      p.refs = [...new Set(p.qMovs.map(m => m.ref).filter(Boolean))];
+      return p;
+    };
+    const porCodigo = (a, b) => a.code > b.code ? 1 : a.code < b.code ? -1 : 0;
+    const ots = [...porOt.values()].map(cerrar)
+      .sort((a, b) => (a.ot === b.ot ? porCodigo(a, b) : (a.ot < b.ot ? 1 : -1)));
+    const todos = [...porProd.values()].map(cerrar).sort(porCodigo);
+    // El ajuste va aparte: es lo que hay que dejar en QMS, no un documento que
+    // falta ingresar.
+    const ajustes = todos.filter(p => p.ajuste);
+    const prods = todos.filter(p => !p.ajuste);
+    return {mes, ots, prods, ajustes, espacios: [...espacios],
+            filas: [...ots, ...prods, ...ajustes]};
+  }
+
+  // Lo que se ve en la tabla del mes.
+  const MES_FILTERS = [
+    ['dif', 'No cuadran', r => r.st !== 'ok', 'var(--out)'],
+    ['falta_qms', 'Falta en QMS', r => r.st === 'falta_qms', 'var(--out)'],
+    ['falta_defo', 'Falta en Defontana', r => r.st === 'falta_defo', 'var(--out)'],
+    ['dif_cant', 'Cantidad distinta', r => r.st === 'dif', 'var(--warn)'],
+    ['ajuste', 'Ajuste de inventario', r => r.ajuste, 'var(--warn)'],
+    ['ok', 'Cuadran', r => r.st === 'ok', 'var(--in)'],
+    ['all', 'Todos', r => true, null],
+  ];
+  const MES_COLS = [
+    ['ref', 'OT / OC', '', r => r.ot || null],
+    ['code', 'Producto', '', r => r.code],
+    ['defo', 'Defontana', 'num', r => r.dMovs.length ? r.d : null],
+    ['qms', 'QMS', 'num', r => r.qMovs.length ? r.q : null],
+    ['dif', 'Diferencia', 'num', r => r.dif],
+    ['st', 'Qué pasa', '', r => ESTADO_MES[r.st][1]],
+    ['docs', 'Documentos', '', r => r.docs.join(', ') || null],
+  ];
+  const cantMes = (v, hay) => hay ? `<td class="num ${v > EPS ? 'plus' : v < -EPS ? 'minus' : 'mut'}">${sgn(v)}</td>`
+                                  : '<td class="num mut">no está</td>';
+  const mesRow = r => {
+    const [cls, txt] = ESTADO_MES[r.st];
+    return `<tr>
+      <td>${r.ot ? `<span class="code">${esc(r.ot)}</span>` : '<span class="mut">sin OT</span>'}${r.ajuste ? '<div class="small">ajuste de inventario</div>' : ''}</td>
+      <td><div class="code">${esc(r.code)}</div><div class="pname">${esc(r.name)}</div></td>
+      ${cantMes(r.d, r.dMovs.length)}
+      ${cantMes(r.q, r.qMovs.length)}
+      <td class="num diff ${r.dif > EPS ? 'plus' : r.dif < -EPS ? 'minus' : 'mut'}">${Math.abs(r.dif) <= EPS ? '0' : sgn(r.dif)}</td>
+      <td><span class="pill ${cls}">${txt}</span></td>
+      <td class="obs">${r.docs.length ? esc(r.docs.join(', ')) : '<span class="mut">—</span>'}${r.refs.length ? '<div class="small">QMS: ' + esc(r.refs.join(', ')) + '</div>' : ''}</td></tr>`;
+  };
+  const mesExport = r => ({
+    'Mes': mesTexto(state.mes), 'OT / OC': r.ot || '', 'Código': r.code, 'Nombre': r.name,
+    'Movimiento en Defontana': r.dMovs.length ? r.d : '',
+    'Movimiento en QMS': r.qMovs.length ? r.q : '',
+    'Diferencia (QMS − Defontana)': r.dif,
+    'Qué pasa': ESTADO_MES[r.st][1],
+    'Es del ajuste de inventario': r.ajuste ? 'Sí' : '',
+    'Documentos de Defontana': r.docs.join(', '),
+    'Referencias de QMS': r.refs.join(', '),
+  });
+  function computeMes(){
+    const meses = mesesConMovimientos();
+    if (!meses.length){ state.mesRows = []; state.mes = ''; return; }
+    if (!meses.includes(state.mes)) state.mes = meses[0];
+    state.mesRows = comparacionDelMes(state.mes).filas;
+  }
+
   // ---------- Verificar ajustes ----------
   function computeCheck(){
     state.checkRows = []; state.docGroups = [];
@@ -3097,7 +3355,7 @@
     state.rows = base.rows; state.zero = base.zero; state.orphan = base.orphan;
     computeCheck();
     computeQms();
-    const reg = state.view === 'reg', chk = state.view === 'check', qms = state.view === 'qms';
+    const reg = state.view === 'reg', chk = state.view === 'check', qms = state.view === 'qms', mes = state.view === 'mes';
     document.querySelectorAll('.view').forEach(b => b.setAttribute('aria-selected', b.dataset.view === state.view));
     $('checkPanel').hidden = !chk;
     renderStepsPanel(reg);
@@ -3115,9 +3373,20 @@
     if (dash){ renderDash(); $('foot').innerHTML = ''; return; }
     if (plan){ renderPlan(); $('foot').innerHTML = ''; return; }
     if (chk) renderAjDocs('ajDocs', state.mov2 ? state.docGroups : [], false);
-    const all = reg ? state.rows : chk ? state.checkRows : qms ? state.qmsRows : state.zero,
-      F = reg ? REG_FILTERS : chk ? CHECK_FILTERS : qms ? QMS_FILTERS : ZERO_FILTERS,
-      cols = reg ? REG_COLS : chk ? CHECK_COLS : qms ? QMS_COLS : ZERO_COLS;
+    if (mes) computeMes();
+    const all = reg ? state.rows : chk ? state.checkRows : qms ? state.qmsRows : mes ? state.mesRows : state.zero,
+      F = reg ? REG_FILTERS : chk ? CHECK_FILTERS : qms ? QMS_FILTERS : mes ? MES_FILTERS : ZERO_FILTERS,
+      cols = reg ? REG_COLS : chk ? CHECK_COLS : qms ? QMS_COLS : mes ? MES_COLS : ZERO_COLS;
+    // El selector de mes sólo tiene sentido en esta vista.
+    const selMes = $('optMes');
+    if (selMes){
+      selMes.hidden = !mes;
+      if (mes){
+        const meses = mesesConMovimientos();
+        selMes.innerHTML = meses.map(m => `<option value="${esc(m)}"${m === state.mes ? ' selected' : ''}>${esc(mesTexto(m))}</option>`).join('')
+          || '<option value="">sin movimientos</option>';
+      }
+    }
 
     // Resumen
     if (chk){
@@ -3132,6 +3401,19 @@
         <button class="rx-card bad" type="button" data-go="double"><span class="lbl">Posible doble ajuste</span><span class="big">${fmt(n('double'))}</span><span class="note">contar de nuevo para confirmar</span></button>
         <div class="rx-card"><span class="lbl">Ajustes en Defontana</span><span class="big">${money(ajDocs.reduce((a, g) => a + g.valor, 0))}</span><span class="note">${fmt(ajDocs.length)} ${ajDocs.length === 1 ? 'documento' : 'documentos'}</span></div>`;
       }
+    } else if (mes){
+      const n = f => all.filter(f).length;
+      const falta = n(r => r.st === 'falta_qms' && !r.ajuste), faltaD = n(r => r.st === 'falta_defo');
+      const aj = all.filter(r => r.ajuste);
+      $('summary').innerHTML = !state.qmsMov
+        ? `<div class="rx-card"><span class="lbl">Falta el archivo de QMS</span><span class="big">—</span><span class="note">sube Ingresos y Egresos de QMS para comparar el mes</span></div>`
+        : `
+        <div class="rx-card"><span class="lbl">${esc(mesTexto(state.mes))}</span><span class="big">${fmt(all.length)}</span><span class="note">movimientos comparados, por OT y por producto</span></div>
+        <button class="rx-card bad" type="button" data-go="falta_qms"><span class="lbl">Falta en QMS</span><span class="big">${fmt(falta)}</span><span class="note">Defontana lo movió y QMS no</span></button>
+        <button class="rx-card bad" type="button" data-go="falta_defo"><span class="lbl">Falta en Defontana</span><span class="big">${fmt(faltaD)}</span><span class="note">QMS lo movió y Defontana no</span></button>
+        <button class="rx-card down" type="button" data-go="dif_cant"><span class="lbl">Cantidad distinta</span><span class="big">${fmt(n(r => r.st === 'dif'))}</span><span class="note">los dos lo movieron, por distinto</span></button>
+        <button class="rx-card" type="button" data-go="ajuste"><span class="lbl">Ajuste de inventario</span><span class="big">${fmt(aj.length)}</span><span class="note">lo que hay que dejar en QMS</span></button>
+        <button class="rx-card up" type="button" data-go="ok"><span class="lbl">Cuadran</span><span class="big">${fmt(n(r => r.st === 'ok'))}</span><span class="note">el mismo movimiento en los dos</span></button>`;
     } else if (qms){
       const n = k => all.filter(r => r.st === k).length;
       $('summary').innerHTML = `
@@ -3186,24 +3468,28 @@
     const zer = state.view === 'zero';
     if (qms) state.open.clear();
     const lin = $('optLinea').value;
-    const rows = sorted(all.filter(r => f(r) && (!lin || (r.linea || '') === lin) && (!q || strip(r.code).includes(q) || strip(r.name).includes(q) || (zer && strip(r.m.tipo + ' ' + r.m.ref + ' ' + r.m.folio).includes(q)))), cols);
+    const rows = sorted(all.filter(r => f(r) && (!lin || (r.linea || '') === lin) && (!q || strip(r.code).includes(q) || strip(r.name).includes(q) || (zer && strip(r.m.tipo + ' ' + r.m.ref + ' ' + r.m.folio).includes(q)) || (mes && strip(r.ot + ' ' + r.docs.join(' ')).includes(q)))), cols);
     state.visible = rows;
     const tb = $('tbody');
     if (qms && !state.qms){ tb.innerHTML = `<tr><td colspan="${cols.length}" class="empty">Sube arriba el archivo de QMS (Distribución de Valor de Stock) para verlo lado a lado con Defontana. No entra en ningún cálculo: es sólo para comparar.</td></tr>`; }
+    else if (mes && !state.qmsMov){ tb.innerHTML = `<tr><td colspan="${cols.length}" class="empty">Sube arriba el archivo de Ingresos y Egresos de QMS para comparar, mes a mes, los movimientos de los dos sistemas: qué movió Defontana y QMS no, y al revés.</td></tr>`; }
+    else if (mes && !state.mov.length){ tb.innerHTML = `<tr><td colspan="${cols.length}" class="empty">Sube arriba el Informe de Documentos de Defontana (archivo 2) para comparar sus movimientos con los de QMS.</td></tr>`; }
     else if (!chk && !qms && !state.mov.length){ tb.innerHTML = `<tr><td colspan="${cols.length}" class="empty">Sube arriba el Informe de Documentos de Defontana (archivo 2) para cruzarlo con el conteo.</td></tr>`; }
     else if (chk && !state.mov2){ tb.innerHTML = `<tr><td colspan="${cols.length}" class="empty">Sube arriba el Informe de Documentos de Defontana descargado de nuevo, ya con los ajustes hechos. El programa buscará los documentos de ajuste y revisará producto por producto si quedó cuadrado.</td></tr>`; }
     else if (!rows.length){ tb.innerHTML = `<tr><td colspan="${cols.length}" class="empty">No hay productos en esta vista.</td></tr>`; }
     else {
       const parts = [];
       for (const r of rows){
-        parts.push(reg ? regRow(r) : chk ? checkRow(r) : qms ? qmsRow(r) : zeroRow(r));
-        if (!zer && !qms && state.open.has(r.key)) parts.push(detail(r));
+        parts.push(reg ? regRow(r) : chk ? checkRow(r) : qms ? qmsRow(r) : mes ? mesRow(r) : zeroRow(r));
+        if (!zer && !qms && !mes && state.open.has(r.key)) parts.push(detail(r));
       }
       tb.innerHTML = parts.join('');
     }
 
     $('foot').innerHTML = chk
       ? '<b>Cómo se verifica.</b> “Debería tener Defontana” = Contado + ingresos − egresos registrados después del conteo, sin contar los documentos de ajuste. “Tiene Defontana” es el saldo de Defontana al conteo más todos los documentos posteriores, incluidos los ajustes (se calcula con los documentos para no depender del orden de las filas; si la última fila del informe muestra otro saldo, se avisa). Si son iguales, quedó bien. “Posible doble ajuste” significa que cuadra en el cálculo, pero la diferencia del conteo calzaba con un documento registrado después del conteo: si esa mercadería ya había salido o entrado al contar, el ajuste la contó dos veces. Solo se listan los productos que estaban descuadrados o que tuvieron ajuste.'
+      : mes
+      ? '<b>Cómo se compara.</b> Mes a mes, los movimientos de Defontana (Informe de Documentos) contra los de QMS (Ingresos y Egresos). Los dos sistemas no comparten la numeración de sus comprobantes, pero sí la orden de trabajo: Defontana la escribe en “Referencia” y QMS en su columna de OT, así que lo que lleva OT se compara OT por OT y producto por producto. Lo que no la lleva —compras, guías de despacho y los comprobantes del ajuste— se compara sumando lo que movió cada sistema en el mes para ese producto. Una orden de compra cruzaría igual que la OT, pero la columna “N Doc. Compra” del informe de Defontana viene vacía: mientras siga así, las entradas se comparan por producto. No se comparan los traspasos entre bodegas (no entran ni salen del inventario) ni los ajustes de costo (no mueven unidades). Hacia atrás no se ofrecen meses: hasta el ajuste de inventario no se hacían todos los documentos, y ese desorden es justamente lo que el ajuste vino a cerrar. Los comprobantes del ajuste van aparte: son lo que hay que dejar registrado en QMS, no un documento que a alguien se le olvidó.'
       : qms
       ? '<b>Qué muestra.</b> El stock de QMS lado a lado con el de Defontana, sólo para mirar: no entra en el cálculo del ajuste, que se sigue decidiendo con el conteo físico. Los códigos se cruzan igual que en el resto del módulo —sin mayúsculas, tildes, espacios, puntos, guiones ni ceros a la izquierda— y respetando las parejas confirmadas en “Unificar códigos”. El stock de Defontana es el de todas las bodegas y su valor unitario es el PMP; los de QMS salen del archivo. Se marca “unidad distinta” cuando las dos unidades no son la misma ni equivalentes (UN y UNIDAD son la misma; UN y KG no). El valor unitario se da por igual si no se aleja más de 1%: cada sistema lo calcula por su cuenta y unos pesos de redondeo no son una diferencia.'
       : reg
@@ -3320,13 +3606,14 @@
     'Debería tener Defontana': r.expected ?? '', 'Tiene Defontana': r.sysCalc ?? r.sysNow ?? '', 'Saldo última fila del informe': r.sysNow ?? '', 'Diferencia que queda': r.gap ?? ''
   });
   const exportRows = () => (state.visible || []).map(
-    state.view === 'reg' ? regExport : state.view === 'check' ? checkExport : state.view === 'qms' ? qmsExport : zeroExport);
+    state.view === 'reg' ? regExport : state.view === 'check' ? checkExport
+      : state.view === 'qms' ? qmsExport : state.view === 'mes' ? mesExport : zeroExport);
 
   $('btnXlsx').addEventListener('click', () => {
     const rows = exportRows(); if (!rows.length) return;
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), {reg:'Regularización', zero:'Documentos a costo 0', check:'Verificación de ajustes'}[state.view]);
-    const name = {reg:'regularizacion-inventario-', zero:'documentos-costo-0-', check:'verificacion-ajustes-'}[state.view] + fmtDate(new Date()) + '.xlsx';
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), {reg:'Regularización', zero:'Documentos a costo 0', check:'Verificación de ajustes', qms:'Cruce con QMS', mes:'Movimientos del mes'}[state.view]);
+    const name = {reg:'regularizacion-inventario-', zero:'documentos-costo-0-', check:'verificacion-ajustes-', qms:'cruce-qms-', mes:'movimientos-del-mes-'}[state.view] + fmtDate(new Date()) + '.xlsx';
     XLSX.writeFile(wb, name);
   });
   $('btnCopy').addEventListener('click', () => {
@@ -3342,14 +3629,14 @@
   });
 
   // ---------- Carga ----------
-  function setupLoader(inputId, dropId, statusId, parser, key, label){
+  function setupLoader(inputId, dropId, statusId, parser, key, label, todasLasHojas){
     const input = $(inputId), drop = $(dropId), st = $(statusId);
     const handle = file => {
       if (!file) return;
       st.textContent = 'Leyendo ' + file.name + '…';
       file.arrayBuffer().then(buf => {
         const wb = XLSX.read(buf, {type:'array'});
-        const data = leerDeCualquierHoja(wb, parser);
+        const data = (todasLasHojas ? leerDeTodasLasHojas : leerDeCualquierHoja)(wb, parser);
         if (!data.length) throw new Error('El archivo no tiene filas con datos.');
         state[key] = data;
         drop.classList.remove('err'); drop.classList.add('ok');
@@ -3361,6 +3648,7 @@
         render();
         if (key === 'ajustes') $('btnClearAjustes').hidden = false;
         if (key === 'qms') $('btnClearQms').hidden = false;
+        if (key === 'qmsMov') $('btnClearQmsMov').hidden = false;
         if (key === 'articulos'){
           $('btnClearArticulos').hidden = false;
           // La hora es lo que distingue una foto de otra: sin ella no se sabe
@@ -3383,7 +3671,7 @@
                            : ' · trae sólo los que tienen stock: para cruzar con QMS los códigos creados, bájalo con todos') +
             ' · ' + (data.fecha ? 'sacado de Defontana el ' + data.fecha : 'sin fecha de generación en el archivo');
         }
-        const clave = {stock:'conteo', mov:'informe', mov2:'informe_ajustes', ajustes:'ajustes', articulos:'articulos', qms:'qms'}[key];
+        const clave = {stock:'conteo', mov:'informe', mov2:'informe_ajustes', ajustes:'ajustes', articulos:'articulos', qms:'qms', qmsMov:'qmsmov'}[key];
         if (clave){ avisoGuardado(st, guardarArchivo(clave, file), clave, file.name); if (key === 'mov2') guardarEstado(); }
       }).catch(e => { drop.classList.remove('ok'); drop.classList.add('err'); st.textContent = e.message || 'No se pudo leer el archivo.'; });
     };
@@ -3399,6 +3687,16 @@
   const cargarAjustes = setupLoader('fileAjustes', 'dropAjustes', 'stAjustes', parseMov, 'ajustes', 'líneas de ajuste (se toman como regularización ya hecha)');
   const SIN_QMS = 'Distribución de Valor de Stock de QMS: se muestra al lado de Defontana para comparar. No entra en el cálculo del ajuste';
   setupLoader('fileQms', 'dropQms', 'stQms', parseQms, 'qms', 'productos de QMS');
+  setupLoader('fileQmsMov', 'dropQmsMov', 'stQmsMov', parseMovQms, 'qmsMov', 'movimientos de QMS', true);
+  const SIN_QMS_MOV = 'Ingresos y Egresos de QMS: los movimientos del otro sistema, para compararlos mes a mes con los de Defontana';
+  $('btnClearQmsMov').addEventListener('click', () => {
+    state.qmsMov = null; $('btnClearQmsMov').hidden = true; $('dropQmsMov').classList.remove('ok');
+    $('stQmsMov').textContent = SIN_QMS_MOV;
+    if (CFG && CFG.guardar){ const fd = new FormData(); fd.append('borrar', '1'); fetch(urlDe('qmsmov'), {method:'POST', body:fd, headers:{'X-CSRFToken': CFG.csrf}, credentials:'same-origin'}).catch(() => {}); }
+    render();
+  });
+  // Cambiar de mes no vuelve a leer nada: los dos archivos ya están cargados.
+  $('optMes').addEventListener('change', e => { state.mes = e.target.value; state.open.clear(); render(); });
   $('btnClearQms').addEventListener('click', () => {
     state.qms = null; $('btnClearQms').hidden = true; $('dropQms').classList.remove('ok');
     $('stQms').textContent = SIN_QMS;
@@ -3615,14 +3913,14 @@
     const g = (CFG && CFG.guardados) || {};
     if (!Object.keys(g).length) return;
     state.cargando = true;
-    const leerInforme = async (clave, key, dropId, statusId, parser = parseMov, que = 'líneas') => {
+    const leerInforme = async (clave, key, dropId, statusId, parser = parseMov, que = 'líneas', todasLasHojas = false) => {
       const info = g[clave]; if (!info) return;
       $(statusId).textContent = 'Cargando ' + info.nombre + ' guardado…';
       try {
         const r = await fetch(urlDe(clave), {credentials:'same-origin'});
         if (!r.ok) throw new Error();
         const wb = XLSX.read(await r.arrayBuffer(), {type:'array'});
-        const data = leerDeCualquierHoja(wb, parser);
+        const data = (todasLasHojas ? leerDeTodasLasHojas : leerDeCualquierHoja)(wb, parser);
         state[key] = data;
         $(dropId).classList.add('ok');
         // La foto del stock valorizado se identifica por cuándo se sacó de
@@ -3639,6 +3937,8 @@
     await leerInforme('articulos', 'articulos', 'dropArticulos', 'stArticulos', parseArticulos, 'artículos con saldo y valor');
     if (state.articulos && !CFG.historial) $('btnClearArticulos').hidden = false;
     await leerInforme('qms', 'qms', 'dropQms', 'stQms', parseQms, 'productos de QMS');
+    await leerInforme('qmsmov', 'qmsMov', 'dropQmsMov', 'stQmsMov', parseMovQms, 'movimientos de QMS', true);
+    if (state.qmsMov && !CFG.historial) $('btnClearQmsMov').hidden = false;
     if (state.qms && !CFG.historial) $('btnClearQms').hidden = false;
     if (!state.mov.length && state.mov2) state.mov = state.mov2;
     if (g.estado){
@@ -3669,6 +3969,6 @@
   // puerta, la matemática que decide los ajustes de inventario no se puede
   // comprobar más que a ojo.
   if (typeof module !== 'undefined' && module.exports){
-    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, parseArticulos, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, tipoAjCosto, avisoDeFechas, avisoDeDuplicados, guardarArchivo, detectarAjustes, conAjustes, parseCostos, costoDeSuCompra, pmpEditable, costoPropuestoSinValor, renderStepsPanel, REG_COLS, regRow, detail, parseQms, computeQms, cruceQms, qmsRow, regExport, cmpExport, state};
+    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, parseArticulos, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, tipoAjCosto, avisoDeFechas, avisoDeDuplicados, guardarArchivo, detectarAjustes, conAjustes, parseCostos, costoDeSuCompra, pmpEditable, costoPropuestoSinValor, renderStepsPanel, REG_COLS, regRow, detail, parseQms, parseMovQms, leerDeTodasLasHojas, comparacionDelMes, mesesConMovimientos, mesTexto, computeMes, mesRow, mesExport, MES_COLS, computeQms, cruceQms, qmsRow, regExport, cmpExport, state};
   }
 })();
