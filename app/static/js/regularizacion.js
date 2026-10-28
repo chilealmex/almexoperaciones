@@ -103,7 +103,11 @@
       // Dónde está guardado. La bodega es el recinto y la ubicación el lugar
       // dentro de él ("Estante A3 / Nivel 2"): contando son dos datos
       // distintos, y en el informe hacen falta los dos para ir a buscarlo.
-      ubicacion:t.col('Ubicación', 'Ubicacion'), bodega:t.col('Bodega', 'Nombre Bodega')};
+      ubicacion:t.col('Ubicación', 'Ubicacion'), bodega:t.col('Bodega', 'Nombre Bodega'),
+      // El Excel de "Stock y conteo" trae esta columna desde que se pueden
+      // marcar los activos fijos: así la marca llega sola y no hay que volver
+      // a ponerla acá producto por producto.
+      af:t.col('Activo fijo', 'Activo Fijo')};
     const out = [];
     for (const r of t.rows){
       const code = String(r[c.code] ?? '').trim(); if (!code) continue;
@@ -114,7 +118,8 @@
       out.push({code, key:keyOf(code), name:r[c.name] ?? '', stock:num(r[c.stock]), estado:c.estado >= 0 ? r[c.estado] ?? '' : '',
         por:c.por >= 0 ? r[c.por] ?? '' : '', fecha:c.fecha >= 0 ? fechaDeConteo(r[c.fecha]) : null, um:c.um >= 0 ? String(r[c.um] ?? '').trim() : '', linea:c.linea >= 0 ? String(r[c.linea] ?? '').trim() : '',
         ubicacion:c.ubicacion >= 0 ? String(r[c.ubicacion] ?? '').trim() : '',
-        bodega:c.bodega >= 0 ? String(r[c.bodega] ?? '').trim() : ''});
+        bodega:c.bodega >= 0 ? String(r[c.bodega] ?? '').trim() : '',
+        af:c.af >= 0 && /^s/i.test(String(r[c.af] ?? '').trim())});
     }
     return out;
   }
@@ -628,6 +633,7 @@
         recount: Object.fromEntries([...state.recount].map(([k, v]) => [k, {qty: v.qty, fecha: +v.fecha}])),
         pmp: Object.fromEntries(state.pmpEdit),
         ajSi: [...state.ajSi], ajNo: [...state.ajNo], hechos: Object.fromEntries(state.hechos),
+        afSi: [...state.afSi], afNo: [...state.afNo],
         movCuando: Object.fromEntries(state.movCuando)
       });
       // En la misma fila que los archivos: si sale mientras se está subiendo
@@ -690,7 +696,11 @@
   const state = {stock:[], mov:[], view:'reg', filter:{reg:'all', zero:'all', check:'all', qms:'dif', mes:'dif'}, qms:null, qmsRows:[], mov2:null, ajustes:null, articulos:null,
     // Los movimientos de QMS (Ingresos y Egresos) y el mes que se está
     // comparando con los de Defontana.
-    qmsMov:null, mesRows:[], mes:'', hechos:new Map(), ajSi:new Set(), ajNo:new Set(), docGroupsMain:[], checkRows:[], docGroups:[],
+    qmsMov:null, mesRows:[], mes:'',
+    // Los productos marcados como activo fijo acá, y los desmarcados. Van en
+    // dos listas, como los comprobantes de ajuste: la marca puede venir del
+    // archivo de conteo y hay que poder sacarla sin editar el archivo.
+    afSi:new Set(), afNo:new Set(), hechos:new Map(), ajSi:new Set(), ajNo:new Set(), docGroupsMain:[], checkRows:[], docGroups:[],
     sort:{reg:{k:'code', d:1}, zero:{k:'fecha', d:1}, check:{k:'code', d:1}, qms:{k:'code', d:1}, mes:{k:'ref', d:1}}, open:new Set(), pmpEdit:new Map(), recount:leerRecuentos(), rows:[], zero:[],
     // Documentos puestos a mano antes o después del conteo (clave del
     // documento -> 'antes' | 'despues'). La fecha del documento es la del
@@ -924,7 +934,9 @@
         bodega:(list.find(x => x.bodega) || main).bodega || '',
         stock: done.length ? done.reduce((a, x) => a + x.stock, 0) : null,
         fecha: done.length ? new Date(Math.max(...done.map(x => +x.fecha))) : null,
-        variants: list.map(x => x.code), nCounted: done.length, previos};
+        variants: list.map(x => x.code), nCounted: done.length, previos,
+        // Basta con que uno de los códigos del producto venga marcado.
+        af: list.some(x => x.af)};
       // Un recuento ingresado en la tabla reemplaza al conteo original
       const rc = state.recount.get(main.key);
       if (rc){ g.original = {stock: g.stock, fecha: g.fecha}; g.stock = rc.qty; g.fecha = rc.fecha; g.por = 'Recuento'; g.recontado = true; g.nCounted = Math.max(1, g.nCounted); }
@@ -1053,7 +1065,15 @@
         nuevoEnDefontana = !foto;
         saldoDeLaFoto = foto ? foto.stock : null;
       }
-      const diff = counted && sysAtCount != null ? s.stock - sysAtCount : null;
+      // Un activo fijo guardado en la bodega de activos fijos no se cuenta con
+      // el resto del inventario: quien recorre la bodega no pasa por ahí, y el
+      // producto sale contado en 0 aunque esté. Pasa cuando se compró a una
+      // bodega normal y después se traspasó a la de activos fijos: el traspaso
+      // es justamente la señal de que quedó bien. Marcarlo suma esas unidades
+      // a lo contado, en vez de proponer una salida por algo que sí está.
+      const activoFijo = !!s && esActivoFijo(s.key, s);
+      const enActivos = activoFijo ? stockEnActivos(s.key) : 0;
+      const diff = counted && sysAtCount != null ? (s.stock + enActivos) - sysAtCount : null;
       // Lo que Defontana debería mostrar hoy: su saldo de hoy más la diferencia
       // que quedó al contar. Da lo mismo que sumarle los movimientos al conteo
       // —contado + entradas − salidas— mientras el informe los traiga todos; la
@@ -1125,6 +1145,11 @@
           dx.obs.unshift(`Se contó en ${de}, pero en Defontana el producto está en ${a} y no hay una conversión conocida entre esas unidades: se compararon las cifras tal cual. Corrige la unidad en el maestro de Defontana y confirma en qué unidad se registraron sus movimientos antes de ajustar.`);
         }
       }
+      // Que la cuenta se hizo con las unidades de la bodega de activos fijos
+      // tiene que decirse: si no, la fila muestra un conteo de 0 contra un
+      // saldo de 4 y parece que la pantalla se equivocó.
+      if (counted && enActivos > EPS)
+        dx.obs.push(`Marcado como activo fijo: Defontana tiene ${fmt(enActivos)} en la bodega de activos fijos, y el conteo de la bodega no pasa por ahí. Esas unidades se suman a lo contado (${fmt(s.stock)} + ${fmt(enActivos)}), así que no se propone sacarlas.`);
       // Defontana tiene el producto con más de un código: cada uno lleva su propio saldo
       const arts = porArt.length > 1 ? porArt.map(x => ({art: x.art, hoy: x.hoy})) : null;
       let artAjuste = null;
@@ -1228,7 +1253,7 @@
               // la actualizada: los documentos traen la que tenían cuando se
               // emitieron, y si la unidad del artículo se cambió después, la
               // de los documentos viejos ya no es la de Defontana.
-              umInv: (fotoDe(docs) || {}).um || '', linea: s ? s.linea || '' : '', ubicacion: s ? s.ubicacion || '' : '', bodegaConteo: s ? s.bodega || '' : '', alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, umInfo, arts, artAjuste, pend, costDocs, manual, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs, ajPrevios, sysCalc, toOther,
+              umInv: (fotoDe(docs) || {}).um || '', activoFijo, enActivos, linea: s ? s.linea || '' : '', ubicacion: s ? s.ubicacion || '' : '', bodegaConteo: s ? s.bodega || '' : '', alias, viaName, nCounted: s ? s.nCounted : 0, key, code: s ? s.code : docs[0].art, name: s ? s.name : docs[0].desc, s, umInfo, arts, artAjuste, pend, costDocs, manual, counted, docs, ins, outs, sameDay, aj, ajVal, ajDocs, ajPrevios, sysCalc, toOther,
         sysAtCount, sysNow, realNow, diff, st, pmp, edited, pmpSrc: edited ? 'Ingresado a mano' : pm ? pm.src : 'Sin costo en Defontana',
         valor: st === 'done' ? 0 : pend != null && pmp != null ? pend * pmp : diff != null && Math.abs(diff) > EPS && pmp != null ? diff * pmp : (st === 'ok' ? 0 : null), zeros, cost};
     };
@@ -1524,6 +1549,26 @@
       bodegasPorKey.set(a.key, m);
     }
   }
+  // La bodega donde se guardan los activos fijos. Defontana la llama "BODEGA
+  // DE ACTIVOS FIJOS"; con reconocer la palabra basta.
+  const ES_BODEGA_ACTIVOS = /ACTIVO/i;
+  // Cuántas unidades tiene Defontana de ese producto guardadas ahí, según el
+  // Informe de Inventario, que trae una fila por bodega.
+  function stockEnActivos(key){
+    if (!state.articulos || !state.articulos.length) return 0;
+    armarBodegas();
+    const m = bodegasPorKey.get(key);
+    if (!m) return 0;
+    let n = 0;
+    for (const [b, q] of m) if (ES_BODEGA_ACTIVOS.test(b)) n += q || 0;
+    return n;
+  }
+  // Si el producto es un activo fijo. La marca puede venir del archivo de
+  // conteo —el Excel de "Stock y conteo" trae la columna— y lo que se marque
+  // acá manda sobre eso.
+  const esActivoFijo = (key, s) => state.afSi.has(key) ? true
+    : state.afNo.has(key) ? false : !!(s && s.af);
+
   // Dónde está guardado, según QMS. Defontana dice en qué bodega está el
   // artículo; en qué parte de la bodega sólo lo sabe QMS.
   const ubicacionDe = r => {
@@ -2187,6 +2232,9 @@
   // Cada paso lleva su propio "Listo": marcar la unidad de medida no puede
   // llevarse por delante el ajuste de cantidad ni el de costo.
   const botonPaso = (r, p, txt, titulo) => `<button type="button" class="rx-btn ghost sm hecho" data-hecho="${esc(r.key)}" data-paso="${p}" title="${titulo}">${txt}</button>`;
+  // Marcar un producto como activo fijo. Es del producto, no del conteo: lo
+  // que esté guardado en la bodega de activos fijos no se cuenta con el resto.
+  const botonActivoFijo = r => `<button type="button" class="rx-btn ghost sm afijo" data-afijo="${esc(r.key)}" title="${r.activoFijo ? 'Dejar de tratarlo como activo fijo' : 'Es un activo fijo: lo que Defontana tenga en la bodega de activos fijos se suma a lo contado, porque el conteo de la bodega no pasa por ahí'}">${r.activoFijo ? '★ Activo fijo' : '☆ Activo fijo'}</button>`;
   const stepsCell = (steps, r) => `<ol class="steps">${steps.map(x => {
     const p = PASO_DE[x.k];
     return `<li><span class="stepk ${STEP[x.k].cls}">${STEP[x.k].label}</span> ${esc(x.txt)}` +
@@ -2562,6 +2610,7 @@
     ['alias', 'Código escrito distinto', r => r.alias.length > 0 || r.viaName || r.nCounted > 1, 'var(--accent)'],
     ['cost', 'Revisar costo ($0)', r => !!(r.cost && r.cost.need), 'var(--warn)'],
     ['recount', 'Recontados', r => !!(r.s && r.s.recontado), 'var(--accent)'],
+    ['afijo', 'Activos fijos', r => !!r.activoFijo, 'var(--accent)'],
     ['foto', 'No cuadra con el stock valorizado', r => !!r.fotoDifiere, 'var(--warn)'],
     ['faltanmov', 'Le faltan movimientos en el informe', r => !!r.faltanMov, 'var(--warn)'],
     ['sinvalor', 'Con unidades y sin valor', r => docSteps(r).some(x => x.k === 'sinvalor'), 'var(--warn)'],
@@ -2896,7 +2945,7 @@
       <td class="num diff ${r.st === 'check' ? 'mut' : aj > EPS ? 'plus' : aj < -EPS ? 'minus' : 'mut'}">${aj == null ? '—' : Math.abs(aj) <= EPS ? '0' : r.st === 'check' ? '<span class="small">a confirmar</span><div class="small">(' + sgn(aj) + ' si no se explica)</div>' : sgn(aj)}</td>
       <td><span class="pill ${cls}">${label}${qty}</span>${comprobantesAj(r)}${r.sameDay && r.counted ? '<span class="flag" title="Hay documentos el mismo día del conteo">· mismo día</span>' : ''}</td>
       <td class="obs">${obsCell(r)}</td>
-      <td class="tomake">${stepsCell(docSteps(r), r)}${marcasCell(r)}${r.s ? botonPaso(r, 'todo', r.manual ? 'Desmarcar todo' : '✓ Todo regularizado', r.manual ? 'Volver a mostrarlo como pendiente' : 'Ya regularizaste todo este producto en Defontana') : ''}</td>
+      <td class="tomake">${stepsCell(docSteps(r), r)}${marcasCell(r)}${r.s ? botonPaso(r, 'todo', r.manual ? 'Desmarcar todo' : '✓ Todo regularizado', r.manual ? 'Volver a mostrarlo como pendiente' : 'Ya regularizaste todo este producto en Defontana') : ''}${r.s ? botonActivoFijo(r) : ''}</td>
       <td class="num">${costCell(r)}</td>
       <td class="num">${pmpEditable(r) ? pmpInput(r.key, r.edited ? r.pmp : (costoPropuestoSinValor(r) ?? r.pmp), r.edited, r.code) : '<span class="mut">' + (r.pmp != null ? money(r.pmp) : '—') + '</span>'}</td>
       <td class="num diff ${r.valor > 0.5 ? 'plus' : r.valor < -0.5 ? 'minus' : 'mut'}">${r.st === 'up' || r.st === 'down' || r.st === 'check' ? money(r.valor) : '—'}</td></tr>`;
@@ -3577,6 +3626,11 @@
     // 21-10 son 787 productos con nombre, de seis personas.
     'Contado por': r.counted && r.s ? r.s.por || '' : '',
     'Recuento': r.s && r.s.recontado ? 'Sí' : '',
+    // Que el producto es un activo fijo, y cuánto de su saldo está guardado en
+    // la bodega de activos fijos: es lo que explica que el conteo de la bodega
+    // no lo haya encontrado.
+    'Activo fijo': r.activoFijo ? 'Sí' : '',
+    'En la bodega de activos fijos': r.enActivos > EPS ? r.enActivos : '',
     'Movimientos desde el conteo': r.counted ? r.ins - r.outs : '', 'Debería tener Defontana hoy': r.realNow ?? '', 'Tiene Defontana hoy': hoyDe(r) ?? '',
     'Ajuste a hacer hoy': ajusteHoy(r) ?? '', 'Defontana al conteo': r.sysAtCount ?? '', 'Diferencia al conteo': r.diff ?? '',
     'PMP': r.pmp != null ? Math.round(r.pmp * 100) / 100 : '', 'Origen PMP': r.pmpSrc,
@@ -3868,6 +3922,17 @@
   let t; $('optSearch').addEventListener('input', () => { clearTimeout(t); t = setTimeout(render, 150); });
   const toggle = tr => { const k = tr.dataset.key; state.open.has(k) ? state.open.delete(k) : state.open.add(k); render(); };
   $('tbody').addEventListener('click', e => {
+    const af = e.target.closest('[data-afijo]');
+    if (af){
+      // Las dos listas, como con los comprobantes de ajuste: hay que poder
+      // sacar una marca que vino en el archivo de conteo.
+      const k = af.dataset.afijo, r = state.rows.find(x => x.key === k);
+      if (r){
+        if (r.activoFijo){ state.afSi.delete(k); state.afNo.add(k); }
+        else { state.afNo.delete(k); state.afSi.add(k); }
+      }
+      guardarEstado(); render(); return;
+    }
     const hb = e.target.closest('[data-hecho]');
     if (hb){
       const k = hb.dataset.hecho, r = state.rows.find(x => x.key === k);
@@ -3948,6 +4013,8 @@
         if (e.pmp) state.pmpEdit = new Map(Object.entries(e.pmp));
         if (e.ajSi) state.ajSi = new Set(e.ajSi);
         if (e.ajNo) state.ajNo = new Set(e.ajNo);
+        if (e.afSi) state.afSi = new Set(e.afSi);
+        if (e.afNo) state.afNo = new Set(e.afNo);
         // Cada marca guarda la diferencia que tenía el producto al marcarlo (formato anterior: solo la lista de claves)
         if (e.hechos) state.hechos = Array.isArray(e.hechos) ? new Map(e.hechos.map(k => [k, null])) : new Map(Object.entries(e.hechos));
         if (e.movCuando) state.movCuando = new Map(Object.entries(e.movCuando));
@@ -3969,6 +4036,6 @@
   // puerta, la matemática que decide los ajustes de inventario no se puede
   // comprobar más que a ojo.
   if (typeof module !== 'undefined' && module.exports){
-    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, parseArticulos, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, tipoAjCosto, avisoDeFechas, avisoDeDuplicados, guardarArchivo, detectarAjustes, conAjustes, parseCostos, costoDeSuCompra, pmpEditable, costoPropuestoSinValor, renderStepsPanel, REG_COLS, regRow, detail, parseQms, parseMovQms, leerDeTodasLasHojas, comparacionDelMes, mesesConMovimientos, mesTexto, computeMes, mesRow, mesExport, MES_COLS, computeQms, cruceQms, qmsRow, regExport, cmpExport, state};
+    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, parseArticulos, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, tipoAjCosto, avisoDeFechas, avisoDeDuplicados, guardarArchivo, detectarAjustes, conAjustes, parseCostos, costoDeSuCompra, pmpEditable, costoPropuestoSinValor, renderStepsPanel, REG_COLS, REG_FILTERS, regRow, detail, parseQms, parseMovQms, leerDeTodasLasHojas, comparacionDelMes, mesesConMovimientos, mesTexto, computeMes, mesRow, mesExport, MES_COLS, computeQms, cruceQms, qmsRow, regExport, cmpExport, state};
   }
 })();
