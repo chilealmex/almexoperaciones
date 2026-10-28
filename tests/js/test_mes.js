@@ -277,5 +277,62 @@ console.log('\nEl Excel lleva lo mismo que la tabla');
   comprobar('y qué pasa', 'Falta en QMS', x['Qué pasa']);
 }
 
+console.log('\nAl abrir una fila se ven los movimientos de cada sistema');
+{
+  // El neto dice que no cuadran; cuál de los dos documentos falta sólo se ve
+  // mirando los movimientos de cada lado.
+  const c = cargar({
+    documentos: [defo({ref: 'OT 6368', art: 'INS-068', qty: 6, folio: '12'}),
+                 defo({ref: 'OT 6368', art: 'INS-068', qty: 4, folio: '13'})],
+    egresos: [egreso({code: 'INS-068', qty: 6, ot: '6368'})],
+  });
+  const r = de(c.ots, 'INS-068');
+  const html = R.mesDetalle(r);
+
+  comprobar('salen los dos movimientos de Defontana', true,
+            html.includes('#12') && html.includes('#13'));
+  // Partido en dos, porque la referencia de QMS también se escribe en la
+  // columna de Defontana: buscarla en el html entero no diría nada.
+  const ladoQms = html.split('Movimientos en QMS')[1] || '';
+  comprobar('y el de QMS con su OT, en su propio lado', true, ladoQms.includes('OT 6368'));
+  comprobar('contado como uno', true, ladoQms.includes('(1)'));
+  comprobar('y no vacío', false, ladoQms.includes('No tiene movimientos'));
+  comprobar('se dice cuántos tiene cada lado', true,
+            html.includes('Movimientos en Defontana') && html.includes('Movimientos en QMS'));
+  comprobar('y qué revisar', true, /distinta cantidad/i.test(html));
+  comprobar('la fila se puede abrir', true, R.mesRow(r).includes('data-key='));
+  comprobar('con un identificador propio por OT', 'OT 6368|INS068', r.id);
+}
+
+console.log('\nUn producto sin movimientos en un sistema lo dice al abrirlo');
+{
+  const c = cargar({
+    documentos: [defo({ref: 'OT 6368', art: 'INS-117', qty: 4})],
+    egresos: [egreso({code: 'INS-068', qty: 10, ot: '6368'})],
+  });
+  const html = R.mesDetalle(de(c.ots, 'INS-117'));
+
+  comprobar('QMS no tiene ninguno', true, html.includes('No tiene movimientos de este mes'));
+  comprobar('y se dice qué revisar', true, /dej[oó] de registrar en QMS/i.test(html));
+}
+
+console.log('\nLos filtros no mezclan el ajuste con lo que falta registrar');
+{
+  // En su pantalla la tarjeta decía "Falta en QMS 51" y el chip 624: el chip
+  // estaba contando también los 573 productos del ajuste.
+  const c = cargar({
+    conteo: CONTEO_AJUSTE,
+    documentos: [...ENTRADAS_PREVIAS, ...SALIDA_DE_AJUSTE,
+                 defo({ref: 'OT 6368', art: 'INS-117', qty: 4})],
+    egresos: [egreso({code: 'OTRO', qty: 1, ot: '6368'})],
+  });
+  const chip = k => c.filas.filter(R.MES_FILTERS.find(f => f[0] === k)[2]).length;
+
+  comprobar('tres productos del ajuste', 3, c.ajustes.length);
+  comprobar('"falta en QMS" cuenta sólo el que no es del ajuste', 1, chip('falta_qms'));
+  comprobar('y "no cuadran" tampoco los incluye', 2, chip('dif'));
+  comprobar('el ajuste tiene su propio filtro', 3, chip('ajuste'));
+}
+
 console.log(`\n${hechas - fallas} de ${hechas} comprobaciones pasaron`);
 process.exit(fallas ? 1 : 0);

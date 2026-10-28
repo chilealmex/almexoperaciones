@@ -103,6 +103,14 @@
 .regx .det tr.pre td{color:var(--muted)}
 .regx .det tr.after td{font-weight:600}
 .regx .det tr.zero td{background:var(--warn-soft)}
+/* Los movimientos del mes, los de cada sistema uno al lado del otro: es lo que
+   hay que comparar para saber cuál de los dos documentos falta. */
+.regx .mesdets{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:860px){.regx .mesdets{grid-template-columns:1fr}}
+.regx .mesdet h4{margin:0 0 6px;font-size:13px}
+.regx .minitab{width:100%;font-size:12px;border-collapse:collapse}
+.regx .minitab th{position:static;background:transparent;text-align:left;padding:5px 8px;border-bottom:1px solid var(--line);color:var(--muted);font-weight:600}
+.regx .minitab td{padding:5px 8px;border-bottom:1px solid var(--line)}
 /* Poner un movimiento antes o después del conteo. Se ve como texto hasta que
    se toca: es un dato que casi siempre está bien y que, cuando está mal, hay
    que poder corregir sin buscarlo. */

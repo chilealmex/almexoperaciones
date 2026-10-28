@@ -2472,6 +2472,9 @@
            : Math.abs(p.dif) > EPS ? 'dif' : 'ok';
       p.docs = [...new Set(p.dMovs.map(m => m.tipo + ' #' + m.folio))];
       p.refs = [...new Set(p.qMovs.map(m => m.ref).filter(Boolean))];
+      // El mismo producto puede salir en varias OT, así que la fila necesita
+      // su propio identificador para poder abrirse y cerrarse sola.
+      p.id = (p.ot || 'sin-ot') + '|' + p.key;
       return p;
     };
     const porCodigo = (a, b) => a.code > b.code ? 1 : a.code < b.code ? -1 : 0;
@@ -2487,11 +2490,14 @@
   }
 
   // Lo que se ve en la tabla del mes.
+  // Los comprobantes del ajuste no son "lo que falta en QMS": son el ponerse
+  // al día, y tienen su propio filtro. Mezclarlos hacía que el chip dijera 624
+  // donde la tarjeta decía 51.
   const MES_FILTERS = [
-    ['dif', 'No cuadran', r => r.st !== 'ok', 'var(--out)'],
-    ['falta_qms', 'Falta en QMS', r => r.st === 'falta_qms', 'var(--out)'],
-    ['falta_defo', 'Falta en Defontana', r => r.st === 'falta_defo', 'var(--out)'],
-    ['dif_cant', 'Cantidad distinta', r => r.st === 'dif', 'var(--warn)'],
+    ['dif', 'No cuadran', r => r.st !== 'ok' && !r.ajuste, 'var(--out)'],
+    ['falta_qms', 'Falta en QMS', r => r.st === 'falta_qms' && !r.ajuste, 'var(--out)'],
+    ['falta_defo', 'Falta en Defontana', r => r.st === 'falta_defo' && !r.ajuste, 'var(--out)'],
+    ['dif_cant', 'Cantidad distinta', r => r.st === 'dif' && !r.ajuste, 'var(--warn)'],
     ['ajuste', 'Ajuste de inventario', r => r.ajuste, 'var(--warn)'],
     ['ok', 'Cuadran', r => r.st === 'ok', 'var(--in)'],
     ['all', 'Todos', r => true, null],
@@ -2509,7 +2515,7 @@
                                   : '<td class="num mut">no está</td>';
   const mesRow = r => {
     const [cls, txt] = ESTADO_MES[r.st];
-    return `<tr>
+    return `<tr class="rx-row s-${r.st}${state.open.has(r.id) ? ' open' : ''}" data-key="${esc(r.id)}" tabindex="0">
       <td>${r.ot ? `<span class="code">${esc(r.ot)}</span>` : '<span class="mut">sin OT</span>'}${r.ajuste ? '<div class="small">ajuste de inventario</div>' : ''}</td>
       <td><div class="code">${esc(r.code)}</div><div class="pname">${esc(r.name)}</div></td>
       ${cantMes(r.d, r.dMovs.length)}
@@ -2517,6 +2523,32 @@
       <td class="num diff ${r.dif > EPS ? 'plus' : r.dif < -EPS ? 'minus' : 'mut'}">${Math.abs(r.dif) <= EPS ? '0' : sgn(r.dif)}</td>
       <td><span class="pill ${cls}">${txt}</span></td>
       <td class="obs">${r.docs.length ? esc(r.docs.join(', ')) : '<span class="mut">—</span>'}${r.refs.length ? '<div class="small">QMS: ' + esc(r.refs.join(', ')) + '</div>' : ''}</td></tr>`;
+  };
+  // Los movimientos de cada sistema, uno al lado del otro. Es lo que hay que
+  // mirar para saber cuál falta: el neto dice que no cuadran, no cuál de los
+  // dos documentos se quedó sin hacer.
+  const movsTabla = (titulo, movs, pinta) => `<div class="mesdet">
+    <h4>${titulo} <span class="mut">(${fmt(movs.length)})</span></h4>
+    ${movs.length ? `<table class="minitab"><thead><tr><th>Fecha</th><th>Documento</th><th class="num">Cantidad</th></tr></thead>
+      <tbody>${movs.map(pinta).join('')}</tbody></table>`
+      : '<p class="mut">No tiene movimientos de este mes.</p>'}</div>`;
+  const cantCell = m => `<td class="num ${m.kind === 'in' ? 'plus' : 'minus'}">${m.kind === 'in' ? '+' : '−'}${fmt(Math.abs(m.qty))}</td>`;
+  const mesDetalle = r => `<tr class="detail"><td colspan="${MES_COLS.length}"><div class="mesdets">
+    ${movsTabla('Movimientos en Defontana', r.dMovs, m => `<tr>
+      <td>${fmtDate(m.fecha)}</td>
+      <td>${esc(m.tipo)} <span class="code">#${esc(m.folio)}</span>${m.ref ? '<div class="small">' + esc(m.ref) + '</div>' : ''}</td>
+      ${cantCell(m)}</tr>`)}
+    ${movsTabla('Movimientos en QMS', r.qMovs, m => `<tr>
+      <td>${fmtDate(m.fecha)}</td>
+      <td>${m.ref ? esc(m.ref) : '<span class="mut">sin OT ni OC</span>'}${m.idQms ? '<div class="small">N° ' + esc(m.idQms) + '</div>' : ''}</td>
+      ${cantCell(m)}</tr>`)}
+  </div>${r.st === 'ok' ? '' : `<p class="note">${esc(QUE_REVISAR[r.st])}</p>`}</td></tr>`;
+  // Qué hacer con cada caso, dicho en la fila abierta.
+  const QUE_REVISAR = {
+    falta_qms: 'Defontana movió este producto y QMS no. Revisa si el movimiento se dejó de registrar en QMS, o si en QMS quedó con otra OT.',
+    falta_defo: 'QMS movió este producto y Defontana no. Revisa si falta hacer el documento en Defontana, o si en Defontana quedó sin la OT en la referencia.',
+    dif: 'Los dos lo movieron, pero por distinta cantidad. Compara las dos listas: puede faltar una línea en uno de los dos, o estar escrita una cantidad distinta.',
+    ok: '',
   };
   const mesExport = r => ({
     'Mes': mesTexto(state.mes), 'OT / OC': r.ot || '', 'Código': r.code, 'Nombre': r.name,
@@ -3415,6 +3447,7 @@
     $('avisoDuplicados').textContent = dup || '';
     $('avisoDuplicados').hidden = !dup;
     const dash = state.view === 'dash', plan = state.view === 'plan' || dash;
+    if ($('avisoMes') && !mes) $('avisoMes').hidden = true;
     $('planBox').hidden = state.view !== 'plan'; $('dashBox').hidden = !dash;
     $('filtersBar').hidden = plan; $('tablebox').hidden = plan; $('summary').hidden = plan; $('copyNote').hidden = plan;
     const boxMain = $('ajDocsMain');
@@ -3463,6 +3496,18 @@
         <button class="rx-card down" type="button" data-go="dif_cant"><span class="lbl">Cantidad distinta</span><span class="big">${fmt(n(r => r.st === 'dif'))}</span><span class="note">los dos lo movieron, por distinto</span></button>
         <button class="rx-card" type="button" data-go="ajuste"><span class="lbl">Ajuste de inventario</span><span class="big">${fmt(aj.length)}</span><span class="note">lo que hay que dejar en QMS</span></button>
         <button class="rx-card up" type="button" data-go="ok"><span class="lbl">Cuadran</span><span class="big">${fmt(n(r => r.st === 'ok'))}</span><span class="note">el mismo movimiento en los dos</span></button>`;
+      // Lo que hay que mirar: los movimientos que no cuadran y que no son del
+      // ajuste. El ajuste ya se hizo y tiene su propio bloque; esto es lo que
+      // pasó después y quedó sin registrar en algún lado.
+      const sueltos = all.filter(r => r.st !== 'ok' && !r.ajuste).length;
+      const avisoMes = $('avisoMes');
+      if (avisoMes){
+        avisoMes.hidden = !state.qmsMov || !sueltos;
+        if (!avisoMes.hidden)
+          avisoMes.textContent = `En ${mesTexto(state.mes)} hay ${fmt(sueltos)} movimientos que no cuadran entre los dos sistemas, sin contar los del ajuste: ` +
+            `${fmt(falta)} que Defontana movió y QMS no, ${fmt(faltaD)} que QMS movió y Defontana no y ${fmt(n(r => r.st === 'dif' && !r.ajuste))} con distinta cantidad. ` +
+            `Abre cada fila para ver los movimientos de cada sistema y revisar cuál falta.`;
+      }
     } else if (qms){
       const n = k => all.filter(r => r.st === k).length;
       $('summary').innerHTML = `
@@ -3530,7 +3575,8 @@
       const parts = [];
       for (const r of rows){
         parts.push(reg ? regRow(r) : chk ? checkRow(r) : qms ? qmsRow(r) : mes ? mesRow(r) : zeroRow(r));
-        if (!zer && !qms && !mes && state.open.has(r.key)) parts.push(detail(r));
+        if (mes){ if (state.open.has(r.id)) parts.push(mesDetalle(r)); }
+        else if (!zer && !qms && state.open.has(r.key)) parts.push(detail(r));
       }
       tb.innerHTML = parts.join('');
     }
@@ -4036,6 +4082,6 @@
   // puerta, la matemática que decide los ajustes de inventario no se puede
   // comprobar más que a ojo.
   if (typeof module !== 'undefined' && module.exports){
-    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, parseArticulos, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, tipoAjCosto, avisoDeFechas, avisoDeDuplicados, guardarArchivo, detectarAjustes, conAjustes, parseCostos, costoDeSuCompra, pmpEditable, costoPropuestoSinValor, renderStepsPanel, REG_COLS, REG_FILTERS, regRow, detail, parseQms, parseMovQms, leerDeTodasLasHojas, comparacionDelMes, mesesConMovimientos, mesTexto, computeMes, mesRow, mesExport, MES_COLS, computeQms, cruceQms, qmsRow, regExport, cmpExport, state};
+    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, parseArticulos, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, tipoAjCosto, avisoDeFechas, avisoDeDuplicados, guardarArchivo, detectarAjustes, conAjustes, parseCostos, costoDeSuCompra, pmpEditable, costoPropuestoSinValor, renderStepsPanel, REG_COLS, REG_FILTERS, regRow, detail, parseQms, parseMovQms, leerDeTodasLasHojas, comparacionDelMes, mesesConMovimientos, mesTexto, computeMes, mesRow, mesDetalle, mesExport, MES_COLS, MES_FILTERS, computeQms, cruceQms, qmsRow, regExport, cmpExport, state};
   }
 })();
