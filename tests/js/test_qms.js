@@ -26,7 +26,8 @@ function cruce({qms = [], docs = [], conteo = [], articulos = null}){
   porId.set('optSame', Object.assign(porId.get('optSame') || {}, {value: 'before'}));
   state.stock = conteo.map(c => ({code: c.code, key: R.parseStock([['Código', 'Stock físico'], [c.code, 0]])[0].key,
                                   name: c.name || '', stock: c.stock ?? null, fecha: c.fecha || DIA(2026, 9, 1),
-                                  por: '', estado: '', um: c.um || '', linea: c.linea || ''}));
+                                  por: '', estado: '', um: c.um || '', linea: c.linea || '',
+                                  ubicacion: c.ubicacion || ''}));
   state.recount = new Map(); state.hechos = new Map(); state.pmpEdit = new Map(); state.movCuando = new Map();
   state.articulos = articulos;
   const mov = docs.map((d, i) => ({art: d.art, key: null, nameKey: '', tipo: 'PARTE DE ENTRADA', folio: String(100 + i),
@@ -35,8 +36,8 @@ function cruce({qms = [], docs = [], conteo = [], articulos = null}){
     orig: '', dest: 'CENTRAL', estado: 'Aprobado', motivo: '', um: d.um || '', desc: d.desc || '', _aj: false}));
   for (const m of mov){ m.key = R.parseStock([['Código', 'Stock físico'], [m.art, 0]])[0].key; }
   state.mov = mov;
-  state.qms = qms.length ? parseQms([['Código Único', 'Stock', 'Unidad', 'Valor unitario', 'Descripción', 'Linea Negocio', 'Categoria'],
-    ...qms.map(q => [q.code, q.stock, q.um || '', q.unit == null ? '' : q.unit, q.name || '', q.linea || '', q.cat || ''])]) : null;
+  state.qms = qms.length ? parseQms([['Código Único', 'Stock', 'Unidad', 'Valor unitario', 'Descripción', 'Linea Negocio', 'Categoria', 'ubicacion_bodega'],
+    ...qms.map(q => [q.code, q.stock, q.um || '', q.unit == null ? '' : q.unit, q.name || '', q.linea || '', q.cat || '', q.ubicacion || ''])]) : null;
   state.rows = compute(mov).rows;
   computeQms();
   return state.qmsRows;
@@ -314,6 +315,45 @@ console.log('\nUn producto que no está en QMS tampoco la inventa');
   // Y tampoco se le pega la línea de otro producto que sí está en QMS.
   comprobar('vacía en la tabla', null, R.REG_COLS.find(c => c[0] === 'lineaqms')[3](r));
   comprobar('la tabla no muestra la línea ajena', false, R.regRow(r).includes('PRENSAS'));
+}
+
+/* ---- La ubicación, desde QMS ----
+
+   Defontana dice en qué bodega está el artículo; en qué parte de la bodega
+   —"Sala Fría", "R3-E1/R3-F1"— sólo lo sabe QMS, que es donde se anota. En su
+   archivo son 1.227 de 2.004 filas con ubicación. */
+
+console.log('\nLa ubicación sale del archivo de QMS');
+{
+  cruce({
+    qms: [{code: 'INS-001', stock: 10, um: 'UN', unit: 1000, ubicacion: 'Sala Fría'}],
+    conteo: [{code: 'INS-001', stock: 10}],
+    docs: [{art: 'INS-001', qty: 10, saldo: 10, valor: 10000, valorInv: 10000}],
+  });
+  const x = R.regExport(state.rows.find(r => r.code === 'INS-001'));
+  comprobar('la ubicación de QMS', 'Sala Fría', x['Ubicación']);
+}
+
+console.log('\nLa de QMS manda sobre la que traiga el conteo');
+{
+  cruce({
+    qms: [{code: 'INS-001', stock: 10, um: 'UN', unit: 1000, ubicacion: 'Sala Fría'}],
+    conteo: [{code: 'INS-001', stock: 10, ubicacion: 'ESTANTE VIEJO'}],
+    docs: [{art: 'INS-001', qty: 10, saldo: 10, valor: 10000, valorInv: 10000}],
+  });
+  const x = R.regExport(state.rows.find(r => r.code === 'INS-001'));
+  comprobar('manda la de QMS', 'Sala Fría', x['Ubicación']);
+}
+
+console.log('\nSi QMS no la trae, queda la del conteo');
+{
+  cruce({
+    qms: [{code: 'INS-001', stock: 10, um: 'UN', unit: 1000}],
+    conteo: [{code: 'INS-001', stock: 10, ubicacion: 'ESTANTE A3'}],
+    docs: [{art: 'INS-001', qty: 10, saldo: 10, valor: 10000, valorInv: 10000}],
+  });
+  const x = R.regExport(state.rows.find(r => r.code === 'INS-001'));
+  comprobar('la del conteo, de respaldo', 'ESTANTE A3', x['Ubicación']);
 }
 
 console.log(`\n${hechas - fallas} de ${hechas} comprobaciones pasaron`);
