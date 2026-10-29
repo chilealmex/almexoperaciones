@@ -147,12 +147,17 @@ console.log('\nEn el Excel queda dicho');
   comprobar('y cuántas están en esa bodega', 4, x['En la bodega de activos fijos']);
 }
 
-console.log('\nEl botón para marcarlo está en la fila');
+console.log('\nEl botón para marcarlo está en la celda del producto');
 {
+  // En la última columna había que arrastrar la tabla hasta el extremo
+  // derecho para encontrarlo, justo en los productos que hay que marcar.
+  const celdaDelProducto = html => html.split('</td>')[0];
   let r = escenario();
   comprobar('sin marcar, invita a marcarlo', true, R.regRow(r).includes('☆ Activo fijo'));
+  comprobar('y está en la primera celda', true, celdaDelProducto(R.regRow(r)).includes('data-afijo='));
   r = escenario({marcados: [r.key]});
   comprobar('marcado, se ve que lo está', true, R.regRow(r).includes('★ Activo fijo'));
+  comprobar('con el botón encendido', true, celdaDelProducto(R.regRow(r)).includes('afijo on'));
   comprobar('y el botón lleva su código', true, R.regRow(r).includes('data-afijo='));
 }
 
