@@ -2743,7 +2743,15 @@
     for (const k of new Set([...qms.keys(), ...def.keys()])){
       const q = qms.get(k) || null, d = def.get(k) || null;
       const st = cruceQms(q, d);
-      filas.push({key:k, q, d, st,
+      // Si los dos sistemas lo escriben igual. Cruzan por la clave —sin
+      // signos, espacios ni ceros de adelante—, así que pueden cruzar con el
+      // código escrito distinto: "ROP-BCAN-M" en QMS y "ROP- BCAN-M" en
+      // Defontana son el mismo artículo y no el mismo texto. Es lo que hay que
+      // poder mirar de una pasada para saber cuáles hay que emparejar a mano.
+      const codigoQ = q ? String(q.code ?? '').trim() : '';
+      const codigoD = d ? String(d.code ?? '').trim() : '';
+      const codigos = !q || !d ? '' : codigoQ === codigoD ? 'igual' : 'distinto';
+      filas.push({key:k, q, d, st, codigos,
         code: q ? q.code : d.code, name: (q && q.name) || (d && d.name) || '',
         linea: (q && q.linea) || (d && d.linea) || '',
         difStock: q && d ? (q.stock || 0) - (d.stock || 0) : null,
@@ -2778,16 +2786,25 @@
     ['dif', 'No coinciden', r => r.st !== 'igual', 'var(--out)'],
     ['falta', 'Sólo en QMS', r => r.st === 'falta', 'var(--out)'],
     ['sobra', 'Sólo en Defontana', r => r.st === 'sobra', 'var(--out)'],
+    ['codigo', 'Código escrito distinto', r => r.codigos === 'distinto', 'var(--accent)'],
     ['unidad', 'Unidad distinta', r => r.st === 'unidad', 'var(--warn)'],
     ['cantidad', 'Cantidad distinta', r => r.st === 'cantidad', 'var(--warn)'],
     ['valor', 'Valor unitario distinto', r => r.st === 'valor', 'var(--warn)'],
     ['igual', 'Coinciden', r => r.st === 'igual', 'var(--in)'],
   ];
+  // Lo que dice la columna de los códigos: sólo tiene sentido cuando el
+  // artículo está en los dos sistemas. Si está en uno solo, no hay dos
+  // códigos que comparar y la celda queda vacía.
+  const CODIGOS_IGUALES = {
+    igual: ['a-ok', 'Igual'],
+    distinto: ['a-warn', 'Escrito distinto'],
+  };
   const QMS_COLS = [
     ['code', 'Producto', '', r => r.code],
     ['linea', 'Línea', '', r => r.linea || null],
     ['codqms', 'Código QMS', '', r => r.q ? r.q.code : null],
     ['coddef', 'Código Defontana', '', r => r.d ? r.d.code : null],
+    ['codigos', '¿Mismo código?', '', r => CODIGOS_IGUALES[r.codigos] ? CODIGOS_IGUALES[r.codigos][1] : null],
     ['umqms', 'Unidad QMS', '', r => r.q ? r.q.um : null],
     ['umdef', 'Unidad Defontana', '', r => r.d ? r.d.um : null],
     ['stqms', 'Stock QMS', 'num', r => r.q ? r.q.stock : null],
@@ -2805,6 +2822,7 @@
       ${lineaCell(r.linea)}
       <td>${r.q ? `<span class="code">${esc(r.q.code)}</span>` : '<span class="mut">no está</span>'}</td>
       <td>${r.d ? `<span class="code">${esc(r.d.code)}</span>` : '<span class="mut">no está</span>'}</td>
+      <td>${r.codigos ? `<span class="pill ${CODIGOS_IGUALES[r.codigos][0]}">${CODIGOS_IGUALES[r.codigos][1]}</span>` : '<span class="mut">—</span>'}</td>
       <td${mismaUm ? ' class="difum"' : ''}>${r.q && r.q.um ? esc(r.q.um) : '<span class="mut">—</span>'}</td>
       <td${mismaUm ? ' class="difum"' : ''}>${r.d && r.d.um ? esc(r.d.um) : '<span class="mut">—</span>'}</td>
       <td class="num">${r.q ? fmt(r.q.stock) : '<span class="mut">—</span>'}</td>
@@ -2817,6 +2835,7 @@
   const qmsExport = r => ({
     'Código': r.code, 'Nombre': r.name, 'Línea': r.linea || '',
     'Código QMS': r.q ? r.q.code : '', 'Código Defontana': r.d ? r.d.code : '',
+    '¿Se escriben igual?': r.codigos ? CODIGOS_IGUALES[r.codigos][1] : '',
     'Unidad QMS': r.q ? r.q.um : '', 'Unidad Defontana': r.d ? r.d.um : '',
     'Stock QMS': r.q ? r.q.stock : '', 'Stock Defontana': r.d ? r.d.stock : '',
     'Diferencia de stock': r.difStock == null ? '' : r.difStock,
@@ -3606,6 +3625,9 @@
     return {
       'Está en': !state.qms ? '' : DONDE[dondeEsta(r)][1],
       'Código QMS': q ? q.code : '',
+      // Si los dos sistemas lo escriben igual. Va también acá, que es la hoja
+      // donde se mira producto por producto.
+      '¿Se escriben igual?': x && x.codigos ? CODIGOS_IGUALES[x.codigos][1] : '',
       'Línea QMS': q ? q.linea || '' : '',
       // La de Defontana sale del Informe de Inventario, que es el único
       // archivo suyo que la trae.
@@ -4082,6 +4104,6 @@
   // puerta, la matemática que decide los ajustes de inventario no se puede
   // comprobar más que a ojo.
   if (typeof module !== 'undefined' && module.exports){
-    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, parseArticulos, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, tipoAjCosto, avisoDeFechas, avisoDeDuplicados, guardarArchivo, detectarAjustes, conAjustes, parseCostos, costoDeSuCompra, pmpEditable, costoPropuestoSinValor, renderStepsPanel, REG_COLS, REG_FILTERS, regRow, detail, parseQms, parseMovQms, leerDeTodasLasHojas, comparacionDelMes, mesesConMovimientos, mesTexto, computeMes, mesRow, mesDetalle, mesExport, MES_COLS, MES_FILTERS, computeQms, cruceQms, qmsRow, regExport, cmpExport, state};
+    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, parseArticulos, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, tipoAjCosto, avisoDeFechas, avisoDeDuplicados, guardarArchivo, detectarAjustes, conAjustes, parseCostos, costoDeSuCompra, pmpEditable, costoPropuestoSinValor, renderStepsPanel, REG_COLS, REG_FILTERS, QMS_FILTERS, regRow, detail, parseQms, parseMovQms, leerDeTodasLasHojas, comparacionDelMes, mesesConMovimientos, mesTexto, computeMes, mesRow, mesDetalle, mesExport, MES_COLS, MES_FILTERS, computeQms, cruceQms, qmsRow, qmsExport, regExport, cmpExport, state};
   }
 })();
