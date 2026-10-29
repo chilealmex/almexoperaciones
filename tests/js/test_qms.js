@@ -356,5 +356,91 @@ console.log('\nSi QMS no la trae, queda la del conteo');
   comprobar('la del conteo, de respaldo', 'ESTANTE A3', x['Ubicación']);
 }
 
+/* ---- Cómo se escribe el código en cada sistema ----
+
+   Los códigos cruzan por la clave —sin signos, espacios ni ceros de adelante—,
+   así que un artículo puede cruzar con el código escrito distinto en cada
+   sistema: "ROP-BCAN-M" en QMS y "ROP- BCAN-M" en Defontana. Para saber
+   cuáles hay que emparejar a mano hay que poder verlo de una pasada, y
+   bajarlo. */
+
+console.log('\nDice si los dos sistemas escriben igual el código');
+{
+  const articulos = R.parseArticulos([
+    ['Código Artículo', 'Descripción', 'Bodega', 'Saldo', 'Unidad', 'Valor unidad', 'Total'],
+    ['ROP- BCAN-M', 'BUZO', 'BODEGA CENTRAL', 3, 'UN', 100, 300]]);
+  cruce({
+    qms: [{code: 'ROP-BCAN-M', stock: 3, um: 'UN', unit: 100}],
+    docs: [{art: 'ROP- BCAN-M', qty: 3, saldo: 3, valor: 300, valorInv: 300, um: 'UN'}],
+    articulos,
+  });
+  const fila = state.qmsRows.find(r => (r.q && r.q.code) === 'ROP-BCAN-M');
+  comprobar('cruzan como el mismo artículo', true, !!(fila && fila.q && fila.d));
+  comprobar('pero el código está escrito distinto', 'distinto', fila.codigos);
+  comprobar('y se dice en la tabla', true, R.qmsRow(fila).includes('Escrito distinto'));
+  comprobar('y en el Excel', 'Escrito distinto', R.qmsExport(fila)['¿Se escriben igual?']);
+  comprobar('con los dos códigos al lado', 'ROP-BCAN-M', R.qmsExport(fila)['Código QMS']);
+  comprobar('cada uno como lo escribe su sistema', 'ROP- BCAN-M', R.qmsExport(fila)['Código Defontana']);
+}
+
+console.log('\nY cuando lo escriben igual, también');
+{
+  cruce({
+    qms: [{code: 'A-1', stock: 3, um: 'UN', unit: 100}],
+    docs: [{art: 'A-1', qty: 3, saldo: 3, valor: 300, valorInv: 300, um: 'UN'}],
+  });
+  const fila = state.qmsRows.find(r => r.code === 'A-1');
+  comprobar('lo dice', 'igual', fila.codigos);
+  comprobar('en el Excel', 'Igual', R.qmsExport(fila)['¿Se escriben igual?']);
+}
+
+console.log('\nSi está en un solo sistema no hay dos códigos que comparar');
+{
+  cruce({
+    qms: [{code: 'SOLO-QMS', stock: 1, um: 'UN', unit: 1}],
+    docs: [{art: 'SOLO-DEF', qty: 1, saldo: 1, valor: 1, valorInv: 1, um: 'UN'}],
+  });
+  const soloQms = state.qmsRows.find(r => r.code === 'SOLO-QMS');
+  const soloDef = state.qmsRows.find(r => r.code === 'SOLO-DEF');
+  comprobar('el que sólo está en QMS queda vacío', '', soloQms.codigos);
+  comprobar('y en el Excel también', '', R.qmsExport(soloQms)['¿Se escriben igual?']);
+  comprobar('lo mismo el que sólo está en Defontana', '', soloDef.codigos);
+  comprobar('y no se inventa el código que falta', '', R.qmsExport(soloQms)['Código Defontana']);
+}
+
+console.log('\nY sale también en el Excel de Productos');
+{
+  const articulos = R.parseArticulos([
+    ['Código Artículo', 'Descripción', 'Bodega', 'Saldo', 'Unidad', 'Valor unidad', 'Total'],
+    ['ROP- BCAN-M', 'BUZO', 'BODEGA CENTRAL', 3, 'UN', 100, 300]]);
+  cruce({
+    qms: [{code: 'ROP-BCAN-M', stock: 3, um: 'UN', unit: 100}],
+    docs: [{art: 'ROP- BCAN-M', qty: 3, saldo: 3, valor: 300, valorInv: 300, um: 'UN'}],
+    articulos,
+  });
+  const x = R.regExport(state.rows.find(r => r.code === 'ROP- BCAN-M'));
+  comprobar('con su código de QMS', 'ROP-BCAN-M', x['Código QMS']);
+  comprobar('y diciendo que está escrito distinto', 'Escrito distinto', x['¿Se escriben igual?']);
+}
+
+console.log('\nSe pueden filtrar los que están escritos distinto');
+{
+  const articulos = R.parseArticulos([
+    ['Código Artículo', 'Descripción', 'Bodega', 'Saldo', 'Unidad', 'Valor unidad', 'Total'],
+    ['ROP- BCAN-M', 'BUZO', 'BODEGA CENTRAL', 3, 'UN', 100, 300],
+    ['A-1', 'OTRO', 'BODEGA CENTRAL', 3, 'UN', 100, 300]]);
+  cruce({
+    qms: [{code: 'ROP-BCAN-M', stock: 3, um: 'UN', unit: 100}, {code: 'A-1', stock: 3, um: 'UN', unit: 100}],
+    docs: [{art: 'ROP- BCAN-M', qty: 3, saldo: 3, valor: 300, valorInv: 300, um: 'UN'},
+           {art: 'A-1', qty: 3, saldo: 3, valor: 300, valorInv: 300, um: 'UN'}],
+    articulos,
+  });
+  const filtro = R.QMS_FILTERS.find(f => f[0] === 'codigo');
+  comprobar('hay un filtro', true, !!filtro);
+  const pasan = state.qmsRows.filter(filtro[2]);
+  comprobar('deja pasar sólo el escrito distinto', 1, pasan.length);
+  comprobar('y es el que es', 'ROP-BCAN-M', pasan[0].code);
+}
+
 console.log(`\n${hechas - fallas} de ${hechas} comprobaciones pasaron`);
 process.exit(fallas ? 1 : 0);
