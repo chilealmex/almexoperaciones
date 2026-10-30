@@ -1,4 +1,5 @@
 from app.extensions import db
+from app.utils.provision_ingresos_excel import MESES_NOMBRES
 
 
 class ProvisionIngreso(db.Model):
@@ -337,6 +338,9 @@ class ConciliacionSiiLibro(db.Model):
     n_dif_datos = db.Column(db.Integer, nullable=False, default=0)
     # Diferencias revisadas y dadas por buenas (impuesto específico y similares).
     n_aceptados = db.Column(db.Integer, nullable=False, default=0)
+    # Documentos que quedaron contabilizados en otro mes: están, pero en otro
+    # libro. No se cuentan dos veces con los aceptados.
+    n_otro_mes = db.Column(db.Integer, nullable=False, default=0, server_default="0")
 
     # BigInteger: son sumas de todo un mes de facturación en pesos.
     neto_sii = db.Column(db.BigInteger, nullable=False, default=0)
@@ -367,13 +371,14 @@ class ConciliacionSiiLibro(db.Model):
     def pendientes(self) -> int:
         """Documentos que todavía exigen trabajo.
 
-        Los que no cuadran, menos los que alguien ya revisó y dio por buenos:
-        una factura de combustible con impuesto específico descuadra siempre, y
-        seguir contándola haría que el mes nunca llegue a cero.
+        Los que no cuadran, menos los que alguien ya revisó y dio por buenos
+        —una factura de combustible con impuesto específico descuadra siempre, y
+        seguir contándola haría que el mes nunca llegue a cero— y menos los que
+        quedaron contabilizados en otro mes, que están pero en otro libro.
         """
         sin_cuadrar = ((self.n_solo_sii or 0) + (self.n_solo_defontana or 0)
                        + (self.n_dif_monto or 0) + (self.n_dif_datos or 0))
-        return max(0, sin_cuadrar - (self.n_aceptados or 0))
+        return max(0, sin_cuadrar - (self.n_aceptados or 0) - (self.n_otro_mes or 0))
 
     @property
     def cuadra(self) -> bool:
@@ -438,13 +443,50 @@ class ConciliacionSiiDocumento(db.Model):
     aceptado_por_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"), nullable=True)
     aceptado_en = db.Column(db.DateTime, nullable=True)
 
+    # En qué mes quedó contabilizado el documento, cuando no es el del período.
+    # En Defontana el libro lo decide la "fecha contable", que es otro campo que
+    # la fecha del documento: una factura de octubre con fecha contable de
+    # noviembre queda en el libro de noviembre, y al revés. Cuando esa fecha
+    # queda en el mes equivocado, el documento aparece en un período y falta en
+    # el otro, sin que ninguno de los dos sistemas esté mal. Anotarlo explica
+    # la fila sin tocar montos y la saca de lo pendiente.
+    #
+    # Se guarda como "AAAA-MM": es un mes, no un día, y así se ordena solo.
+    mes_contable = db.Column(db.String(7), nullable=True)
+    mes_contable_por_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"), nullable=True)
+    mes_contable_en = db.Column(db.DateTime, nullable=True)
+
     libro_ref = db.relationship("ConciliacionSiiLibro", back_populates="documentos")
-    aceptado_por = db.relationship("Usuario")
+    # Dos caminos distintos a la misma tabla de usuarios —quien aceptó la
+    # diferencia y quien anotó el mes contable—, así que hay que decir cuál es
+    # cuál o SQLAlchemy no sabe por dónde unirlas.
+    aceptado_por = db.relationship("Usuario", foreign_keys=[aceptado_por_id])
+    mes_contable_por = db.relationship("Usuario", foreign_keys=[mes_contable_por_id])
 
     @property
     def llave(self):
         """Identifica al documento entre recargas del mismo libro."""
         return (self.tipo_doc, self.folio)
+
+    @property
+    def mes_contable_texto(self) -> str:
+        """El mes anotado, escrito como se lee: "octubre 2025"."""
+        if not self.mes_contable:
+            return ""
+        try:
+            anio, mes = self.mes_contable.split("-")
+            return f"{MESES_NOMBRES[int(mes) - 1]} {anio}"
+        except (ValueError, IndexError):
+            return self.mes_contable
+
+    @property
+    def resuelto(self) -> bool:
+        """Si ya no hay nada que hacer con este documento en este período.
+
+        O cuadra, o alguien revisó la diferencia y la dio por buena, o el
+        documento quedó contabilizado en otro mes.
+        """
+        return self.estado == "coincide" or self.aceptado or bool(self.mes_contable)
 
     def __repr__(self):
         return f"<ConciliacionSiiDocumento {self.tipo_doc}/{self.folio} {self.estado}>"
