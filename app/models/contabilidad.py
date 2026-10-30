@@ -1,4 +1,5 @@
 from app.extensions import db
+from app.utils.conciliacion_sii import normalizar_rut
 from app.utils.provision_ingresos_excel import MESES_NOMBRES
 
 
@@ -467,6 +468,27 @@ class ConciliacionSiiDocumento(db.Model):
     def llave(self):
         """Identifica al documento entre recargas del mismo libro."""
         return (self.tipo_doc, self.folio)
+
+    @property
+    def rut_distinto(self) -> bool:
+        """Si los dos sistemas traen RUT de contraparte distintos de verdad.
+
+        Defontana escribe el RUT con puntos —"77.197.637-9"— y el SII sin
+        ellos —"77197637-9"—: es el mismo contribuyente escrito de dos maneras.
+        La pantalla los comparaba como texto y pintaba de rojo filas que
+        cuadran, así que el rojo dejaba de significar algo. Se compara lo que
+        identifica al RUT, igual que en el cruce.
+        """
+        if not self.rut_sii or not self.rut_defontana:
+            return False
+        return normalizar_rut(self.rut_sii) != normalizar_rut(self.rut_defontana)
+
+    @property
+    def rut_escrito_distinto(self) -> bool:
+        """Mismo RUT, escrito de otra manera. Sirve para explicarlo al pasar el mouse."""
+        if not self.rut_sii or not self.rut_defontana or self.rut_distinto:
+            return False
+        return self.rut_sii.strip() != self.rut_defontana.strip()
 
     @property
     def mes_contable_texto(self) -> str:

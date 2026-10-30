@@ -157,7 +157,11 @@
           <td class="text-nowrap">{{ d.fecha or '—' }}</td>
           <td class="text-nowrap">{{ d.rut_sii or '—' }}</td>
           <td class="celda-recortada" title="{{ d.contraparte_sii or '' }}">{{ d.contraparte_sii or '—' }}</td>
-          <td class="text-nowrap {{ 'text-danger fw-semibold' if d.rut_sii and d.rut_defontana and d.rut_sii != d.rut_defontana }}">{{ d.rut_defontana or '—' }}</td>
+          {# Rojo sólo cuando es otro contribuyente. Defontana escribe el RUT
+             con puntos y el SII sin ellos: el mismo RUT escrito de dos maneras
+             no es una diferencia, y pintarlo hacía que el rojo no dijera nada. #}
+          <td class="text-nowrap {{ 'text-danger fw-semibold' if d.rut_distinto }}"
+              {% if d.rut_escrito_distinto %}title="El mismo RUT, escrito distinto: el SII lo manda sin puntos"{% endif %}>{{ d.rut_defontana or '—' }}</td>
           <td class="celda-recortada" title="{{ d.contraparte_defontana or '' }}">{{ d.contraparte_defontana or '—' }}</td>
           {% for campo, etiqueta in columnas_monto %}
           {% set valor = d[campo] %}
