@@ -821,7 +821,7 @@ def exportar_periodo_dif_tc(periodo_id):
 # empresa esté contabilizado igual en Defontana. Los dos libros —compras y
 # ventas— se cargan por separado, porque rara vez están listos el mismo día.
 
-FILTROS_CONCILIACION = ("pendientes", "aceptados") + ESTADOS_CONCILIACION
+FILTROS_CONCILIACION = ("pendientes", "aceptados", "otro_mes") + ESTADOS_CONCILIACION
 
 # Motivo más frecuente, para no obligar a escribirlo cada vez: las facturas de
 # combustible llevan impuesto específico y el SII y Defontana no lo reparten
@@ -864,7 +864,7 @@ def _guardar_cruce(conciliacion, clave_libro, resultado, nombre_sii, nombre_defo
     una carga. Si no, un recálculo mentiría diciendo que alguien subió algo.
     """
     libro = conciliacion.libro_por_clave(clave_libro)
-    aceptaciones = {}
+    aceptaciones, meses = {}, {}
     if libro is None:
         libro = ConciliacionSiiLibro(libro=clave_libro, cargas=0)
         conciliacion.libros.append(libro)
@@ -876,6 +876,13 @@ def _guardar_cruce(conciliacion, clave_libro, resultado, nombre_sii, nombre_defo
         aceptaciones = {
             d.llave: (d.motivo_aceptacion, d.aceptado_por_id, d.aceptado_en)
             for d in libro.documentos if d.aceptado
+        }
+        # La nota del mes contable también: la conciliación se recarga varias
+        # veces mientras se corrigen asientos, y volver a anotar documento por
+        # documento en cada recarga haría inútil poder anotarlo.
+        meses = {
+            d.llave: (d.mes_contable, d.mes_contable_por_id, d.mes_contable_en)
+            for d in libro.documentos if d.mes_contable
         }
         for documento in list(libro.documentos):
             db.session.delete(documento)
@@ -901,8 +908,14 @@ def _guardar_cruce(conciliacion, clave_libro, resultado, nombre_sii, nombre_defo
         setattr(libro, campo, totales[campo])
 
     reaplicadas = 0
+    con_mes = 0
     for orden, fila in enumerate(resultado["filas"]):
         previa = aceptaciones.get((fila["tipo_doc"], fila["folio"]))
+        # El mes anotado se vuelve a poner mientras el documento siga sin
+        # cuadrar: si el asiento se corrigió y ahora calza, ya no hay nada que
+        # explicar.
+        mes_previo = meses.get((fila["tipo_doc"], fila["folio"]))
+        con_mes_este = bool(mes_previo) and fila["estado"] != "coincide"
         # Sólo se reaplica si el documento sigue sin cuadrar: si el asiento se
         # corrigió y ahora calza, no hay nada que aceptar.
         reaplicar = bool(previa) and fila["estado"] != "coincide"
@@ -930,8 +943,14 @@ def _guardar_cruce(conciliacion, clave_libro, resultado, nombre_sii, nombre_defo
             motivo_aceptacion=previa[0] if reaplicar else None,
             aceptado_por_id=previa[1] if reaplicar else None,
             aceptado_en=previa[2] if reaplicar else None,
+            mes_contable=mes_previo[0] if con_mes_este else None,
+            mes_contable_por_id=mes_previo[1] if con_mes_este else None,
+            mes_contable_en=mes_previo[2] if con_mes_este else None,
         ))
+        if con_mes_este and not reaplicar:
+            con_mes += 1
     libro.n_aceptados = reaplicadas
+    libro.n_otro_mes = con_mes
     return libro
 
 
@@ -1101,9 +1120,13 @@ def _documentos_filtrados(libro, args):
         consulta = consulta.filter(
             ConciliacionSiiDocumento.estado != "coincide",
             ConciliacionSiiDocumento.aceptado.is_(False),
+            # Un documento anotado en otro mes no falta: está en otro libro.
+            ConciliacionSiiDocumento.mes_contable.is_(None),
         )
     elif filtro == "aceptados":
         consulta = consulta.filter(ConciliacionSiiDocumento.aceptado.is_(True))
+    elif filtro == "otro_mes":
+        consulta = consulta.filter(ConciliacionSiiDocumento.mes_contable.isnot(None))
     elif filtro:
         consulta = consulta.filter(ConciliacionSiiDocumento.estado == filtro)
 
@@ -1177,6 +1200,7 @@ def exportar_libro_conciliacion_sii(conciliacion_id, clave):
         col("Estado", ancho=20, total="texto"),
         col("Tipo Doc.", ancho=28),
         col("Folio", ancho=12),
+        col("Contabilizado en", ancho=18),
         col("En qué se diferencia", ancho=60),
         col("Fecha", ancho=12),
         col("RUT (SII)", ancho=15),
@@ -1193,6 +1217,7 @@ def exportar_libro_conciliacion_sii(conciliacion_id, clave):
             ESTADO_ETIQUETAS_CONCILIACION.get(documento.estado, documento.estado),
             documento.tipo_doc_desc or documento.tipo_doc,
             documento.folio,
+            documento.mes_contable_texto,
             documento.diferencia_descrita or "",
             documento.fecha or "",
             documento.rut_sii or "",
@@ -1259,12 +1284,93 @@ def aceptar_diferencia_conciliacion_sii(conciliacion_id, clave, documento_id):
         documento.aceptado_en = datetime.now(timezone.utc)
         mensaje = f"Diferencia aceptada en {documento.tipo_doc}/{documento.folio}: {motivo}."
 
-    libro.n_aceptados = sum(
-        1 for d in libro.documentos if d.aceptado and d.estado != "coincide"
-    )
+    _recontar_resueltos(libro)
     db.session.commit()
     flash(mensaje, "success")
     return redirect(_volver_al_libro(conciliacion, clave))
+
+
+def _recontar_resueltos(libro):
+    """Cuántos documentos ya no están pendientes, y por cuál de las dos razones.
+
+    Los dos grupos no se pisan: un documento aceptado y además anotado en otro
+    mes se cuenta una sola vez, o el mes quedaría con menos pendientes de los
+    que tiene.
+    """
+    sin_cuadrar = [d for d in libro.documentos if d.estado != "coincide"]
+    libro.n_aceptados = sum(1 for d in sin_cuadrar if d.aceptado)
+    libro.n_otro_mes = sum(1 for d in sin_cuadrar if d.mes_contable and not d.aceptado)
+
+
+@bp.route("/conciliacion-sii/<int:conciliacion_id>/<clave>/<int:documento_id>/mes-contable", methods=["POST"])
+@require_permission("contabilidad", "editar")
+def mes_contable_conciliacion_sii(conciliacion_id, clave, documento_id):
+    """Anota en qué mes quedó contabilizado el documento, o borra esa nota.
+
+    En Defontana el libro en que cae un documento lo decide su "fecha
+    contable", que es otro campo que la fecha del documento. Si esa fecha queda
+    en el mes equivocado, el documento aparece en un período y falta en el otro
+    sin que ninguno de los dos sistemas esté mal: el SII lo informa en
+    noviembre y el libro de Defontana lo tiene en octubre.
+
+    Anotarlo no cambia ningún monto ni esconde la fila: deja dicho dónde está
+    el documento y lo saca de lo pendiente de este mes.
+    """
+    if clave not in ("compra", "venta"):
+        abort(404)
+    conciliacion = _conciliacion_or_404(conciliacion_id)
+    libro = _libro_or_404(conciliacion, clave)
+    if not AccionForm().validate_on_submit():
+        abort(400)
+
+    if conciliacion.cerrado:
+        flash(
+            f"{_etiqueta_periodo(conciliacion)} está cerrado. Reábrelo para cambiar algo.",
+            "warning",
+        )
+        return redirect(_volver_al_libro(conciliacion, clave))
+
+    documento = ConciliacionSiiDocumento.query.filter_by(
+        id=documento_id, libro_id=libro.id
+    ).first_or_404()
+
+    mes = _mes_valido(request.form.get("mes"))
+    if mes is None:
+        documento.mes_contable = None
+        documento.mes_contable_por_id = None
+        documento.mes_contable_en = None
+        mensaje = (f"Se quitó la nota del mes contable en {documento.tipo_doc}/{documento.folio}: "
+                   "vuelve a contarse como pendiente.")
+    else:
+        documento.mes_contable = mes
+        documento.mes_contable_por_id = current_user.id
+        documento.mes_contable_en = datetime.now(timezone.utc)
+        mensaje = (f"{documento.tipo_doc}/{documento.folio} queda como contabilizado en "
+                   f"{documento.mes_contable_texto}.")
+
+    _recontar_resueltos(libro)
+    db.session.commit()
+    flash(mensaje, "success")
+    return redirect(_volver_al_libro(conciliacion, clave))
+
+
+def _mes_valido(valor):
+    """"2025-10" tal como lo manda un <input type="month">, o None para quitarlo.
+
+    Se valida acá y no en el modelo porque lo que llega es texto de un
+    formulario: un mes inventado —"2025-13"— dejaría una nota que después no se
+    puede ni leer ni ordenar.
+    """
+    texto = (valor or "").strip()
+    if not texto:
+        return None
+    partes = texto.split("-")
+    if len(partes) != 2 or not partes[0].isdigit() or not partes[1].isdigit():
+        return None
+    anio, mes = int(partes[0]), int(partes[1])
+    if not (2000 <= anio <= 2100) or not (1 <= mes <= 12):
+        return None
+    return f"{anio:04d}-{mes:02d}"
 
 
 @bp.route("/conciliacion-sii/<int:conciliacion_id>/<clave>/recalcular", methods=["POST"])

@@ -48,7 +48,8 @@
       ('solo_defontana', 'Solo en Defontana', libro.n_solo_defontana),
       ('dif_monto', 'Dif. de monto', libro.n_dif_monto),
       ('dif_datos', 'Dif. de datos', libro.n_dif_datos),
-      ('aceptados', 'Aceptadas', libro.n_aceptados)] %}
+      ('aceptados', 'Aceptadas', libro.n_aceptados),
+      ('otro_mes', 'En otro mes', libro.n_otro_mes)] %}
   <div class="col-6 col-md">
     <a href="{{ url_for('contabilidad.ver_libro_conciliacion_sii', conciliacion_id=conciliacion.id, clave=libro.libro, filtro=clave) }}"
        class="card text-decoration-none h-100 {{ 'border-primary' if filtro == clave }}">
@@ -73,6 +74,7 @@
       <option value="">Todos</option>
       <option value="pendientes" {{ 'selected' if filtro == 'pendientes' }}>Sólo lo que falta revisar</option>
       <option value="aceptados" {{ 'selected' if filtro == 'aceptados' }}>Diferencias aceptadas</option>
+      <option value="otro_mes" {{ 'selected' if filtro == 'otro_mes' }}>Contabilizados en otro mes</option>
       {% for clave, etiqueta in etiquetas_estado.items() %}
       <option value="{{ clave }}" {{ 'selected' if filtro == clave }}>{{ etiqueta }}</option>
       {% endfor %}
@@ -125,6 +127,13 @@
             <span class="badge bg-light text-success border border-success ms-1"
                   title="{{ d.motivo_aceptacion }}">✓ aceptada</span>
             {% endif %}
+            {# En Defontana el libro lo decide la "fecha contable", que es otro
+               campo que la fecha del documento: cuando queda en otro mes, el
+               documento no falta, está en otro libro. #}
+            {% if d.mes_contable %}
+            <span class="badge bg-light text-primary border border-primary ms-1"
+                  title="Quedó contabilizado en {{ d.mes_contable_texto }}">📅 {{ d.mes_contable_texto }}</span>
+            {% endif %}
           </td>
           <td class="celda-recortada" title="{{ d.tipo_doc_desc or d.tipo_doc }}">{{ d.tipo_doc_desc or d.tipo_doc }}</td>
           <td>{{ d.folio }}</td>
@@ -138,7 +147,9 @@
                     data-url="{{ url_for('contabilidad.aceptar_diferencia_conciliacion_sii', conciliacion_id=conciliacion.id, clave=libro.libro, documento_id=d.id, **request.args) }}"
                     data-aceptado="{{ '1' if d.aceptado else '' }}"
                     data-motivo="{{ d.motivo_aceptacion or '' }}"
-                    data-quien="{{ d.aceptado_por.nombre_completo if d.aceptado_por else '' }}">Ver</button>
+                    data-quien="{{ d.aceptado_por.nombre_completo if d.aceptado_por else '' }}"
+                    data-url-mes="{{ url_for('contabilidad.mes_contable_conciliacion_sii', conciliacion_id=conciliacion.id, clave=libro.libro, documento_id=d.id, **request.args) }}"
+                    data-mes="{{ d.mes_contable or '' }}">Ver</button>
             {% else %}
             <span class="text-muted">—</span>
             {% endif %}
@@ -213,6 +224,27 @@
             <button type="submit" class="btn btn-outline-secondary btn-sm">Volver a dejarla pendiente</button>
           </div>
         </form>
+        {# En qué mes quedó contabilizado. En Defontana eso lo decide la "fecha
+           contable" del documento, que es otro campo que su fecha: si quedó en
+           el mes equivocado, el documento aparece en un período y falta en el
+           otro sin que ninguno de los dos sistemas esté mal. #}
+        <hr>
+        <form method="post" id="modal-mes-form">
+          {{ accion.hidden_tag() }}
+          <p class="small text-muted mb-2">
+            ¿Este documento quedó contabilizado en otro mes? En Defontana el libro lo
+            decide la <strong>fecha contable</strong>, no la fecha del documento. Anota en
+            qué mes quedó: deja de contarse como pendiente de este período y la fila
+            dice dónde está.
+          </p>
+          <label class="form-label small mb-1" for="modal-mes-input">Mes en que quedó contabilizado</label>
+          <div class="d-flex gap-2 align-items-start flex-wrap">
+            <input type="month" name="mes" id="modal-mes-input" class="form-control form-control-sm" style="max-width:180px">
+            <button type="submit" class="btn btn-primary btn-sm">Guardar el mes</button>
+            <button type="submit" class="btn btn-outline-secondary btn-sm" id="modal-mes-quitar"
+                    style="display:none;" formnovalidate>Quitar la nota</button>
+          </div>
+        </form>
         {% endif %}
       </div>
     </div>
@@ -248,6 +280,20 @@
       var quien = boton.dataset.quien;
       document.getElementById('modal-diferencia-quien').textContent = quien ? ' por ' + quien : '';
     }
+
+    var formMes = document.getElementById('modal-mes-form');
+    if (!formMes) return;
+    formMes.action = boton.dataset.urlMes || '';
+    var mes = boton.dataset.mes || '';
+    document.getElementById('modal-mes-input').value = mes;
+    // "Quitar la nota" manda el mes vacío, que es lo que la borra.
+    document.getElementById('modal-mes-quitar').style.display = mes ? '' : 'none';
+  });
+  // El botón de quitar vacía el campo antes de mandar: la ruta borra la nota
+  // cuando el mes llega vacío.
+  var botonQuitar = document.getElementById('modal-mes-quitar');
+  if (botonQuitar) botonQuitar.addEventListener('click', function () {
+    document.getElementById('modal-mes-input').value = '';
   });
 </script>
 
