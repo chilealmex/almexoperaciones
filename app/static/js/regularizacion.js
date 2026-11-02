@@ -693,15 +693,17 @@
 
 
   // ---------- Estado ----------
-  const state = {stock:[], mov:[], view:'reg', filter:{reg:'all', zero:'all', check:'all', qms:'dif', mes:'dif'}, qms:null, qmsRows:[], mov2:null, ajustes:null, articulos:null,
+  const state = {stock:[], mov:[], view:'reg', filter:{reg:'all', zero:'all', check:'all', qms:'dif', mes:'dif', cierre:'consaldo'}, qms:null, qmsRows:[], mov2:null, ajustes:null, articulos:null,
     // Los movimientos de QMS (Ingresos y Egresos) y el mes que se está
     // comparando con los de Defontana.
     qmsMov:null, mesRows:[], mes:'',
+    // El saldo al cierre de un mes, sólo con el Informe de Documentos.
+    cierreRows:[], cierre:'',
     // Los productos marcados como activo fijo acá, y los desmarcados. Van en
     // dos listas, como los comprobantes de ajuste: la marca puede venir del
     // archivo de conteo y hay que poder sacarla sin editar el archivo.
     afSi:new Set(), afNo:new Set(), hechos:new Map(), ajSi:new Set(), ajNo:new Set(), docGroupsMain:[], checkRows:[], docGroups:[],
-    sort:{reg:{k:'code', d:1}, zero:{k:'fecha', d:1}, check:{k:'code', d:1}, qms:{k:'code', d:1}, mes:{k:'ref', d:1}}, open:new Set(), pmpEdit:new Map(), recount:leerRecuentos(), rows:[], zero:[],
+    sort:{reg:{k:'code', d:1}, zero:{k:'fecha', d:1}, check:{k:'code', d:1}, qms:{k:'code', d:1}, mes:{k:'ref', d:1}, cierre:{k:'code', d:1}}, open:new Set(), pmpEdit:new Map(), recount:leerRecuentos(), rows:[], zero:[],
     // Documentos puestos a mano antes o después del conteo (clave del
     // documento -> 'antes' | 'despues'). La fecha del documento es la del
     // papel, no la hora en que pasó: un envío a producción fechado el día del
@@ -2567,6 +2569,136 @@
     state.mesRows = comparacionDelMes(state.mes).filas;
   }
 
+  // ---------- Saldo al cierre de un mes ----------
+  //
+  // Para consultar: qué tenía Defontana de cada producto al último día de un
+  // mes. Sale sólo del Informe de Documentos —ni del conteo, ni de QMS, ni del
+  // stock valorizado—, así que es lo que Defontana puede explicar con sus
+  // propios movimientos.
+  //
+  // El saldo de cada fila del informe depende del orden en que Defontana
+  // procesó los documentos, que puede no ser el de las filas cuando hay varios
+  // el mismo día. Por eso el saldo inicial es el valor que más se repite de
+  // (saldo de la fila − movimientos acumulados hasta ella), igual que en el
+  // resto del módulo, y el saldo al cierre se calcula sumando los documentos
+  // hasta esa fecha.
+  const finDeMes = mes => {
+    const [a, n] = String(mes).split('-').map(Number);
+    return new Date(a, n, 0, 23, 59, 59, 999);
+  };
+  // Todos los meses que el informe toca, del más nuevo al más viejo. No se
+  // cortan en el mes del ajuste como en "Movimientos del mes": acá la pregunta
+  // es el saldo de un mes cualquiera, también de antes.
+  function mesesDelInforme(){
+    const set = new Set();
+    for (const m of (state.mov || [])) if (m.fecha) set.add(mesDe(m.fecha));
+    return [...set].filter(Boolean).sort().reverse();
+  }
+
+  function saldosAlCierre(mes){
+    const corte = finDeMes(mes);
+    const desde = new Date(corte.getFullYear(), corte.getMonth(), 1);
+    const porArt = new Map();
+    for (const m of (state.mov || [])){
+      if (!m.fecha) continue;
+      const a = norm(m.art);
+      if (!porArt.has(a)) porArt.set(a, []);
+      porArt.get(a).push(m);
+    }
+    const porProducto = new Map();
+    for (const [art, lista] of porArt){
+      lista.sort((x, y) => x.fecha - y.fecha || x.i - y.i);
+      const mueve = m => m.traspaso ? 0 : m.kind === 'in' ? m.qty : -m.qty;
+      // El saldo inicial, por votación: la fila puede venir sin saldo o con el
+      // de otro orden de proceso.
+      let cum = 0; const votos = new Map();
+      for (const m of lista){
+        cum += mueve(m);
+        if (m.saldo != null){
+          const v = Math.round((m.saldo - cum) * 1e6) / 1e6;
+          votos.set(v, (votos.get(v) || 0) + 1);
+        }
+      }
+      let init = 0, mejor = 0;
+      for (const [v, n] of votos) if (n > mejor){ init = v; mejor = n; }
+
+      const hasta = lista.filter(m => m.fecha <= corte);
+      if (!hasta.length) continue;   // el producto todavía no existía ese mes
+      const saldo = hasta.reduce((a, m) => a + mueve(m), init);
+      const delMes = hasta.filter(m => m.fecha >= desde);
+      const ultimo = hasta[hasta.length - 1];
+      const key = keyOf(art);
+      const fila = porProducto.get(key) || {key, code: ultimo.art, name: ultimo.desc || '',
+        um: ultimo.um || '', saldo: 0, valor: null, entradas: 0, salidas: 0,
+        movimientos: 0, ultima: null, arts: []};
+      fila.saldo += saldo;
+      fila.entradas += delMes.filter(m => m.kind === 'in' && !m.traspaso).reduce((a, m) => a + m.qty, 0);
+      fila.salidas += delMes.filter(m => m.kind === 'out' && !m.traspaso).reduce((a, m) => a + m.qty, 0);
+      fila.movimientos += delMes.length;
+      // El valorizado es el que trae la última fila del informe hasta el corte:
+      // es el número de Defontana, no uno reconstruido.
+      if (ultimo.valorInv != null) fila.valor = (fila.valor || 0) + ultimo.valorInv;
+      if (!fila.ultima || ultimo.fecha > fila.ultima) fila.ultima = ultimo.fecha;
+      if (!fila.arts.includes(ultimo.art)) fila.arts.push(ultimo.art);
+      if (!fila.um && ultimo.um) fila.um = ultimo.um;
+      porProducto.set(key, fila);
+    }
+    const filas = [...porProducto.values()];
+    for (const f of filas){
+      f.costo = f.valor != null && Math.abs(f.saldo) > EPS ? f.valor / f.saldo : null;
+      f.movio = f.movimientos > 0;
+      f.conSaldo = Math.abs(f.saldo) > EPS;
+    }
+    return filas.sort((a, b) => a.code > b.code ? 1 : a.code < b.code ? -1 : 0);
+  }
+
+  const CIERRE_FILTERS = [
+    ['todos', 'Todos', r => true, null],
+    ['consaldo', 'Con saldo', r => r.conSaldo, 'var(--in)'],
+    ['sinsaldo', 'Sin saldo', r => !r.conSaldo, 'var(--muted)'],
+    ['movio', 'Se movió en el mes', r => r.movio, 'var(--accent)'],
+    ['quieto', 'Sin movimientos en el mes', r => !r.movio, 'var(--muted)'],
+    ['negativo', 'Saldo negativo', r => r.saldo < -EPS, 'var(--out)'],
+  ];
+  const CIERRE_COLS = [
+    ['code', 'Producto', '', r => r.code],
+    ['um', 'Unidad', '', r => r.um || null],
+    ['saldo', 'Saldo al cierre', 'num', r => r.saldo],
+    ['valor', 'Valorizado', 'num', r => r.valor],
+    ['costo', 'Costo unitario', 'num', r => r.costo],
+    ['entradas', 'Entradas del mes', 'num', r => r.entradas || null],
+    ['salidas', 'Salidas del mes', 'num', r => r.salidas || null],
+    ['ultima', 'Último movimiento', '', r => r.ultima ? fmtDate(r.ultima) : null],
+  ];
+  const cierreRow = r => `<tr>
+    <td><div class="code">${esc(r.code)}</div><div class="pname">${esc(r.name)}</div>${
+      r.arts.length > 1 ? '<div class="alias">También: ' + r.arts.slice(1).map(esc).join(', ') + '</div>' : ''}</td>
+    <td class="linea um">${r.um ? esc(r.um) : '<span class="mut">—</span>'}</td>
+    <td class="num ${r.saldo < -EPS ? 'minus' : r.conSaldo ? '' : 'mut'}"><b>${fmt(r.saldo)}</b></td>
+    <td class="num">${r.valor != null ? money(r.valor) : '<span class="mut">—</span>'}</td>
+    <td class="num">${r.costo != null ? cuTxt(r.costo) : '<span class="mut">—</span>'}</td>
+    <td class="num">${r.entradas ? '<span class="plus">+' + fmt(r.entradas) + '</span>' : '<span class="mut">—</span>'}</td>
+    <td class="num">${r.salidas ? '<span class="minus">−' + fmt(r.salidas) + '</span>' : '<span class="mut">—</span>'}</td>
+    <td>${r.ultima ? fmtDate(r.ultima) : '<span class="mut">—</span>'}</td></tr>`;
+  const cierreExport = r => ({
+    'Mes': mesTexto(state.cierre), 'Código': r.code, 'Nombre': r.name,
+    'Otros códigos': r.arts.slice(1).join(', '),
+    'Unidad': r.um,
+    'Saldo al cierre': r.saldo,
+    'Valorizado': r.valor != null ? Math.round(r.valor) : '',
+    'Costo unitario': r.costo != null ? Math.round(r.costo * 100) / 100 : '',
+    'Entradas del mes': r.entradas || 0,
+    'Salidas del mes': r.salidas || 0,
+    'Movimientos del mes': r.movimientos,
+    'Último movimiento': r.ultima ? fmtDate(r.ultima) : '',
+  });
+  function computeCierre(){
+    const meses = mesesDelInforme();
+    if (!meses.length){ state.cierreRows = []; state.cierre = ''; return; }
+    if (!meses.includes(state.cierre)) state.cierre = meses[0];
+    state.cierreRows = saldosAlCierre(state.cierre);
+  }
+
   // ---------- Verificar ajustes ----------
   function computeCheck(){
     state.checkRows = []; state.docGroups = [];
@@ -3455,7 +3587,7 @@
     state.rows = base.rows; state.zero = base.zero; state.orphan = base.orphan;
     computeCheck();
     computeQms();
-    const reg = state.view === 'reg', chk = state.view === 'check', qms = state.view === 'qms', mes = state.view === 'mes';
+    const reg = state.view === 'reg', chk = state.view === 'check', qms = state.view === 'qms', mes = state.view === 'mes', cierre = state.view === 'cierre';
     document.querySelectorAll('.view').forEach(b => b.setAttribute('aria-selected', b.dataset.view === state.view));
     $('checkPanel').hidden = !chk;
     renderStepsPanel(reg);
@@ -3475,16 +3607,21 @@
     if (plan){ renderPlan(); $('foot').innerHTML = ''; return; }
     if (chk) renderAjDocs('ajDocs', state.mov2 ? state.docGroups : [], false);
     if (mes) computeMes();
-    const all = reg ? state.rows : chk ? state.checkRows : qms ? state.qmsRows : mes ? state.mesRows : state.zero,
-      F = reg ? REG_FILTERS : chk ? CHECK_FILTERS : qms ? QMS_FILTERS : mes ? MES_FILTERS : ZERO_FILTERS,
-      cols = reg ? REG_COLS : chk ? CHECK_COLS : qms ? QMS_COLS : mes ? MES_COLS : ZERO_COLS;
+    if (cierre) computeCierre();
+    const all = reg ? state.rows : chk ? state.checkRows : qms ? state.qmsRows : mes ? state.mesRows
+        : cierre ? state.cierreRows : state.zero,
+      F = reg ? REG_FILTERS : chk ? CHECK_FILTERS : qms ? QMS_FILTERS : mes ? MES_FILTERS
+        : cierre ? CIERRE_FILTERS : ZERO_FILTERS,
+      cols = reg ? REG_COLS : chk ? CHECK_COLS : qms ? QMS_COLS : mes ? MES_COLS
+        : cierre ? CIERRE_COLS : ZERO_COLS;
     // El selector de mes sólo tiene sentido en esta vista.
     const selMes = $('optMes');
     if (selMes){
-      selMes.hidden = !mes;
-      if (mes){
-        const meses = mesesConMovimientos();
-        selMes.innerHTML = meses.map(m => `<option value="${esc(m)}"${m === state.mes ? ' selected' : ''}>${esc(mesTexto(m))}</option>`).join('')
+      selMes.hidden = !mes && !cierre;
+      if (mes || cierre){
+        const meses = cierre ? mesesDelInforme() : mesesConMovimientos();
+        const elegido = cierre ? state.cierre : state.mes;
+        selMes.innerHTML = meses.map(m => `<option value="${esc(m)}"${m === elegido ? ' selected' : ''}>${esc(mesTexto(m))}</option>`).join('')
           || '<option value="">sin movimientos</option>';
       }
     }
@@ -3502,6 +3639,15 @@
         <button class="rx-card bad" type="button" data-go="double"><span class="lbl">Posible doble ajuste</span><span class="big">${fmt(n('double'))}</span><span class="note">contar de nuevo para confirmar</span></button>
         <div class="rx-card"><span class="lbl">Ajustes en Defontana</span><span class="big">${money(ajDocs.reduce((a, g) => a + g.valor, 0))}</span><span class="note">${fmt(ajDocs.length)} ${ajDocs.length === 1 ? 'documento' : 'documentos'}</span></div>`;
       }
+    } else if (cierre){
+      const conSaldo = all.filter(r => r.conSaldo);
+      const valorizado = all.reduce((a, r) => a + (r.valor || 0), 0);
+      $('summary').innerHTML = !state.mov.length ? '' : `
+        <div class="rx-card"><span class="lbl">${esc(mesTexto(state.cierre))}</span><span class="big">${fmt(conSaldo.length)}</span><span class="note">productos con saldo al último día del mes</span></div>
+        <div class="rx-card"><span class="lbl">Unidades</span><span class="big">${fmt(conSaldo.reduce((a, r) => a + r.saldo, 0))}</span><span class="note">sumando todos los productos</span></div>
+        <div class="rx-card"><span class="lbl">Valorizado</span><span class="big">${money(valorizado)}</span><span class="note">según el Valor Inventario del informe</span></div>
+        <button class="rx-card" type="button" data-go="movio"><span class="lbl">Se movieron en el mes</span><span class="big">${fmt(all.filter(r => r.movio).length)}</span><span class="note">tuvieron al menos un documento</span></button>
+        <button class="rx-card bad" type="button" data-go="negativo"><span class="lbl">Saldo negativo</span><span class="big">${fmt(all.filter(r => r.saldo < -EPS).length)}</span><span class="note">Defontana no puede tener menos que cero</span></button>`;
     } else if (mes){
       const n = f => all.filter(f).length;
       const falta = n(r => r.st === 'falta_qms' && !r.ajuste), faltaD = n(r => r.st === 'falta_defo');
@@ -3587,21 +3733,25 @@
     if (qms && !state.qms){ tb.innerHTML = `<tr><td colspan="${cols.length}" class="empty">Sube arriba el archivo de QMS (Distribución de Valor de Stock) para verlo lado a lado con Defontana. No entra en ningún cálculo: es sólo para comparar.</td></tr>`; }
     else if (mes && !state.qmsMov){ tb.innerHTML = `<tr><td colspan="${cols.length}" class="empty">Sube arriba el archivo de Ingresos y Egresos de QMS para comparar, mes a mes, los movimientos de los dos sistemas: qué movió Defontana y QMS no, y al revés.</td></tr>`; }
     else if (mes && !state.mov.length){ tb.innerHTML = `<tr><td colspan="${cols.length}" class="empty">Sube arriba el Informe de Documentos de Defontana (archivo 2) para comparar sus movimientos con los de QMS.</td></tr>`; }
+    else if (cierre && !state.mov.length){ tb.innerHTML = `<tr><td colspan="${cols.length}" class="empty">Sube arriba el Informe de Documentos de Defontana (archivo 2): el saldo al cierre sale sólo de ahí.</td></tr>`; }
     else if (!chk && !qms && !state.mov.length){ tb.innerHTML = `<tr><td colspan="${cols.length}" class="empty">Sube arriba el Informe de Documentos de Defontana (archivo 2) para cruzarlo con el conteo.</td></tr>`; }
     else if (chk && !state.mov2){ tb.innerHTML = `<tr><td colspan="${cols.length}" class="empty">Sube arriba el Informe de Documentos de Defontana descargado de nuevo, ya con los ajustes hechos. El programa buscará los documentos de ajuste y revisará producto por producto si quedó cuadrado.</td></tr>`; }
     else if (!rows.length){ tb.innerHTML = `<tr><td colspan="${cols.length}" class="empty">No hay productos en esta vista.</td></tr>`; }
     else {
       const parts = [];
       for (const r of rows){
-        parts.push(reg ? regRow(r) : chk ? checkRow(r) : qms ? qmsRow(r) : mes ? mesRow(r) : zeroRow(r));
+        parts.push(reg ? regRow(r) : chk ? checkRow(r) : qms ? qmsRow(r) : mes ? mesRow(r)
+                   : cierre ? cierreRow(r) : zeroRow(r));
         if (mes){ if (state.open.has(r.id)) parts.push(mesDetalle(r)); }
-        else if (!zer && !qms && state.open.has(r.key)) parts.push(detail(r));
+        else if (!zer && !qms && !cierre && state.open.has(r.key)) parts.push(detail(r));
       }
       tb.innerHTML = parts.join('');
     }
 
     $('foot').innerHTML = chk
       ? '<b>Cómo se verifica.</b> “Debería tener Defontana” = Contado + ingresos − egresos registrados después del conteo, sin contar los documentos de ajuste. “Tiene Defontana” es el saldo de Defontana al conteo más todos los documentos posteriores, incluidos los ajustes (se calcula con los documentos para no depender del orden de las filas; si la última fila del informe muestra otro saldo, se avisa). Si son iguales, quedó bien. “Posible doble ajuste” significa que cuadra en el cálculo, pero la diferencia del conteo calzaba con un documento registrado después del conteo: si esa mercadería ya había salido o entrado al contar, el ajuste la contó dos veces. Solo se listan los productos que estaban descuadrados o que tuvieron ajuste.'
+      : cierre
+      ? '<b>De dónde sale.</b> Sólo del Informe de Documentos de Defontana: ni el conteo, ni QMS, ni el stock valorizado entran en esta vista. El saldo al cierre es el saldo inicial del producto más todos sus movimientos hasta el último día del mes elegido. El saldo inicial no se lee de una fila: se toma el valor que más se repite de (Saldo Inventario de la fila − movimientos acumulados hasta ella), porque el saldo de cada fila depende del orden en que Defontana procesó los documentos y ese orden puede no ser el de las filas cuando hay varios el mismo día. Los traspasos entre bodegas no suman ni restan: cambian de bodega, no de inventario. El valorizado es el Valor Inventario de la última fila hasta el corte —el número de Defontana, no uno reconstruido— y el costo unitario es ese valor dividido por el saldo. Un producto que todavía no tenía ningún documento a esa fecha no aparece.'
       : mes
       ? '<b>Cómo se compara.</b> Mes a mes, los movimientos de Defontana (Informe de Documentos) contra los de QMS (Ingresos y Egresos). Los dos sistemas no comparten la numeración de sus comprobantes, pero sí la orden de trabajo: Defontana la escribe en “Referencia” y QMS en su columna de OT, así que lo que lleva OT se compara OT por OT y producto por producto. Lo que no la lleva —compras, guías de despacho y los comprobantes del ajuste— se compara sumando lo que movió cada sistema en el mes para ese producto. Una orden de compra cruzaría igual que la OT, pero la columna “N Doc. Compra” del informe de Defontana viene vacía: mientras siga así, las entradas se comparan por producto. No se comparan los traspasos entre bodegas (no entran ni salen del inventario) ni los ajustes de costo (no mueven unidades). Hacia atrás no se ofrecen meses: hasta el ajuste de inventario no se hacían todos los documentos, y ese desorden es justamente lo que el ajuste vino a cerrar. Los comprobantes del ajuste van aparte: son lo que hay que dejar registrado en QMS, no un documento que a alguien se le olvidó.'
       : qms
@@ -3729,13 +3879,15 @@
   });
   const exportRows = () => (state.visible || []).map(
     state.view === 'reg' ? regExport : state.view === 'check' ? checkExport
-      : state.view === 'qms' ? qmsExport : state.view === 'mes' ? mesExport : zeroExport);
+      : state.view === 'qms' ? qmsExport : state.view === 'mes' ? mesExport
+      : state.view === 'cierre' ? cierreExport : zeroExport);
 
   $('btnXlsx').addEventListener('click', () => {
     const rows = exportRows(); if (!rows.length) return;
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), {reg:'Regularización', zero:'Documentos a costo 0', check:'Verificación de ajustes', qms:'Cruce con QMS', mes:'Movimientos del mes'}[state.view]);
-    const name = {reg:'regularizacion-inventario-', zero:'documentos-costo-0-', check:'verificacion-ajustes-', qms:'cruce-qms-', mes:'movimientos-del-mes-'}[state.view] + fmtDate(new Date()) + '.xlsx';
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), {reg:'Regularización', zero:'Documentos a costo 0', check:'Verificación de ajustes', qms:'Cruce con QMS', mes:'Movimientos del mes', cierre:'Saldo al cierre'}[state.view]);
+    const name = {reg:'regularizacion-inventario-', zero:'documentos-costo-0-', check:'verificacion-ajustes-', qms:'cruce-qms-', mes:'movimientos-del-mes-',
+      cierre:'saldo-al-cierre-'}[state.view] + fmtDate(new Date()) + '.xlsx';
     XLSX.writeFile(wb, name);
   });
   $('btnCopy').addEventListener('click', () => {
@@ -3818,7 +3970,10 @@
     render();
   });
   // Cambiar de mes no vuelve a leer nada: los dos archivos ya están cargados.
-  $('optMes').addEventListener('change', e => { state.mes = e.target.value; state.open.clear(); render(); });
+  $('optMes').addEventListener('change', e => {
+    if (state.view === 'cierre') state.cierre = e.target.value; else state.mes = e.target.value;
+    state.open.clear(); render();
+  });
   $('btnClearQms').addEventListener('click', () => {
     state.qms = null; $('btnClearQms').hidden = true; $('dropQms').classList.remove('ok');
     $('stQms').textContent = SIN_QMS;
@@ -4104,6 +4259,6 @@
   // puerta, la matemática que decide los ajustes de inventario no se puede
   // comprobar más que a ojo.
   if (typeof module !== 'undefined' && module.exports){
-    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, parseArticulos, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, tipoAjCosto, avisoDeFechas, avisoDeDuplicados, guardarArchivo, detectarAjustes, conAjustes, parseCostos, costoDeSuCompra, pmpEditable, costoPropuestoSinValor, renderStepsPanel, REG_COLS, REG_FILTERS, QMS_FILTERS, regRow, detail, parseQms, parseMovQms, leerDeTodasLasHojas, comparacionDelMes, mesesConMovimientos, mesTexto, computeMes, mesRow, mesDetalle, mesExport, MES_COLS, MES_FILTERS, computeQms, cruceQms, qmsRow, qmsExport, regExport, cmpExport, state};
+    module.exports = {compute, computeCheck, valorizacionImposible, ajusteDelConteo, pendiente, hoyDe, costoHabitual, costoAtipico, fueraDeRango, comoEstaHoy, parseMov, parseStock, parseArticulos, leerDeCualquierHoja, filasConLasColumnas, buildPlan, docSteps, tipoAjCosto, avisoDeFechas, avisoDeDuplicados, guardarArchivo, detectarAjustes, conAjustes, parseCostos, costoDeSuCompra, pmpEditable, costoPropuestoSinValor, renderStepsPanel, REG_COLS, REG_FILTERS, QMS_FILTERS, regRow, detail, parseQms, parseMovQms, leerDeTodasLasHojas, comparacionDelMes, mesesConMovimientos, mesTexto, computeMes, mesRow, mesDetalle, mesExport, MES_COLS, MES_FILTERS, saldosAlCierre, mesesDelInforme, computeCierre, cierreRow, cierreExport, CIERRE_FILTERS, computeQms, cruceQms, qmsRow, qmsExport, regExport, cmpExport, state};
   }
 })();
