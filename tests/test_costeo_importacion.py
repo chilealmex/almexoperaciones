@@ -412,6 +412,84 @@ def test_se_puede_marcar_un_producto_con_una_categoria_de_activo_fijo(client, us
     assert producto.activo_fijo == "MUEBLES Y UTILES"
 
 
+def test_la_lista_ofrece_gastos_ademas_de_las_categorias(client, usuario_admin, empresa, db):
+    """No todo lo que llega en una importación se activa: parte se va a gasto.
+
+    Gasto no es una categoría de activo fijo —no se activa ni se deprecia—,
+    así que es una opción fija de la lista y no una fila del maestro de
+    categorías, donde quedaría como un activo más.
+    """
+    db.session.add(CategoriaActivo(empresa_id=empresa.id, nombre="MAQUINARIAS Y EQUIPOS"))
+    db.session.commit()
+    login(client, "admin@test.cl")
+    costeo = _crear_costeo(db, empresa, n_importacion="60")
+    client.post(f"/importaciones/costeo-detallado/{costeo.id}/productos/agregar", follow_redirects=True)
+
+    texto = client.get(f"/importaciones/costeo-detallado/{costeo.id}").get_data(as_text=True)
+
+    assert ">Gastos</option>" in texto
+    assert '<option value="GASTOS"' in texto
+    # Y sigue estando todo lo que ya estaba.
+    assert ">No</option>" in texto
+    assert '<option value="MAQUINARIAS Y EQUIPOS"' in texto
+
+
+def test_se_puede_marcar_un_producto_como_gasto(client, usuario_admin, empresa, db):
+    login(client, "admin@test.cl")
+    costeo = _crear_costeo(db, empresa, n_importacion="61")
+    client.post(f"/importaciones/costeo-detallado/{costeo.id}/productos/agregar", follow_redirects=True)
+    _db.session.refresh(costeo)
+    producto = costeo.productos[0]
+
+    client.post(
+        f"/importaciones/costeo-detallado/{costeo.id}/productos/guardar",
+        data={
+            f"prod-{producto.id}-producto": "Flete pagado aparte",
+            f"prod-{producto.id}-valor_unitario_tc": "10",
+            f"prod-{producto.id}-cantidad": "1",
+            f"prod-{producto.id}-unidad_tc": "USD",
+            f"prod-{producto.id}-activo_fijo": "GASTOS",
+        },
+        follow_redirects=True,
+    )
+    _db.session.refresh(producto)
+
+    assert producto.activo_fijo == "GASTOS"
+    assert producto.es_gasto is True
+    # Un gasto no es un activo fijo: no se activa ni se deprecia.
+    assert producto.es_activo_fijo is False
+    # Y al volver a la pantalla queda elegido.
+    texto = client.get(f"/importaciones/costeo-detallado/{costeo.id}").get_data(as_text=True)
+    assert '<option value="GASTOS" selected>Gastos</option>' in texto
+
+
+def test_una_categoria_llamada_gastos_no_sale_dos_veces(client, usuario_admin, empresa, db):
+    # Si alguien crea la categoría "Gastos" en el maestro, la lista mostraría
+    # dos opciones con el mismo valor y la misma etiqueta.
+    db.session.add(CategoriaActivo(empresa_id=empresa.id, nombre="GASTOS"))
+    db.session.add(CategoriaActivo(empresa_id=empresa.id, nombre="VEHICULOS"))
+    db.session.commit()
+    login(client, "admin@test.cl")
+    costeo = _crear_costeo(db, empresa, n_importacion="62")
+    client.post(f"/importaciones/costeo-detallado/{costeo.id}/productos/agregar", follow_redirects=True)
+
+    texto = client.get(f"/importaciones/costeo-detallado/{costeo.id}").get_data(as_text=True)
+
+    assert texto.count('<option value="GASTOS"') == 1
+    assert '<option value="VEHICULOS"' in texto
+
+
+def test_una_categoria_de_verdad_sigue_siendo_activo_fijo(client, usuario_admin, empresa, db):
+    producto = CosteoImportacionProducto(activo_fijo="MAQUINARIAS Y EQUIPOS")
+
+    assert producto.es_activo_fijo is True
+    assert producto.es_gasto is False
+    # Y "No" no es ninguna de las dos cosas.
+    sin_marcar = CosteoImportacionProducto(activo_fijo="NO")
+    assert sin_marcar.es_activo_fijo is False
+    assert sin_marcar.es_gasto is False
+
+
 def test_marcar_producto_sin_ad_valorem_por_ruta_lo_deja_en_cero(client, usuario_admin, empresa, db):
     login(client, "admin@test.cl")
     costeo = _crear_costeo(db, empresa, n_importacion="88")

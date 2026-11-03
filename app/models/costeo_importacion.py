@@ -163,7 +163,23 @@ class CosteoImportacionProducto(db.Model):
     valor_unitario_tc = db.Column(db.Float, nullable=False, default=0)
     cantidad = db.Column(db.Float, nullable=False, default=0)
     unidad_tc = db.Column(db.String(6), nullable=False, default="USD")
-    activo_fijo = db.Column(db.String(80), nullable=False, default="NO")
+    # Qué se hace con el producto al llegar: nada (queda como existencia), se
+    # activa en una categoría de activo fijo, o se va a gasto. "Gasto" no es
+    # una categoría de activo fijo —no se activa, no se deprecia— así que no
+    # puede vivir en el maestro de categorías: es una opción fija de la lista.
+    SIN_ACTIVAR = "NO"
+    GASTOS = "GASTOS"
+    activo_fijo = db.Column(db.String(80), nullable=False, default=SIN_ACTIVAR)
+
+    @property
+    def es_gasto(self) -> bool:
+        return (self.activo_fijo or "").strip().upper() == self.GASTOS
+
+    @property
+    def es_activo_fijo(self) -> bool:
+        """Activo fijo de verdad: una categoría, no "No" ni "Gasto"."""
+        valor = (self.activo_fijo or "").strip().upper()
+        return bool(valor) and valor not in (self.SIN_ACTIVAR, self.GASTOS)
     tiene_ad_valorem = db.Column(db.String(3), nullable=False, default="SI")
     # Monto de ad valorem escrito a mano. Si viene vacío se calcula como
     # CIF x tasa; sirve para cuando la DIN trae un monto distinto al teórico.

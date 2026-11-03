@@ -394,6 +394,11 @@ def _categorias_activo_disponibles():
     EQUIPOS") y no el nombre, porque ahí suele ir el código de la cuenta contable.
     """
     categorias = CategoriaActivo.query.filter_by(empresa_id=_empresa_id(), activa=True).all()
+    # "Gastos" ya está en la lista como opción fija: si además existiera una
+    # categoría con ese nombre, saldría dos veces y las dos guardarían lo
+    # mismo.
+    categorias = [c for c in categorias
+                  if (c.nombre or "").strip().upper() != CosteoImportacionProducto.GASTOS]
     return sorted(categorias, key=lambda c: (c.descripcion or c.nombre).upper())
 
 
