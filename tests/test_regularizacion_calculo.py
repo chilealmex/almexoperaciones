@@ -38,6 +38,7 @@ PRUEBAS = {
     "los códigos creados sin stock entran igual": JS / "test_codigos.js",
     "los movimientos del mes se comparan con los de QMS": JS / "test_mes.js",
     "los activos fijos no se cuentan con el resto de la bodega": JS / "test_activo_fijo.js",
+    "el saldo de inventario al cierre de un mes": JS / "test_cierre.js",
 }
 
 
@@ -68,6 +69,7 @@ def test_las_comprobaciones_del_navegador_existen():
     assert "manda la foto" in (JS / "test_valorizado.js").read_text(encoding="utf-8")
     assert "la misma OT" in (JS / "test_mes.js").read_text(encoding="utf-8")
     assert "no se propone sacarlas" in (JS / "test_activo_fijo.js").read_text(encoding="utf-8")
+    assert "no se copia de la última fila" in (JS / "test_cierre.js").read_text(encoding="utf-8")
     assert "montos de otras filas" in (JS / "test_linea_defontana.js").read_text(encoding="utf-8")
     assert "se suben de vuelta" in (JS / "test_costos_excel.js").read_text(encoding="utf-8")
     assert "su propia compra" in (JS / "test_sinvalor.js").read_text(encoding="utf-8")
