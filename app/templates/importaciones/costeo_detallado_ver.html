@@ -354,6 +354,11 @@
               <td class="costeo-celda-activo-fijo">
                 <select name="prod-{{ p.id }}-activo_fijo" class="form-select form-select-sm campo-excel" style="min-width:125px;" {{ 'disabled' if not puede_editar }}>
                   <option value="NO" {{ 'selected' if p.activo_fijo == 'NO' }}>No</option>
+                  {# Gasto no es una categoría de activo fijo: el producto no se
+                     activa ni se deprecia, su costo se va a gasto. Por eso es una
+                     opción fija de la lista y no una fila del maestro de
+                     categorías, donde quedaría como un activo más. #}
+                  <option value="GASTOS" {{ 'selected' if p.es_gasto }}>Gastos</option>
                   {% for categoria in categorias_activo %}
                   <option value="{{ categoria.nombre }}" {{ 'selected' if p.activo_fijo == categoria.nombre }}>{{ categoria.descripcion or categoria.nombre }}</option>
                   {% endfor %}
