@@ -114,6 +114,42 @@ def test_un_csv_que_no_es_del_sii_avisa_en_vez_de_reventar(db):
     assert "Tipo Doc" in str(error.value)
 
 
+# El resumen del RCV se baja del mismo lugar que el detalle y los dos son un
+# CSV del SII: es fácil llevarse uno por el otro, y entonces conviene que lo
+# diga con todas sus letras en vez de hablar de columnas que faltan.
+RESUMEN_SII = (
+    "Tipo Documento;Total Documentos;Monto Exento;Monto Neto;IVA Recuperable;"
+    "IVA Uso Comun;IVA No Recuperable;Monto Total\r\n"
+    "Factura Electrónica(33);154;1994566;146321262;27801042;0;0;176085408\r\n"
+    "Nota de Crédito Electrónica(61);9;7872;21569241;4098155;0;0;25675268\r\n"
+)
+
+
+def test_el_resumen_del_rcv_dice_que_hace_falta_el_detalle(db):
+    with pytest.raises(ArchivoInvalido) as error:
+        leer_rcv_sii(_archivo(RESUMEN_SII, "RCV_RESUMEN_COMPRA.csv"), "compra")
+
+    mensaje = str(error.value)
+    assert "resumen" in mensaje
+    assert "detalle" in mensaje
+    # Y no el mensaje de siempre, que manda a descargar lo que ya descargó
+    assert "sin abrirlo ni guardarlo en Excel" not in mensaje
+
+
+def test_lo_que_manda_es_que_tenga_folio_no_el_resto_de_las_columnas(db):
+    # Un detalle se reconoce por su columna Folio: si además trae una columna
+    # que se parece a las del resumen, sigue siendo el detalle.
+    detalle = (
+        "Tipo Doc;Folio;Total Documentos;RUT Proveedor;Monto Total\r\n"
+        "33;160;1;77.590.967-6;15422400\r\n"
+    )
+
+    docs = leer_rcv_sii(_archivo(detalle, "detalle.csv"), "compra")
+
+    assert len(docs) == 1
+    assert docs[0]["folio"] == "160"
+
+
 # --- Leer el libro de Defontana ---
 
 
