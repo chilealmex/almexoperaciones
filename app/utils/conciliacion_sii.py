@@ -244,6 +244,16 @@ def leer_rcv_sii(archivo, libro: str) -> list:
 
     col_tipo = _buscar_columna(campos, "tipo", "doc")
     col_folio = _buscar_columna(campos, "folio")
+    if col_tipo and not col_folio and _buscar_columna(campos, "total", "documentos"):
+        # El resumen del RCV: una línea por tipo de documento, con cuántos hay
+        # y cuánto suman. No nombra ninguna factura, así que no hay nada que
+        # cruzar. Se baja del mismo lugar que el detalle y los dos son un CSV
+        # del SII, así que es fácil llevarse uno por el otro.
+        raise ArchivoInvalido(
+            "Ese archivo del SII es el resumen del RCV: trae una línea por tipo de documento "
+            "—cuántos son y cuánto suman— y ninguna con folio, así que no hay con qué cruzar. "
+            "En el SII, en la misma pantalla, descarga el detalle: trae una línea por factura."
+        )
     if not col_tipo or not col_folio:
         raise ArchivoInvalido(
             "El archivo del SII no tiene las columnas 'Tipo Doc' y 'Folio'. "
