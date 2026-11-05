@@ -24,7 +24,7 @@ from app.utils.conciliacion_sii import (
     ArchivoInvalido,
     comparar_con_mayor,
     juntar_mayores,
-    leer_libro_mayor,
+    leer_cuentas_mayor,
 )
 from tests.conftest import login
 
@@ -65,7 +65,7 @@ PROV_NOV = _mayor("2.1.1070.20.01", "PROVEEDORES NACIONALES", [
 
 
 def _leer_los_dos():
-    return juntar_mayores([leer_libro_mayor(IVA_NOV), leer_libro_mayor(PROV_NOV)])
+    return juntar_mayores(leer_cuentas_mayor(IVA_NOV) + leer_cuentas_mayor(PROV_NOV))
 
 
 def _documento(**extra):
@@ -79,7 +79,7 @@ def _documento(**extra):
 
 def test_se_lee_la_cuenta_y_lo_que_aporta():
     IVA_NOV.seek(0)
-    mayor = leer_libro_mayor(IVA_NOV)
+    mayor = leer_cuentas_mayor(IVA_NOV)[0]
 
     assert mayor["cuenta"] == "1.1.1090.10.01"
     assert mayor["nombre"] == "IVA CREDITO FISCAL"
@@ -91,7 +91,7 @@ def test_se_lee_la_cuenta_y_lo_que_aporta():
 
 def test_la_cuenta_de_proveedores_aporta_el_total_y_suma_al_haber():
     PROV_NOV.seek(0)
-    mayor = leer_libro_mayor(PROV_NOV)
+    mayor = leer_cuentas_mayor(PROV_NOV)[0]
 
     assert mayor["clase"] == "total"
     # Es una cuenta de pasivo (empieza en 2): el crédito es el monto, en
@@ -166,27 +166,113 @@ def test_una_nota_de_credito_queda_en_negativo_por_el_lado_de_la_cuenta():
         _linea("05/11/2026", "261100023", "Cpra_NCC",
                "NCC#1295765 Cuota 1 Proveedor 90.844.000-1 EMPRESA", debito="59,143")])
 
-    mayor = juntar_mayores([leer_libro_mayor(iva), leer_libro_mayor(prov)])
+    mayor = juntar_mayores(leer_cuentas_mayor(iva) + leer_cuentas_mayor(prov))
 
     assert mayor["iva"][("1295765", "908440001")] == -9443
     assert mayor["total"][("1295765", "908440001")] == -59143
 
 
+# ---------- El IVA retenido ----------
+#
+# El caso real: la FCEDIESEL#337537 del 06-08. El mayor tiene 18.231 en IVA
+# crédito, 114.186 en proveedores y 17.970 en IVA retenido por pagar, y el SII
+# informa IVA 18.231 y total 96.216, que es 114.186 − 17.970.
+
+RETENCION = _mayor("2.1.2030.10.05", "IVA RETENIDO POR PAGAR", [
+    _linea("06/08/2026", "260800058", "Cpra_FCEDIESEL",
+           "FCEDIESEL#337537 Proveedor 76497541-3 COMERCIAL MISLE ROMEO", credito="17,970"),
+])
+IVA_AGO = _mayor("1.1.1090.10.01", "IVA CREDITO FISCAL", [
+    _linea("06/08/2026", "260800058", "Cpra_FCEDIESEL",
+           "FCEDIESEL#337537 Proveedor 76497541-3 COMERCIAL MISLE ROMEO", debito="18,231"),
+])
+PROV_AGO = _mayor("2.1.1070.20.01", "PROVEEDORES NACIONALES", [
+    _linea("06/08/2026", "260800058", "Cpra_FCEDIESEL",
+           "FCEDIESEL#337537 Proveedor 76497541-3 COMERCIAL MISLE ROMEO", credito="114,186"),
+])
+DOC_RETENIDO = dict(folio="337537", estado="coincide",
+                    rut_sii="76497541-3", rut_defontana="76497541-3",
+                    iva_sii=18231, iva_defontana=18231,
+                    total_sii=96216, total_defontana=96216)
+
+
+def _mayores_de_agosto(*archivos):
+    cuentas = []
+    for archivo in archivos:
+        archivo.seek(0)
+        cuentas += leer_cuentas_mayor(archivo)
+    return juntar_mayores(cuentas)
+
+
+def test_lo_retenido_se_le_descuenta_al_total_del_documento():
+    # Sin descontarlo, el mayor diría 114.186 contra los 96.216 del SII y la
+    # factura aparecería con el total distinto sin estarlo.
+    visto = comparar_con_mayor(
+        DOC_RETENIDO, _mayores_de_agosto(IVA_AGO, PROV_AGO, RETENCION)
+    )
+
+    assert visto["total_mayor"] == 96216
+    assert visto["estado"] == "cuadra"
+
+
+def test_lo_retenido_no_se_suma_al_iva_del_documento():
+    # El IVA quedó entero en la cuenta de IVA crédito: lo retenido es otra
+    # línea del mismo asiento, no más IVA.
+    visto = comparar_con_mayor(
+        DOC_RETENIDO, _mayores_de_agosto(IVA_AGO, PROV_AGO, RETENCION)
+    )
+
+    assert visto["iva_mayor"] == 18231
+
+
+def test_sin_la_cuenta_de_retencion_la_factura_sale_con_el_total_distinto():
+    # Que es lo que pasaba antes de poder cargarla: queda dicho para que se
+    # note que el descuento viene de esa cuenta y no de otra parte.
+    visto = comparar_con_mayor(DOC_RETENIDO, _mayores_de_agosto(IVA_AGO, PROV_AGO))
+
+    assert visto["total_mayor"] == 114186
+    assert visto["estado"] == "dif_total"
+
+
+def test_la_cuenta_de_retencion_sola_no_le_inventa_un_total_a_nadie():
+    # Lo retenido corrige un total; suelto no es el total de ningún documento.
+    mayor = _mayores_de_agosto(IVA_AGO, RETENCION)
+
+    assert mayor["total"] == {}
+
+
 def test_un_archivo_que_no_es_libro_mayor_se_rechaza_con_un_mensaje_claro():
     with pytest.raises(ArchivoInvalido) as error:
-        leer_libro_mayor(io.BytesIO(b"<html><body><table><tr><td>otra cosa</td></tr></table></body></html>"))
+        leer_cuentas_mayor(io.BytesIO(b"<html><body><table><tr><td>otra cosa</td></tr></table></body></html>"))
 
     assert "Libro Mayor" in str(error.value)
 
 
-def test_un_mayor_sin_documentos_tambien():
+def test_un_mayor_sin_documentos_se_lee_pero_no_sirve_para_cruzar():
+    # Se lee igual —su movimiento es el que arma el F29— pero no nombra
+    # ninguna factura, así que no hay nada que cruzar con él.
     vacio = _mayor("2.1.1070.20.01", "PROVEEDORES NACIONALES", [
         _linea("05/11/2026", "261100099", "EGRESO", "Pago a proveedores", debito="100")])
 
-    with pytest.raises(ArchivoInvalido) as error:
-        leer_libro_mayor(vacio)
+    cuenta = leer_cuentas_mayor(vacio)[0]
 
-    assert "no trae líneas con documento" in str(error.value)
+    assert cuenta["documentos"] == {}
+    assert cuenta["movimientos"][("2026-11", "EGRESO")]["debe"] == 100
+
+
+def test_cruzar_con_un_mayor_sin_documentos_lo_dice(client, db, empresa, usuario_admin):
+    conciliacion, _libro, _documento = _periodo(db, empresa)
+    login(client, "admin@test.cl")
+    vacio = _mayor("2.1.1070.20.01", "PROVEEDORES NACIONALES", [
+        _linea("05/11/2026", "261100099", "EGRESO", "Pago a proveedores", debito="100")])
+
+    r = client.post(
+        f"/contabilidad/conciliacion-sii/{conciliacion.id}/compra/mayor",
+        data={"mayor": [(vacio, "mayor-pagos.xls")]},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+
+    assert "no trae líneas con documento" in r.get_data(as_text=True)
 
 
 # ---------- La pantalla ----------
