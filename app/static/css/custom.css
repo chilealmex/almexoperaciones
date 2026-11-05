@@ -1395,3 +1395,28 @@ input.campo-excel.esta-vacio::placeholder {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ===== Conciliación SII: los meses cerrados =====
+   Un mes cerrado ya está listo: se pinta en verde y se guarda bajo su propia
+   fila, para que lo que quede a la vista sea lo que todavía da trabajo. */
+.mes-cerrado > td { background: #f1f8f3; }
+/* La primera fila de cada mes lleva una línea arriba: así Compras y Ventas se
+   leen como un bloque y no como cuatro filas sueltas. */
+.mes-abre > td { border-top: 1px solid #dfe5ec; }
+.fila-cerrados > td {
+  background: #f4f7fa;
+  color: var(--muted);
+}
+.fila-cerrados { cursor: pointer; }
+.fila-cerrados:hover > td { filter: brightness(0.97); }
+.fila-cerrados[aria-expanded="false"] .chevron-grupo { transform: rotate(-90deg); }
+.fila-cerrados[aria-expanded="false"] .ocultar-cerrados,
+.fila-cerrados[aria-expanded="true"] .ver-cerrados { display: none; }
+/* Un cero no es una noticia: apagado, saltan a la vista los que no lo son.
+   Se apaga con el color y no con opacity: opacity también destiñe el fondo de
+   la celda, y en un mes cerrado le hacía un parche blanco sobre el verde. */
+.num-cero { color: #a7b2bd; }
+/* El mes, su estado y sus botones en una columna angosta: sin esto "🔒 Cerrar"
+   y el tarro de basura caen cada uno en su propia línea. */
+.celda-periodo { white-space: nowrap; }
+.celda-periodo .btn-link { font-size: 0.85rem; }

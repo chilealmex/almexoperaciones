@@ -6,6 +6,7 @@ documento y que la tabla traiga los totales de cada columna.
 """
 
 import io
+import re
 
 from werkzeug.datastructures import FileStorage
 
@@ -884,8 +885,8 @@ def test_la_pantalla_muestra_el_anio_y_esconde_los_demas(client, db, empresa, us
     assert 'data-anio="2026"\n              aria-expanded="true"' in cuerpo
     assert 'data-anio="2024"\n              aria-expanded="false"' in cuerpo
     # Las filas del año viejo llegan escondidas, no ausentes: se despliegan sin recargar
-    assert 'class="mes-de-2024" hidden' in cuerpo
-    assert 'class="mes-de-2026">' in cuerpo
+    assert re.search(r'class="mes-de-2024[^"]*"\s+hidden', cuerpo)
+    assert re.search(r'class="mes-de-2026[^"]*"\s*>', cuerpo)
 
 
 def test_el_mes_ya_no_repite_el_anio(client, db, empresa, usuario_admin):
@@ -897,3 +898,76 @@ def test_el_mes_ya_no_repite_el_anio(client, db, empresa, usuario_admin):
 
     assert "<strong>Octubre</strong>" in cuerpo
     assert "Octubre 2026</strong>" not in cuerpo
+
+
+# ---------- Los meses cerrados ----------
+#
+# Un mes cerrado ya está listo y no se vuelve a tocar: lo que tiene que quedar
+# a la vista es lo que todavía da trabajo.
+
+def test_un_mes_cerrado_llega_escondido_y_el_abierto_no(client, db, empresa, usuario_admin):
+    _periodo(db, empresa, 2026, 10, cerrado=True)
+    _periodo(db, empresa, 2026, 9, pendientes=2)
+    login(client, "admin@test.cl")
+
+    cuerpo = client.get("/contabilidad/conciliacion-sii").get_data(as_text=True)
+
+    assert re.search(r'class="mes-de-2026 mes-cerrado[^"]*"\s+hidden', cuerpo)
+    # El de septiembre, que sigue dando trabajo, a la vista
+    assert re.search(r'class="mes-de-2026 mes-abre"\s*>', cuerpo)
+
+
+def test_hay_una_fila_para_desplegar_los_cerrados(client, db, empresa, usuario_admin):
+    # Escondidos no es desaparecidos: tiene que poder mirarlos cuando quiera.
+    _periodo(db, empresa, 2026, 10, cerrado=True)
+    _periodo(db, empresa, 2026, 8, cerrado=True)
+    _periodo(db, empresa, 2026, 9)
+    login(client, "admin@test.cl")
+
+    cuerpo = client.get("/contabilidad/conciliacion-sii").get_data(as_text=True)
+
+    assert 'class="fila-cerrados" data-anio="2026"' in cuerpo
+    assert "2 meses cerrados" in cuerpo
+    assert "ver-cerrados" in cuerpo
+
+
+def test_sin_meses_cerrados_no_aparece_esa_fila(client, db, empresa, usuario_admin):
+    _periodo(db, empresa, 2026, 9)
+    login(client, "admin@test.cl")
+
+    cuerpo = client.get("/contabilidad/conciliacion-sii").get_data(as_text=True)
+
+    assert 'class="fila-cerrados"' not in cuerpo
+
+
+def test_la_fila_de_cerrados_llega_escondida_si_el_anio_esta_plegado(client, db, empresa, usuario_admin):
+    # Sólo se abre el año más nuevo: en los demás no tiene nada que hacer.
+    _periodo(db, empresa, 2026, 9)
+    _periodo(db, empresa, 2024, 5, cerrado=True)
+    login(client, "admin@test.cl")
+
+    cuerpo = client.get("/contabilidad/conciliacion-sii").get_data(as_text=True)
+
+    assert re.search(r'class="fila-cerrados" data-anio="2024"[^>]*\shidden', cuerpo)
+
+
+def test_el_mes_cerrado_se_marca_en_verde(client, db, empresa, usuario_admin):
+    _periodo(db, empresa, 2026, 10, cerrado=True)
+    login(client, "admin@test.cl")
+
+    cuerpo = client.get("/contabilidad/conciliacion-sii").get_data(as_text=True)
+
+    assert re.search(r'badge bg-success[^>]*>🔒 Cerrado', cuerpo)
+
+
+def test_los_ceros_se_apagan_para_que_salten_los_que_no_lo_son(client, db, empresa, usuario_admin):
+    # La tabla venía siendo una pared de ceros; lo que hay que mirar son los
+    # otros.
+    _periodo(db, empresa, 2026, 10, pendientes=4)
+    login(client, "admin@test.cl")
+
+    cuerpo = client.get("/contabilidad/conciliacion-sii").get_data(as_text=True)
+
+    assert '<span class="num-cero">0</span>' in cuerpo
+    # El que no es cero sale entero, sin apagar
+    assert re.search(r'<td class="num">4</td>', cuerpo)

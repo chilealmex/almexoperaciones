@@ -56,16 +56,20 @@
 </div>
 {% endif %}
 
+{# Un cero no es una noticia: se apaga para que salten a la vista los que no
+   lo son, que son los que hay que mirar. #}
+{% macro n(valor) %}{% if valor %}{{ valor }}{% else %}<span class="num-cero">0</span>{% endif %}{% endmacro %}
+
 {% macro celda_libro(conciliacion, libro, clave) %}
   {% if libro %}
   <td class="num">{{ libro.n_coincide }}</td>
-  <td class="num">{{ libro.n_solo_sii }}</td>
-  <td class="num">{{ libro.n_solo_defontana }}</td>
-  <td class="num">{{ libro.n_dif_monto }}</td>
-  <td class="num">{{ libro.n_dif_datos }}</td>
+  <td class="num">{{ n(libro.n_solo_sii) }}</td>
+  <td class="num">{{ n(libro.n_solo_defontana) }}</td>
+  <td class="num">{{ n(libro.n_dif_monto) }}</td>
+  <td class="num">{{ n(libro.n_dif_datos) }}</td>
   <td class="num">{{ libro.total_sii|clp }}</td>
   <td class="num">{{ libro.total_defontana|clp }}</td>
-  <td class="num {{ 'text-danger fw-semibold' if libro.diferencia != 0 }}">{{ libro.diferencia|clp }}</td>
+  <td class="num {{ 'text-danger fw-semibold' if libro.diferencia != 0 else 'num-cero' }}">{{ libro.diferencia|clp }}</td>
   <td>
     <a href="{{ url_for('contabilidad.ver_libro_conciliacion_sii', conciliacion_id=conciliacion.id, clave=clave) }}"
        class="btn btn-outline-secondary btn-sm">Ver</a>
@@ -132,12 +136,15 @@
           {% for c in grupo.meses %}
           {% for clave, etiqueta in [('compra', 'Compras'), ('venta', 'Ventas')] %}
           {% set libro = c.libro_por_clave(clave) %}
-          <tr class="mes-de-{{ grupo.anio }}"{{ ' hidden' if not abierto }}>
+          {# Un mes cerrado ya no se toca: llega guardado, debajo de los que
+             todavía dan trabajo, y se despliega cuando hay algo que mirar. #}
+          <tr class="mes-de-{{ grupo.anio }}{{ ' mes-cerrado' if c.cerrado }}{{ ' mes-abre' if loop.first }}"
+              {{ ' hidden' if not abierto or c.cerrado }}>
             {% if loop.first %}
-            <td rowspan="2" class="align-middle">
+            <td rowspan="2" class="align-middle celda-periodo">
               <div><strong>{{ meses[c.mes - 1] }}</strong></div>
               {% if c.cerrado %}
-              <span class="badge bg-secondary" title="{% if c.cerrado_por %}Cerrado por {{ c.cerrado_por.nombre_completo }}{% endif %}{% if c.cerrado_en %} el {{ c.cerrado_en|fecha_hora }}{% endif %}">🔒 Cerrado</span>
+              <span class="badge bg-success" title="{% if c.cerrado_por %}Cerrado por {{ c.cerrado_por.nombre_completo }}{% endif %}{% if c.cerrado_en %} el {{ c.cerrado_en|fecha_hora }}{% endif %}{% if not current_user.es_superadmin %} · Solo un superadmin puede reabrirlo{% endif %}">🔒 Cerrado</span>
               {% endif %}
               {% if puede_editar %}
               <div class="mt-1">
@@ -149,9 +156,10 @@
                     <input type="hidden" name="estado" value="abierto">
                     <button type="submit" class="btn btn-link btn-sm p-0">Reabrir</button>
                   </form>
-                  {% else %}
-                  <span class="text-muted small">Solo un superadmin reabre</span>
                   {% endif %}
+                  {# Para quien no puede reabrirlo no va ninguna línea: iba una
+                     por cada mes cerrado y eran cinco veces la misma. Lo dice
+                     el globo de la marca "Cerrado". #}
                 {% else %}
                 <form method="post" class="d-inline"
                       action="{{ url_for('contabilidad.cambiar_estado_conciliacion_sii', conciliacion_id=c.id) }}"
@@ -183,6 +191,18 @@
           </tr>
           {% endfor %}
           {% endfor %}
+          {% if grupo.cerrados %}
+          <tr class="fila-cerrados" data-anio="{{ grupo.anio }}" aria-expanded="false"
+              role="button" tabindex="0"{{ ' hidden' if not abierto }}>
+            <td colspan="11" class="small">
+              <span class="chevron-grupo">▾</span>
+              🔒 {{ grupo.cerrados }} {{ 'mes cerrado' if grupo.cerrados == 1 else 'meses cerrados' }}
+              <span class="ms-2 text-primary text-decoration-underline"><span
+                class="ver-cerrados">mostrar</span><span
+                class="ocultar-cerrados">ocultar</span></span>
+            </td>
+          </tr>
+          {% endif %}
           {% endfor %}
         </tbody>
       </table>
@@ -204,23 +224,40 @@
   // collapse de Bootstrap porque collapse cambia el display de la fila, y una
   // <tr> que deja de ser table-row rompe la grilla de columnas de la tabla.
   (function () {
-    document.querySelectorAll('.fila-anio[data-anio]').forEach(function (cabecera) {
+    function desplegado(fila) {
+      return fila && fila.getAttribute('aria-expanded') === 'true';
+    }
+
+    // Un mes se ve si su año está desplegado y, cuando está cerrado, si además
+    // se pidió ver los cerrados de ese año.
+    function pintar(anio) {
+      var anioAbierto = desplegado(document.querySelector('.fila-anio[data-anio="' + anio + '"]'));
+      var filaCerrados = document.querySelector('.fila-cerrados[data-anio="' + anio + '"]');
+      var verCerrados = desplegado(filaCerrados);
+      document.querySelectorAll('.mes-de-' + anio).forEach(function (fila) {
+        var cerrado = fila.classList.contains('mes-cerrado');
+        fila.hidden = !anioAbierto || (cerrado && !verCerrados);
+      });
+      if (filaCerrados) filaCerrados.hidden = !anioAbierto;
+    }
+
+    function plegable(fila) {
+      if (!fila) return;
       function alternar() {
-        var abierto = cabecera.getAttribute('aria-expanded') === 'true';
-        cabecera.setAttribute('aria-expanded', abierto ? 'false' : 'true');
-        document.querySelectorAll('.mes-de-' + cabecera.dataset.anio).forEach(function (fila) {
-          fila.hidden = abierto;
-        });
+        fila.setAttribute('aria-expanded', desplegado(fila) ? 'false' : 'true');
+        pintar(fila.dataset.anio);
       }
-      cabecera.addEventListener('click', alternar);
-      cabecera.addEventListener('keydown', function (evento) {
+      fila.addEventListener('click', alternar);
+      fila.addEventListener('keydown', function (evento) {
         // Con teclado: la fila es un botón, así que responde a Enter y espacio.
         if (evento.key === 'Enter' || evento.key === ' ') {
           evento.preventDefault();
           alternar();
         }
       });
-    });
+    }
+
+    document.querySelectorAll('.fila-anio[data-anio], .fila-cerrados[data-anio]').forEach(plegable);
   })();
 </script>
 {% endblock %}
