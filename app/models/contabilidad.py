@@ -539,3 +539,79 @@ class ConciliacionSiiDocumento(db.Model):
 
     def __repr__(self):
         return f"<ConciliacionSiiDocumento {self.tipo_doc}/{self.folio} {self.estado}>"
+
+
+class F29Cuenta(db.Model):
+    """Una cuenta del Libro Mayor cargada para armar la propuesta del F29.
+
+    Las cuentas se van subiendo de a una —el mayor se baja de Defontana cuenta
+    por cuenta— y se quedan guardadas: subir la de IVA crédito no borra la de
+    IVA débito que ya estaba. Volver a subir la misma reemplaza sus
+    movimientos, porque el mayor es una foto de la contabilidad y la de hoy
+    manda sobre la de ayer.
+
+    El archivo trae el año entero, así que una carga sirve para los doce
+    meses: el mes se elige al mirar la propuesta, no al cargar.
+    """
+
+    __tablename__ = "f29_cuentas"
+    __table_args__ = (db.UniqueConstraint("cuenta", name="uq_f29_cuenta"),)
+
+    id = db.Column(db.Integer, primary_key=True)
+    # El código del plan de cuentas, "1.1.1090.10.01".
+    cuenta = db.Column(db.String(40), nullable=False)
+    nombre = db.Column(db.String(120), nullable=False)
+    # A qué parte del formulario aporta: iva_credito, iva_debito, ppm...
+    concepto = db.Column(db.String(20), nullable=True)
+    # 1 para las cuentas de activo y −1 para las de pasivo, para que lo que se
+    # declara quede en positivo.
+    signo = db.Column(db.Integer, nullable=False, default=1)
+
+    archivo = db.Column(db.String(255), nullable=True)
+    lineas = db.Column(db.Integer, nullable=False, default=0)
+    cargas = db.Column(db.Integer, nullable=False, default=1)
+    cargado_en = db.Column(db.DateTime, server_default=db.func.now())
+    cargado_por_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"), nullable=True)
+
+    movimientos = db.relationship(
+        "F29Movimiento", backref="cuenta_mayor", cascade="all, delete-orphan", lazy="selectin"
+    )
+    cargado_por = db.relationship("Usuario")
+
+    @property
+    def meses(self) -> list:
+        return sorted({m.mes for m in self.movimientos})
+
+    def __repr__(self):
+        return f"<F29Cuenta {self.cuenta} {self.nombre}>"
+
+
+class F29Movimiento(db.Model):
+    """Lo que una cuenta movió en un mes, por tipo de documento.
+
+    Se guarda separado por tipo —"Cpra_FCA", "Cpra_DI", "Cpra_NCC"— porque el
+    formulario los declara en códigos distintos: las facturas del giro en el
+    520, las de importación en el 535 y las notas de crédito en el 528.
+    """
+
+    __tablename__ = "f29_movimientos"
+    __table_args__ = (
+        db.UniqueConstraint("cuenta_id", "mes", "tipo", name="uq_f29_movimiento"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    cuenta_id = db.Column(
+        db.Integer, db.ForeignKey("f29_cuentas.id"), nullable=False, index=True
+    )
+    mes = db.Column(db.String(7), nullable=False, index=True)
+    tipo = db.Column(db.String(40), nullable=False, default="")
+
+    debe = db.Column(db.BigInteger, nullable=False, default=0)
+    haber = db.Column(db.BigInteger, nullable=False, default=0)
+    lineas = db.Column(db.Integer, nullable=False, default=0)
+    # Documentos distintos, que no es lo mismo que líneas: el formulario pide
+    # la cantidad de facturas y una factura puede quedar en dos líneas.
+    documentos = db.Column(db.Integer, nullable=False, default=0)
+
+    def __repr__(self):
+        return f"<F29Movimiento {self.mes} {self.tipo}>"

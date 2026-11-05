@@ -20,6 +20,8 @@ from app.models.contabilidad import (
     ConciliacionSii,
     ConciliacionSiiDocumento,
     ConciliacionSiiLibro,
+    F29Cuenta,
+    F29Movimiento,
     LineaDifTc,
     PeriodoDifTc,
     ProvisionIngreso,
@@ -36,12 +38,14 @@ from app.utils.conciliacion_sii import (
     comparar_con_mayor,
     cruzar,
     juntar_mayores,
+    leer_cuentas_mayor,
     leer_libro_defontana,
-    leer_libro_mayor,
     leer_rcv_sii,
     separar_por_sistema,
 )
 from app.utils.decorators import require_permission
+from app.utils.f29 import CONCEPTOS as CONCEPTOS_F29
+from app.utils.f29 import concepto_de_cuenta, propuesta_f29
 from app.utils.dif_tipo_cambio import recalcular_periodo, totales_periodo
 from app.utils.dif_tipo_cambio_excel import PlanillaInvalida as PlanillaInvalidaMayor
 from app.utils.dif_tipo_cambio_excel import leer_mayor
@@ -1435,9 +1439,17 @@ def cargar_mayor_conciliacion_sii(conciliacion_id, clave):
         return redirect(_volver_al_libro(conciliacion, clave))
 
     try:
-        mayores = [leer_libro_mayor(a) for a in archivos]
+        mayores = [cuenta for a in archivos for cuenta in leer_cuentas_mayor(a)]
     except ArchivoInvalido as error:
         flash(str(error), "danger")
+        return redirect(_volver_al_libro(conciliacion, clave))
+
+    if not any(cuenta["documentos"] for cuenta in mayores):
+        flash(
+            "El Libro Mayor no trae líneas con documento. Descárgalo de la cuenta de IVA "
+            "y de la de proveedores o clientes, que son las que nombran cada factura.",
+            "danger",
+        )
         return redirect(_volver_al_libro(conciliacion, clave))
 
     mayor = juntar_mayores(mayores)
@@ -1805,4 +1817,171 @@ def provision_reversas_por_mes():
         nombre_mes=nombre_mes,
         mes_legible=mes_legible,
         mes_reversa_legible=mes_reversa_legible,
+    )
+
+
+# --- F29: la propuesta con el Libro Mayor ---------------------------------
+#
+# El formulario se llena con lo que las cuentas de impuestos movieron en el
+# mes, y eso está en el mayor. Las cuentas se van subiendo de a una —el mayor
+# se baja de Defontana cuenta por cuenta— y se quedan guardadas, así que la
+# propuesta se va completando a medida que se suben.
+
+
+def _cuentas_del_mes(mes):
+    """Las cuentas cargadas, con lo que movieron en ese mes."""
+    cuentas = []
+    for cuenta in F29Cuenta.query.order_by(F29Cuenta.nombre).all():
+        movimientos = [
+            {"tipo": m.tipo, "debe": m.debe, "haber": m.haber,
+             "lineas": m.lineas, "documentos": m.documentos}
+            for m in cuenta.movimientos if m.mes == mes
+        ]
+        cuentas.append({
+            "id": cuenta.id,
+            "cuenta": cuenta.cuenta,
+            "nombre": cuenta.nombre,
+            "concepto": cuenta.concepto,
+            "signo": cuenta.signo,
+            "movimientos": movimientos,
+        })
+    return cuentas
+
+
+def _mes_f29_texto(mes) -> str:
+    """"2026-09" escrito como se lee: "septiembre 2026"."""
+    try:
+        anio, numero = str(mes).split("-")
+        return f"{MESES_NOMBRES[int(numero) - 1]} {anio}"
+    except (ValueError, IndexError):
+        return str(mes or "")
+
+
+def _meses_del_f29():
+    filas = db.session.query(F29Movimiento.mes).distinct().all()
+    return sorted((f[0] for f in filas), reverse=True)
+
+
+@bp.route("/f29")
+@require_permission("contabilidad", "ver")
+def f29():
+    meses = _meses_del_f29()
+    mes = request.args.get("mes") or (meses[0] if meses else "")
+    cuentas = _cuentas_del_mes(mes) if mes else []
+    return render_template(
+        "contabilidad/f29.html",
+        cargadas=F29Cuenta.query.order_by(F29Cuenta.nombre).all(),
+        meses=meses,
+        mes=mes,
+        mes_texto=_mes_f29_texto(mes),
+        propuesta=propuesta_f29(cuentas) if mes else None,
+        cuentas=cuentas,
+        conceptos=CONCEPTOS_F29,
+        accion=AccionForm(),
+    )
+
+
+@bp.route("/f29/cargar", methods=["POST"])
+@require_permission("contabilidad", "editar")
+def cargar_f29():
+    """Guarda una o varias cuentas del Libro Mayor para armar el F29.
+
+    Lo que ya estaba cargado se queda: subir la cuenta de IVA crédito no borra
+    la de IVA débito. Volver a subir la misma cuenta reemplaza sus
+    movimientos, porque el mayor es una foto de la contabilidad y la de hoy
+    manda sobre la de ayer.
+    """
+    archivos = [a for a in request.files.getlist("mayor") if a and a.filename]
+    if not archivos:
+        flash("Elige al menos un Libro Mayor.", "warning")
+        return redirect(url_for("contabilidad.f29", **request.args))
+
+    try:
+        leidas = [(a.filename, c) for a in archivos for c in leer_cuentas_mayor(a)]
+    except ArchivoInvalido as error:
+        flash(str(error), "danger")
+        return redirect(url_for("contabilidad.f29", **request.args))
+
+    nuevas, actualizadas, sin_concepto = 0, 0, []
+    for archivo, leida in leidas:
+        cuenta = F29Cuenta.query.filter_by(cuenta=leida["cuenta"]).first()
+        if cuenta is None:
+            cuenta = F29Cuenta(cuenta=leida["cuenta"], cargas=0)
+            db.session.add(cuenta)
+            nuevas += 1
+        else:
+            actualizadas += 1
+            # Primero se borran los movimientos de la carga anterior y recién
+            # después se insertan los nuevos: si no, los dos juegos chocan en
+            # la misma base.
+            cuenta.movimientos.clear()
+            db.session.flush()
+
+        cuenta.nombre = leida["nombre"][:120]
+        cuenta.concepto = concepto_de_cuenta(leida["nombre"])
+        cuenta.signo = leida["signo"]
+        cuenta.archivo = archivo[:255]
+        cuenta.cargas = (cuenta.cargas or 0) + 1
+        cuenta.cargado_en = datetime.now(timezone.utc)
+        cuenta.cargado_por_id = getattr(current_user, "id", None)
+        cuenta.lineas = sum(m["lineas"] for m in leida["movimientos"].values())
+        for (mes, tipo), movimiento in leida["movimientos"].items():
+            cuenta.movimientos.append(F29Movimiento(
+                mes=mes, tipo=(tipo or "")[:40],
+                debe=movimiento["debe"], haber=movimiento["haber"],
+                lineas=movimiento["lineas"], documentos=movimiento["documentos"],
+            ))
+        if not cuenta.concepto:
+            sin_concepto.append(cuenta.nombre)
+
+    db.session.commit()
+
+    partes = []
+    if nuevas:
+        partes.append(f"{nuevas} cuenta(s) nueva(s)")
+    if actualizadas:
+        partes.append(f"{actualizadas} actualizada(s)")
+    flash("Libro Mayor cargado: " + " y ".join(partes) + ".", "success")
+    if sin_concepto:
+        flash(
+            "No se reconoció a qué parte del F29 aporta: " + ", ".join(sin_concepto) +
+            ". Queda cargada igual, con su movimiento a la vista.",
+            "warning",
+        )
+    return redirect(url_for("contabilidad.f29", **request.args))
+
+
+@bp.route("/f29/<int:cuenta_id>/eliminar", methods=["POST"])
+@require_permission("contabilidad", "editar")
+def eliminar_cuenta_f29(cuenta_id):
+    cuenta = db.session.get(F29Cuenta, cuenta_id)
+    if cuenta is None:
+        abort(404)
+    nombre = cuenta.nombre
+    db.session.delete(cuenta)
+    db.session.commit()
+    flash(f"Se quitó {nombre} de la propuesta del F29.", "success")
+    return redirect(url_for("contabilidad.f29", **request.args))
+
+
+@bp.route("/f29/propuesta.xlsx")
+@require_permission("contabilidad", "ver")
+def exportar_f29():
+    mes = request.args.get("mes") or (_meses_del_f29() or [""])[0]
+    propuesta = propuesta_f29(_cuentas_del_mes(mes)) if mes else {"lineas": []}
+    columnas = [
+        col("Código", ancho=10),
+        col("Glosa", ancho=48),
+        col("Valor", ancho=18, formato=CLP),
+        col("De dónde sale", ancho=42),
+    ]
+    filas = [
+        [linea["codigo"], linea["glosa"], linea["valor"], linea["de"]]
+        for linea in propuesta["lineas"]
+    ]
+    return responder_excel(
+        f"f29-{mes or 'sin-mes'}",
+        f"Propuesta F29 — {_mes_f29_texto(mes) or 'sin mes'}",
+        columnas,
+        filas,
     )

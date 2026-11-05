@@ -354,6 +354,17 @@ MODULOS = (
                 ),
             },
             {
+                "clave": "f29",
+                "etiqueta": "Propuesta F29",
+                "endpoint": "contabilidad.f29",
+                "endpoints": (
+                    "contabilidad.f29",
+                    "contabilidad.cargar_f29",
+                    "contabilidad.eliminar_cuenta_f29",
+                    "contabilidad.exportar_f29",
+                ),
+            },
+            {
                 "clave": "dif_tc",
                 "etiqueta": "Dif TC PR/CL",
                 "endpoint": "contabilidad.dif_tc",

@@ -405,13 +405,24 @@ _RE_FECHA_MAYOR = re.compile(r"^(\d{2})/(\d{2})/(\d{4})$")
 
 
 def _clase_de_cuenta(nombre: str) -> str:
-    """Qué aporta la cuenta al cruce: el IVA del documento o su total.
+    """Qué aporta la cuenta al cruce: el IVA del documento, su total o una
+    retención.
 
     El IVA se reconoce por el nombre de la cuenta —"IVA CREDITO FISCAL", "IVA
     DEBITO FISCAL"—. Lo demás que se cargue (proveedores en compras, clientes
     en ventas) aporta el total del documento.
+
+    El IVA retenido es su propia clase porque no es ninguno de los dos. En una
+    factura de compra con retención el IVA queda entero en la cuenta de IVA
+    crédito y el total entero en la de proveedores; lo retenido es una tercera
+    línea que se le descuenta al total informado. En la FCEDIESEL#337537 del
+    06-08: IVA crédito 18.231, proveedores 114.186, retenido 17.970, y el SII
+    informa total 96.216 = 114.186 − 17.970.
     """
-    return "iva" if "IVA" in normalizar_nombre(nombre) else "total"
+    normalizado = normalizar_nombre(nombre)
+    if "IVA" in normalizado and "RETENIDO" in normalizado:
+        return "retenido"
+    return "iva" if "IVA" in normalizado else "total"
 
 
 def _signo_de_cuenta(codigo: str) -> int:
@@ -425,68 +436,105 @@ def _signo_de_cuenta(codigo: str) -> int:
     return -1 if codigo.startswith("2") else 1
 
 
-def leer_libro_mayor(archivo) -> dict:
-    """Lee un Libro Mayor de Defontana y devuelve sus documentos por cuenta.
-
-    {'cuenta', 'nombre', 'clase', 'documentos': {(folio, clave de RUT): monto}},
-    con el monto ya con el signo que le toca a la cuenta. Se agrupa por folio y
-    RUT y no por el prefijo del tipo ("FCA", "NCC"): ese prefijo es de
-    Defontana y no se parece a los códigos del SII, mientras que folio y RUT
-    los tienen los dos lados. En el mayor del 05-11 el par identifica un solo
-    documento en las dos cuentas: 0 ambigüedades en 1.670 y en 1.457.
-    """
+def _tabla_del_mayor(archivo):
+    """La tabla de movimientos del ".xls" de Defontana, que es HTML."""
     texto = _decodificar(_leer_bytes(archivo), ("cp1252", "latin-1", "utf-8"))
     parser = _TablasHtml()
     parser.feed(texto)
-
-    tabla = None
     for candidata in parser.tablas:
         if any(fila and fila[0].strip() == "Fecha" for fila in candidata):
-            tabla = candidata
-            break
-    if tabla is None:
-        raise ArchivoInvalido(
-            "Ese archivo no parece un Libro Mayor de Defontana: no tiene la tabla de "
-            "movimientos con las columnas Fecha, Número, Tipo y Descripción."
-        )
+            return candidata
+    raise ArchivoInvalido(
+        "Ese archivo no parece un Libro Mayor de Defontana: no tiene la tabla de "
+        "movimientos con las columnas Fecha, Número, Tipo y Descripción."
+    )
 
-    codigo = nombre = ""
-    documentos, fechas = {}, {}
-    for fila in tabla:
+
+def leer_cuentas_mayor(archivo) -> list:
+    """Lee un Libro Mayor de Defontana y devuelve una entrada por cuenta.
+
+    Un archivo puede traer varias cuentas, una tras otra, y cada una se lee por
+    separado porque no aportan lo mismo: la de IVA da el IVA del documento, la
+    de proveedores su total, la de IVA retenido lo que se retuvo.
+
+    De cada cuenta:
+
+    - 'documentos': {(folio, clave de RUT): monto}, con el signo que le toca a
+      la cuenta. Se agrupa por folio y RUT y no por el prefijo del tipo ("FCA",
+      "NCC"): ese prefijo es de Defontana y no se parece a los códigos del SII,
+      mientras que folio y RUT los tienen los dos lados. En el mayor del 05-11
+      el par identifica un solo documento: 0 ambigüedades en 1.670 y en 1.457.
+    - 'movimientos': {(mes, tipo): {'debe', 'haber', 'lineas', 'documentos'}},
+      que es de lo que sale el F29. El tipo es el del asiento ("Cpra_FCA",
+      "Cpra_DI", "Cpra_NCC") y separa lo que el formulario declara por
+      separado: las facturas del giro, las de importación y las notas de
+      crédito van a códigos distintos.
+    """
+    cuentas, actual = [], None
+    for fila in _tabla_del_mayor(archivo):
         if not fila or not fila[0]:
             continue
         primera = fila[0].strip()
         cuenta = _RE_CUENTA_MAYOR.match(primera)
         if cuenta:
-            # Un mismo archivo puede traer varias cuentas, una tras otra.
             codigo, nombre = cuenta.group(1), cuenta.group(2).strip()
+            actual = {
+                "cuenta": codigo,
+                "nombre": nombre,
+                "clase": _clase_de_cuenta(nombre),
+                "signo": _signo_de_cuenta(codigo),
+                "documentos": {},
+                "movimientos": {},
+                "_fechas": {},
+                "_folios": {},
+            }
+            cuentas.append(actual)
             continue
-        if not _RE_FECHA_MAYOR.match(primera) or len(fila) < 6:
+        if actual is None or not _RE_FECHA_MAYOR.match(primera) or len(fila) < 6:
             continue
+
+        mes = f"{primera[6:10]}-{primera[3:5]}"
+        tipo = (fila[2] or "").strip()
+        debe, haber = a_monto(fila[4]), a_monto(fila[5])
+        movimiento = actual["movimientos"].setdefault(
+            (mes, tipo), {"debe": 0, "haber": 0, "lineas": 0, "documentos": 0}
+        )
+        movimiento["debe"] += debe
+        movimiento["haber"] += haber
+        movimiento["lineas"] += 1
+
         doc = _RE_DOC_MAYOR.match(fila[3] or "")
         if not doc:
             # Pagos, traspasos y la apertura no nombran documento: no hay nada
-            # que cruzar con ellos.
+            # que cruzar con ellos, pero su monto sí es movimiento de la cuenta.
             continue
         rut = _RE_RUT_MAYOR.search(fila[3] or "")
         llave = (normalizar_folio(doc.group(2)), normalizar_rut(rut.group(1)) if rut else "")
-        monto = (a_monto(fila[4]) - a_monto(fila[5])) * _signo_de_cuenta(codigo)
-        documentos[llave] = documentos.get(llave, 0) + monto
-        fechas.setdefault(llave, []).append(primera)
-
-    if not documentos:
-        raise ArchivoInvalido(
-            "El Libro Mayor no trae líneas con documento. Descárgalo de la cuenta de IVA "
-            "y de la de proveedores o clientes, que son las que nombran cada factura."
+        actual["documentos"][llave] = actual["documentos"].get(llave, 0) + (
+            (debe - haber) * actual["signo"]
         )
-    return {
-        "cuenta": codigo,
-        "nombre": nombre,
-        "clase": _clase_de_cuenta(nombre),
-        "documentos": documentos,
+        actual["_fechas"].setdefault(llave, []).append(primera)
+        # La cantidad de documentos del F29 cuenta facturas, no líneas: un
+        # documento puede quedar en dos líneas de la misma cuenta.
+        vistos = actual["_folios"].setdefault((mes, tipo), set())
+        if llave not in vistos:
+            vistos.add(llave)
+            movimiento["documentos"] += 1
+
+    for cuenta in cuentas:
         # En qué mes quedó contabilizado cada documento, por si cayó en otro.
-        "meses": {k: sorted({f"{d[6:10]}-{d[3:5]}" for d in v})[-1] for k, v in fechas.items()},
-    }
+        cuenta["meses"] = {
+            k: sorted({f"{d[6:10]}-{d[3:5]}" for d in v})[-1]
+            for k, v in cuenta.pop("_fechas").items()
+        }
+        cuenta.pop("_folios")
+
+    if not cuentas:
+        raise ArchivoInvalido(
+            "El Libro Mayor no trae ninguna cuenta. Descárgalo desde Defontana con el "
+            "detalle de movimientos."
+        )
+    return cuentas
 
 
 # Lo que el mayor dice de un documento, comparado con lo que informa el libro.
@@ -505,10 +553,15 @@ def juntar_mayores(mayores) -> dict:
     Se suben de a uno por cuenta —la de IVA y la de proveedores o clientes—, y
     para cruzar hace falta tener las dos juntas: el IVA sale de una y el total
     de la otra.
+
+    Si además se carga la cuenta de IVA retenido, lo retenido se le descuenta
+    al total, que es lo que hace el SII: en la FCEDIESEL#337537 el mayor tiene
+    114.186 en proveedores y 17.970 retenidos, y el SII informa 96.216. Sin
+    descontarlo, esa factura aparecería con el total distinto sin estarlo.
     """
-    iva, total, meses, cuentas = {}, {}, {}, []
+    iva, total, retenido, meses, cuentas = {}, {}, {}, {}, []
     for mayor in mayores:
-        destino = iva if mayor["clase"] == "iva" else total
+        destino = {"iva": iva, "retenido": retenido}.get(mayor["clase"], total)
         for llave, monto in mayor["documentos"].items():
             destino[llave] = destino.get(llave, 0) + monto
         for llave, mes in mayor.get("meses", {}).items():
@@ -516,6 +569,13 @@ def juntar_mayores(mayores) -> dict:
                 meses[llave] = mes
         cuentas.append({"cuenta": mayor["cuenta"], "nombre": mayor["nombre"],
                         "clase": mayor["clase"], "documentos": len(mayor["documentos"])})
+
+    # Lo retenido sólo corrige el total de un documento que tenga total: suelto
+    # no es el total de nadie.
+    for llave, monto in retenido.items():
+        if llave in total:
+            total[llave] -= monto
+
     return {"iva": iva, "total": total, "meses": meses, "cuentas": cuentas}
 
 

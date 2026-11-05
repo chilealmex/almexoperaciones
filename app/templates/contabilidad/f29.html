@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% block title %}Propuesta F29{% endblock %}
+{% block content %}
+{% set puede_editar = puede('contabilidad', 'editar') %}
+
+<div class="page-head">
+  <div>
+    <h1>Propuesta F29</h1>
+    <p class="page-sub">
+      El formulario armado con lo que las cuentas de impuestos movieron en el mes, según el Libro Mayor.
+    </p>
+  </div>
+  {% if mes %}
+  <div>
+    <a class="btn btn-outline-secondary btn-sm"
+       href="{{ url_for('contabilidad.exportar_f29', mes=mes) }}">Excel</a>
+  </div>
+  {% endif %}
+</div>
+
+{% if puede_editar %}
+<div class="card mb-4">
+  <div class="card-header">Cargar cuentas del Libro Mayor</div>
+  <div class="card-body">
+    <form method="post" action="{{ url_for('contabilidad.cargar_f29') }}"
+          enctype="multipart/form-data" class="d-flex gap-2 align-items-end flex-wrap">
+      {{ accion.hidden_tag() }}
+      <div>
+        <label class="form-label small mb-1" for="mayor">Libro Mayor (Defontana)</label>
+        <input type="file" name="mayor" id="mayor" class="form-control form-control-sm"
+               accept=".xls,.xlsx,.html,.htm" multiple style="min-width:320px;">
+        <div class="form-text">
+          De a una o varias juntas. Las que se suban se van sumando a las que ya están, y
+          volver a subir una reemplaza sólo esa. El archivo trae el año entero, así que una
+          carga sirve para todos los meses.
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary btn-sm mb-4">Cargar</button>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+<div class="card mb-4">
+  <div class="card-header">Cuentas cargadas</div>
+  <div class="table-responsive">
+    <table class="table table-sm mb-0 align-middle">
+      <thead>
+        <tr>
+          <th>Cuenta</th><th>Nombre</th><th>Aporta a</th>
+          <th class="text-end">Líneas</th><th>Meses</th><th>Cargada</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for cuenta in cargadas %}
+        <tr>
+          <td class="text-nowrap small">{{ cuenta.cuenta }}</td>
+          <td>{{ cuenta.nombre }}</td>
+          <td>
+            {% if cuenta.concepto %}
+              {{ conceptos.get(cuenta.concepto, cuenta.concepto) }}
+            {% else %}
+              <span class="text-warning">sin reconocer</span>
+            {% endif %}
+          </td>
+          <td class="text-end">{{ cuenta.lineas }}</td>
+          <td class="small text-muted">{{ cuenta.meses|length }}</td>
+          <td class="small text-muted text-nowrap">{{ cuenta.cargado_en|fecha_hora }}</td>
+          <td class="text-end">
+            {% if puede_editar %}
+            <form method="post" class="d-inline"
+                  action="{{ url_for('contabilidad.eliminar_cuenta_f29', cuenta_id=cuenta.id, mes=mes) }}"
+                  onsubmit="return confirm('¿Quitar {{ cuenta.nombre }} de la propuesta?');">
+              {{ accion.hidden_tag() }}
+              <button class="btn btn-outline-danger btn-sm">Quitar</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="text-center text-muted py-4">
+          Todavía no hay ninguna cuenta cargada. Sube el Libro Mayor de la cuenta de IVA débito
+          fiscal, el de IVA crédito fiscal, y los de PPM, retención de honorarios e impuesto único.
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% if meses %}
+<form method="get" class="d-flex gap-2 align-items-end flex-wrap mb-3">
+  <div>
+    <label class="form-label small mb-1" for="mes">Mes</label>
+    <select name="mes" id="mes" class="form-select form-select-sm" onchange="this.form.submit()">
+      {% for m in meses %}
+      <option value="{{ m }}" {{ 'selected' if m == mes }}>{{ m }}</option>
+      {% endfor %}
+    </select>
+  </div>
+</form>
+{% endif %}
+
+{% if propuesta %}
+  {% for aviso in propuesta.avisos %}
+  <div class="alert alert-warning py-2">{{ aviso }}</div>
+  {% endfor %}
+
+  {% if propuesta.faltan %}
+  <div class="alert alert-info py-2">
+    Falta cargar la cuenta de {{ propuesta.faltan|join(' y la de ') }}: sin ella esa parte del
+    formulario queda en cero.
+  </div>
+  {% endif %}
+
+  {% if propuesta.sin_codigo %}
+  <div class="alert alert-warning py-2">
+    {% for linea in propuesta.sin_codigo %}
+    <div>
+      <strong>{{ linea.nombre }}</strong>: {{ linea.valor|clp }} en {{ mes_texto }}.
+      Falta saber en qué código del formulario va — mándame un F29 de un mes que la traiga
+      declarada y queda puesta.
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="card mb-4">
+    <div class="card-header">Formulario 29 — {{ mes_texto }}</div>
+    <div class="table-responsive">
+      <table class="table table-sm mb-0 align-middle">
+        <thead>
+          <tr>
+            <th style="width:6rem;">Código</th>
+            <th>Glosa</th>
+            <th class="text-end" style="width:12rem;">Valor</th>
+            <th>De dónde sale</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for linea in propuesta.lineas %}
+          <tr class="{{ 'table-light fw-semibold' if linea.clase == 'total' }}">
+            <td class="text-nowrap">{{ linea.codigo }}</td>
+            <td>{{ linea.glosa }}</td>
+            <td class="text-end text-nowrap">
+              {% if linea.clase == 'cantidad' %}{{ linea.valor }}{% else %}{{ linea.valor|clp }}{% endif %}
+            </td>
+            <td class="small text-muted">{{ linea.de }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {% if propuesta.sin_clasificar %}
+  <div class="alert alert-secondary py-2 small">
+    Cargadas pero sin reconocer a qué código van:
+    {% for c in propuesta.sin_clasificar %}{{ c.nombre }}{{ ', ' if not loop.last }}{% endfor %}.
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <div class="card-header">Lo que movió cada cuenta en {{ mes_texto }}</div>
+    <div class="table-responsive">
+      <table class="table table-sm mb-0 align-middle">
+        <thead>
+          <tr>
+            <th>Cuenta</th><th>Tipo</th>
+            <th class="text-end">Debe</th><th class="text-end">Haber</th>
+            <th class="text-end">Líneas</th><th class="text-end">Documentos</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for cuenta in cuentas %}
+            {% for movimiento in cuenta.movimientos|sort(attribute='tipo') %}
+            <tr>
+              <td class="small">{{ cuenta.nombre if loop.first }}</td>
+              <td class="small">{{ movimiento.tipo or '—' }}</td>
+              <td class="text-end">{{ movimiento.debe|clp }}</td>
+              <td class="text-end">{{ movimiento.haber|clp }}</td>
+              <td class="text-end">{{ movimiento.lineas }}</td>
+              <td class="text-end">{{ movimiento.documentos }}</td>
+            </tr>
+            {% endfor %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="card-footer small text-muted">
+      Las líneas que no nombran documento —el traspaso del saldo a IVA por pagar, la apertura—
+      no entran en ningún código: son el cierre contable del mes, no algo que el formulario declare.
+    </div>
+  </div>
+{% endif %}
+{% endblock %}
