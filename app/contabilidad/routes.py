@@ -30,10 +30,14 @@ from app.utils.conciliacion_sii import COLUMNAS_MONTO as COLUMNAS_MONTO_CONCILIA
 from app.utils.conciliacion_sii import ESTADO_ETIQUETAS as ESTADO_ETIQUETAS_CONCILIACION
 from app.utils.conciliacion_sii import ESTADOS as ESTADOS_CONCILIACION
 from app.utils.conciliacion_sii import TIPOS_DOCUMENTO as TIPOS_DOCUMENTO_SII
+from app.utils.conciliacion_sii import MAYOR_ETIQUETAS
 from app.utils.conciliacion_sii import (
     ArchivoInvalido,
+    comparar_con_mayor,
     cruzar,
+    juntar_mayores,
     leer_libro_defontana,
+    leer_libro_mayor,
     leer_rcv_sii,
     separar_por_sistema,
 )
@@ -821,7 +825,7 @@ def exportar_periodo_dif_tc(periodo_id):
 # empresa esté contabilizado igual en Defontana. Los dos libros —compras y
 # ventas— se cargan por separado, porque rara vez están listos el mismo día.
 
-FILTROS_CONCILIACION = ("pendientes", "aceptados", "otro_mes") + ESTADOS_CONCILIACION
+FILTROS_CONCILIACION = ("pendientes", "aceptados", "otro_mes", "mayor_dif", "mayor_falta") + ESTADOS_CONCILIACION
 
 # Motivo más frecuente, para no obligar a escribirlo cada vez: las facturas de
 # combustible llevan impuesto específico y el SII y Defontana no lo reparten
@@ -864,7 +868,7 @@ def _guardar_cruce(conciliacion, clave_libro, resultado, nombre_sii, nombre_defo
     una carga. Si no, un recálculo mentiría diciendo que alguien subió algo.
     """
     libro = conciliacion.libro_por_clave(clave_libro)
-    aceptaciones, meses = {}, {}
+    aceptaciones, meses, del_mayor = {}, {}, {}
     if libro is None:
         libro = ConciliacionSiiLibro(libro=clave_libro, cargas=0)
         conciliacion.libros.append(libro)
@@ -883,6 +887,12 @@ def _guardar_cruce(conciliacion, clave_libro, resultado, nombre_sii, nombre_defo
         meses = {
             d.llave: (d.mes_contable, d.mes_contable_por_id, d.mes_contable_en)
             for d in libro.documentos if d.mes_contable
+        }
+        # Y lo que dijo el Libro Mayor: volver a subirlo en cada recálculo
+        # sería rehacer el mismo trabajo.
+        del_mayor = {
+            d.llave: (d.iva_mayor, d.total_mayor, d.mayor_estado, d.mes_mayor)
+            for d in libro.documentos if d.mayor_estado
         }
         for documento in list(libro.documentos):
             db.session.delete(documento)
@@ -946,11 +956,16 @@ def _guardar_cruce(conciliacion, clave_libro, resultado, nombre_sii, nombre_defo
             mes_contable=mes_previo[0] if con_mes_este else None,
             mes_contable_por_id=mes_previo[1] if con_mes_este else None,
             mes_contable_en=mes_previo[2] if con_mes_este else None,
+            **dict(zip(("iva_mayor", "total_mayor", "mayor_estado", "mes_mayor"),
+                       del_mayor.get((fila["tipo_doc"], fila["folio"]), (None, None, None, None)))),
         ))
         if con_mes_este and not reaplicar:
             con_mes += 1
     libro.n_aceptados = reaplicadas
     libro.n_otro_mes = con_mes
+    libro.n_mayor_dif = sum(
+        1 for d in libro.documentos if d.mayor_estado and d.mayor_estado.startswith("dif")
+    )
     return libro
 
 
@@ -1127,6 +1142,10 @@ def _documentos_filtrados(libro, args):
         consulta = consulta.filter(ConciliacionSiiDocumento.aceptado.is_(True))
     elif filtro == "otro_mes":
         consulta = consulta.filter(ConciliacionSiiDocumento.mes_contable.isnot(None))
+    elif filtro == "mayor_dif":
+        consulta = consulta.filter(ConciliacionSiiDocumento.mayor_estado.like("dif%"))
+    elif filtro == "mayor_falta":
+        consulta = consulta.filter(ConciliacionSiiDocumento.mayor_estado == "falta")
     elif filtro:
         consulta = consulta.filter(ConciliacionSiiDocumento.estado == filtro)
 
@@ -1178,6 +1197,7 @@ def ver_libro_conciliacion_sii(conciliacion_id, clave):
         filtro=filtro,
         tipo=tipo,
         mes_nombre=_nombre_de_mes(conciliacion.mes),
+        etiquetas_mayor=MAYOR_ETIQUETAS,
         motivo_habitual=MOTIVO_HABITUAL,
         accion=AccionForm(),
         # Un período cerrado se mira pero no se toca: sin el formulario de
@@ -1201,6 +1221,10 @@ def exportar_libro_conciliacion_sii(conciliacion_id, clave):
         col("Tipo Doc.", ancho=28),
         col("Folio", ancho=12),
         col("Contabilizado en", ancho=18),
+        col("IVA en el mayor", ancho=16, formato=CLP),
+        col("Total en el mayor", ancho=16, formato=CLP),
+        col("Mayor", ancho=26),
+        col("Mes del mayor", ancho=16),
         col("En qué se diferencia", ancho=60),
         col("Fecha", ancho=12),
         col("RUT (SII)", ancho=15),
@@ -1218,6 +1242,10 @@ def exportar_libro_conciliacion_sii(conciliacion_id, clave):
             documento.tipo_doc_desc or documento.tipo_doc,
             documento.folio,
             documento.mes_contable_texto,
+            documento.iva_mayor,
+            documento.total_mayor,
+            MAYOR_ETIQUETAS.get(documento.mayor_estado, ""),
+            documento.mes_mayor_texto,
             documento.diferencia_descrita or "",
             documento.fecha or "",
             documento.rut_sii or "",
@@ -1371,6 +1399,91 @@ def _mes_valido(valor):
     if not (2000 <= anio <= 2100) or not (1 <= mes <= 12):
         return None
     return f"{anio:04d}-{mes:02d}"
+
+
+@bp.route("/conciliacion-sii/<int:conciliacion_id>/<clave>/mayor", methods=["POST"])
+@require_permission("contabilidad", "editar")
+def cargar_mayor_conciliacion_sii(conciliacion_id, clave):
+    """Cruza el libro con el Libro Mayor: dónde quedó contabilizado cada documento.
+
+    El mayor dice en qué cuentas quedó cada factura: el IVA en la cuenta de IVA
+    y el total en la de proveedores (o clientes, en ventas). Si esos dos calzan
+    con lo que informa el libro, el neto quedó bien contabilizado, porque
+    neto = total − IVA.
+
+    Se suben las dos cuentas juntas —una trae el IVA y la otra el total—, y se
+    guarda lo que el mayor dice de cada documento. No cambia ningún monto del
+    cruce: agrega una tercera columna de verdad.
+    """
+    if clave not in ("compra", "venta"):
+        abort(404)
+    conciliacion = _conciliacion_or_404(conciliacion_id)
+    libro = _libro_or_404(conciliacion, clave)
+    if not AccionForm().validate_on_submit():
+        abort(400)
+
+    if conciliacion.cerrado:
+        flash(
+            f"{_etiqueta_periodo(conciliacion)} está cerrado. Reábrelo para cambiar algo.",
+            "warning",
+        )
+        return redirect(_volver_al_libro(conciliacion, clave))
+
+    archivos = [a for a in request.files.getlist("mayor") if a and a.filename]
+    if not archivos:
+        flash("Elige al menos un Libro Mayor: el de la cuenta de IVA y el de proveedores o clientes.", "warning")
+        return redirect(_volver_al_libro(conciliacion, clave))
+
+    try:
+        mayores = [leer_libro_mayor(a) for a in archivos]
+    except ArchivoInvalido as error:
+        flash(str(error), "danger")
+        return redirect(_volver_al_libro(conciliacion, clave))
+
+    mayor = juntar_mayores(mayores)
+    if not mayor["iva"] or not mayor["total"]:
+        falta = "la cuenta de IVA" if not mayor["iva"] else "la cuenta de proveedores o clientes"
+        flash(
+            f"Falta {falta}: el IVA sale de una cuenta y el total de la otra, así que hacen falta las dos.",
+            "warning",
+        )
+        return redirect(_volver_al_libro(conciliacion, clave))
+
+    for documento in libro.documentos:
+        visto = comparar_con_mayor(_documento_como_dict(documento), mayor)
+        documento.iva_mayor = visto["iva_mayor"]
+        documento.total_mayor = visto["total_mayor"]
+        documento.mayor_estado = visto["estado"]
+        documento.mes_mayor = visto["mes_mayor"]
+
+    libro.mayor_cuentas = ", ".join(c["nombre"] for c in mayor["cuentas"])[:255]
+    libro.mayor_cargado_en = datetime.now(timezone.utc)
+    libro.n_mayor_dif = sum(
+        1 for d in libro.documentos if d.mayor_estado and d.mayor_estado.startswith("dif")
+    )
+    db.session.commit()
+
+    cuadran = sum(1 for d in libro.documentos if d.mayor_estado == "cuadra")
+    flash(
+        f"Libro Mayor cruzado con {libro.etiqueta.lower()} de {_etiqueta_periodo(conciliacion)}: "
+        f"{cuadran} documentos cuadran, {libro.n_mayor_dif} no.",
+        "success",
+    )
+    return redirect(_volver_al_libro(conciliacion, clave))
+
+
+def _documento_como_dict(documento) -> dict:
+    """Lo que comparar_con_mayor necesita, sin que el módulo sepa del modelo."""
+    return {
+        "folio": documento.folio,
+        "estado": documento.estado,
+        "rut_sii": documento.rut_sii,
+        "rut_defontana": documento.rut_defontana,
+        "iva_sii": documento.iva_sii,
+        "iva_defontana": documento.iva_defontana,
+        "total_sii": documento.total_sii,
+        "total_defontana": documento.total_defontana,
+    }
 
 
 @bp.route("/conciliacion-sii/<int:conciliacion_id>/<clave>/recalcular", methods=["POST"])

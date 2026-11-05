@@ -41,6 +41,37 @@
   </div>
 </div>
 
+{# El Libro Mayor: en qué quedó contabilizado cada documento. El IVA sale de
+   la cuenta de IVA y el total de la de proveedores (o clientes, en ventas), así
+   que hacen falta las dos. Si los dos calzan con lo informado, el neto quedó
+   bien, porque neto = total − IVA. #}
+{% if puede_editar and not conciliacion.cerrado %}
+<div class="card mb-3">
+  <div class="card-body py-2 px-3">
+    <form method="post" enctype="multipart/form-data"
+          action="{{ url_for('contabilidad.cargar_mayor_conciliacion_sii', conciliacion_id=conciliacion.id, clave=libro.libro, **request.args) }}"
+          class="d-flex gap-2 align-items-end flex-wrap">
+      {{ accion.hidden_tag() }}
+      <div>
+        <label class="form-label small mb-1" for="mayor">Libro Mayor (Defontana)</label>
+        <input type="file" name="mayor" id="mayor" class="form-control form-control-sm"
+               accept=".xls,.xlsx,.html,.htm" multiple style="min-width:320px;">
+        <div class="form-text">
+          Las dos cuentas juntas: la de IVA y la de {{ 'proveedores' if libro.libro == 'compra' else 'clientes' }}.
+          El IVA sale de una y el total de la otra.
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary btn-sm mb-4">Cruzar con el mayor</button>
+      {% if libro.mayor_cargado_en %}
+      <div class="small text-muted mb-4">
+        Cruzado el {{ libro.mayor_cargado_en|fecha_hora }}<br>{{ libro.mayor_cuentas }}
+      </div>
+      {% endif %}
+    </form>
+  </div>
+</div>
+{% endif %}
+
 <div class="row g-2 mb-3">
   {% for clave, etiqueta, valor in [
       ('coincide', 'Coincide', libro.n_coincide),
@@ -49,7 +80,8 @@
       ('dif_monto', 'Dif. de monto', libro.n_dif_monto),
       ('dif_datos', 'Dif. de datos', libro.n_dif_datos),
       ('aceptados', 'Aceptadas', libro.n_aceptados),
-      ('otro_mes', 'En otro mes', libro.n_otro_mes)] %}
+      ('otro_mes', 'En otro mes', libro.n_otro_mes),
+      ('mayor_dif', 'Mayor distinto', libro.n_mayor_dif)] %}
   <div class="col-6 col-md">
     <a href="{{ url_for('contabilidad.ver_libro_conciliacion_sii', conciliacion_id=conciliacion.id, clave=libro.libro, filtro=clave) }}"
        class="card text-decoration-none h-100 {{ 'border-primary' if filtro == clave }}">
@@ -75,6 +107,8 @@
       <option value="pendientes" {{ 'selected' if filtro == 'pendientes' }}>Sólo lo que falta revisar</option>
       <option value="aceptados" {{ 'selected' if filtro == 'aceptados' }}>Diferencias aceptadas</option>
       <option value="otro_mes" {{ 'selected' if filtro == 'otro_mes' }}>Contabilizados en otro mes</option>
+      <option value="mayor_dif" {{ 'selected' if filtro == 'mayor_dif' }}>Mayor: IVA o total distinto</option>
+      <option value="mayor_falta" {{ 'selected' if filtro == 'mayor_falta' }}>Mayor: no está</option>
       {% for clave, etiqueta in etiquetas_estado.items() %}
       <option value="{{ clave }}" {{ 'selected' if filtro == clave }}>{{ etiqueta }}</option>
       {% endfor %}
@@ -113,6 +147,9 @@
           <th>Razón social (SII)</th>
           <th>RUT (Defontana)</th>
           <th>Razón social (Defontana)</th>
+          {# Lo que el mayor dice del documento: el IVA de la cuenta de IVA y
+             el total de la de proveedores o clientes. #}
+          <th>Mayor</th>
           {% for campo, etiqueta in columnas_monto %}
           <th class="num">{{ etiqueta }}</th>
           {% endfor %}
@@ -163,6 +200,19 @@
           <td class="text-nowrap {{ 'text-danger fw-semibold' if d.rut_distinto }}"
               {% if d.rut_escrito_distinto %}title="El mismo RUT, escrito distinto: el SII lo manda sin puntos"{% endif %}>{{ d.rut_defontana or '—' }}</td>
           <td class="celda-recortada" title="{{ d.contraparte_defontana or '' }}">{{ d.contraparte_defontana or '—' }}</td>
+          <td class="text-nowrap">
+            {% if not d.mayor_estado %}
+            <span class="text-muted">—</span>
+            {% elif d.mayor_estado == 'cuadra' %}
+            <span class="badge bg-light text-success border border-success"
+                  title="IVA {{ d.iva_mayor|clp }} y total {{ d.total_mayor|clp }} en el mayor{% if d.mes_mayor %} · {{ d.mes_mayor_texto }}{% endif %}">✓ cuadra</span>
+            {% elif d.mayor_estado == 'falta' %}
+            <span class="badge bg-light text-secondary border">no está</span>
+            {% else %}
+            <span class="badge bg-light text-danger border border-danger"
+                  title="{{ etiquetas_mayor.get(d.mayor_estado, '') }}: IVA {{ d.iva_mayor|clp }}, total {{ d.total_mayor|clp }} en el mayor{% if d.mes_mayor %} · {{ d.mes_mayor_texto }}{% endif %}">{{ 'IVA' if d.mayor_estado == 'dif_iva' else ('Total' if d.mayor_estado == 'dif_total' else 'IVA y total') }}</span>
+            {% endif %}
+          </td>
           {% for campo, etiqueta in columnas_monto %}
           {% set valor = d[campo] %}
           <td class="num {{ 'text-danger fw-semibold' if campo.startswith('dif') and valor != 0 }}">{{ valor|clp }}</td>

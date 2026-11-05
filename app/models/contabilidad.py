@@ -339,6 +339,12 @@ class ConciliacionSiiLibro(db.Model):
     n_dif_datos = db.Column(db.Integer, nullable=False, default=0)
     # Diferencias revisadas y dadas por buenas (impuesto específico y similares).
     n_aceptados = db.Column(db.Integer, nullable=False, default=0)
+    # Documentos cuyo IVA o total no calzan con el Libro Mayor: lo que se
+    # informó y lo que se contabilizó no son lo mismo.
+    n_mayor_dif = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+    # Las cuentas del mayor que se cargaron, para saber contra qué se comparó.
+    mayor_cuentas = db.Column(db.String(255), nullable=True)
+    mayor_cargado_en = db.Column(db.DateTime, nullable=True)
     # Documentos que quedaron contabilizados en otro mes: están, pero en otro
     # libro. No se cuentan dos veces con los aceptados.
     n_otro_mes = db.Column(db.Integer, nullable=False, default=0, server_default="0")
@@ -439,6 +445,16 @@ class ConciliacionSiiDocumento(db.Model):
     # las facturas de combustible llevan impuesto específico, que el SII y
     # Defontana no reparten igual entre neto e impuestos. Marcarlas saca el
     # documento de lo pendiente sin ocultarlo ni alterar los montos.
+    # Lo que el Libro Mayor dice de este documento: el IVA que quedó en la
+    # cuenta de IVA y el total en la de proveedores o clientes. Si los dos
+    # calzan con lo informado, el neto quedó bien contabilizado, porque
+    # neto = total − IVA. En blanco mientras no se cargue el mayor.
+    iva_mayor = db.Column(db.BigInteger, nullable=True)
+    total_mayor = db.Column(db.BigInteger, nullable=True)
+    mayor_estado = db.Column(db.String(20), nullable=True)
+    # En qué mes lo tiene contabilizado el mayor, que puede no ser el período.
+    mes_mayor = db.Column(db.String(7), nullable=True)
+
     aceptado = db.Column(db.Boolean, nullable=False, default=False)
     motivo_aceptacion = db.Column(db.String(200), nullable=True)
     aceptado_por_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"), nullable=True)
@@ -468,6 +484,17 @@ class ConciliacionSiiDocumento(db.Model):
     def llave(self):
         """Identifica al documento entre recargas del mismo libro."""
         return (self.tipo_doc, self.folio)
+
+    @property
+    def mes_mayor_texto(self) -> str:
+        """El mes en que el mayor lo tiene contabilizado, escrito como se lee."""
+        if not self.mes_mayor:
+            return ""
+        try:
+            anio, mes = self.mes_mayor.split("-")
+            return f"{MESES_NOMBRES[int(mes) - 1]} {anio}"
+        except (ValueError, IndexError):
+            return self.mes_mayor
 
     @property
     def rut_distinto(self) -> bool:

@@ -387,6 +387,169 @@ def leer_libro_defontana(archivo) -> list:
     return documentos
 
 
+# --- Libro Mayor de Defontana (".xls" que también es HTML) ----------------
+#
+# El mayor dice en qué quedó contabilizado cada documento: el IVA en la cuenta
+# de IVA y el total en la de proveedores (o clientes, en ventas). Si esos dos
+# calzan con lo que informa el libro, el neto quedó bien, porque neto = total −
+# IVA.
+#
+# Cada línea trae el documento en su descripción: "FCA#1043902 Proveedor
+# 76.754.296-8 FEDEX EXPRESS CHILE SPA". En el mayor del 05-11, de 1.491 líneas
+# de la cuenta de IVA, 1.475 traen ese #folio, y las 1.670 de proveedores con
+# folio traen también el RUT.
+_RE_DOC_MAYOR = re.compile(r"^\s*([A-Za-zÁÉÍÓÚÑ]+)\s*#\s*(\d+)")
+_RE_RUT_MAYOR = re.compile(r"(\d{1,3}(?:[.\d]*)-[\dkK])")
+_RE_CUENTA_MAYOR = re.compile(r"^(\d+(?:\.\d+)+)\s+(.*)$")
+_RE_FECHA_MAYOR = re.compile(r"^(\d{2})/(\d{2})/(\d{4})$")
+
+
+def _clase_de_cuenta(nombre: str) -> str:
+    """Qué aporta la cuenta al cruce: el IVA del documento o su total.
+
+    El IVA se reconoce por el nombre de la cuenta —"IVA CREDITO FISCAL", "IVA
+    DEBITO FISCAL"—. Lo demás que se cargue (proveedores en compras, clientes
+    en ventas) aporta el total del documento.
+    """
+    return "iva" if "IVA" in normalizar_nombre(nombre) else "total"
+
+
+def _signo_de_cuenta(codigo: str) -> int:
+    """Hacia qué lado suma la cuenta, según su primer dígito.
+
+    En el plan de cuentas chileno el 1 son activos y el 2 pasivos: el IVA
+    crédito (1.1.1090) suma al debe y proveedores (2.1.1070) suma al haber. Con
+    el signo correcto, una nota de crédito queda en negativo por sí sola, igual
+    que en el resto del cruce.
+    """
+    return -1 if codigo.startswith("2") else 1
+
+
+def leer_libro_mayor(archivo) -> dict:
+    """Lee un Libro Mayor de Defontana y devuelve sus documentos por cuenta.
+
+    {'cuenta', 'nombre', 'clase', 'documentos': {(folio, clave de RUT): monto}},
+    con el monto ya con el signo que le toca a la cuenta. Se agrupa por folio y
+    RUT y no por el prefijo del tipo ("FCA", "NCC"): ese prefijo es de
+    Defontana y no se parece a los códigos del SII, mientras que folio y RUT
+    los tienen los dos lados. En el mayor del 05-11 el par identifica un solo
+    documento en las dos cuentas: 0 ambigüedades en 1.670 y en 1.457.
+    """
+    texto = _decodificar(_leer_bytes(archivo), ("cp1252", "latin-1", "utf-8"))
+    parser = _TablasHtml()
+    parser.feed(texto)
+
+    tabla = None
+    for candidata in parser.tablas:
+        if any(fila and fila[0].strip() == "Fecha" for fila in candidata):
+            tabla = candidata
+            break
+    if tabla is None:
+        raise ArchivoInvalido(
+            "Ese archivo no parece un Libro Mayor de Defontana: no tiene la tabla de "
+            "movimientos con las columnas Fecha, Número, Tipo y Descripción."
+        )
+
+    codigo = nombre = ""
+    documentos, fechas = {}, {}
+    for fila in tabla:
+        if not fila or not fila[0]:
+            continue
+        primera = fila[0].strip()
+        cuenta = _RE_CUENTA_MAYOR.match(primera)
+        if cuenta:
+            # Un mismo archivo puede traer varias cuentas, una tras otra.
+            codigo, nombre = cuenta.group(1), cuenta.group(2).strip()
+            continue
+        if not _RE_FECHA_MAYOR.match(primera) or len(fila) < 6:
+            continue
+        doc = _RE_DOC_MAYOR.match(fila[3] or "")
+        if not doc:
+            # Pagos, traspasos y la apertura no nombran documento: no hay nada
+            # que cruzar con ellos.
+            continue
+        rut = _RE_RUT_MAYOR.search(fila[3] or "")
+        llave = (normalizar_folio(doc.group(2)), normalizar_rut(rut.group(1)) if rut else "")
+        monto = (a_monto(fila[4]) - a_monto(fila[5])) * _signo_de_cuenta(codigo)
+        documentos[llave] = documentos.get(llave, 0) + monto
+        fechas.setdefault(llave, []).append(primera)
+
+    if not documentos:
+        raise ArchivoInvalido(
+            "El Libro Mayor no trae líneas con documento. Descárgalo de la cuenta de IVA "
+            "y de la de proveedores o clientes, que son las que nombran cada factura."
+        )
+    return {
+        "cuenta": codigo,
+        "nombre": nombre,
+        "clase": _clase_de_cuenta(nombre),
+        "documentos": documentos,
+        # En qué mes quedó contabilizado cada documento, por si cayó en otro.
+        "meses": {k: sorted({f"{d[6:10]}-{d[3:5]}" for d in v})[-1] for k, v in fechas.items()},
+    }
+
+
+# Lo que el mayor dice de un documento, comparado con lo que informa el libro.
+MAYOR_ETIQUETAS = {
+    "cuadra": "Cuadra con el mayor",
+    "dif_iva": "IVA distinto en el mayor",
+    "dif_total": "Total distinto en el mayor",
+    "dif_ambos": "IVA y total distintos en el mayor",
+    "falta": "No está en el mayor",
+}
+
+
+def juntar_mayores(mayores) -> dict:
+    """Junta varios archivos de Libro Mayor en un solo mapa por documento.
+
+    Se suben de a uno por cuenta —la de IVA y la de proveedores o clientes—, y
+    para cruzar hace falta tener las dos juntas: el IVA sale de una y el total
+    de la otra.
+    """
+    iva, total, meses, cuentas = {}, {}, {}, []
+    for mayor in mayores:
+        destino = iva if mayor["clase"] == "iva" else total
+        for llave, monto in mayor["documentos"].items():
+            destino[llave] = destino.get(llave, 0) + monto
+        for llave, mes in mayor.get("meses", {}).items():
+            if mes > meses.get(llave, ""):
+                meses[llave] = mes
+        cuentas.append({"cuenta": mayor["cuenta"], "nombre": mayor["nombre"],
+                        "clase": mayor["clase"], "documentos": len(mayor["documentos"])})
+    return {"iva": iva, "total": total, "meses": meses, "cuentas": cuentas}
+
+
+def comparar_con_mayor(documento, mayor) -> dict:
+    """Qué dice el mayor del documento, y si calza con lo informado.
+
+    Se compara contra lo que informa el libro de Defontana, que es lo que se
+    contabilizó; si el documento no está en ese libro —sólo lo informa el SII—
+    se compara contra el SII, que ahí es lo único que hay.
+
+    El documento se busca por folio y RUT: el prefijo del mayor ("FCA", "NCC")
+    es de Defontana y no se parece a los códigos del SII, mientras que el folio
+    y el RUT los tienen los dos lados.
+    """
+    rut = documento.get("rut_defontana") or documento.get("rut_sii") or ""
+    llave = (normalizar_folio(documento.get("folio")), normalizar_rut(rut))
+    iva_mayor = mayor["iva"].get(llave)
+    total_mayor = mayor["total"].get(llave)
+    if iva_mayor is None and total_mayor is None:
+        return {"iva_mayor": None, "total_mayor": None, "mes_mayor": None, "estado": "falta"}
+
+    desde_defontana = documento.get("estado") != "solo_sii"
+    iva_ref = documento.get("iva_defontana" if desde_defontana else "iva_sii") or 0
+    total_ref = documento.get("total_defontana" if desde_defontana else "total_sii") or 0
+    dif_iva = iva_mayor is not None and abs(iva_mayor - iva_ref) > TOLERANCIA_PESOS
+    dif_total = total_mayor is not None and abs(total_mayor - total_ref) > TOLERANCIA_PESOS
+    estado = ("dif_ambos" if dif_iva and dif_total
+              else "dif_iva" if dif_iva
+              else "dif_total" if dif_total
+              else "cuadra")
+    return {"iva_mayor": iva_mayor, "total_mayor": total_mayor,
+            "mes_mayor": mayor["meses"].get(llave), "estado": estado}
+
+
 # --- El cruce -------------------------------------------------------------
 
 _CAMPOS_MONTO = ("neto", "exento", "iva", "total")
