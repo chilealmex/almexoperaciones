@@ -30,13 +30,50 @@
         <input type="file" name="mayor" id="mayor" class="form-control form-control-sm"
                accept=".xls,.xlsx,.html,.htm" multiple style="min-width:320px;">
         <div class="form-text">
-          De a una o varias juntas. Las que se suban se van sumando a las que ya están, y
-          volver a subir una reemplaza sólo esa. El archivo trae el año entero, así que una
-          carga sirve para todos los meses.
+          El <strong>Informe por Análisis</strong> (.xlsx) trae todas las cuentas juntas: con ese
+          archivo basta. También sirve el Libro Mayor, cuenta por cuenta. Lo que se suba se va
+          sumando a lo que ya está, y volver a subir una cuenta reemplaza sólo esa. El archivo
+          trae el año entero, así que una carga sirve para todos los meses.
         </div>
       </div>
       <button type="submit" class="btn btn-primary btn-sm mb-4">Cargar</button>
     </form>
+  </div>
+</div>
+
+<div class="card mb-4">
+  <div class="card-header">Cargar un F29 ya presentado</div>
+  <div class="card-body">
+    <form method="post" action="{{ url_for('contabilidad.cargar_declarado_f29') }}"
+          enctype="multipart/form-data" class="d-flex gap-2 align-items-end flex-wrap">
+      {{ accion.hidden_tag() }}
+      <div>
+        <label class="form-label small mb-1" for="f29">Formulario 29 (PDF del SII)</label>
+        <input type="file" name="f29" id="f29" class="form-control form-control-sm"
+               accept=".pdf" multiple style="min-width:320px;">
+        <div class="form-text">
+          De a uno o varios. El mes lo dice el propio formulario. Tiene que ser el PDF tal
+          como lo entrega el SII: uno reimpreso o escaneado no se puede leer, porque sus
+          números quedan dibujados y no como texto.
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary btn-sm mb-4">Cargar</button>
+    </form>
+    {% if declarados %}
+    <div class="small text-muted">
+      Cargados:
+      {% for d in declarados %}
+      <span class="me-2">
+        {{ d.mes }}{% if d.folio %} (folio {{ d.folio }}){% endif %}
+        <form method="post" class="d-inline"
+              action="{{ url_for('contabilidad.eliminar_declarado_f29', declarado_id=d.id, mes=mes) }}">
+          {{ accion.hidden_tag() }}
+          <button class="btn btn-link btn-sm p-0 text-danger" title="Quitar">×</button>
+        </form>
+      </span>
+      {% endfor %}
+    </div>
+    {% endif %}
   </div>
 </div>
 {% endif %}
@@ -125,6 +162,36 @@
   </div>
   {% endif %}
 
+  {% if propuesta.controles %}
+  <div class="card mb-4">
+    <div class="card-header">Contra lo que dice la contabilidad</div>
+    <div class="list-group list-group-flush">
+      {% for control in propuesta.controles %}
+      <div class="list-group-item small {{ 'list-group-item-danger' if not control.calza }}">
+        {{ '✔' if control.calza else '✘' }}
+        <strong>{{ control.cuenta }}</strong> traspasó {{ control.traspasado|clp }} al cerrar el mes,
+        y {{ control.que_es }} da {{ control.propuesto|clp }}.
+        {{ 'Calzan.' if control.calza else 'Hay que revisar por qué no calzan.' }}
+      </div>
+      {% endfor %}
+    </div>
+    <div class="card-footer small text-muted">
+      El traspaso no es una línea del formulario: es el asiento con que la contabilidad cierra
+      el mes. Que calce quiere decir que a la propuesta no le falta ni le sobra nada.
+    </div>
+  </div>
+  {% endif %}
+
+  {% set comp = {} %}
+  {% if comparacion %}
+    {% for fila in comparacion.filas %}{% set _ = comp.update({fila.codigo: fila}) %}{% endfor %}
+  <div class="alert {{ 'alert-success' if not comparacion.distintos else 'alert-warning' }} py-2">
+    Contra el F29 presentado de {{ mes_texto }}{% if declarado.folio %} (folio {{ declarado.folio }}){% endif %}:
+    <strong>{{ comparacion.calzan }}</strong> códigos calzan
+    {%- if comparacion.distintos %} y <strong>{{ comparacion.distintos }}</strong> no{% endif %}.
+  </div>
+  {% endif %}
+
   <div class="card mb-4">
     <div class="card-header">Formulario 29 — {{ mes_texto }}</div>
     <div class="table-responsive">
@@ -133,24 +200,66 @@
           <tr>
             <th style="width:6rem;">Código</th>
             <th>Glosa</th>
-            <th class="text-end" style="width:12rem;">Valor</th>
+            <th class="text-end" style="width:11rem;">Propuesta</th>
+            {% if comparacion %}
+            <th class="text-end" style="width:11rem;">Declarado</th>
+            <th class="text-end" style="width:10rem;">Diferencia</th>
+            {% endif %}
             <th>De dónde sale</th>
           </tr>
         </thead>
         <tbody>
           {% for linea in propuesta.lineas %}
-          <tr class="{{ 'table-light fw-semibold' if linea.clase == 'total' }}">
+          {% set fila = comp.get(linea.codigo) %}
+          <tr class="{{ 'table-light fw-semibold' if linea.clase == 'total' }}{{ ' table-warning' if fila and fila.estado == 'distinto' }}">
             <td class="text-nowrap">{{ linea.codigo }}</td>
             <td>{{ linea.glosa }}</td>
             <td class="text-end text-nowrap">
               {% if linea.clase == 'cantidad' %}{{ linea.valor }}{% else %}{{ linea.valor|clp }}{% endif %}
             </td>
+            {% if comparacion %}
+            <td class="text-end text-nowrap">
+              {% if fila and fila.declarado is not none %}
+                {% if linea.clase == 'cantidad' %}{{ fila.declarado }}{% else %}{{ fila.declarado|clp }}{% endif %}
+              {% else %}<span class="text-muted">—</span>{% endif %}
+            </td>
+            <td class="text-end text-nowrap">
+              {% if fila and fila.estado == 'calza' %}<span class="text-success">calza</span>
+              {% elif fila and fila.estado == 'distinto' %}
+                <span class="text-danger fw-semibold">
+                  {% if linea.clase == 'cantidad' %}{{ fila.diferencia }}{% else %}{{ fila.diferencia|clp }}{% endif %}
+                </span>
+              {% else %}<span class="text-muted">—</span>{% endif %}
+            </td>
+            {% endif %}
             <td class="small text-muted">{{ linea.de }}</td>
           </tr>
+          {% if fila and fila.estado == 'distinto' and linea.detalle %}
+          {# Dónde puede estar la diferencia: de qué asientos está hecho el código. #}
+          <tr class="table-warning">
+            <td></td>
+            <td colspan="{{ 5 if comparacion else 3 }}" class="small">
+              <span class="text-muted">De qué está hecho:</span>
+              {% for d in linea.detalle %}
+              <span class="ms-2">{{ d.tipo or '—' }}
+                <strong>{{ d.monto|clp }}</strong>
+                {%- if d.documentos %} ({{ d.documentos }} doc.){% endif %}</span>
+              {% endfor %}
+            </td>
+          </tr>
+          {% endif %}
           {% endfor %}
         </tbody>
       </table>
     </div>
+    {% if comparacion and comparacion.sin_comparar %}
+    <div class="card-footer small text-muted">
+      Declarados y sin comparar, porque la propuesta no los calcula:
+      {% for c in comparacion.sin_comparar %}
+      <span class="me-2">{{ c.codigo }} {{ c.glosa }} <strong>{{ c.declarado|clp }}</strong></span>
+      {% endfor %}
+    </div>
+    {% endif %}
   </div>
 
   {% if propuesta.sin_clasificar %}

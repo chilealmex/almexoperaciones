@@ -615,3 +615,55 @@ class F29Movimiento(db.Model):
 
     def __repr__(self):
         return f"<F29Movimiento {self.mes} {self.tipo}>"
+
+
+class F29Declarado(db.Model):
+    """Un F29 ya presentado, leído de su PDF.
+
+    Sirve para poner lado a lado lo que se declaró y lo que dice la
+    contabilidad. Se guarda uno por mes: volver a subirlo reemplaza al
+    anterior, que es lo que pasa cuando se rectifica.
+    """
+
+    __tablename__ = "f29_declarados"
+    __table_args__ = (db.UniqueConstraint("mes", name="uq_f29_declarado_mes"),)
+
+    id = db.Column(db.Integer, primary_key=True)
+    mes = db.Column(db.String(7), nullable=False)
+    # El folio del formulario, para saber cuál de todos es.
+    folio = db.Column(db.String(30), nullable=True)
+    archivo = db.Column(db.String(255), nullable=True)
+    cargado_en = db.Column(db.DateTime, server_default=db.func.now())
+    cargado_por_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"), nullable=True)
+
+    codigos = db.relationship(
+        "F29DeclaradoCodigo", backref="declaracion", cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+    cargado_por = db.relationship("Usuario")
+
+    @property
+    def por_codigo(self) -> dict:
+        return {c.codigo: c.valor for c in self.codigos}
+
+    def __repr__(self):
+        return f"<F29Declarado {self.mes} folio {self.folio}>"
+
+
+class F29DeclaradoCodigo(db.Model):
+    """Un código del formulario, con lo que se declaró en él."""
+
+    __tablename__ = "f29_declarado_codigos"
+    __table_args__ = (
+        db.UniqueConstraint("declarado_id", "codigo", name="uq_f29_declarado_codigo"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    declarado_id = db.Column(
+        db.Integer, db.ForeignKey("f29_declarados.id"), nullable=False, index=True
+    )
+    codigo = db.Column(db.String(6), nullable=False)
+    valor = db.Column(db.BigInteger, nullable=False, default=0)
+
+    def __repr__(self):
+        return f"<F29DeclaradoCodigo {self.codigo}={self.valor}>"
