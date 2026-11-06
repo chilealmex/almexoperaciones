@@ -362,6 +362,8 @@ MODULOS = (
                     "contabilidad.cargar_f29",
                     "contabilidad.eliminar_cuenta_f29",
                     "contabilidad.exportar_f29",
+                    "contabilidad.cargar_declarado_f29",
+                    "contabilidad.eliminar_declarado_f29",
                 ),
             },
             {

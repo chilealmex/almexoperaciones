@@ -21,6 +21,8 @@ from app.models.contabilidad import (
     ConciliacionSiiDocumento,
     ConciliacionSiiLibro,
     F29Cuenta,
+    F29Declarado,
+    F29DeclaradoCodigo,
     F29Movimiento,
     LineaDifTc,
     PeriodoDifTc,
@@ -46,7 +48,9 @@ from app.utils.conciliacion_sii import (
 )
 from app.utils.decorators import require_permission
 from app.utils.f29 import CONCEPTOS as CONCEPTOS_F29
-from app.utils.f29 import concepto_de_cuenta, propuesta_f29
+from app.utils.f29 import CODIGOS_INFORMATIVOS, GLOSAS as GLOSAS_F29
+from app.utils.f29 import comparar_con_declarado, concepto_de_cuenta, propuesta_f29
+from app.utils.f29_pdf import leer_f29_pdf
 from app.utils.dif_tipo_cambio import recalcular_periodo, totales_periodo
 from app.utils.dif_tipo_cambio_excel import PlanillaInvalida as PlanillaInvalidaMayor
 from app.utils.dif_tipo_cambio_excel import leer_mayor
@@ -1863,23 +1867,100 @@ def _meses_del_f29():
     return sorted((f[0] for f in filas), reverse=True)
 
 
+CODIGOS_F29_LEIBLES = set(GLOSAS_F29) | set(CODIGOS_INFORMATIVOS)
+
+
+def _meses_con_algo():
+    """Los meses que tienen movimiento cargado o un formulario presentado."""
+    declarados = [d[0] for d in db.session.query(F29Declarado.mes).distinct().all()]
+    return sorted(set(_meses_del_f29()) | set(declarados), reverse=True)
+
+
 @bp.route("/f29")
 @require_permission("contabilidad", "ver")
 def f29():
-    meses = _meses_del_f29()
+    meses = _meses_con_algo()
     mes = request.args.get("mes") or (meses[0] if meses else "")
     cuentas = _cuentas_del_mes(mes) if mes else []
+    propuesta = propuesta_f29(cuentas) if mes else None
+    declarado = F29Declarado.query.filter_by(mes=mes).first() if mes else None
     return render_template(
         "contabilidad/f29.html",
         cargadas=F29Cuenta.query.order_by(F29Cuenta.nombre).all(),
         meses=meses,
         mes=mes,
         mes_texto=_mes_f29_texto(mes),
-        propuesta=propuesta_f29(cuentas) if mes else None,
+        propuesta=propuesta,
+        declarado=declarado,
+        comparacion=(comparar_con_declarado(propuesta["lineas"], declarado.por_codigo)
+                     if propuesta and declarado else None),
+        declarados=F29Declarado.query.order_by(F29Declarado.mes.desc()).all(),
         cuentas=cuentas,
         conceptos=CONCEPTOS_F29,
         accion=AccionForm(),
     )
+
+
+@bp.route("/f29/declarado", methods=["POST"])
+@require_permission("contabilidad", "editar")
+def cargar_declarado_f29():
+    """Guarda uno o varios F29 presentados, leídos de su PDF.
+
+    Se guarda uno por mes y el período lo dice el propio formulario, así que
+    no hay que elegirlo: volver a subir el de un mes reemplaza al anterior,
+    que es lo que pasa cuando se rectifica.
+    """
+    archivos = [a for a in request.files.getlist("f29") if a and a.filename]
+    if not archivos:
+        flash("Elige al menos un F29 en PDF.", "warning")
+        return redirect(url_for("contabilidad.f29", **request.args))
+
+    leidos = []
+    for archivo in archivos:
+        try:
+            leidos.append((archivo.filename, leer_f29_pdf(archivo, CODIGOS_F29_LEIBLES)))
+        except ArchivoInvalido as error:
+            flash(f"{archivo.filename}: {error}", "danger")
+            return redirect(url_for("contabilidad.f29", **request.args))
+
+    meses = []
+    for nombre, leido in leidos:
+        declarado = F29Declarado.query.filter_by(mes=leido["mes"]).first()
+        if declarado is None:
+            declarado = F29Declarado(mes=leido["mes"])
+            db.session.add(declarado)
+        else:
+            declarado.codigos.clear()
+            db.session.flush()
+        declarado.folio = (leido["folio"] or "")[:30]
+        declarado.archivo = nombre[:255]
+        declarado.cargado_en = datetime.now(timezone.utc)
+        declarado.cargado_por_id = getattr(current_user, "id", None)
+        for codigo, valor in leido["codigos"].items():
+            declarado.codigos.append(F29DeclaradoCodigo(codigo=codigo, valor=valor))
+        meses.append(leido["mes"])
+
+    db.session.commit()
+    flash(
+        "F29 cargado: " + ", ".join(_mes_f29_texto(m) for m in meses) + ".",
+        "success",
+    )
+    argumentos = dict(request.args)
+    argumentos["mes"] = meses[0]
+    return redirect(url_for("contabilidad.f29", **argumentos))
+
+
+@bp.route("/f29/declarado/<int:declarado_id>/eliminar", methods=["POST"])
+@require_permission("contabilidad", "editar")
+def eliminar_declarado_f29(declarado_id):
+    declarado = db.session.get(F29Declarado, declarado_id)
+    if declarado is None:
+        abort(404)
+    mes = declarado.mes
+    db.session.delete(declarado)
+    db.session.commit()
+    flash(f"Se quitó el F29 de {_mes_f29_texto(mes)}.", "success")
+    return redirect(url_for("contabilidad.f29", **request.args))
 
 
 @bp.route("/f29/cargar", methods=["POST"])

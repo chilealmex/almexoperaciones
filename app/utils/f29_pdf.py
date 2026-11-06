@@ -70,6 +70,14 @@ def leer_f29_pdf(archivo, codigos_validos) -> dict:
     Devuelve {'mes', 'folio', 'codigos': {código: valor}}.
     """
     texto = _texto_del_pdf(archivo)
+    if not texto.strip():
+        # Un F29 reimpreso o escaneado: sus números quedan dibujados como
+        # trazos o como una imagen, y no hay texto que leer.
+        raise ArchivoInvalido(
+            "Ese PDF no tiene texto: parece un formulario reimpreso o escaneado, donde los "
+            "números quedan dibujados y no se pueden leer. Bájalo del SII tal como lo "
+            "entrega, sin volver a imprimirlo."
+        )
     if "FORMULARIO 29" not in texto.upper():
         raise ArchivoInvalido(
             "Ese PDF no parece un Formulario 29 del SII: no dice \"Formulario 29\" en "

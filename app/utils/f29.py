@@ -134,19 +134,29 @@ def _grupos(cuenta) -> dict:
         tipo = movimiento.get("tipo")
         familia = familia_de_tipo(tipo) if es_de_documento(tipo, documentos) else "sin_documento"
         grupo = grupos.setdefault(
-            familia, {"monto": 0, "documentos": 0, "lineas": 0, "tipos": []}
+            familia, {"monto": 0, "documentos": 0, "lineas": 0, "tipos": [], "detalle": []}
         )
         neto = (movimiento.get("debe") or 0) - (movimiento.get("haber") or 0)
-        grupo["monto"] += neto * (cuenta.get("signo") or 1)
+        monto = neto * (cuenta.get("signo") or 1)
         # El formulario pide cuántas facturas son. Cuando el asiento las
         # nombra se cuentan documentos distintos; cuando no, cada línea es una.
-        grupo["documentos"] += documentos or (movimiento.get("lineas") or 0)
+        cuantos = documentos or (movimiento.get("lineas") or 0)
+        grupo["monto"] += monto
+        grupo["documentos"] += cuantos
         grupo["lineas"] += movimiento.get("lineas") or 0
         grupo["tipos"].append(tipo)
+        # De qué está hecho, por si el código no calza con lo declarado: ahí
+        # hay que poder mirar qué asientos lo formaron.
+        grupo["detalle"].append({
+            "cuenta": cuenta.get("nombre", ""), "tipo": tipo, "monto": monto,
+            "documentos": cuantos, "lineas": movimiento.get("lineas") or 0,
+        })
     # Una nota de crédito mueve la cuenta al revés que una factura, y el
     # formulario la pide en positivo para restarla después.
     if "nota_credito" in grupos:
         grupos["nota_credito"]["monto"] = -grupos["nota_credito"]["monto"]
+        for linea in grupos["nota_credito"]["detalle"]:
+            linea["monto"] = -linea["monto"]
     return grupos
 
 
@@ -190,34 +200,36 @@ def propuesta_f29(cuentas) -> dict:
 
     lineas, avisos, controles = [], [], []
 
-    def poner(codigo, valor, de, clase="monto"):
+    def poner(codigo, valor, de, clase="monto", detalle=()):
         lineas.append({"codigo": codigo, "glosa": GLOSAS[codigo], "valor": valor,
-                       "de": de, "clase": clase})
+                       "de": de, "clase": clase, "detalle": list(detalle)})
 
     def grupos_de(concepto):
         juntos = {}
         for cuenta in por_concepto.get(concepto, ()):
             for familia, grupo in _grupos(cuenta).items():
                 destino = juntos.setdefault(
-                    familia, {"monto": 0, "documentos": 0, "lineas": 0, "tipos": []}
+                    familia,
+                    {"monto": 0, "documentos": 0, "lineas": 0, "tipos": [], "detalle": []},
                 )
                 destino["monto"] += grupo["monto"]
                 destino["documentos"] += grupo["documentos"]
                 destino["lineas"] += grupo["lineas"]
                 destino["tipos"] += grupo["tipos"]
+                destino["detalle"] += grupo["detalle"]
         return juntos
 
-    vacio = {"monto": 0, "documentos": 0, "lineas": 0, "tipos": []}
+    vacio = {"monto": 0, "documentos": 0, "lineas": 0, "tipos": [], "detalle": []}
 
     # --- Débitos: lo que se vendió -------------------------------------
     debito = grupos_de("iva_debito")
     facturas = debito.get("documento", vacio)
     notas_v = debito.get("nota_credito", vacio)
     nombre_debito = _nombres(por_concepto.get("iva_debito"))
-    poner("503", facturas["documentos"], nombre_debito, "cantidad")
-    poner("502", facturas["monto"], nombre_debito)
-    poner("509", notas_v["documentos"], nombre_debito, "cantidad")
-    poner("510", notas_v["monto"], nombre_debito)
+    poner("503", facturas["documentos"], nombre_debito, "cantidad", facturas["detalle"])
+    poner("502", facturas["monto"], nombre_debito, detalle=facturas["detalle"])
+    poner("509", notas_v["documentos"], nombre_debito, "cantidad", notas_v["detalle"])
+    poner("510", notas_v["monto"], nombre_debito, detalle=notas_v["detalle"])
     total_debitos = facturas["monto"] - notas_v["monto"]
     poner("538", total_debitos, "código 502 − código 510", "total")
     for cuenta in por_concepto.get("iva_debito", ()):
@@ -229,12 +241,12 @@ def propuesta_f29(cuentas) -> dict:
     notas_c = credito.get("nota_credito", vacio)
     importacion = credito.get("importacion", vacio)
     nombre_credito = _nombres(por_concepto.get("iva_credito"))
-    poner("519", recibidas["documentos"], nombre_credito, "cantidad")
-    poner("520", recibidas["monto"], nombre_credito)
-    poner("527", notas_c["documentos"], nombre_credito, "cantidad")
-    poner("528", notas_c["monto"], nombre_credito)
-    poner("534", importacion["documentos"], nombre_credito, "cantidad")
-    poner("535", importacion["monto"], nombre_credito)
+    poner("519", recibidas["documentos"], nombre_credito, "cantidad", recibidas["detalle"])
+    poner("520", recibidas["monto"], nombre_credito, detalle=recibidas["detalle"])
+    poner("527", notas_c["documentos"], nombre_credito, "cantidad", notas_c["detalle"])
+    poner("528", notas_c["monto"], nombre_credito, detalle=notas_c["detalle"])
+    poner("534", importacion["documentos"], nombre_credito, "cantidad", importacion["detalle"])
+    poner("535", importacion["monto"], nombre_credito, detalle=importacion["detalle"])
     total_creditos = recibidas["monto"] - notas_c["monto"] + importacion["monto"]
     poner("537", total_creditos, "código 520 − código 528 + código 535", "total")
 
@@ -259,9 +271,12 @@ def propuesta_f29(cuentas) -> dict:
     unico = sum(_lado_declarado(c) for c in por_concepto.get("impuesto_unico", ()))
     honorarios = sum(_lado_declarado(c) for c in por_concepto.get("honorarios", ()))
     ppm = sum(_lado_declarado(c) for c in por_concepto.get("ppm", ()))
-    poner("048", unico, _nombres(por_concepto.get("impuesto_unico")))
-    poner("151", honorarios, _nombres(por_concepto.get("honorarios")))
-    poner("062", ppm, _nombres(por_concepto.get("ppm")))
+    poner("048", unico, _nombres(por_concepto.get("impuesto_unico")),
+          detalle=_detalle_de(por_concepto.get("impuesto_unico")))
+    poner("151", honorarios, _nombres(por_concepto.get("honorarios")),
+          detalle=_detalle_de(por_concepto.get("honorarios")))
+    poner("062", ppm, _nombres(por_concepto.get("ppm")),
+          detalle=_detalle_de(por_concepto.get("ppm")))
 
     subtotal = max(determinado, 0) + ppm + unico + honorarios
     poner("595", subtotal, "código 089 + código 062 + código 048 + código 151", "total")
@@ -297,6 +312,26 @@ def propuesta_f29(cuentas) -> dict:
         "avisos": avisos,
         "a_pagar": subtotal,
     }
+
+
+def _detalle_de(cuentas) -> list:
+    """De qué está hecho lo que aporta una cuenta de retención o de PPM.
+
+    Acá no hay familias de documento: lo que se declara es un lado de la
+    cuenta, así que el detalle son sus asientos del mes.
+    """
+    detalle = []
+    for cuenta in cuentas or ():
+        for movimiento in cuenta.get("movimientos", ()):
+            lado = "haber" if (cuenta.get("signo") or 1) < 0 else "debe"
+            if not movimiento.get(lado):
+                continue
+            detalle.append({
+                "cuenta": cuenta.get("nombre", ""), "tipo": movimiento.get("tipo"),
+                "monto": movimiento.get(lado), "documentos": movimiento.get("documentos") or 0,
+                "lineas": movimiento.get("lineas") or 0,
+            })
+    return detalle
 
 
 def _comprobar_traspaso(cuenta, propuesto, que_es, avisos, controles):
