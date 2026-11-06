@@ -22,6 +22,7 @@ from app.models.contabilidad import (
     ConciliacionSiiLibro,
     F29Cuenta,
     F29Declarado,
+    F29Documento,
     F29DeclaradoCodigo,
     F29Movimiento,
     LineaDifTc,
@@ -1853,6 +1854,20 @@ def _cuentas_del_mes(mes):
     return cuentas
 
 
+def _documentos_por_codigo(propuesta, mes) -> dict:
+    """Los documentos que forman cada código, para poder desplegarlos."""
+    del_mes = _documentos_del_mes(mes)
+    por_codigo = {}
+    for linea in propuesta["lineas"]:
+        tipos = {d["tipo"] for d in linea.get("detalle", ()) if d.get("tipo")}
+        documentos = [d for tipo in tipos for d in del_mes.get(tipo, ())]
+        if documentos:
+            por_codigo[linea["codigo"]] = sorted(
+                documentos, key=lambda d: -abs(d.monto or 0)
+            )
+    return por_codigo
+
+
 def _mes_f29_texto(mes) -> str:
     """"2026-09" escrito como se lee: "septiembre 2026"."""
     try:
@@ -1860,6 +1875,21 @@ def _mes_f29_texto(mes) -> str:
         return f"{MESES_NOMBRES[int(numero) - 1]} {anio}"
     except (ValueError, IndexError):
         return str(mes or "")
+
+
+def _documentos_del_mes(mes, tipos=None):
+    """Los documentos del mayor de ese mes, agrupados por tipo de asiento.
+
+    Es lo que hay que mirar cuando un código no calza: en julio de 2026 la
+    diferencia del código 502 resultó ser una sola factura, la 5804.
+    """
+    consulta = F29Documento.query.filter_by(mes=mes)
+    if tipos:
+        consulta = consulta.filter(F29Documento.tipo.in_(list(tipos)))
+    por_tipo = {}
+    for documento in consulta.order_by(F29Documento.folio).all():
+        por_tipo.setdefault(documento.tipo, []).append(documento)
+    return por_tipo
 
 
 def _meses_del_f29():
@@ -1924,6 +1954,7 @@ def f29():
         declarado=declarado,
         comparacion=(comparar_con_declarado(propuesta["lineas"], declarado.por_codigo)
                      if propuesta and declarado else None),
+        documentos_por_codigo=_documentos_por_codigo(propuesta, mes) if propuesta else {},
         declarados=F29Declarado.query.order_by(F29Declarado.mes.desc()).all(),
         cuentas=cuentas,
         conceptos=CONCEPTOS_F29,
@@ -2028,6 +2059,7 @@ def cargar_f29():
             # después se insertan los nuevos: si no, los dos juegos chocan en
             # la misma base.
             cuenta.movimientos.clear()
+            cuenta.documentos.clear()
             db.session.flush()
 
         cuenta.nombre = leida["nombre"][:120]
@@ -2043,6 +2075,13 @@ def cargar_f29():
                 mes=mes, tipo=(tipo or "")[:40],
                 debe=movimiento["debe"], haber=movimiento["haber"],
                 lineas=movimiento["lineas"], documentos=movimiento["documentos"],
+            ))
+        for documento in leida.get("detalle", {}).values():
+            cuenta.documentos.append(F29Documento(
+                mes=documento["mes"], tipo=(documento["tipo"] or "")[:40],
+                folio=documento["folio"][:40], rut=documento["rut"][:20],
+                glosa=documento["glosa"], monto=documento["monto"],
+                lineas=documento["lineas"],
             ))
         if not cuenta.concepto:
             sin_concepto.append(cuenta.nombre)
