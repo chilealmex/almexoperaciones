@@ -412,6 +412,24 @@ _RE_DOC_MAYOR = re.compile(r"^\s*([A-Za-zÁÉÍÓÚÑ]+)\s*#\s*(\d+)")
 _RE_RUT_MAYOR = re.compile(r"(\d{1,3}(?:[.\d]*)-[\dkK])")
 _RE_CUENTA_MAYOR = re.compile(r"^(\d+(?:\.\d+)+)\s+(.*)$")
 _RE_FECHA_MAYOR = re.compile(r"^(\d{2})/(\d{2})/(\d{4})$")
+# En las ventas el asiento nombra el documento de otra forma: "33 Factura
+# Electronica Nº 5526", con el código del SII adelante y el folio al final.
+_RE_DOC_VENTA = re.compile(r"^\s*\d+\s+.*?N[ºo°]\s*(\d+)\s*$")
+
+
+def _documento_de_glosa(glosa: str):
+    """El folio que nombra la glosa del asiento, escrito como sea.
+
+    Las compras lo escriben "FCA#1043902 Proveedor 76.754.296-8 FEDEX" y las
+    ventas "33 Factura Electronica Nº 5526". Los pagos, los traspasos y la
+    apertura no nombran ninguno.
+    """
+    texto = glosa or ""
+    compra = _RE_DOC_MAYOR.match(texto)
+    if compra:
+        return compra.group(2)
+    venta = _RE_DOC_VENTA.match(texto)
+    return venta.group(1) if venta else None
 
 
 def _clase_de_cuenta(nombre: str) -> str:
@@ -460,6 +478,58 @@ def _tabla_del_mayor(archivo):
     )
 
 
+def _cuenta_nueva(codigo: str, nombre: str) -> dict:
+    return {
+        "cuenta": codigo,
+        "nombre": nombre,
+        "clase": _clase_de_cuenta(nombre),
+        "signo": _signo_de_cuenta(codigo),
+        "documentos": {},
+        "movimientos": {},
+        "_fechas": {},
+        "_folios": {},
+    }
+
+
+def _anotar_linea(cuenta, mes, tipo, glosa, debe, haber):
+    """Suma una línea del asiento a su cuenta, venga del formato que venga.
+
+    El Libro Mayor y el Informe por Análisis dicen lo mismo con otras columnas,
+    así que lo que hay que hacer con cada línea es idéntico.
+    """
+    movimiento = cuenta["movimientos"].setdefault(
+        (mes, tipo), {"debe": 0, "haber": 0, "lineas": 0, "documentos": 0}
+    )
+    movimiento["debe"] += debe
+    movimiento["haber"] += haber
+    movimiento["lineas"] += 1
+
+    folio = _documento_de_glosa(glosa)
+    if not folio:
+        # Pagos, traspasos y la apertura no nombran documento: no hay nada que
+        # cruzar con ellos, pero su monto sí es movimiento de la cuenta.
+        return
+    rut = _RE_RUT_MAYOR.search(glosa or "")
+    llave = (normalizar_folio(folio), normalizar_rut(rut.group(1)) if rut else "")
+    cuenta["documentos"][llave] = cuenta["documentos"].get(llave, 0) + (
+        (debe - haber) * cuenta["signo"]
+    )
+    cuenta["_fechas"].setdefault(llave, []).append(mes)
+    # La cantidad de documentos del F29 cuenta facturas, no líneas: un
+    # documento puede quedar en dos líneas de la misma cuenta.
+    vistos = cuenta["_folios"].setdefault((mes, tipo), set())
+    if llave not in vistos:
+        vistos.add(llave)
+        movimiento["documentos"] += 1
+
+
+def _cerrar_cuentas(cuentas):
+    for cuenta in cuentas:
+        # En qué mes quedó contabilizado cada documento, por si cayó en otro.
+        cuenta["meses"] = {k: max(v) for k, v in cuenta.pop("_fechas").items()}
+        cuenta.pop("_folios")
+
+
 def leer_cuentas_mayor(archivo) -> list:
     """Lee un Libro Mayor de Defontana y devuelve una entrada por cuenta.
 
@@ -487,64 +557,147 @@ def leer_cuentas_mayor(archivo) -> list:
         primera = fila[0].strip()
         cuenta = _RE_CUENTA_MAYOR.match(primera)
         if cuenta:
-            codigo, nombre = cuenta.group(1), cuenta.group(2).strip()
-            actual = {
-                "cuenta": codigo,
-                "nombre": nombre,
-                "clase": _clase_de_cuenta(nombre),
-                "signo": _signo_de_cuenta(codigo),
-                "documentos": {},
-                "movimientos": {},
-                "_fechas": {},
-                "_folios": {},
-            }
+            actual = _cuenta_nueva(cuenta.group(1), cuenta.group(2).strip())
             cuentas.append(actual)
             continue
         if actual is None or not _RE_FECHA_MAYOR.match(primera) or len(fila) < 6:
             continue
-
-        mes = f"{primera[6:10]}-{primera[3:5]}"
-        tipo = (fila[2] or "").strip()
-        debe, haber = a_monto(fila[4]), a_monto(fila[5])
-        movimiento = actual["movimientos"].setdefault(
-            (mes, tipo), {"debe": 0, "haber": 0, "lineas": 0, "documentos": 0}
+        _anotar_linea(
+            actual,
+            mes=f"{primera[6:10]}-{primera[3:5]}",
+            tipo=(fila[2] or "").strip(),
+            glosa=fila[3] or "",
+            debe=a_monto(fila[4]),
+            haber=a_monto(fila[5]),
         )
-        movimiento["debe"] += debe
-        movimiento["haber"] += haber
-        movimiento["lineas"] += 1
 
-        doc = _RE_DOC_MAYOR.match(fila[3] or "")
-        if not doc:
-            # Pagos, traspasos y la apertura no nombran documento: no hay nada
-            # que cruzar con ellos, pero su monto sí es movimiento de la cuenta.
-            continue
-        rut = _RE_RUT_MAYOR.search(fila[3] or "")
-        llave = (normalizar_folio(doc.group(2)), normalizar_rut(rut.group(1)) if rut else "")
-        actual["documentos"][llave] = actual["documentos"].get(llave, 0) + (
-            (debe - haber) * actual["signo"]
-        )
-        actual["_fechas"].setdefault(llave, []).append(primera)
-        # La cantidad de documentos del F29 cuenta facturas, no líneas: un
-        # documento puede quedar en dos líneas de la misma cuenta.
-        vistos = actual["_folios"].setdefault((mes, tipo), set())
-        if llave not in vistos:
-            vistos.add(llave)
-            movimiento["documentos"] += 1
-
-    for cuenta in cuentas:
-        # En qué mes quedó contabilizado cada documento, por si cayó en otro.
-        cuenta["meses"] = {
-            k: sorted({f"{d[6:10]}-{d[3:5]}" for d in v})[-1]
-            for k, v in cuenta.pop("_fechas").items()
-        }
-        cuenta.pop("_folios")
-
+    _cerrar_cuentas(cuentas)
     if not cuentas:
         raise ArchivoInvalido(
             "El Libro Mayor no trae ninguna cuenta. Descárgalo desde Defontana con el "
             "detalle de movimientos."
         )
     return cuentas
+
+
+# --- Informe por Análisis de Defontana (.xlsx) ---------------------------
+#
+# Dice lo mismo que el Libro Mayor pero con todas las cuentas juntas en un
+# archivo y una columna "Cuenta" en cada línea, en vez de un título por cuenta.
+# Para el F29 es el archivo cómodo: las siete cuentas de impuestos salen de una
+# sola descarga.
+#
+# Su código de cuenta viene sin puntos —"1110901001" y no "1.1.1090.10.01"—, y
+# el documento va en la columna "Comentario" en vez de la descripción.
+_COLUMNAS_ANALISIS = {
+    "cuenta": ("cuenta",),
+    # "descripci" y no "descripcion": el encabezado viene con tilde y la
+    # búsqueda de columnas compara el texto tal cual, sin quitarlas.
+    "nombre": ("descripci",),
+    "fecha": ("fecha",),
+    "tipo": ("tipo",),
+    "debe": ("cargo",),
+    "haber": ("abono",),
+    "glosa": ("comentario",),
+}
+
+
+def _fila_de_encabezado(hoja):
+    """Dónde empieza la tabla: el informe trae el membrete arriba."""
+    for numero, fila in enumerate(hoja.iter_rows(values_only=True), 1):
+        valores = [normalizar_nombre(c) for c in fila if c is not None]
+        if "CUENTA" in valores and "CARGO" in " ".join(valores):
+            return numero, [str(c or "").strip() for c in fila]
+    return None, []
+
+
+def leer_informe_analisis(archivo) -> list:
+    """Lee un Informe por Análisis de Defontana y devuelve una entrada por cuenta.
+
+    Devuelve lo mismo que leer_cuentas_mayor, para que lo que venga después no
+    tenga que saber de qué archivo salió.
+    """
+    import openpyxl
+
+    try:
+        libro = openpyxl.load_workbook(archivo, data_only=True, read_only=True)
+    except Exception as error:  # noqa: BLE001 - openpyxl levanta de todo
+        raise ArchivoInvalido(
+            "No se pudo abrir el archivo como Excel. El Informe por Análisis se descarga "
+            "de Defontana en .xlsx."
+        ) from error
+
+    hoja = libro.worksheets[0]
+    numero, encabezado = _fila_de_encabezado(hoja)
+    if not numero:
+        raise ArchivoInvalido(
+            "Ese Excel no parece un Informe por Análisis de Defontana: no tiene la tabla "
+            "con las columnas Cuenta, Fecha, Tipo, Cargo y Abono."
+        )
+
+    indice = {}
+    for campo, claves in _COLUMNAS_ANALISIS.items():
+        columna = _buscar_columna(encabezado, *claves)
+        indice[campo] = encabezado.index(columna) if columna else None
+    if indice["cuenta"] is None or indice["fecha"] is None:
+        raise ArchivoInvalido(
+            "Ese Excel no parece un Informe por Análisis de Defontana: le faltan las "
+            "columnas Cuenta y Fecha."
+        )
+
+    cuentas, por_codigo = [], {}
+    for fila in hoja.iter_rows(min_row=numero + 1, values_only=True):
+        def dato(campo):
+            posicion = indice[campo]
+            if posicion is None or posicion >= len(fila):
+                return None
+            return fila[posicion]
+
+        codigo = str(dato("cuenta") or "").strip()
+        mes = _mes_de_celda(dato("fecha"))
+        if not codigo or not mes:
+            continue
+        if codigo not in por_codigo:
+            por_codigo[codigo] = _cuenta_nueva(codigo, str(dato("nombre") or "").strip())
+            cuentas.append(por_codigo[codigo])
+        _anotar_linea(
+            por_codigo[codigo],
+            mes=mes,
+            tipo=str(dato("tipo") or "").strip(),
+            glosa=str(dato("glosa") or ""),
+            debe=a_monto(dato("debe")),
+            haber=a_monto(dato("haber")),
+        )
+
+    _cerrar_cuentas(cuentas)
+    if not cuentas:
+        raise ArchivoInvalido(
+            "El Informe por Análisis no trae ninguna línea con cuenta y fecha."
+        )
+    return cuentas
+
+
+def _mes_de_celda(valor) -> str:
+    """El mes de la celda de fecha, que puede venir como fecha o como texto."""
+    if hasattr(valor, "strftime"):
+        return valor.strftime("%Y-%m")
+    texto = str(valor or "").strip()
+    return f"{texto[6:10]}-{texto[3:5]}" if _RE_FECHA_MAYOR.match(texto) else ""
+
+
+def leer_cuentas_contables(archivo, nombre: str = "") -> list:
+    """Las cuentas de un archivo de Defontana, sea cual sea de los dos.
+
+    El Libro Mayor viene como ".xls" que en realidad es HTML y el Informe por
+    Análisis como .xlsx de verdad, así que se distinguen por el nombre y, si
+    eso no alcanza, probando.
+    """
+    if (nombre or "").lower().endswith(".xlsx"):
+        return leer_informe_analisis(archivo)
+    try:
+        return leer_cuentas_mayor(archivo)
+    except ArchivoInvalido:
+        return leer_informe_analisis(archivo)
 
 
 # Lo que el mayor dice de un documento, comparado con lo que informa el libro.

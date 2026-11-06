@@ -30,9 +30,10 @@
         <input type="file" name="mayor" id="mayor" class="form-control form-control-sm"
                accept=".xls,.xlsx,.html,.htm" multiple style="min-width:320px;">
         <div class="form-text">
-          De a una o varias juntas. Las que se suban se van sumando a las que ya están, y
-          volver a subir una reemplaza sólo esa. El archivo trae el año entero, así que una
-          carga sirve para todos los meses.
+          El <strong>Informe por Análisis</strong> (.xlsx) trae todas las cuentas juntas: con ese
+          archivo basta. También sirve el Libro Mayor, cuenta por cuenta. Lo que se suba se va
+          sumando a lo que ya está, y volver a subir una cuenta reemplaza sólo esa. El archivo
+          trae el año entero, así que una carga sirve para todos los meses.
         </div>
       </div>
       <button type="submit" class="btn btn-primary btn-sm mb-4">Cargar</button>
@@ -122,6 +123,26 @@
       declarada y queda puesta.
     </div>
     {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if propuesta.controles %}
+  <div class="card mb-4">
+    <div class="card-header">Contra lo que dice la contabilidad</div>
+    <div class="list-group list-group-flush">
+      {% for control in propuesta.controles %}
+      <div class="list-group-item small {{ 'list-group-item-danger' if not control.calza }}">
+        {{ '✔' if control.calza else '✘' }}
+        <strong>{{ control.cuenta }}</strong> traspasó {{ control.traspasado|clp }} al cerrar el mes,
+        y {{ control.que_es }} da {{ control.propuesto|clp }}.
+        {{ 'Calzan.' if control.calza else 'Hay que revisar por qué no calzan.' }}
+      </div>
+      {% endfor %}
+    </div>
+    <div class="card-footer small text-muted">
+      El traspaso no es una línea del formulario: es el asiento con que la contabilidad cierra
+      el mes. Que calce quiere decir que a la propuesta no le falta ni le sobra nada.
+    </div>
   </div>
   {% endif %}
 

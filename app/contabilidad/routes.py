@@ -38,6 +38,7 @@ from app.utils.conciliacion_sii import (
     comparar_con_mayor,
     cruzar,
     juntar_mayores,
+    leer_cuentas_contables,
     leer_cuentas_mayor,
     leer_libro_defontana,
     leer_rcv_sii,
@@ -1897,7 +1898,8 @@ def cargar_f29():
         return redirect(url_for("contabilidad.f29", **request.args))
 
     try:
-        leidas = [(a.filename, c) for a in archivos for c in leer_cuentas_mayor(a)]
+        leidas = [(a.filename, c) for a in archivos
+                  for c in leer_cuentas_contables(a, a.filename)]
     except ArchivoInvalido as error:
         flash(str(error), "danger")
         return redirect(url_for("contabilidad.f29", **request.args))

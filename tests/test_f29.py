@@ -15,6 +15,8 @@ Los números de estas pruebas son los del F29 de septiembre de 2026 (folio
 
 import io
 
+import pytest
+
 from app.models.contabilidad import F29Cuenta
 from app.utils.conciliacion_sii import leer_cuentas_mayor
 from app.utils.f29 import concepto_de_cuenta, propuesta_f29
@@ -364,3 +366,192 @@ def test_el_f29_pide_permiso_de_contabilidad(client, db, empresa, usuario_bodega
     login(client, "bodega@test.cl")
 
     assert client.get("/contabilidad/f29").status_code == 403
+
+
+# ---------- El Informe por Análisis ----------
+#
+# Defontana lo exporta en .xlsx de verdad, con todas las cuentas juntas y una
+# columna "Cuenta" en cada línea, en vez de un título por cuenta. Para el F29
+# es el archivo cómodo: las siete cuentas de impuestos salen de una descarga.
+#
+# Su código de cuenta viene sin puntos —"1110901001"— y el documento va en la
+# columna "Comentario". En ventas lo nombra de otra forma: "33 Factura
+# Electronica Nº 5526" en vez de "FCA#1043902 Proveedor 76.754.296-8".
+
+ANALISIS = [
+    ["1110901001", "IVA CREDITO FISCAL", "02/09/2026", "Cpra_FCA", "260900001",
+     8990287, 0, "FCA#1001 Proveedor 76.124.890-1 UN PROVEEDOR"],
+    ["1110901001", "IVA CREDITO FISCAL", "30/09/2026", "TRASPASO", "260900900",
+     0, 8990287, None],
+    ["2120301001", "IVA DEBITO FISCAL", "05/09/2026", "Vta_FVAELECT", "260900500",
+     0, 95961778, "33 Factura Electronica Nº 5526"],
+    ["2120301001", "IVA DEBITO FISCAL", "25/09/2026", "Vta_NCVELECT", "260900501",
+     159600, 0, "61 Nota de Credito Electronica Nº 220"],
+    ["2120301002", "IMPUESTO 2 CATEGORIA", "30/09/2026", "HONORARIOS", "260900700",
+     0, 405548, None],
+    # Lo que hay que pagar: 95.802.178 de débitos − 8.990.287 de créditos
+    # + 405.548 de retención de honorarios.
+    ["2120301004", "IMPUESTO POR PAGAR", "30/09/2026", "TRASPASO", "260900999",
+     0, 87217439, None],
+]
+
+
+def _informe(filas=None, encabezado=None):
+    """El .xlsx tal como lo exporta Defontana, con su membrete arriba."""
+    import openpyxl
+
+    libro = openpyxl.Workbook()
+    hoja = libro.active
+    hoja.append(["Shaw Almex Chile SpA", "", "", "Fecha: 06/11/2026"])
+    hoja.append(["99578050-k"])
+    hoja.append(["Informe por Análisis", "", "", "Período: 01/01/2026 - 06/11/2026"])
+    hoja.append(encabezado or [
+        "Cuenta", "Descripción", "Fecha", "Tipo", "Número",
+        "Cargo ($)", "Abono ($)", "Comentario",
+    ])
+    for fila in (ANALISIS if filas is None else filas):
+        hoja.append(fila)
+    memoria = io.BytesIO()
+    libro.save(memoria)
+    memoria.seek(0)
+    return memoria
+
+
+def _cuentas_del_informe(mes="2026-09", **kwargs):
+    from app.utils.conciliacion_sii import leer_cuentas_contables
+
+    cuentas = []
+    for leida in leer_cuentas_contables(_informe(**kwargs), "informe.xlsx"):
+        movimientos = [
+            {"tipo": tipo, **datos}
+            for (m, tipo), datos in leida["movimientos"].items() if m == mes
+        ]
+        cuentas.append({
+            "cuenta": leida["cuenta"], "nombre": leida["nombre"], "signo": leida["signo"],
+            "concepto": concepto_de_cuenta(leida["nombre"]), "movimientos": movimientos,
+        })
+    return cuentas
+
+
+def test_se_leen_todas_las_cuentas_del_informe_en_una_sola_pasada():
+    from app.utils.conciliacion_sii import leer_cuentas_contables
+
+    cuentas = leer_cuentas_contables(_informe(), "informe.xlsx")
+
+    assert [c["cuenta"] for c in cuentas] == [
+        "1110901001", "2120301001", "2120301002", "2120301004"
+    ]
+    # El código viene sin puntos y el signo igual sale de su primer dígito
+    assert cuentas[0]["signo"] == 1
+    assert cuentas[1]["signo"] == -1
+
+
+def test_la_factura_de_venta_se_reconoce_aunque_se_escriba_distinto():
+    # "33 Factura Electronica Nº 5526" y no "FCA#1043902 Proveedor ...".
+    propuesta = propuesta_f29(_cuentas_del_informe())
+
+    assert _valor(propuesta, "502") == 95961778
+    assert _valor(propuesta, "503") == 1
+    assert _valor(propuesta, "510") == 159600
+    assert _valor(propuesta, "509") == 1
+
+
+def test_una_factura_de_venta_en_dos_lineas_se_cuenta_una_sola_vez():
+    # Es lo que obliga a leer el folio de la glosa y no a contar líneas: el
+    # formulario pide cuántas facturas se emitieron, y una factura puede
+    # quedar partida en dos líneas del mismo asiento.
+    partida = [
+        ["2120301001", "IVA DEBITO FISCAL", "05/09/2026", "Vta_FVAELECT", "260900500",
+         0, 100000, "33 Factura Electronica Nº 5526"],
+        ["2120301001", "IVA DEBITO FISCAL", "05/09/2026", "Vta_FVAELECT", "260900500",
+         0, 50000, "33 Factura Electronica Nº 5526"],
+        ["2120301001", "IVA DEBITO FISCAL", "06/09/2026", "Vta_FVAELECT", "260900502",
+         0, 70000, "33 Factura Electronica Nº 5527"],
+    ]
+
+    propuesta = propuesta_f29(_cuentas_del_informe(filas=partida))
+
+    assert _valor(propuesta, "503") == 2
+    assert _valor(propuesta, "502") == 220000
+
+
+def test_la_cuenta_de_segunda_categoria_es_la_retencion_de_honorarios():
+    assert concepto_de_cuenta("IMPUESTO 2 CATEGORIA") == "honorarios"
+    assert _valor(propuesta_f29(_cuentas_del_informe()), "151") == 405548
+
+
+def test_el_traspaso_del_cierre_comprueba_la_propuesta():
+    propuesta = propuesta_f29(_cuentas_del_informe())
+
+    control = next(c for c in propuesta["controles"] if "POR PAGAR" in c["cuenta"])
+    assert control["traspasado"] == 87217439
+    assert control["propuesto"] == _valor(propuesta, "595")
+    assert control["calza"] is True
+    assert not propuesta["avisos"]
+
+
+def test_si_el_traspaso_no_calza_con_la_propuesta_se_avisa():
+    torcido = [f for f in ANALISIS if "POR PAGAR" not in f[1]] + [
+        ["2120301004", "IMPUESTO POR PAGAR", "30/09/2026", "TRASPASO", "260900999",
+         0, 99000000, None],
+    ]
+
+    propuesta = propuesta_f29(_cuentas_del_informe(filas=torcido))
+
+    control = next(c for c in propuesta["controles"] if "POR PAGAR" in c["cuenta"])
+    assert control["calza"] is False
+    assert any("no calzan" in a for a in propuesta["avisos"])
+
+
+def test_un_mes_sin_cerrar_no_tiene_traspaso_y_no_se_dice_nada():
+    # El traspaso es el asiento del cierre: mientras el mes no se cierre no
+    # existe, y eso no es una diferencia.
+    sin_cerrar = [f for f in ANALISIS if f[3] != "TRASPASO"]
+
+    propuesta = propuesta_f29(_cuentas_del_informe(filas=sin_cerrar))
+
+    assert propuesta["controles"] == []
+    assert not propuesta["avisos"]
+
+
+def test_el_asiento_del_cierre_no_es_un_documento():
+    # Se distingue por el tipo: los de documento llevan el libro adelante
+    # ("Cpra_FCA", "Vta_FVAELECT") y los del cierre son una sola palabra.
+    from app.utils.f29 import es_de_documento
+
+    assert es_de_documento("Cpra_FCA") is True
+    assert es_de_documento("Vta_FVAELECT") is True
+    assert es_de_documento("TRASPASO") is False
+    assert es_de_documento("EGRESO") is False
+    # Y si otro plan de cuentas bautizara los tipos de otra forma, lo que
+    # nombra una factura sigue siendo una factura.
+    assert es_de_documento("COMPRAS", documentos=3) is True
+
+
+def test_un_excel_que_no_es_el_informe_avisa_en_vez_de_reventar():
+    from app.utils.conciliacion_sii import ArchivoInvalido, leer_cuentas_contables
+
+    with pytest.raises(ArchivoInvalido) as error:
+        leer_cuentas_contables(
+            _informe(encabezado=["a", "b", "c", "d", "e", "f", "g", "h"]), "otro.xlsx"
+        )
+
+    assert "Informe por Análisis" in str(error.value)
+
+
+def test_el_informe_tambien_se_sube_desde_la_pantalla(client, db, empresa, usuario_admin):
+    login(client, "admin@test.cl")
+
+    client.post(
+        "/contabilidad/f29/cargar",
+        data={"mayor": [(_informe(), "Informe_por_analisis.xlsx")]},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+
+    cargadas = {c.nombre: c.concepto for c in F29Cuenta.query.all()}
+    assert cargadas == {
+        "IVA CREDITO FISCAL": "iva_credito",
+        "IVA DEBITO FISCAL": "iva_debito",
+        "IMPUESTO 2 CATEGORIA": "honorarios",
+        "IMPUESTO POR PAGAR": "impuesto_por_pagar",
+    }

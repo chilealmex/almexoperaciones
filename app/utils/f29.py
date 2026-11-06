@@ -50,8 +50,9 @@ CONCEPTOS = {
     "iva_credito": "IVA crédito fiscal",
     "iva_retenido": "IVA retenido por pagar",
     "impuesto_unico": "Retención impuesto único a los trabajadores",
-    "honorarios": "Retención sobre honorarios",
+    "honorarios": "Retención sobre honorarios (segunda categoría)",
     "ppm": "Pagos provisionales mensuales",
+    "impuesto_por_pagar": "Impuesto por pagar (el traspaso del mes)",
 }
 
 # Las dos que no pueden faltar: sin ellas no hay débitos ni créditos que
@@ -80,10 +81,16 @@ def concepto_de_cuenta(nombre) -> str:
         return ""
     if "PPM" in n or "PAGOPROVISIONAL" in n or "PAGOSPROVISIONALES" in n:
         return "ppm"
-    if "HONORARIO" in n:
+    # La retención a las boletas de honorarios es el impuesto de segunda
+    # categoría, y así se llama la cuenta: "IMPUESTO 2 CATEGORIA".
+    if "HONORARIO" in n or "2CATEGORIA" in n or "SEGUNDACATEGORIA" in n:
         return "honorarios"
     if "IMPUESTOUNICO" in n or ("UNICO" in n and "TRABAJADOR" in n):
         return "impuesto_unico"
+    # Donde se centraliza lo que hay que pagar. No es una línea del
+    # formulario: es contra qué comprobar que la propuesta esté completa.
+    if "IMPUESTOPORPAGAR" in n:
+        return "impuesto_por_pagar"
     return ""
 
 
@@ -102,25 +109,38 @@ def familia_de_tipo(tipo) -> str:
     return "documento"
 
 
-def _grupos(cuenta) -> dict:
-    """Lo que movió la cuenta en el mes, juntado por clase de documento.
+def es_de_documento(tipo, documentos=0) -> bool:
+    """Si el asiento es de un documento o del cierre del mes.
 
-    Las líneas que no nombran documento —el traspaso del saldo a IVA por
-    pagar, la apertura— quedan aparte: no son nada que el formulario declare,
-    y sumarlas al crédito del mes lo dejaría al doble.
+    Defontana nombra los asientos de documento con el libro adelante —
+    "Cpra_FCA", "Vta_FVAELECT"— y los demás con una sola palabra: "TRASPASO",
+    "EGRESO", "APERTURA". Esos no son nada que el formulario declare, y
+    sumarlos al crédito del mes lo dejaría al doble.
+
+    Que la línea nombre un documento vale igual: si otro plan de cuentas
+    bautizara los tipos de otra forma, lo que nombra una factura es una
+    factura.
     """
+    return "_" in str(tipo or "") or bool(documentos)
+
+
+def _grupos(cuenta) -> dict:
+    """Lo que movió la cuenta en el mes, juntado por clase de documento."""
     grupos = {}
     for movimiento in cuenta.get("movimientos", ()):
         documentos = movimiento.get("documentos") or 0
-        familia = familia_de_tipo(movimiento.get("tipo")) if documentos else "sin_documento"
+        tipo = movimiento.get("tipo")
+        familia = familia_de_tipo(tipo) if es_de_documento(tipo, documentos) else "sin_documento"
         grupo = grupos.setdefault(
             familia, {"monto": 0, "documentos": 0, "lineas": 0, "tipos": []}
         )
         neto = (movimiento.get("debe") or 0) - (movimiento.get("haber") or 0)
         grupo["monto"] += neto * (cuenta.get("signo") or 1)
-        grupo["documentos"] += documentos
+        # El formulario pide cuántas facturas son. Cuando el asiento las
+        # nombra se cuentan documentos distintos; cuando no, cada línea es una.
+        grupo["documentos"] += documentos or (movimiento.get("lineas") or 0)
         grupo["lineas"] += movimiento.get("lineas") or 0
-        grupo["tipos"].append(movimiento.get("tipo"))
+        grupo["tipos"].append(tipo)
     # Una nota de crédito mueve la cuenta al revés que una factura, y el
     # formulario la pide en positivo para restarla después.
     if "nota_credito" in grupos:
@@ -140,6 +160,21 @@ def _lado_declarado(cuenta) -> int:
     return haber if (cuenta.get("signo") or 1) < 0 else debe
 
 
+def _traspaso(cuenta) -> int:
+    """Cuánto se traspasó al cerrar el mes, sin signo.
+
+    Al cierre, el saldo de cada cuenta de impuestos se lleva a la de impuesto
+    por pagar con un asiento de tipo "TRASPASO". Ese monto es la contabilidad
+    diciendo cuánto declaró, y sirve para comprobar la propuesta.
+    """
+    total = 0
+    for movimiento in cuenta.get("movimientos", ()):
+        if str(movimiento.get("tipo") or "").strip().upper() != "TRASPASO":
+            continue
+        total += (movimiento.get("debe") or 0) - (movimiento.get("haber") or 0)
+    return abs(total)
+
+
 def propuesta_f29(cuentas) -> dict:
     """La propuesta del F29 con las cuentas del mayor de un mes.
 
@@ -151,7 +186,7 @@ def propuesta_f29(cuentas) -> dict:
     for cuenta in cuentas:
         por_concepto.setdefault(cuenta.get("concepto") or "", []).append(cuenta)
 
-    lineas, avisos = [], []
+    lineas, avisos, controles = [], [], []
 
     def poner(codigo, valor, de, clase="monto"):
         lineas.append({"codigo": codigo, "glosa": GLOSAS[codigo], "valor": valor,
@@ -183,6 +218,8 @@ def propuesta_f29(cuentas) -> dict:
     poner("510", notas_v["monto"], nombre_debito)
     total_debitos = facturas["monto"] - notas_v["monto"]
     poner("538", total_debitos, "código 502 − código 510", "total")
+    for cuenta in por_concepto.get("iva_debito", ()):
+        _comprobar_traspaso(cuenta, total_debitos, "el total de débitos", avisos, controles)
 
     # --- Créditos: lo que se compró ------------------------------------
     credito = grupos_de("iva_credito")
@@ -199,16 +236,11 @@ def propuesta_f29(cuentas) -> dict:
     total_creditos = recibidas["monto"] - notas_c["monto"] + importacion["monto"]
     poner("537", total_creditos, "código 520 − código 528 + código 535", "total")
 
-    # El traspaso del mes lleva el saldo de la cuenta a IVA por pagar, así que
-    # tiene que ser el mismo total de créditos. Si no calza, falta un
+    # El traspaso del mes lleva el saldo de la cuenta a impuesto por pagar, así
+    # que tiene que ser el mismo total de créditos. Si no calza, falta un
     # documento o sobra uno.
-    traspaso = credito.get("sin_documento")
-    if traspaso and traspaso["monto"] and abs(abs(traspaso["monto"]) - total_creditos) > 1:
-        avisos.append(
-            f"El traspaso del mes en {nombre_credito} es {abs(traspaso['monto']):,.0f} y el total "
-            f"de créditos propuesto es {total_creditos:,.0f}: hay que revisar por qué no calzan."
-            .replace(",", ".")
-        )
+    for cuenta in por_concepto.get("iva_credito", ()):
+        _comprobar_traspaso(cuenta, total_creditos, "el total de créditos", avisos, controles)
 
     # --- Lo determinado ------------------------------------------------
     determinado = total_debitos - total_creditos
@@ -234,6 +266,12 @@ def propuesta_f29(cuentas) -> dict:
     poner("547", subtotal, "código 595", "total")
     poner("091", subtotal, "código 547", "total")
 
+    # Al cerrar el mes, lo que hay que pagar se centraliza en su cuenta. Ese
+    # traspaso es la contabilidad diciendo cuánto declaró, así que comprobarlo
+    # contra la propuesta dice si está completa.
+    for cuenta in por_concepto.get("impuesto_por_pagar", ()):
+        _comprobar_traspaso(cuenta, subtotal, "el total a pagar propuesto", avisos, controles)
+
     # --- Lo que todavía no se puede poner solo -------------------------
     sin_codigo = []
     for cuenta in por_concepto.get("iva_retenido", ()):
@@ -250,12 +288,42 @@ def propuesta_f29(cuentas) -> dict:
     ]
     return {
         "lineas": lineas,
+        "controles": controles,
         "faltan": faltan,
         "sin_codigo": sin_codigo,
         "sin_clasificar": sin_clasificar,
         "avisos": avisos,
         "a_pagar": subtotal,
     }
+
+
+def _comprobar_traspaso(cuenta, propuesto, que_es, avisos, controles):
+    """Compara el traspaso del cierre con lo que propone el formulario.
+
+    El traspaso no es una línea del F29: es el asiento con que la contabilidad
+    cierra el mes. Que calce con lo propuesto quiere decir que no falta ni
+    sobra nada; que no calce, que hay algo que mirar. Si el mes todavía no se
+    cerró no hay traspaso y no se dice nada.
+    """
+    traspasado = _traspaso(cuenta)
+    if not traspasado:
+        return
+    # El IVA se redondea documento por documento: un peso de diferencia es eso
+    # y no un documento que falte.
+    if abs(traspasado - propuesto) <= 1:
+        controles.append({
+            "cuenta": cuenta["nombre"], "traspasado": traspasado,
+            "propuesto": propuesto, "que_es": que_es, "calza": True,
+        })
+        return
+    controles.append({
+        "cuenta": cuenta["nombre"], "traspasado": traspasado,
+        "propuesto": propuesto, "que_es": que_es, "calza": False,
+    })
+    avisos.append(
+        f"El traspaso del mes en {cuenta['nombre']} es {traspasado:,.0f} y {que_es} da "
+        f"{propuesto:,.0f}: hay que revisar por qué no calzan.".replace(",", ".")
+    )
 
 
 def _nombres(cuentas) -> str:
