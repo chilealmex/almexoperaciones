@@ -20,6 +20,8 @@ de la cuenta de IVA crédito fiscal del mismo mes:
 El peso de diferencia del 520 es el redondeo del IVA documento por documento.
 """
 
+from app.utils.f29_pdf import CODIGOS_INFORMATIVOS
+
 # Los códigos del formulario, con la glosa tal como la escribe el SII. Salen
 # del F29 de septiembre de 2026: no están puestos de memoria.
 GLOSAS = {
@@ -328,3 +330,50 @@ def _comprobar_traspaso(cuenta, propuesto, que_es, avisos, controles):
 
 def _nombres(cuentas) -> str:
     return ", ".join(c["nombre"] for c in cuentas or ()) or "—"
+
+
+# --- Lo declarado contra lo que dice la contabilidad ---------------------
+
+ESTADOS_COMPARACION = {
+    "calza": "Calza",
+    "distinto": "Distinto",
+    "no_declarado": "No está en el formulario",
+    "sin_propuesta": "Declarado, sin comparar",
+}
+
+
+def comparar_con_declarado(lineas, declarado) -> dict:
+    """Pone lado a lado cada código propuesto y lo que dice el F29 presentado.
+
+    Se perdona un peso: el IVA se redondea documento por documento y la suma
+    de las facturas puede quedar a un peso de lo que informa el SII.
+
+    'declarado' es {código: valor}; lo que trae y la propuesta no calcula
+    —la base imponible, el IVA de documentos electrónicos— queda aparte, dicho
+    pero sin comparar.
+    """
+    filas, iguales, distintos = [], 0, 0
+    for linea in lineas:
+        codigo = linea["codigo"]
+        propuesto = linea["valor"]
+        if codigo not in declarado:
+            filas.append({"codigo": codigo, "glosa": linea["glosa"], "propuesto": propuesto,
+                          "declarado": None, "diferencia": None, "estado": "no_declarado"})
+            continue
+        valor = declarado[codigo]
+        diferencia = propuesto - valor
+        estado = "calza" if abs(diferencia) <= 1 else "distinto"
+        if estado == "calza":
+            iguales += 1
+        else:
+            distintos += 1
+        filas.append({"codigo": codigo, "glosa": linea["glosa"], "propuesto": propuesto,
+                      "declarado": valor, "diferencia": diferencia, "estado": estado})
+
+    propuestos = {linea["codigo"] for linea in lineas}
+    aparte = [
+        {"codigo": codigo, "glosa": GLOSAS.get(codigo) or CODIGOS_INFORMATIVOS.get(codigo, ""),
+         "declarado": valor, "estado": "sin_propuesta"}
+        for codigo, valor in sorted(declarado.items()) if codigo not in propuestos
+    ]
+    return {"filas": filas, "sin_comparar": aparte, "calzan": iguales, "distintos": distintos}

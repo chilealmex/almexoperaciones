@@ -639,6 +639,17 @@ def leer_informe_analisis(archivo) -> list:
     for campo, claves in _COLUMNAS_ANALISIS.items():
         columna = _buscar_columna(encabezado, *claves)
         indice[campo] = encabezado.index(columna) if columna else None
+    if indice["cuenta"] is not None and indice["fecha"] is None:
+        # El Informe por Análisis resumido: una línea por cuenta con el total
+        # del período entero. Se baja del mismo lugar que el detallado y se
+        # llama igual, pero sin fecha no hay cómo separar los meses y sin tipo
+        # no hay cómo separar las facturas del giro de las importaciones y las
+        # notas de crédito, que van a códigos distintos del formulario.
+        raise ArchivoInvalido(
+            "Ese Informe por Análisis es el resumido: trae una línea por cuenta con el "
+            "total de todo el período, sin fecha ni tipo de documento. Descárgalo "
+            "detallado —una línea por asiento— y con eso basta para todos los meses del año."
+        )
     if indice["cuenta"] is None or indice["fecha"] is None:
         raise ArchivoInvalido(
             "Ese Excel no parece un Informe por Análisis de Defontana: le faltan las "
