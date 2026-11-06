@@ -50,12 +50,21 @@ from app.utils.conciliacion_sii import (
 from app.utils.decorators import require_permission
 from app.utils.f29 import CONCEPTOS as CONCEPTOS_F29
 from app.utils.f29 import CODIGOS_INFORMATIVOS, GLOSAS as GLOSAS_F29
+from app.utils.f29 import ESTADOS_COMPARACION as ESTADOS_COMPARACION_F29
 from app.utils.f29 import comparar_con_declarado, concepto_de_cuenta, propuesta_f29
 from app.utils.f29_pdf import leer_f29_pdf
 from app.utils.dif_tipo_cambio import recalcular_periodo, totales_periodo
 from app.utils.dif_tipo_cambio_excel import PlanillaInvalida as PlanillaInvalidaMayor
 from app.utils.dif_tipo_cambio_excel import leer_mayor
-from app.utils.exportar import CLP, FECHA, PORCENTAJE, col, responder_excel, responder_plantilla_excel
+from app.utils.exportar import (
+    CLP,
+    FECHA,
+    PORCENTAJE,
+    col,
+    responder_excel,
+    responder_excel_hojas,
+    responder_plantilla_excel,
+)
 from app.utils.provision_ingresos_excel import HOJA as HOJA_PROVISIONES
 from app.utils.provision_ingresos_excel import (
     MESES_NOMBRES,
@@ -1038,7 +1047,105 @@ def conciliacion_sii():
         form=form,
         accion=AccionForm(),
         meses=MESES_NOMBRES,
+        periodos=[
+            (f"{c.anio}-{c.mes:02d}", f"{MESES_NOMBRES[c.mes - 1]} {c.anio}")
+            for c in conciliaciones
+        ],
     )
+
+
+@bp.route("/conciliacion-sii/informe.xlsx")
+@require_permission("contabilidad", "ver")
+def exportar_informe_conciliacion_sii():
+    """El cruce de varios meses en un Excel, para mirarlo todo junto.
+
+    Dos hojas: el resumen mes a mes —si cuadra o en qué se diferencia— y el
+    detalle documento por documento de esos mismos meses. El detalle sale con
+    sus filtros puestos, que es lo que hace falta para armarle encima una
+    tabla dinámica.
+    """
+    clave = request.args.get("libro")
+    if clave not in ("compra", "venta"):
+        abort(404)
+    desde = (request.args.get("desde") or "").strip()
+    hasta = (request.args.get("hasta") or "").strip()
+
+    periodos = [
+        c for c in ConciliacionSii.query.filter_by(empresa_id=_empresa_id())
+        .order_by(ConciliacionSii.anio, ConciliacionSii.mes).all()
+        if (not desde or f"{c.anio}-{c.mes:02d}" >= desde)
+        and (not hasta or f"{c.anio}-{c.mes:02d}" <= hasta)
+    ]
+    etiqueta = "Compras" if clave == "compra" else "Ventas"
+    rango = _rango_legible(desde, hasta, periodos)
+
+    resumen, detalle = [], []
+    for conciliacion in periodos:
+        libro = conciliacion.libro_por_clave(clave)
+        if libro is None:
+            continue
+        mes = f"{conciliacion.anio}-{conciliacion.mes:02d}"
+        resumen.append([
+            mes, _etiqueta_periodo(conciliacion),
+            "Cerrado" if conciliacion.cerrado else "Abierto",
+            "Cuadra" if libro.cuadra else f"{libro.pendientes} por revisar",
+            libro.n_coincide, libro.n_solo_sii, libro.n_solo_defontana,
+            libro.n_dif_monto, libro.n_dif_datos, libro.n_aceptados, libro.n_otro_mes,
+            libro.total_sii, libro.total_defontana, libro.diferencia,
+        ])
+        for documento in libro.documentos:
+            detalle.append([
+                mes, _etiqueta_periodo(conciliacion), etiqueta,
+                ESTADO_ETIQUETAS_CONCILIACION.get(documento.estado, documento.estado),
+                documento.tipo_doc_desc or documento.tipo_doc, documento.folio,
+                documento.fecha,
+                documento.rut_sii or documento.rut_defontana,
+                documento.contraparte_sii or documento.contraparte_defontana,
+                documento.neto_sii, documento.iva_sii, documento.total_sii,
+                documento.neto_defontana, documento.iva_defontana, documento.total_defontana,
+                (documento.total_sii or 0) - (documento.total_defontana or 0),
+                "Sí" if documento.aceptado else "",
+                documento.mes_contable_texto,
+            ])
+
+    hojas = [
+        (
+            f"Resumen {etiqueta}",
+            [col("Período", ancho=12), col("Mes", ancho=18), col("Estado", ancho=12),
+             col("Cuadra", ancho=18),
+             col("Coincide", ancho=11), col("Solo SII", ancho=11),
+             col("Solo Defontana", ancho=15), col("Dif. monto", ancho=12),
+             col("Dif. datos", ancho=12), col("Aceptadas", ancho=11),
+             col("En otro mes", ancho=12),
+             col("Total SII", ancho=18, formato=CLP),
+             col("Total Defontana", ancho=18, formato=CLP),
+             col("Diferencia", ancho=16, formato=CLP)],
+            resumen, rango,
+        ),
+        (
+            f"Detalle {etiqueta}",
+            [col("Período", ancho=12), col("Mes", ancho=18), col("Libro", ancho=10),
+             col("Estado", ancho=20), col("Tipo doc.", ancho=26), col("Folio", ancho=14),
+             col("Fecha", ancho=12), col("RUT", ancho=16), col("Razón social", ancho=40),
+             col("Neto SII", ancho=16, formato=CLP), col("IVA SII", ancho=14, formato=CLP),
+             col("Total SII", ancho=16, formato=CLP),
+             col("Neto Defontana", ancho=16, formato=CLP),
+             col("IVA Defontana", ancho=14, formato=CLP),
+             col("Total Defontana", ancho=16, formato=CLP),
+             col("Diferencia", ancho=14, formato=CLP),
+             col("Aceptada", ancho=10), col("Contabilizado en", ancho=18)],
+            detalle, rango,
+        ),
+    ]
+    return responder_excel_hojas(f"conciliacion-{clave}", hojas)
+
+
+def _rango_legible(desde, hasta, periodos) -> str:
+    if not periodos:
+        return "Sin períodos en ese rango"
+    primero = _etiqueta_periodo(periodos[0])
+    ultimo = _etiqueta_periodo(periodos[-1])
+    return primero if primero == ultimo else f"{primero} a {ultimo}"
 
 
 @bp.route("/conciliacion-sii/cargar", methods=["POST"])
@@ -2119,21 +2226,85 @@ def eliminar_cuenta_f29(cuenta_id):
 @bp.route("/f29/propuesta.xlsx")
 @require_permission("contabilidad", "ver")
 def exportar_f29():
+    """El informe del mes: el mayor, la propuesta y lo declarado.
+
+    Cuatro hojas, para poder seguir una diferencia de punta a punta: el
+    formulario código por código, lo que movió cada cuenta, los documentos uno
+    por uno y lo declarado en el F29.
+    """
     mes = request.args.get("mes") or (_meses_del_f29() or [""])[0]
-    propuesta = propuesta_f29(_cuentas_del_mes(mes)) if mes else {"lineas": []}
+    cuentas = _cuentas_del_mes(mes) if mes else []
+    propuesta = propuesta_f29(cuentas) if mes else {"lineas": [], "controles": []}
+    declarado = F29Declarado.query.filter_by(mes=mes).first() if mes else None
+    comparacion = (
+        comparar_con_declarado(propuesta["lineas"], declarado.por_codigo)
+        if declarado else None
+    )
+    etiqueta = _mes_f29_texto(mes) or "sin mes"
+
+    # --- El formulario, con lo declarado al lado si está cargado ------
     columnas = [
         col("Código", ancho=10),
-        col("Glosa", ancho=48),
-        col("Valor", ancho=18, formato=CLP),
-        col("De dónde sale", ancho=42),
+        col("Glosa", ancho=46),
+        col("Propuesta", ancho=18, formato=CLP),
     ]
-    filas = [
-        [linea["codigo"], linea["glosa"], linea["valor"], linea["de"]]
-        for linea in propuesta["lineas"]
-    ]
-    return responder_excel(
-        f"f29-{mes or 'sin-mes'}",
-        f"Propuesta F29 — {_mes_f29_texto(mes) or 'sin mes'}",
-        columnas,
-        filas,
-    )
+    if comparacion:
+        columnas += [
+            col("Declarado", ancho=18, formato=CLP),
+            col("Diferencia", ancho=16, formato=CLP),
+            col("Estado", ancho=14),
+        ]
+    columnas.append(col("Cuenta contable", ancho=42))
+
+    por_codigo = {f["codigo"]: f for f in (comparacion or {}).get("filas", ())}
+    filas = []
+    for linea in propuesta["lineas"]:
+        fila = [linea["codigo"], linea["glosa"], linea["valor"]]
+        if comparacion:
+            visto = por_codigo.get(linea["codigo"])
+            fila += [
+                visto["declarado"] if visto else None,
+                visto["diferencia"] if visto else None,
+                ESTADOS_COMPARACION_F29.get(visto["estado"], "") if visto else "",
+            ]
+        fila.append(linea["de"])
+        filas.append(fila)
+
+    hojas = [(f"F29 {etiqueta}", columnas, filas, "")]
+
+    # --- Lo que movió cada cuenta ------------------------------------
+    hojas.append((
+        "Mayor por cuenta",
+        [col("Cuenta", ancho=14), col("Nombre", ancho=30), col("Tipo", ancho=20),
+         col("Debe", ancho=16, formato=CLP), col("Haber", ancho=16, formato=CLP),
+         col("Líneas", ancho=10), col("Documentos", ancho=12)],
+        [[c["cuenta"], c["nombre"], m["tipo"], m["debe"], m["haber"],
+          m["lineas"], m["documentos"]]
+         for c in cuentas for m in sorted(c["movimientos"], key=lambda x: x["tipo"] or "")],
+        "",
+    ))
+
+    # --- Los documentos, uno por uno ---------------------------------
+    documentos = [
+        d for tipo in sorted(_documentos_del_mes(mes)) for d in _documentos_del_mes(mes)[tipo]
+    ] if mes else []
+    hojas.append((
+        "Documentos del mayor",
+        [col("Tipo", ancho=20), col("Folio", ancho=16), col("RUT", ancho=16),
+         col("Glosa", ancho=60), col("Monto", ancho=18, formato=CLP)],
+        [[d.tipo, d.folio, d.rut, d.glosa, d.monto] for d in documentos],
+        "",
+    ))
+
+    # --- Lo declarado, tal como vino del F29 --------------------------
+    if declarado:
+        hojas.append((
+            "Declarado en el F29",
+            [col("Código", ancho=10), col("Glosa", ancho=46),
+             col("Declarado", ancho=18, formato=CLP)],
+            [[codigo, GLOSAS_F29.get(codigo) or CODIGOS_INFORMATIVOS.get(codigo, ""), valor]
+             for codigo, valor in sorted(declarado.por_codigo.items())],
+            f"Folio {declarado.folio}" if declarado.folio else "",
+        ))
+
+    return responder_excel_hojas(f"f29-{mes or 'sin-mes'}", hojas)

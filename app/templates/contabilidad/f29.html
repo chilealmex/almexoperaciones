@@ -213,7 +213,9 @@
             <td class="small text-muted">{{ linea.de if linea else '' }}</td>
           </tr>
           {% if fila.estado == 'distinto' and linea and linea.detalle %}
-          {# Dónde puede estar la diferencia: de qué asientos está hecho el código. #}
+          {# Dónde puede estar la diferencia: de qué asientos está hecho el
+             código, y un botón para abrir los documentos uno por uno. #}
+          {% set documentos = documentos_por_codigo.get(fila.codigo) %}
           <tr class="table-warning">
             <td></td>
             <td colspan="5" class="small">
@@ -224,8 +226,40 @@
                 {%- if d.documentos %} ({{ d.documentos }} doc.){% endif %}
                 <span class="text-muted">· {{ d.cuenta }}</span></span>
               {% endfor %}
+              {% if documentos %}
+              <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2 ms-2"
+                      data-bs-toggle="collapse" data-bs-target="#docs-{{ fila.codigo }}">
+                Ver los {{ documentos|length }} documentos
+              </button>
+              {% endif %}
             </td>
           </tr>
+          {% if documentos %}
+          <tr class="collapse" id="docs-{{ fila.codigo }}">
+            <td></td>
+            <td colspan="5" class="p-0">
+              <table class="table table-sm mb-0">
+                <thead>
+                  <tr class="small">
+                    <th>Tipo</th><th>Folio</th><th>RUT</th><th>Glosa</th>
+                    <th class="text-end">Monto</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for d in documentos %}
+                  <tr class="small">
+                    <td>{{ d.tipo }}</td>
+                    <td>{{ d.folio }}</td>
+                    <td class="text-muted">{{ d.rut or '—' }}</td>
+                    <td class="text-muted">{{ d.glosa or '' }}</td>
+                    <td class="text-end">{{ d.monto|clp }}</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </td>
+          </tr>
+          {% endif %}
           {% endif %}
           {% endfor %}
         </tbody>
