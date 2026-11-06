@@ -486,6 +486,7 @@ def _cuenta_nueva(codigo: str, nombre: str) -> dict:
         "signo": _signo_de_cuenta(codigo),
         "documentos": {},
         "movimientos": {},
+        "detalle": {},
         "_fechas": {},
         "_folios": {},
     }
@@ -511,9 +512,16 @@ def _anotar_linea(cuenta, mes, tipo, glosa, debe, haber):
         return
     rut = _RE_RUT_MAYOR.search(glosa or "")
     llave = (normalizar_folio(folio), normalizar_rut(rut.group(1)) if rut else "")
-    cuenta["documentos"][llave] = cuenta["documentos"].get(llave, 0) + (
-        (debe - haber) * cuenta["signo"]
-    )
+    monto = (debe - haber) * cuenta["signo"]
+    cuenta["documentos"][llave] = cuenta["documentos"].get(llave, 0) + monto
+    # Cada documento, uno por uno: es lo que hay que poder mirar cuando un
+    # código del F29 no calza con lo declarado.
+    detalle = cuenta["detalle"].setdefault((mes, tipo, llave[0], llave[1]), {
+        "mes": mes, "tipo": tipo, "folio": llave[0], "rut": llave[1],
+        "glosa": _texto(glosa, 200), "monto": 0, "lineas": 0,
+    })
+    detalle["monto"] += monto
+    detalle["lineas"] += 1
     cuenta["_fechas"].setdefault(llave, []).append(mes)
     # La cantidad de documentos del F29 cuenta facturas, no líneas: un
     # documento puede quedar en dos líneas de la misma cuenta.

@@ -576,6 +576,9 @@ class F29Cuenta(db.Model):
     movimientos = db.relationship(
         "F29Movimiento", backref="cuenta_mayor", cascade="all, delete-orphan", lazy="selectin"
     )
+    documentos = db.relationship(
+        "F29Documento", backref="cuenta_mayor", cascade="all, delete-orphan", lazy="selectin"
+    )
     cargado_por = db.relationship("Usuario")
 
     @property
@@ -667,3 +670,36 @@ class F29DeclaradoCodigo(db.Model):
 
     def __repr__(self):
         return f"<F29DeclaradoCodigo {self.codigo}={self.valor}>"
+
+
+class F29Documento(db.Model):
+    """Un documento del mayor, uno por uno.
+
+    Los movimientos van agrupados por mes y tipo, que es como el formulario
+    los declara. Pero cuando un código no calza con lo declarado hay que poder
+    mirar factura por factura: en julio de 2026 la diferencia del código 502
+    resultó ser una sola, la 5804 por 1.473.479.
+    """
+
+    __tablename__ = "f29_documentos"
+    __table_args__ = (
+        db.UniqueConstraint(
+            "cuenta_id", "mes", "tipo", "folio", "rut", name="uq_f29_documento"
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    cuenta_id = db.Column(
+        db.Integer, db.ForeignKey("f29_cuentas.id"), nullable=False, index=True
+    )
+    mes = db.Column(db.String(7), nullable=False, index=True)
+    tipo = db.Column(db.String(40), nullable=False, default="")
+    folio = db.Column(db.String(40), nullable=False, default="")
+    rut = db.Column(db.String(20), nullable=False, default="")
+    # La glosa del asiento, que es donde el documento viene nombrado.
+    glosa = db.Column(db.String(200), nullable=True)
+    monto = db.Column(db.BigInteger, nullable=False, default=0)
+    lineas = db.Column(db.Integer, nullable=False, default=1)
+
+    def __repr__(self):
+        return f"<F29Documento {self.mes} {self.tipo} {self.folio}>"
