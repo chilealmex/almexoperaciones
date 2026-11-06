@@ -1158,12 +1158,49 @@ def _documentos_filtrados(libro, args):
     elif filtro:
         consulta = consulta.filter(ConciliacionSiiDocumento.estado == filtro)
 
+    elif not filtro:
+        # Un documento anotado en otro mes no es de este libro: sale de la
+        # lista y queda en su filtro, "En otro mes". Antes seguía apareciendo
+        # entre los demás y había que volver a mirarlo cada vez.
+        consulta = consulta.filter(ConciliacionSiiDocumento.mes_contable.is_(None))
+
     tipo = (args.get("tipo") or "").strip()
     if tipo:
         consulta = consulta.filter(ConciliacionSiiDocumento.tipo_doc == tipo)
 
     documentos = consulta.order_by(ConciliacionSiiDocumento.orden).all()
     return documentos, busqueda, filtro, tipo
+
+
+def _anotados_como_de_este_mes(conciliacion, libro):
+    """Documentos que otro período anotó como contabilizados en éste.
+
+    La misma factura está en los dos meses: en el que la tiene contabilizada
+    aparece como "solo en Defontana" y en el que la informa el SII como "solo
+    en SII". Anotarla en uno explica también la fila del otro, así que ahí se
+    dice de dónde viene y se deja el camino de vuelta.
+    """
+    mes = f"{conciliacion.anio}-{conciliacion.mes:02d}"
+    filas = (
+        ConciliacionSiiDocumento.query
+        .join(ConciliacionSiiLibro,
+              ConciliacionSiiDocumento.libro_id == ConciliacionSiiLibro.id)
+        .join(ConciliacionSii, ConciliacionSiiLibro.conciliacion_id == ConciliacionSii.id)
+        .filter(
+            ConciliacionSiiDocumento.mes_contable == mes,
+            ConciliacionSiiLibro.libro == libro.libro,
+            ConciliacionSiiLibro.id != libro.id,
+            ConciliacionSii.empresa_id == conciliacion.empresa_id,
+        )
+        .all()
+    )
+    return {
+        (d.tipo_doc, d.folio): {
+            "id": d.libro_ref.conciliacion.id,
+            "etiqueta": _etiqueta_periodo(d.libro_ref.conciliacion),
+        }
+        for d in filas
+    }
 
 
 def _totales_de_documentos(documentos):
@@ -1197,6 +1234,7 @@ def ver_libro_conciliacion_sii(conciliacion_id, clave):
         conciliacion=conciliacion,
         libro=libro,
         documentos=documentos,
+        anotados_de_otro=_anotados_como_de_este_mes(conciliacion, libro),
         totales=_totales_de_documentos(documentos),
         columnas_monto=COLUMNAS_MONTO_CONCILIACION,
         etiquetas_estado=ESTADO_ETIQUETAS_CONCILIACION,

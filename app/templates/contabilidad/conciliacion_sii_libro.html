@@ -171,6 +171,15 @@
             <span class="badge bg-light text-primary border border-primary ms-1"
                   title="Quedó contabilizado en {{ d.mes_contable_texto }}">📅 {{ d.mes_contable_texto }}</span>
             {% endif %}
+            {# La misma factura está en los dos meses. Si el otro la anotó como
+               de éste, acá se dice de dónde viene y se deja el camino de vuelta. #}
+            {% set viene_de = anotados_de_otro.get((d.tipo_doc, d.folio)) %}
+            {% if viene_de %}
+            <a class="badge bg-light text-primary border border-primary ms-1 text-decoration-none"
+               href="{{ url_for('contabilidad.ver_libro_conciliacion_sii', conciliacion_id=viene_de.id, clave=libro.libro, filtro='otro_mes') }}"
+               title="En {{ viene_de.etiqueta }} quedó anotada como contabilizada en este mes">
+              📅 anotada desde {{ viene_de.etiqueta }}</a>
+            {% endif %}
           </td>
           <td class="celda-recortada" title="{{ d.tipo_doc_desc or d.tipo_doc }}">{{ d.tipo_doc_desc or d.tipo_doc }}</td>
           <td>{{ d.folio }}</td>
