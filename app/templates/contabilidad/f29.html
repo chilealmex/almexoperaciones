@@ -2,15 +2,18 @@
 {% block title %}Propuesta F29{% endblock %}
 {% block content %}
 {% set puede_editar = puede('contabilidad', 'editar') %}
+{% set etiquetas = {'propuesta': 'Propuesta', 'comparacion': 'Comparación con el F29',
+                    'detalle': 'Detalle del mes', 'archivos': 'Archivos'} %}
 
 <div class="page-head">
   <div>
     <h1>Propuesta F29</h1>
     <p class="page-sub">
-      El formulario armado con lo que las cuentas de impuestos movieron en el mes, según el Libro Mayor.
+      El formulario armado con lo que las cuentas de impuestos movieron en el mes, y
+      comparado con el F29 que presentaste.
     </p>
   </div>
-  {% if mes %}
+  {% if mes and vista == 'propuesta' %}
   <div>
     <a class="btn btn-outline-secondary btn-sm"
        href="{{ url_for('contabilidad.exportar_f29', mes=mes) }}">Excel</a>
@@ -18,149 +21,108 @@
   {% endif %}
 </div>
 
-{% if puede_editar %}
-<div class="card mb-4">
-  <div class="card-header">Cargar cuentas del Libro Mayor</div>
-  <div class="card-body">
-    <form method="post" action="{{ url_for('contabilidad.cargar_f29') }}"
-          enctype="multipart/form-data" class="d-flex gap-2 align-items-end flex-wrap">
-      {{ accion.hidden_tag() }}
-      <div>
-        <label class="form-label small mb-1" for="mayor">Libro Mayor (Defontana)</label>
-        <input type="file" name="mayor" id="mayor" class="form-control form-control-sm"
-               accept=".xls,.xlsx,.html,.htm" multiple style="min-width:320px;">
-        <div class="form-text">
-          El <strong>Informe por Análisis</strong> (.xlsx) trae todas las cuentas juntas: con ese
-          archivo basta. También sirve el Libro Mayor, cuenta por cuenta. Lo que se suba se va
-          sumando a lo que ya está, y volver a subir una cuenta reemplaza sólo esa. El archivo
-          trae el año entero, así que una carga sirve para todos los meses.
-        </div>
-      </div>
-      <button type="submit" class="btn btn-primary btn-sm mb-4">Cargar</button>
-    </form>
-  </div>
-</div>
-
-<div class="card mb-4">
-  <div class="card-header">Cargar un F29 ya presentado</div>
-  <div class="card-body">
-    <form method="post" action="{{ url_for('contabilidad.cargar_declarado_f29') }}"
-          enctype="multipart/form-data" class="d-flex gap-2 align-items-end flex-wrap">
-      {{ accion.hidden_tag() }}
-      <div>
-        <label class="form-label small mb-1" for="f29">Formulario 29 (PDF del SII)</label>
-        <input type="file" name="f29" id="f29" class="form-control form-control-sm"
-               accept=".pdf" multiple style="min-width:320px;">
-        <div class="form-text">
-          De a uno o varios. El mes lo dice el propio formulario. Tiene que ser el PDF tal
-          como lo entrega el SII: uno reimpreso o escaneado no se puede leer, porque sus
-          números quedan dibujados y no como texto.
-        </div>
-      </div>
-      <button type="submit" class="btn btn-primary btn-sm mb-4">Cargar</button>
-    </form>
-    {% if declarados %}
-    <div class="small text-muted">
-      Cargados:
-      {% for d in declarados %}
-      <span class="me-2">
-        {{ d.mes }}{% if d.folio %} (folio {{ d.folio }}){% endif %}
-        <form method="post" class="d-inline"
-              action="{{ url_for('contabilidad.eliminar_declarado_f29', declarado_id=d.id, mes=mes) }}">
-          {{ accion.hidden_tag() }}
-          <button class="btn btn-link btn-sm p-0 text-danger" title="Quitar">×</button>
-        </form>
-      </span>
-      {% endfor %}
-    </div>
-    {% endif %}
-  </div>
-</div>
-{% endif %}
-
-<div class="card mb-4">
-  <div class="card-header">Cuentas cargadas</div>
-  <div class="table-responsive">
-    <table class="table table-sm mb-0 align-middle">
-      <thead>
-        <tr>
-          <th>Cuenta</th><th>Nombre</th><th>Aporta a</th>
-          <th class="text-end">Líneas</th><th>Meses</th><th>Cargada</th><th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for cuenta in cargadas %}
-        <tr>
-          <td class="text-nowrap small">{{ cuenta.cuenta }}</td>
-          <td>{{ cuenta.nombre }}</td>
-          <td>
-            {% if cuenta.concepto %}
-              {{ conceptos.get(cuenta.concepto, cuenta.concepto) }}
-            {% else %}
-              <span class="text-warning">sin reconocer</span>
-            {% endif %}
-          </td>
-          <td class="text-end">{{ cuenta.lineas }}</td>
-          <td class="small text-muted">{{ cuenta.meses|length }}</td>
-          <td class="small text-muted text-nowrap">{{ cuenta.cargado_en|fecha_hora }}</td>
-          <td class="text-end">
-            {% if puede_editar %}
-            <form method="post" class="d-inline"
-                  action="{{ url_for('contabilidad.eliminar_cuenta_f29', cuenta_id=cuenta.id, mes=mes) }}"
-                  onsubmit="return confirm('¿Quitar {{ cuenta.nombre }} de la propuesta?');">
-              {{ accion.hidden_tag() }}
-              <button class="btn btn-outline-danger btn-sm">Quitar</button>
-            </form>
-            {% endif %}
-          </td>
-        </tr>
-        {% else %}
-        <tr><td colspan="7" class="text-center text-muted py-4">
-          Todavía no hay ninguna cuenta cargada. Sube el Libro Mayor de la cuenta de IVA débito
-          fiscal, el de IVA crédito fiscal, y los de PPM, retención de honorarios e impuesto único.
-        </td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</div>
-
+{# El mes manda sobre todas las pestañas, así que va arriba y se queda al cambiar. #}
 {% if meses %}
-<form method="get" class="d-flex gap-2 align-items-end flex-wrap mb-3">
+<form method="get" class="d-flex gap-3 align-items-end flex-wrap mb-3">
+  <input type="hidden" name="vista" value="{{ vista }}">
   <div>
-    <label class="form-label small mb-1" for="mes">Mes</label>
-    <select name="mes" id="mes" class="form-select form-select-sm" onchange="this.form.submit()">
-      {% for m in meses %}
-      <option value="{{ m }}" {{ 'selected' if m == mes }}>{{ m }}</option>
+    <label class="form-label small mb-1" for="mes">Período</label>
+    <select name="mes" id="mes" class="form-select form-select-sm" onchange="this.form.submit()"
+            style="min-width:12rem;">
+      {% for anio, de_ese_anio in meses_por_anio %}
+      <optgroup label="{{ anio }}">
+        {% for valor, nombre in de_ese_anio %}
+        <option value="{{ valor }}" {{ 'selected' if valor == mes }}>{{ nombre }} {{ anio }}</option>
+        {% endfor %}
+      </optgroup>
       {% endfor %}
     </select>
   </div>
+  {% if declarado %}
+  <div class="small text-muted mb-1">
+    F29 presentado cargado{% if declarado.folio %}, folio {{ declarado.folio }}{% endif %}.
+  </div>
+  {% elif mes %}
+  <div class="small text-muted mb-1">Sin el F29 de este mes todavía.</div>
+  {% endif %}
 </form>
 {% endif %}
 
-{% if propuesta %}
-  {% for aviso in propuesta.avisos %}
-  <div class="alert alert-warning py-2">{{ aviso }}</div>
+<ul class="nav nav-tabs mb-3">
+  {% for clave in vistas %}
+  <li class="nav-item">
+    <a class="nav-link {{ 'active' if vista == clave }}"
+       href="{{ url_for('contabilidad.f29', mes=mes, vista=clave) }}">
+      {{ etiquetas[clave] }}
+      {% if clave == 'comparacion' and comparacion and comparacion.distintos %}
+      <span class="badge bg-danger ms-1">{{ comparacion.distintos }}</span>
+      {% endif %}
+      {% if clave == 'archivos' %}
+      <span class="badge bg-secondary ms-1">{{ cargadas|length }}</span>
+      {% endif %}
+    </a>
+  </li>
   {% endfor %}
+</ul>
 
-  {% if propuesta.faltan %}
-  <div class="alert alert-info py-2">
-    Falta cargar la cuenta de {{ propuesta.faltan|join(' y la de ') }}: sin ella esa parte del
-    formulario queda en cero.
+{# ---------------- Propuesta ---------------- #}
+{% if vista == 'propuesta' %}
+  {% if not propuesta %}
+  <div class="alert alert-info">
+    Todavía no hay nada cargado. Anda a <strong>Archivos</strong> y sube el Informe por
+    Análisis de Defontana: con ese archivo se arma el formulario.
   </div>
-  {% endif %}
-
-  {% if propuesta.sin_codigo %}
-  <div class="alert alert-warning py-2">
-    {% for linea in propuesta.sin_codigo %}
-    <div>
-      <strong>{{ linea.nombre }}</strong>: {{ linea.valor|clp }} en {{ mes_texto }}.
-      Falta saber en qué código del formulario va — mándame un F29 de un mes que la traiga
-      declarada y queda puesta.
-    </div>
+  {% else %}
+    {% for aviso in propuesta.avisos %}
+    <div class="alert alert-warning py-2">{{ aviso }}</div>
     {% endfor %}
+
+    {% if propuesta.faltan %}
+    <div class="alert alert-info py-2">
+      Falta cargar la cuenta de {{ propuesta.faltan|join(' y la de ') }}: sin ella esa parte
+      del formulario queda en cero.
+    </div>
+    {% endif %}
+
+    {% if propuesta.sin_codigo %}
+    <div class="alert alert-warning py-2">
+      {% for linea in propuesta.sin_codigo %}
+      <div>
+        <strong>{{ linea.nombre }}</strong>: {{ linea.valor|clp }} en {{ mes_texto }}.
+        Falta saber en qué código del formulario va — mándame un F29 de un mes que la traiga
+        declarada y queda puesta.
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+  <div class="card mb-4">
+    <div class="card-header">Lo que habría que declarar en {{ mes_texto }}</div>
+    <div class="table-responsive">
+      <table class="table table-sm mb-0 align-middle">
+        <thead>
+          <tr>
+            <th style="width:6rem;">Código</th>
+            <th>Glosa</th>
+            <th class="text-end" style="width:12rem;">Valor</th>
+            <th>De dónde sale</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for linea in propuesta.lineas %}
+          <tr class="{{ 'table-light fw-semibold' if linea.clase == 'total' }}">
+            <td class="text-nowrap">{{ linea.codigo }}</td>
+            <td>{{ linea.glosa }}</td>
+            <td class="text-end text-nowrap">
+              {% if linea.clase == 'cantidad' %}{{ linea.valor }}{% else %}{{ linea.valor|clp }}{% endif %}
+            </td>
+            <td class="small text-muted">{{ linea.de }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </div>
-  {% endif %}
 
   {% if propuesta.controles %}
   <div class="card mb-4">
@@ -182,63 +144,77 @@
   </div>
   {% endif %}
 
-  {% set comp = {} %}
-  {% if comparacion %}
-    {% for fila in comparacion.filas %}{% set _ = comp.update({fila.codigo: fila}) %}{% endfor %}
+  {% if propuesta.sin_clasificar %}
+  <div class="alert alert-secondary py-2 small">
+    Cargadas pero sin reconocer a qué código van:
+    {% for c in propuesta.sin_clasificar %}{{ c.nombre }}{{ ', ' if not loop.last }}{% endfor %}.
+  </div>
+  {% endif %}
+  {% endif %}
+{% endif %}
+
+{# ---------------- Comparación ---------------- #}
+{% if vista == 'comparacion' %}
+  {% if not propuesta %}
+  <div class="alert alert-info">
+    Primero sube el Informe por Análisis en <strong>Archivos</strong>: sin él no hay con qué
+    comparar el formulario.
+  </div>
+  {% elif not declarado %}
+  <div class="alert alert-info">
+    <strong>Todavía no subes el F29 de {{ mes_texto }}.</strong>
+    Bájalo del SII en PDF y súbelo en <strong>Archivos</strong>; acá va a aparecer código por
+    código lo que declaraste al lado de lo que dicen tus cuentas.
+  </div>
+  {% else %}
   <div class="alert {{ 'alert-success' if not comparacion.distintos else 'alert-warning' }} py-2">
-    Contra el F29 presentado de {{ mes_texto }}{% if declarado.folio %} (folio {{ declarado.folio }}){% endif %}:
+    F29 de {{ mes_texto }}{% if declarado.folio %}, folio {{ declarado.folio }}{% endif %}:
     <strong>{{ comparacion.calzan }}</strong> códigos calzan
     {%- if comparacion.distintos %} y <strong>{{ comparacion.distintos }}</strong> no{% endif %}.
   </div>
-  {% endif %}
 
   <div class="card mb-4">
-    <div class="card-header">Formulario 29 — {{ mes_texto }}</div>
+    <div class="card-header">Código por código — {{ mes_texto }}</div>
     <div class="table-responsive">
       <table class="table table-sm mb-0 align-middle">
         <thead>
           <tr>
             <th style="width:6rem;">Código</th>
             <th>Glosa</th>
-            <th class="text-end" style="width:11rem;">Propuesta</th>
-            {% if comparacion %}
-            <th class="text-end" style="width:11rem;">Declarado</th>
+            <th class="text-end" style="width:11rem;">Dice tu contabilidad</th>
+            <th class="text-end" style="width:11rem;">Declaraste</th>
             <th class="text-end" style="width:10rem;">Diferencia</th>
-            {% endif %}
-            <th>De dónde sale</th>
           </tr>
         </thead>
         <tbody>
-          {% for linea in propuesta.lineas %}
-          {% set fila = comp.get(linea.codigo) %}
-          <tr class="{{ 'table-light fw-semibold' if linea.clase == 'total' }}{{ ' table-warning' if fila and fila.estado == 'distinto' }}">
-            <td class="text-nowrap">{{ linea.codigo }}</td>
-            <td>{{ linea.glosa }}</td>
+          {% for fila in comparacion.filas %}
+          {% set linea = propuesta.lineas | selectattr('codigo', 'equalto', fila.codigo) | first %}
+          {% set cantidad = linea and linea.clase == 'cantidad' %}
+          <tr class="{{ 'table-warning' if fila.estado == 'distinto' }}">
+            <td class="text-nowrap">{{ fila.codigo }}</td>
+            <td>{{ fila.glosa }}</td>
             <td class="text-end text-nowrap">
-              {% if linea.clase == 'cantidad' %}{{ linea.valor }}{% else %}{{ linea.valor|clp }}{% endif %}
+              {% if cantidad %}{{ fila.propuesto }}{% else %}{{ fila.propuesto|clp }}{% endif %}
             </td>
-            {% if comparacion %}
             <td class="text-end text-nowrap">
-              {% if fila and fila.declarado is not none %}
-                {% if linea.clase == 'cantidad' %}{{ fila.declarado }}{% else %}{{ fila.declarado|clp }}{% endif %}
+              {% if fila.declarado is not none %}
+                {% if cantidad %}{{ fila.declarado }}{% else %}{{ fila.declarado|clp }}{% endif %}
               {% else %}<span class="text-muted">—</span>{% endif %}
             </td>
             <td class="text-end text-nowrap">
-              {% if fila and fila.estado == 'calza' %}<span class="text-success">calza</span>
-              {% elif fila and fila.estado == 'distinto' %}
+              {% if fila.estado == 'calza' %}<span class="text-success">calza</span>
+              {% elif fila.estado == 'distinto' %}
                 <span class="text-danger fw-semibold">
-                  {% if linea.clase == 'cantidad' %}{{ fila.diferencia }}{% else %}{{ fila.diferencia|clp }}{% endif %}
+                  {% if cantidad %}{{ fila.diferencia }}{% else %}{{ fila.diferencia|clp }}{% endif %}
                 </span>
-              {% else %}<span class="text-muted">—</span>{% endif %}
+              {% else %}<span class="text-muted">no está en el F29</span>{% endif %}
             </td>
-            {% endif %}
-            <td class="small text-muted">{{ linea.de }}</td>
           </tr>
-          {% if fila and fila.estado == 'distinto' and linea.detalle %}
+          {% if fila.estado == 'distinto' and linea and linea.detalle %}
           {# Dónde puede estar la diferencia: de qué asientos está hecho el código. #}
           <tr class="table-warning">
             <td></td>
-            <td colspan="{{ 5 if comparacion else 3 }}" class="small">
+            <td colspan="4" class="small">
               <span class="text-muted">De qué está hecho:</span>
               {% for d in linea.detalle %}
               <span class="ms-2">{{ d.tipo or '—' }}
@@ -252,23 +228,25 @@
         </tbody>
       </table>
     </div>
-    {% if comparacion and comparacion.sin_comparar %}
+    {% if comparacion.sin_comparar %}
     <div class="card-footer small text-muted">
-      Declarados y sin comparar, porque la propuesta no los calcula:
+      Declarados y sin comparar, porque estas cuentas no los calculan:
       {% for c in comparacion.sin_comparar %}
       <span class="me-2">{{ c.codigo }} {{ c.glosa }} <strong>{{ c.declarado|clp }}</strong></span>
       {% endfor %}
     </div>
     {% endif %}
   </div>
-
-  {% if propuesta.sin_clasificar %}
-  <div class="alert alert-secondary py-2 small">
-    Cargadas pero sin reconocer a qué código van:
-    {% for c in propuesta.sin_clasificar %}{{ c.nombre }}{{ ', ' if not loop.last }}{% endfor %}.
-  </div>
   {% endif %}
+{% endif %}
 
+{# ---------------- Detalle del mes ---------------- #}
+{% if vista == 'detalle' %}
+  {% if not cuentas %}
+  <div class="alert alert-info">
+    No hay movimiento cargado en {{ mes_texto or 'este mes' }}.
+  </div>
+  {% else %}
   <div class="card">
     <div class="card-header">Lo que movió cada cuenta en {{ mes_texto }}</div>
     <div class="table-responsive">
@@ -297,8 +275,139 @@
       </table>
     </div>
     <div class="card-footer small text-muted">
-      Las líneas que no nombran documento —el traspaso del saldo a IVA por pagar, la apertura—
-      no entran en ningún código: son el cierre contable del mes, no algo que el formulario declare.
+      Las líneas que no son de un documento —el traspaso del saldo al cierre, la apertura— no
+      entran en ningún código: son el cierre contable del mes, no algo que el formulario declare.
+    </div>
+  </div>
+  {% endif %}
+{% endif %}
+
+{# ---------------- Archivos ---------------- #}
+{% if vista == 'archivos' %}
+  {% if puede_editar %}
+  <div class="row g-3 mb-4">
+    <div class="col-12 col-lg-6">
+      <div class="card h-100">
+        <div class="card-header">1. Las cuentas de la contabilidad</div>
+        <div class="card-body">
+          <form method="post" action="{{ url_for('contabilidad.cargar_f29') }}"
+                enctype="multipart/form-data">
+            {{ accion.hidden_tag() }}
+            <label class="form-label small mb-1" for="mayor">Informe por Análisis o Libro Mayor</label>
+            <input type="file" name="mayor" id="mayor" class="form-control form-control-sm"
+                   accept=".xls,.xlsx,.html,.htm" multiple>
+            <div class="form-text mb-2">
+              El <strong>Informe por Análisis detallado</strong> (.xlsx) trae todas las cuentas
+              juntas y el año entero: con una carga quedan los doce meses. También sirve el
+              Libro Mayor, cuenta por cuenta. Lo que subas se suma a lo que ya está.
+            </div>
+            <button type="submit" class="btn btn-primary btn-sm">Cargar</button>
+          </form>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-lg-6">
+      <div class="card h-100">
+        <div class="card-header">2. El F29 que presentaste</div>
+        <div class="card-body">
+          <form method="post" action="{{ url_for('contabilidad.cargar_declarado_f29') }}"
+                enctype="multipart/form-data">
+            {{ accion.hidden_tag() }}
+            <label class="form-label small mb-1" for="f29">Formulario 29 (PDF del SII)</label>
+            <input type="file" name="f29" id="f29" class="form-control form-control-sm"
+                   accept=".pdf" multiple>
+            <div class="form-text mb-2">
+              De a uno o varios, uno por mes. El mes lo dice el propio formulario. Tiene que ser
+              el PDF tal como lo entrega el SII: uno reimpreso o escaneado no se puede leer,
+              porque sus números quedan dibujados y no como texto.
+            </div>
+            <button type="submit" class="btn btn-primary btn-sm">Cargar</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="card mb-4">
+    <div class="card-header">Cuentas cargadas</div>
+    <div class="table-responsive">
+      <table class="table table-sm mb-0 align-middle">
+        <thead>
+          <tr>
+            <th>Cuenta</th><th>Nombre</th><th>Aporta a</th>
+            <th class="text-end">Líneas</th><th class="text-end">Meses</th><th>Cargada</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for cuenta in cargadas %}
+          <tr>
+            <td class="text-nowrap small">{{ cuenta.cuenta }}</td>
+            <td>{{ cuenta.nombre }}</td>
+            <td>
+              {% if cuenta.concepto %}{{ conceptos.get(cuenta.concepto, cuenta.concepto) }}
+              {% else %}<span class="text-warning">sin reconocer</span>{% endif %}
+            </td>
+            <td class="text-end">{{ cuenta.lineas }}</td>
+            <td class="text-end small text-muted">{{ cuenta.meses|length }}</td>
+            <td class="small text-muted text-nowrap">{{ cuenta.cargado_en|fecha_hora }}</td>
+            <td class="text-end">
+              {% if puede_editar %}
+              <form method="post" class="d-inline"
+                    action="{{ url_for('contabilidad.eliminar_cuenta_f29', cuenta_id=cuenta.id, mes=mes, vista='archivos') }}"
+                    onsubmit="return confirm('¿Quitar {{ cuenta.nombre }} de la propuesta?');">
+                {{ accion.hidden_tag() }}
+                <button class="btn btn-outline-danger btn-sm">Quitar</button>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="7" class="text-center text-muted py-4">
+            Todavía no hay ninguna cuenta cargada.
+          </td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">F29 presentados</div>
+    <div class="table-responsive">
+      <table class="table table-sm mb-0 align-middle">
+        <thead>
+          <tr><th>Período</th><th>Folio</th><th class="text-end">Códigos</th>
+              <th>Archivo</th><th>Cargado</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for d in declarados %}
+          <tr>
+            <td class="text-nowrap">
+              <a href="{{ url_for('contabilidad.f29', mes=d.mes, vista='comparacion') }}">{{ d.mes }}</a>
+            </td>
+            <td class="small">{{ d.folio or '—' }}</td>
+            <td class="text-end">{{ d.codigos|length }}</td>
+            <td class="small text-muted">{{ d.archivo or '' }}</td>
+            <td class="small text-muted text-nowrap">{{ d.cargado_en|fecha_hora }}</td>
+            <td class="text-end">
+              {% if puede_editar %}
+              <form method="post" class="d-inline"
+                    action="{{ url_for('contabilidad.eliminar_declarado_f29', declarado_id=d.id, mes=mes, vista='archivos') }}"
+                    onsubmit="return confirm('¿Quitar el F29 de {{ d.mes }}?');">
+                {{ accion.hidden_tag() }}
+                <button class="btn btn-outline-danger btn-sm">Quitar</button>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="6" class="text-center text-muted py-4">
+            Todavía no hay ningún F29 cargado.
+          </td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
   </div>
 {% endif %}

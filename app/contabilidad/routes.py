@@ -1876,6 +1876,25 @@ def _meses_con_algo():
     return sorted(set(_meses_del_f29()) | set(declarados), reverse=True)
 
 
+VISTAS_F29 = ("propuesta", "comparacion", "detalle", "archivos")
+
+
+def _meses_por_anio(meses):
+    """Los meses agrupados por año, del más nuevo al más viejo.
+
+    Una lista plana de "2026-10" se vuelve ilegible en cuanto hay más de un
+    año, y los años van a ir sumándose.
+    """
+    anios = {}
+    for mes in meses:
+        anio, numero = mes.split("-")
+        anios.setdefault(anio, []).append((mes, MESES_NOMBRES[int(numero) - 1]))
+    return [
+        (anio, sorted(anios[anio], reverse=True))
+        for anio in sorted(anios, reverse=True)
+    ]
+
+
 @bp.route("/f29")
 @require_permission("contabilidad", "ver")
 def f29():
@@ -1884,10 +1903,21 @@ def f29():
     cuentas = _cuentas_del_mes(mes) if mes else []
     propuesta = propuesta_f29(cuentas) if mes else None
     declarado = F29Declarado.query.filter_by(mes=mes).first() if mes else None
+    cargadas = F29Cuenta.query.order_by(F29Cuenta.nombre).all()
+
+    vista = request.args.get("vista")
+    if vista not in VISTAS_F29:
+        # Sin nada cargado no hay nada que proponer: lo primero es subir los
+        # archivos, así que ahí se entra.
+        vista = "propuesta" if cargadas else "archivos"
+
     return render_template(
         "contabilidad/f29.html",
-        cargadas=F29Cuenta.query.order_by(F29Cuenta.nombre).all(),
+        cargadas=cargadas,
+        vista=vista,
+        vistas=VISTAS_F29,
         meses=meses,
+        meses_por_anio=_meses_por_anio(meses),
         mes=mes,
         mes_texto=_mes_f29_texto(mes),
         propuesta=propuesta,

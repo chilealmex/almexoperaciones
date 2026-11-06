@@ -278,7 +278,9 @@ def test_la_pantalla_pone_lado_a_lado_la_propuesta_y_lo_declarado(
     ]
     _subir(client, declarado)
 
-    cuerpo = client.get("/contabilidad/f29?mes=2026-09").get_data(as_text=True)
+    cuerpo = client.get(
+        "/contabilidad/f29?mes=2026-09&vista=comparacion"
+    ).get_data(as_text=True)
 
     assert "códigos calzan" in cuerpo
     # El 520 declarado no es el que sale de las cuentas: se marca y se dice de
@@ -286,3 +288,105 @@ def test_la_pantalla_pone_lado_a_lado_la_propuesta_y_lo_declarado(
     assert "De qué está hecho" in cuerpo
     assert "Cpra_FCA" in cuerpo
     assert ANALISIS[0][3] == "Cpra_FCA"
+
+
+# ---------- Las pestañas ----------
+#
+# La pantalla tenía todo apilado: los dos cargadores, las cuentas, la
+# propuesta y la comparación, uno debajo del otro. Separada en pestañas, cada
+# cosa está donde se la busca.
+
+def test_sin_nada_cargado_se_entra_por_los_archivos(client, db, empresa, usuario_admin):
+    # No hay nada que proponer todavía: lo primero es subir los archivos.
+    login(client, "admin@test.cl")
+
+    cuerpo = client.get("/contabilidad/f29").get_data(as_text=True)
+
+    assert "Las cuentas de la contabilidad" in cuerpo
+    assert "El F29 que presentaste" in cuerpo
+
+
+def test_con_cuentas_cargadas_se_entra_por_la_propuesta(client, db, empresa, usuario_admin):
+    from tests.test_f29 import _informe
+
+    login(client, "admin@test.cl")
+    client.post(
+        "/contabilidad/f29/cargar",
+        data={"mayor": [(_informe(), "informe.xlsx")]},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+
+    cuerpo = client.get("/contabilidad/f29").get_data(as_text=True)
+
+    assert "Lo que habría que declarar" in cuerpo
+
+
+def test_sin_el_f29_del_mes_la_comparacion_dice_que_falta(client, db, empresa, usuario_admin):
+    # Era lo que no se entendía: la comparación no aparecía por ninguna parte
+    # y no había cómo saber que faltaba subir el PDF.
+    from tests.test_f29 import _informe
+
+    login(client, "admin@test.cl")
+    client.post(
+        "/contabilidad/f29/cargar",
+        data={"mayor": [(_informe(), "informe.xlsx")]},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+
+    cuerpo = client.get(
+        "/contabilidad/f29?mes=2026-09&vista=comparacion"
+    ).get_data(as_text=True)
+
+    assert "Todavía no subes el F29" in cuerpo
+
+
+def test_el_periodo_se_mantiene_al_cambiar_de_pestana(client, db, empresa, usuario_admin):
+    login(client, "admin@test.cl")
+    _subir(client)
+
+    cuerpo = client.get(
+        "/contabilidad/f29?mes=2026-09&vista=detalle"
+    ).get_data(as_text=True)
+
+    assert 'href="/contabilidad/f29?mes=2026-09&amp;vista=propuesta"' in cuerpo
+
+
+def test_los_periodos_se_agrupan_por_año_del_mas_nuevo_al_mas_viejo(db):
+    from app.contabilidad.routes import _meses_por_anio
+
+    agrupados = _meses_por_anio(["2025-01", "2026-10", "2024-07", "2026-09"])
+
+    assert [anio for anio, _meses in agrupados] == ["2026", "2025", "2024"]
+    assert agrupados[0][1] == [("2026-10", "Octubre"), ("2026-09", "Septiembre")]
+
+
+def test_la_pantalla_lista_los_años_en_el_selector(client, db, empresa, usuario_admin):
+    # No sólo un año: los períodos se van acumulando y tienen que verse todos,
+    # cada uno bajo el suyo.
+    login(client, "admin@test.cl")
+    _subir(client)
+    _subir(client, [linea.replace("202609", "202512") for linea in SEPTIEMBRE])
+
+    cuerpo = client.get("/contabilidad/f29").get_data(as_text=True)
+
+    assert '<optgroup label="2026">' in cuerpo
+    assert '<optgroup label="2025">' in cuerpo
+    assert "Septiembre 2026" in cuerpo
+    assert "Diciembre 2025" in cuerpo
+
+
+def test_una_pestaña_que_no_existe_cae_en_una_que_si(client, db, empresa, usuario_admin):
+    # Un enlace viejo o una dirección escrita a mano no pueden dejar la
+    # pantalla en blanco.
+    from tests.test_f29 import _informe
+
+    login(client, "admin@test.cl")
+    client.post(
+        "/contabilidad/f29/cargar",
+        data={"mayor": [(_informe(), "informe.xlsx")]},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+
+    cuerpo = client.get("/contabilidad/f29?vista=loquesea").get_data(as_text=True)
+
+    assert "Lo que habría que declarar" in cuerpo
