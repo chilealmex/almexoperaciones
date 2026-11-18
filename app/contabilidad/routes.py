@@ -1478,7 +1478,11 @@ def cargar_mayor_conciliacion_sii(conciliacion_id, clave):
 
     archivos = [a for a in request.files.getlist("mayor") if a and a.filename]
     if not archivos:
-        flash("Elige al menos un Libro Mayor: el de la cuenta de IVA y el de proveedores o clientes.", "warning")
+        flash(
+            "Elige los dos Libros Mayores a la vez: el de la cuenta de IVA y el de "
+            "proveedores o clientes. Son dos archivos distintos.",
+            "warning",
+        )
         return redirect(_volver_al_libro(conciliacion, clave))
 
     try:
@@ -1497,9 +1501,16 @@ def cargar_mayor_conciliacion_sii(conciliacion_id, clave):
 
     mayor = juntar_mayores(mayores)
     if not mayor["iva"] or not mayor["total"]:
-        falta = "la cuenta de IVA" if not mayor["iva"] else "la cuenta de proveedores o clientes"
+        # Son dos mayores distintos, uno por cuenta, y van los dos en la misma
+        # subida: el cruce no guarda nada a medias, así que con uno solo no se
+        # puede completar después.
+        traido, falta = (("la cuenta de IVA", "la de proveedores o clientes")
+                         if mayor["iva"] else
+                         ("la cuenta de proveedores o clientes", "la de IVA"))
         flash(
-            f"Falta {falta}: el IVA sale de una cuenta y el total de la otra, así que hacen falta las dos.",
+            f"Subiste {traido} y falta {falta}. Son dos mayores distintos y van los dos "
+            "a la vez, porque el IVA sale de uno y el total del otro: vuelve a elegir, "
+            "marcando los dos archivos en el mismo cuadro.",
             "warning",
         )
         return redirect(_volver_al_libro(conciliacion, clave))
