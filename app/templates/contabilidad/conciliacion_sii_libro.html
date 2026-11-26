@@ -57,8 +57,11 @@
         <input type="file" name="mayor" id="mayor" class="form-control form-control-sm"
                accept=".xls,.xlsx,.html,.htm" multiple style="min-width:320px;">
         <div class="form-text">
-          Las dos cuentas juntas: la de IVA y la de {{ 'proveedores' if libro.libro == 'compra' else 'clientes' }}.
-          El IVA sale de una y el total de la otra.
+          Son dos mayores distintos —el de la cuenta de IVA y el de
+          {{ 'proveedores' if libro.libro == 'compra' else 'clientes' }}— y van los dos
+          a la vez: marca los dos archivos en el mismo cuadro.
+          El IVA sale de uno y el total del otro.{% if libro.libro == 'compra' %}
+          Si el mes tuvo IVA retenido, agrega también esa cuenta.{% endif %}
         </div>
       </div>
       <button type="submit" class="btn btn-primary btn-sm mb-4">Cruzar con el mayor</button>

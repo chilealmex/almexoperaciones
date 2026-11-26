@@ -11,6 +11,7 @@ Cada línea del mayor nombra su documento en la descripción:
 """
 
 import io
+import re
 
 import openpyxl
 import pytest
@@ -336,21 +337,56 @@ def test_cuando_lo_contabilizado_no_calza_queda_contado(client, db, empresa, usu
     assert "74074161" in cuerpo
 
 
+def _subir_uno(client, conciliacion, archivo, nombre):
+    archivo.seek(0)
+    return client.post(
+        f"/contabilidad/conciliacion-sii/{conciliacion.id}/compra/mayor",
+        data={"mayor": [(io.BytesIO(archivo.read()), nombre)]},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+
+
 def test_hacen_falta_las_dos_cuentas(client, db, empresa, usuario_admin):
     # El IVA sale de una cuenta y el total de la otra: con una sola, la mitad
     # de la comparación no existe.
     conciliacion, _libro, documento = _periodo(db, empresa)
     login(client, "admin@test.cl")
-    IVA_NOV.seek(0)
 
-    r = client.post(
-        f"/contabilidad/conciliacion-sii/{conciliacion.id}/compra/mayor",
-        data={"mayor": [(io.BytesIO(IVA_NOV.read()), "mayor-iva.xls")]},
-        content_type="multipart/form-data", follow_redirects=True,
-    )
+    r = _subir_uno(client, conciliacion, IVA_NOV, "mayor-iva.xls")
 
-    assert "proveedores o clientes" in r.get_data(as_text=True)
+    cuerpo = r.get_data(as_text=True)
+    # Y dice cuál llegó, no sólo que falta algo: con dos archivos parecidos
+    # "falta una cuenta" no alcanza para saber cuál volver a buscar.
+    assert "Subiste la cuenta de IVA" in cuerpo
+    assert "falta la de proveedores o clientes" in cuerpo
     assert documento.mayor_estado is None
+
+
+def test_y_lo_dice_al_revés_cuando_la_que_falta_es_la_de_IVA(client, db, empresa, usuario_admin):
+    conciliacion, _libro, documento = _periodo(db, empresa)
+    login(client, "admin@test.cl")
+
+    r = _subir_uno(client, conciliacion, PROV_NOV, "mayor-proveedores.xls")
+
+    cuerpo = r.get_data(as_text=True)
+    assert "Subiste la cuenta de proveedores o clientes" in cuerpo
+    assert "falta la de IVA" in cuerpo
+    assert documento.mayor_estado is None
+
+
+def test_el_formulario_dice_que_son_dos_archivos_y_van_juntos(client, db, empresa, usuario_admin):
+    """Decía «las dos cuentas juntas», que se lee como un archivo con las dos."""
+    conciliacion, _libro, _documento = _periodo(db, empresa)
+    login(client, "admin@test.cl")
+
+    cuerpo = client.get(
+        f"/contabilidad/conciliacion-sii/{conciliacion.id}/compra"
+    ).get_data(as_text=True)
+
+    assert "Son dos mayores distintos" in cuerpo
+    assert "marca los dos archivos en el mismo cuadro" in cuerpo
+    # Y el campo los acepta de a varios, que es lo que hace posible el consejo
+    assert re.search(r'<input[^>]*name="mayor"[^>]*multiple', cuerpo)
 
 
 def test_en_un_periodo_cerrado_no_se_carga(client, db, empresa, usuario_admin):
