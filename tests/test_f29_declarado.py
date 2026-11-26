@@ -390,3 +390,41 @@ def test_una_pestaña_que_no_existe_cae_en_una_que_si(client, db, empresa, usuar
     cuerpo = client.get("/contabilidad/f29?vista=loquesea").get_data(as_text=True)
 
     assert "Lo que habría que declarar" in cuerpo
+
+
+def test_la_comparacion_muestra_la_cuenta_contable(client, db, empresa, usuario_admin):
+    # Para ir a buscar la diferencia hay que saber en qué cuenta mirar.
+    from tests.test_f29 import _informe
+
+    login(client, "admin@test.cl")
+    client.post(
+        "/contabilidad/f29/cargar",
+        data={"mayor": [(_informe(), "informe.xlsx")]},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    _subir(client, ["FORMULARIO 29", "PERIODO [15] 202609",
+                    "502 DEBITOS FACTURAS EMITIDAS 95.961.778"])
+
+    cuerpo = client.get(
+        "/contabilidad/f29?mes=2026-09&vista=comparacion"
+    ).get_data(as_text=True)
+
+    assert "Cuenta contable" in cuerpo
+    assert "2120301001 IVA DEBITO FISCAL" in cuerpo
+
+
+def test_un_documento_de_diferencia_no_es_redondeo():
+    # El peso de redondeo se perdona en la plata; en las cantidades no, porque
+    # un documento de diferencia es un documento que falta o que sobra.
+    lineas = [
+        {"codigo": "503", "glosa": GLOSAS["503"], "valor": 56,
+         "de": "", "clase": "cantidad", "detalle": []},
+        {"codigo": "502", "glosa": GLOSAS["502"], "valor": 95961778,
+         "de": "", "clase": "monto", "detalle": []},
+    ]
+
+    comparacion = comparar_con_declarado(lineas, {"503": 55, "502": 95961779})
+
+    por_codigo = {f["codigo"]: f for f in comparacion["filas"]}
+    assert por_codigo["503"]["estado"] == "distinto"
+    assert por_codigo["502"]["estado"] == "calza"

@@ -184,6 +184,7 @@
             <th class="text-end" style="width:11rem;">Dice tu contabilidad</th>
             <th class="text-end" style="width:11rem;">Declaraste</th>
             <th class="text-end" style="width:10rem;">Diferencia</th>
+            <th>Cuenta contable</th>
           </tr>
         </thead>
         <tbody>
@@ -209,17 +210,19 @@
                 </span>
               {% else %}<span class="text-muted">no está en el F29</span>{% endif %}
             </td>
+            <td class="small text-muted">{{ linea.de if linea else '' }}</td>
           </tr>
           {% if fila.estado == 'distinto' and linea and linea.detalle %}
           {# Dónde puede estar la diferencia: de qué asientos está hecho el código. #}
           <tr class="table-warning">
             <td></td>
-            <td colspan="4" class="small">
+            <td colspan="5" class="small">
               <span class="text-muted">De qué está hecho:</span>
               {% for d in linea.detalle %}
               <span class="ms-2">{{ d.tipo or '—' }}
                 <strong>{{ d.monto|clp }}</strong>
-                {%- if d.documentos %} ({{ d.documentos }} doc.){% endif %}</span>
+                {%- if d.documentos %} ({{ d.documentos }} doc.){% endif %}
+                <span class="text-muted">· {{ d.cuenta }}</span></span>
               {% endfor %}
             </td>
           </tr>

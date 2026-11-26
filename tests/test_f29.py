@@ -523,9 +523,12 @@ def test_el_asiento_del_cierre_no_es_un_documento():
     assert es_de_documento("Vta_FVAELECT") is True
     assert es_de_documento("TRASPASO") is False
     assert es_de_documento("EGRESO") is False
-    # Y si otro plan de cuentas bautizara los tipos de otra forma, lo que
-    # nombra una factura sigue siendo una factura.
-    assert es_de_documento("COMPRAS", documentos=3) is True
+    # Lo decide el tipo y nada más: que la glosa nombre un documento no
+    # alcanza. En julio de 2026 dos líneas de TRASPASO dicen
+    # "DI#5110087129 Proveedor 60.804.000-5 SERVICIO NACIONAL DE ADUANA" —una
+    # corrección que entra y sale por el mismo monto— y con eso el traspaso de
+    # cierre entero se metía en el código 520 y lo dejaba en negativo.
+    assert es_de_documento("TRASPASO", documentos=1) is False
 
 
 def test_un_excel_que_no_es_el_informe_avisa_en_vez_de_reventar():
@@ -555,3 +558,110 @@ def test_el_informe_tambien_se_sube_desde_la_pantalla(client, db, empresa, usuar
         "IMPUESTO 2 CATEGORIA": "honorarios",
         "IMPUESTO POR PAGAR": "impuesto_por_pagar",
     }
+
+
+# ---------- La cuenta contable de cada línea ----------
+
+def test_cada_codigo_dice_de_que_cuenta_sale_con_su_codigo():
+    # El nombre solo no basta para ir a buscarla: el plan de cuentas se navega
+    # por código y hay cuentas que se llaman parecido.
+    propuesta = propuesta_f29(_cuentas(CREDITO, DEBITO))
+
+    de_520 = next(l for l in propuesta["lineas"] if l["codigo"] == "520")
+    de_502 = next(l for l in propuesta["lineas"] if l["codigo"] == "502")
+
+    assert de_520["de"] == "1.1.1090.10.01 IVA CREDITO FISCAL"
+    assert de_502["de"] == "2.1.2030.10.01 IVA DEBITO FISCAL"
+
+
+def test_el_detalle_de_un_codigo_tambien_nombra_su_cuenta():
+    propuesta = propuesta_f29(_cuentas(CREDITO))
+
+    de_520 = next(l for l in propuesta["lineas"] if l["codigo"] == "520")
+
+    assert {d["cuenta"] for d in de_520["detalle"]} == {"1.1.1090.10.01 IVA CREDITO FISCAL"}
+
+
+def test_un_total_no_sale_de_una_cuenta_sino_de_otros_codigos():
+    propuesta = propuesta_f29(_cuentas(CREDITO, DEBITO))
+
+    total = next(l for l in propuesta["lineas"] if l["codigo"] == "537")
+
+    assert total["de"] == "código 520 − código 528 + código 535"
+
+
+# ---------- El PPM ----------
+
+def test_el_ppm_del_mes_es_su_traspaso_y_no_todo_lo_que_pasó_por_la_cuenta():
+    """La cuenta junta la provisión del mes con el pago de meses anteriores.
+
+    En julio de 2026 tiene un traspaso de 4.983.204 y dos egresos —6.212.845
+    y 1.465.640, los dos con glosa "CENTRALIZA IVA MES ..."— y lo declarado en
+    el código 062 fue el traspaso. En septiembre, igual.
+    """
+    cuentas = _cuentas(
+        ("1.1.0905.00.05", "PROVISION PPM", [
+            _linea("01/09/2026", "EGRESO", "CENTRALIZA IVA MES mayo 2026", debito="6,212,845"),
+            _linea("30/09/2026", "TRASPASO", "CENTRALIZA IVA MES septiembre 2026",
+                   debito="4,983,204"),
+        ]),
+    )
+
+    assert _valor(propuesta_f29(cuentas), "062") == 4983204
+
+
+def test_sin_traspaso_el_ppm_es_lo_que_movió_la_cuenta():
+    # No todos los meses se contabilizan con traspaso; dejarlo en cero sería
+    # esconder la provisión.
+    cuentas = _cuentas(
+        ("1.1.0905.00.05", "PROVISION PPM", [
+            _linea("30/09/2026", "EGRESO", "CENTRALIZA IVA MES septiembre 2026",
+                   debito="3,988,620"),
+        ]),
+    )
+
+    assert _valor(propuesta_f29(cuentas), "062") == 3988620
+
+
+def test_lo_retenido_a_sueldos_y_honorarios_es_lo_del_mes_no_su_traspaso():
+    """Acá manda la retención y no el traspaso, al revés que en el PPM.
+
+    El asiento de sueldos trae la retención del impuesto único del mes y el de
+    honorarios la de segunda categoría; el traspaso que cae en el mismo mes
+    está cerrando la retención del mes anterior, que es otro número.
+    """
+    cuentas = _cuentas(
+        ("2.1.2030.10.03", "IMPUESTO UNICO", [
+            _linea("30/09/2026", "SUELDOS", "CENTRALIZA REMUNERACIONES", credito="3,441,426"),
+            _linea("05/09/2026", "TRASPASO", "CENTRALIZA IVA MES agosto 2026",
+                   debito="3,517,537"),
+        ]),
+        ("2.1.2030.10.02", "IMPUESTO 2 CATEGORIA", [
+            _linea("30/09/2026", "HONORARIOS", "Boletas de honorarios", credito="405,548"),
+            _linea("05/09/2026", "TRASPASO", "Cierre de agosto", debito="380,000"),
+        ]),
+    )
+
+    propuesta = propuesta_f29(cuentas)
+
+    assert _valor(propuesta, "048") == 3441426
+    assert _valor(propuesta, "151") == 405548
+
+
+def test_las_notas_de_debito_recibidas_no_van_en_el_credito_del_giro():
+    """En julio de 2026 el F29 declara 147 documentos y 57.760.490.
+
+    Son exactamente las facturas del giro sin las cuatro notas de débito, que
+    van en otro código. Se muestran con su monto para que no desaparezcan.
+    """
+    con_nota = ("1.1.1090.10.01", "IVA CREDITO FISCAL", [
+        _linea("02/09/2026", "Cpra_FCA", _doc("1001"), debito="8,990,287"),
+        _linea("03/09/2026", "Cpra_NDC", "NDC#18895 Proveedor 10.853.224-6 AGENCIA",
+               debito="4"),
+    ])
+
+    propuesta = propuesta_f29(_cuentas(con_nota))
+
+    assert _valor(propuesta, "520") == 8990287
+    assert _valor(propuesta, "519") == 1
+    assert any("Notas de débito" in l["nombre"] for l in propuesta["sin_codigo"])
