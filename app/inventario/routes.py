@@ -3020,7 +3020,10 @@ def _excel_de_lineas(resultado, cargados):
     filas que no son artículos.
     """
     resumen = resultado["resumen"]
-    usados = ", ".join(etiqueta for clave, etiqueta, _p in FUENTES if clave in cargados)
+    # Los que aportaron líneas, no los que están guardados: un archivo que el
+    # lector no pudo abrir está cargado y no sirvió, y decir que se usó sería
+    # mentir sobre de dónde salió la columna.
+    usados = ", ".join(resumen["fuentes"])
 
     columnas = [col(titulo, ancho=_ANCHO_LINEAS.get(titulo, 16))
                 for titulo in resultado["encabezados"]]

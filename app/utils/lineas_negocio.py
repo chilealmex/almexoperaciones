@@ -180,6 +180,18 @@ def leer_informe(file_storage) -> dict:
             "filas": articulos, "subtotales": subtotales}
 
 
+def fuentes_con_datos(lineas: dict) -> list:
+    """Las fuentes que de verdad aportaron líneas, en el orden de siempre.
+
+    No es lo mismo que "los archivos cargados": uno guardado en Regularización
+    puede venir en un formato que el lector no abre, o sin la columna de línea,
+    y entonces no aporta nada. Nombrarlo igual en el resumen haría creer que su
+    línea se tomó en cuenta cuando no.
+    """
+    presentes = {etiqueta for dicho in lineas.values() for etiqueta in dicho}
+    return [etiqueta for _clave, etiqueta, _palabras in FUENTES if etiqueta in presentes]
+
+
 def informe_con_lineas(informe: dict, lineas: dict) -> dict:
     """Las filas del informe con la línea de negocio al lado, y el resumen.
 
@@ -203,6 +215,7 @@ def informe_con_lineas(informe: dict, lineas: dict) -> dict:
         "encabezados": encabezados + ["Línea de negocio", "Aviso"],
         "filas": filas,
         "resumen": {
+            "fuentes": fuentes_con_datos(lineas),
             "articulos": len(filas),
             "subtotales": informe["subtotales"],
             "con_linea": len(filas) - sin_linea,

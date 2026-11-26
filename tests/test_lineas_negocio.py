@@ -211,8 +211,23 @@ def test_el_informe_queda_con_la_linea_al_final_y_el_resumen_cuadra():
     assert resultado["filas"][1][-1] == AVISO_DISTINTAS
     assert "QMS: LAGGING" in resultado["filas"][1][-2]
     assert resultado["resumen"] == {
+        "fuentes": ["Conteo", "QMS", "Defontana"],
         "articulos": 2, "subtotales": 3, "con_linea": 2, "sin_linea": 0, "distintas": 1,
     }
+
+
+def test_el_resumen_nombra_las_fuentes_que_aportaron_y_no_las_cargadas():
+    """Un archivo cargado que no se puede leer no es una fuente de nada.
+
+    Decir que se usó haría creer que su línea se tomó en cuenta, y la columna
+    saldría igual aunque ese archivo no exista.
+    """
+    informe = leer_informe(_Archivo(INFORME_LIMPIO))
+    ilegible = {"conteo": ("conteo.xlsx", CONTEO), "qms": ("qms.xlsx", b"esto no es una planilla")}
+
+    resultado = informe_con_lineas(informe, leer_lineas(ilegible))
+
+    assert resultado["resumen"]["fuentes"] == ["Conteo"]
 
 
 def test_el_articulo_que_no_esta_en_regularizacion_queda_marcado():
