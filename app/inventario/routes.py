@@ -11,7 +11,8 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.inventario import bp
 from app.inventario.forms import (
-    AccionForm, CruceDePruebaForm, ImportarConteoForm, ImportarCsvForm, ImportarOTIForm, OTIForm,
+    AccionForm, CruceDePruebaForm, ImportarConteoForm, ImportarCsvForm, ImportarOTIForm,
+    LineasNegocioForm, OTIForm,
 )
 from app.extensions import db
 from app.models.conteo_inventario import ItemConteoInventario, TomaInventario, TomaInventarioDetalle
@@ -36,6 +37,9 @@ from app.utils.importar_conteo import (
     rarezas_del_codigo,
     importar_qms,
     unificar_grupo,
+)
+from app.utils.lineas_negocio import (
+    FUENTES, SinArchivos, informe_con_lineas, leer_informe, leer_lineas,
 )
 from app.utils.cantidades import a_cantidad, format_cantidad, punto_ambiguo
 from app.utils.cruce_prueba import comparar, para_guardar
@@ -2958,3 +2962,89 @@ def oti_importar():
     except SQLAlchemyError as e:
         _avisar_fallo_de_importacion(e, "las OT internas")
     return redirect(url_for("inventario.oti_lista"))
+
+
+# --- Línea de negocio: el informe de Defontana con la línea al lado ---------
+#
+# El Informe de Inventario de Defontana no trae línea de negocio. La tienen los
+# archivos de Regularización, y en tres que no siempre coinciden: el conteo,
+# QMS y el Informe de Artículos. Acá se sube el informe y baja el mismo, sin
+# subtotales y con la línea pegada al final.
+#
+# No guarda nada: el archivo entra, sale el Excel y se acabó.
+
+@bp.route("/lineas-negocio", methods=["GET", "POST"])
+@require_permission("inventario", "ver")
+def lineas_negocio():
+    formulario = LineasNegocioForm()
+    cargados = _archivos_de_lineas()
+
+    if formulario.validate_on_submit():
+        if not cargados:
+            flash(
+                "No hay archivos de Regularización cargados: sin ellos no hay de dónde "
+                "sacar la línea de negocio. Carga el conteo, el de QMS o el Informe de Artículos.",
+                "warning",
+            )
+            return redirect(url_for("inventario.lineas_negocio"))
+        try:
+            informe = leer_informe(formulario.archivo.data)
+            resultado = informe_con_lineas(informe, leer_lineas(cargados))
+        except (SinArchivos, ValueError) as error:
+            flash(str(error), "danger")
+            return redirect(url_for("inventario.lineas_negocio"))
+        return _excel_de_lineas(resultado, cargados)
+
+    return render_template(
+        "inventario/lineas_negocio.html",
+        formulario=formulario,
+        fuentes=[(etiqueta, clave in cargados) for clave, etiqueta, _p in FUENTES],
+    )
+
+
+def _archivos_de_lineas() -> dict:
+    """Los archivos de Regularización que pueden traer línea, por clave."""
+    claves = {clave for clave, _etiqueta, _palabras in FUENTES}
+    registros = RegularizacionArchivo.query.filter(
+        RegularizacionArchivo.empresa_id == current_user.empresa_id,
+        RegularizacionArchivo.clave.in_(claves),
+    ).all()
+    return {r.clave: (r.nombre, r.contenido) for r in registros}
+
+
+def _excel_de_lineas(resultado, cargados):
+    """El informe con su columna nueva, y una hoja que dice cómo quedó.
+
+    El resumen va aparte y no como una nota al pie: la hoja del informe tiene
+    que poder filtrarse y resumirse en una tabla dinámica sin tropezar con
+    filas que no son artículos.
+    """
+    resumen = resultado["resumen"]
+    # Los que aportaron líneas, no los que están guardados: un archivo que el
+    # lector no pudo abrir está cargado y no sirvió, y decir que se usó sería
+    # mentir sobre de dónde salió la columna.
+    usados = ", ".join(resumen["fuentes"])
+
+    columnas = [col(titulo, ancho=_ANCHO_LINEAS.get(titulo, 16))
+                for titulo in resultado["encabezados"]]
+    filas_resumen = [
+        ["Artículos en el informe", resumen["articulos"]],
+        ["Filas de subtotal que se sacaron", resumen["subtotales"]],
+        ["Con línea de negocio", resumen["con_linea"]],
+        ["Sin línea en ningún archivo", resumen["sin_linea"]],
+        ["Con las fuentes en desacuerdo", resumen["distintas"]],
+        ["Archivos de Regularización usados", usados],
+    ]
+    return responder_excel_hojas("lineas-de-negocio", [
+        ("Inventario con línea", columnas, resultado["filas"], f"Línea de negocio según {usados}"),
+        ("Resumen", [col("Dato", ancho=38), col("Valor", ancho=22)], filas_resumen, ""),
+    ])
+
+
+# El informe se entrega con las columnas de Defontana, así que los anchos son
+# los de esas columnas y no los de un informe nuestro.
+_ANCHO_LINEAS = {
+    "Código Artículo": 20, "Descripción": 46, "Categoría": 22, "Bodega": 20,
+    "Saldo": 12, "Unidad": 10, "Valorización": 16,
+    "Línea de negocio": 44,
+}
