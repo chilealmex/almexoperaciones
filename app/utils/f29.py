@@ -108,6 +108,8 @@ def familia_de_tipo(tipo) -> str:
         return "importacion"
     if sufijo.startswith("NC"):
         return "nota_credito"
+    if sufijo.startswith("ND"):
+        return "nota_debito"
     return "documento"
 
 
@@ -119,11 +121,13 @@ def es_de_documento(tipo, documentos=0) -> bool:
     "EGRESO", "APERTURA". Esos no son nada que el formulario declare, y
     sumarlos al crédito del mes lo dejaría al doble.
 
-    Que la línea nombre un documento vale igual: si otro plan de cuentas
-    bautizara los tipos de otra forma, lo que nombra una factura es una
-    factura.
+    Lo decide el tipo y nada más. Que la glosa nombre un documento no alcanza:
+    en julio de 2026 dos líneas de TRASPASO dicen "DI#5110087129 Proveedor
+    60.804.000-5 SERVICIO NACIONAL DE ADUANA" —una corrección que entra y sale
+    por el mismo monto—, y con eso el traspaso de cierre entero, −89.498.443,
+    se metía en el código 520 y lo dejaba en negativo.
     """
-    return "_" in str(tipo or "") or bool(documentos)
+    return "_" in str(tipo or "")
 
 
 def _grupos(cuenta) -> dict:
@@ -148,7 +152,7 @@ def _grupos(cuenta) -> dict:
         # De qué está hecho, por si el código no calza con lo declarado: ahí
         # hay que poder mirar qué asientos lo formaron.
         grupo["detalle"].append({
-            "cuenta": cuenta.get("nombre", ""), "tipo": tipo, "monto": monto,
+            "cuenta": _nombre_de_cuenta(cuenta), "tipo": tipo, "monto": monto,
             "documentos": cuantos, "lineas": movimiento.get("lineas") or 0,
         })
     # Una nota de crédito mueve la cuenta al revés que una factura, y el
@@ -170,6 +174,11 @@ def _lado_declarado(cuenta) -> int:
     debe = sum(m.get("debe") or 0 for m in cuenta.get("movimientos", ()))
     haber = sum(m.get("haber") or 0 for m in cuenta.get("movimientos", ()))
     return haber if (cuenta.get("signo") or 1) < 0 else debe
+
+
+def _ppm_del_mes(cuenta) -> int:
+    """La provisión del mes: su traspaso, o el movimiento si no hubo traspaso."""
+    return _traspaso(cuenta) or _lado_declarado(cuenta)
 
 
 def _traspaso(cuenta) -> int:
@@ -268,9 +277,17 @@ def propuesta_f29(cuentas) -> dict:
             "remanente y no con impuesto a pagar.".replace(",", ".")
         )
 
+    # Lo retenido se declara entero: el asiento de sueldos trae la retención
+    # del impuesto único y el de honorarios la de segunda categoría, y el otro
+    # lado de esas cuentas es el pago del mes anterior.
     unico = sum(_lado_declarado(c) for c in por_concepto.get("impuesto_unico", ()))
     honorarios = sum(_lado_declarado(c) for c in por_concepto.get("honorarios", ()))
-    ppm = sum(_lado_declarado(c) for c in por_concepto.get("ppm", ()))
+    # El PPM no: su cuenta junta la provisión del mes con el pago de meses
+    # anteriores, todos con glosa "CENTRALIZA IVA MES ...". Lo que se declara
+    # es el traspaso del mes. En julio de 2026 esa cuenta tiene tres líneas
+    # —un traspaso de 4.983.204 y dos egresos, de 6.212.845 y 1.465.640— y lo
+    # declarado en el código 062 fue el traspaso; en septiembre, igual.
+    ppm = sum(_ppm_del_mes(c) for c in por_concepto.get("ppm", ()))
     poner("048", unico, _nombres(por_concepto.get("impuesto_unico")),
           detalle=_detalle_de(por_concepto.get("impuesto_unico")))
     poner("151", honorarios, _nombres(por_concepto.get("honorarios")),
@@ -295,6 +312,17 @@ def propuesta_f29(cuentas) -> dict:
         retenido = _lado_declarado(cuenta)
         if retenido:
             sin_codigo.append({"nombre": cuenta["nombre"], "valor": retenido})
+    # Las notas de débito recibidas no van en el 519 ni en el 520: en julio de
+    # 2026 el F29 declara 147 documentos y 57.760.490, que son exactamente las
+    # facturas sin las cuatro notas de débito. Se muestran con su monto para
+    # que no desaparezcan, hasta saber en qué código van.
+    for familia, etiqueta in (("nota_debito", "Notas de débito recibidas"),):
+        grupo = credito.get(familia)
+        if grupo and grupo["monto"]:
+            sin_codigo.append({
+                "nombre": f"{etiqueta} ({grupo['documentos']} en {nombre_credito})",
+                "valor": grupo["monto"],
+            })
 
     faltan = [
         CONCEPTOS[c] for c in CONCEPTOS
@@ -327,7 +355,7 @@ def _detalle_de(cuentas) -> list:
             if not movimiento.get(lado):
                 continue
             detalle.append({
-                "cuenta": cuenta.get("nombre", ""), "tipo": movimiento.get("tipo"),
+                "cuenta": _nombre_de_cuenta(cuenta), "tipo": movimiento.get("tipo"),
                 "monto": movimiento.get(lado), "documentos": movimiento.get("documentos") or 0,
                 "lineas": movimiento.get("lineas") or 0,
             })
@@ -363,8 +391,18 @@ def _comprobar_traspaso(cuenta, propuesto, que_es, avisos, controles):
     )
 
 
+def _nombre_de_cuenta(cuenta) -> str:
+    """El código y el nombre, que es como se la busca en el plan de cuentas."""
+    return f"{cuenta.get('cuenta', '')} {cuenta.get('nombre', '')}".strip()
+
+
 def _nombres(cuentas) -> str:
-    return ", ".join(c["nombre"] for c in cuentas or ()) or "—"
+    """De qué cuenta contable sale la línea, con su código.
+
+    El nombre solo no basta para ir a buscarla: el plan de cuentas se navega
+    por código, y en Defontana hay cuentas que se llaman parecido.
+    """
+    return ", ".join(_nombre_de_cuenta(c) for c in cuentas or ()) or "—"
 
 
 # --- Lo declarado contra lo que dice la contabilidad ---------------------
@@ -397,7 +435,10 @@ def comparar_con_declarado(lineas, declarado) -> dict:
             continue
         valor = declarado[codigo]
         diferencia = propuesto - valor
-        estado = "calza" if abs(diferencia) <= 1 else "distinto"
+        # El peso de redondeo se perdona en la plata, no en las cantidades: un
+        # documento de diferencia es un documento, no un decimal.
+        tolerancia = 0 if linea.get("clase") == "cantidad" else 1
+        estado = "calza" if abs(diferencia) <= tolerancia else "distinto"
         if estado == "calza":
             iguales += 1
         else:

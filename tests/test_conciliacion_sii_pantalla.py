@@ -971,3 +971,104 @@ def test_los_ceros_se_apagan_para_que_salten_los_que_no_lo_son(client, db, empre
     assert '<span class="num-cero">0</span>' in cuerpo
     # El que no es cero sale entero, sin apagar
     assert re.search(r'<td class="num">4</td>', cuerpo)
+
+
+# ---------- Bajar el cruce de varios meses ----------
+#
+# Mirar mes a mes en la pantalla sirve para trabajar, pero para revisar el año
+# —o un trozo— hace falta tenerlo todo junto en una planilla.
+
+def _url_informe(**extra):
+    from urllib.parse import urlencode
+
+    return "/contabilidad/conciliacion-sii/informe.xlsx?" + urlencode(extra)
+
+
+def _hojas(respuesta):
+    import io
+
+    import openpyxl
+
+    libro = openpyxl.load_workbook(io.BytesIO(respuesta.data))
+    return {
+        hoja.title: [f for f in hoja.iter_rows(values_only=True)]
+        for hoja in libro.worksheets
+    }
+
+
+def test_el_informe_trae_el_resumen_y_el_detalle(client, db, empresa, usuario_admin):
+    conciliacion = _periodo(db, empresa, 2026, 10, pendientes=2)
+    libro = conciliacion.libro_por_clave("compra")
+    libro.documentos.append(ConciliacionSiiDocumento(
+        tipo_doc="33", tipo_doc_desc="Factura Electrónica", folio="1667",
+        rut_sii="78031034-0", contraparte_sii="TRANSPORTES MAPICK SPA",
+        total_sii=119000, total_defontana=100000,
+        estado="dif_monto", orden=0,
+    ))
+    db.session.commit()
+    login(client, "admin@test.cl")
+
+    r = client.get(_url_informe(libro="compra", desde="2026-01", hasta="2026-12"))
+
+    assert r.status_code == 200
+    hojas = _hojas(r)
+    assert "Resumen Compras" in hojas
+    assert "Detalle Compras" in hojas
+    valores = [v for fila in hojas["Detalle Compras"] for v in fila]
+    assert "1667" in valores
+    assert 19000 in valores     # la diferencia del documento
+
+
+def test_el_informe_respeta_el_periodo_pedido(client, db, empresa, usuario_admin):
+    _periodo(db, empresa, 2026, 3)
+    _periodo(db, empresa, 2026, 10)
+    login(client, "admin@test.cl")
+
+    r = client.get(_url_informe(libro="compra", desde="2026-09", hasta="2026-12"))
+
+    resumen = _hojas(r)["Resumen Compras"]
+    periodos = {fila[0] for fila in resumen if fila and fila[0]}
+    assert "2026-10" in periodos
+    assert "2026-03" not in periodos
+
+
+def test_el_informe_separa_compras_de_ventas(client, db, empresa, usuario_admin):
+    # No basta con que la hoja se llame "Ventas": tiene que traer las ventas.
+    conciliacion = _periodo(db, empresa, 2026, 10)
+    conciliacion.libro_por_clave("compra").documentos.append(ConciliacionSiiDocumento(
+        tipo_doc="33", folio="1111", contraparte_sii="UN PROVEEDOR",
+        estado="coincide", orden=0,
+    ))
+    conciliacion.libro_por_clave("venta").documentos.append(ConciliacionSiiDocumento(
+        tipo_doc="33", folio="2222", contraparte_sii="UN CLIENTE",
+        estado="coincide", orden=0,
+    ))
+    db.session.commit()
+    login(client, "admin@test.cl")
+
+    hojas = _hojas(client.get(_url_informe(libro="venta")))
+
+    assert "Resumen Ventas" in hojas
+    assert "Resumen Compras" not in hojas
+    folios = {v for fila in hojas["Detalle Ventas"] for v in fila}
+    assert "2222" in folios
+    assert "1111" not in folios
+
+
+def test_un_libro_que_no_existe_no_descarga_nada(client, db, empresa, usuario_admin):
+    _periodo(db, empresa, 2026, 10)
+    login(client, "admin@test.cl")
+
+    assert client.get(_url_informe(libro="cualquiera")).status_code == 404
+
+
+def test_la_pantalla_ofrece_bajarlo_con_sus_periodos(client, db, empresa, usuario_admin):
+    _periodo(db, empresa, 2025, 12)
+    _periodo(db, empresa, 2026, 10)
+    login(client, "admin@test.cl")
+
+    cuerpo = client.get("/contabilidad/conciliacion-sii").get_data(as_text=True)
+
+    assert "Descargar el cruce de varios meses" in cuerpo
+    assert 'value="2026-10"' in cuerpo
+    assert 'value="2025-12"' in cuerpo

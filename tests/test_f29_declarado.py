@@ -10,6 +10,7 @@ Las líneas de estas pruebas son las del F29 de septiembre de 2026 (folio
 
 import io
 
+import openpyxl
 import pytest
 
 from app.models.contabilidad import F29Declarado
@@ -390,3 +391,149 @@ def test_una_pestaña_que_no_existe_cae_en_una_que_si(client, db, empresa, usuar
     cuerpo = client.get("/contabilidad/f29?vista=loquesea").get_data(as_text=True)
 
     assert "Lo que habría que declarar" in cuerpo
+
+
+def test_la_comparacion_muestra_la_cuenta_contable(client, db, empresa, usuario_admin):
+    # Para ir a buscar la diferencia hay que saber en qué cuenta mirar.
+    from tests.test_f29 import _informe
+
+    login(client, "admin@test.cl")
+    client.post(
+        "/contabilidad/f29/cargar",
+        data={"mayor": [(_informe(), "informe.xlsx")]},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    _subir(client, ["FORMULARIO 29", "PERIODO [15] 202609",
+                    "502 DEBITOS FACTURAS EMITIDAS 95.961.778"])
+
+    cuerpo = client.get(
+        "/contabilidad/f29?mes=2026-09&vista=comparacion"
+    ).get_data(as_text=True)
+
+    assert "Cuenta contable" in cuerpo
+    assert "2120301001 IVA DEBITO FISCAL" in cuerpo
+
+
+def test_un_documento_de_diferencia_no_es_redondeo():
+    # El peso de redondeo se perdona en la plata; en las cantidades no, porque
+    # un documento de diferencia es un documento que falta o que sobra.
+    lineas = [
+        {"codigo": "503", "glosa": GLOSAS["503"], "valor": 56,
+         "de": "", "clase": "cantidad", "detalle": []},
+        {"codigo": "502", "glosa": GLOSAS["502"], "valor": 95961778,
+         "de": "", "clase": "monto", "detalle": []},
+    ]
+
+    comparacion = comparar_con_declarado(lineas, {"503": 55, "502": 95961779})
+
+    por_codigo = {f["codigo"]: f for f in comparacion["filas"]}
+    assert por_codigo["503"]["estado"] == "distinto"
+    assert por_codigo["502"]["estado"] == "calza"
+
+
+# ---------- Los documentos y el informe ----------
+
+def _con_todo(client):
+    """El informe cargado y el F29 de ese mes, como lo usa ella."""
+    from tests.test_f29 import _informe
+
+    client.post(
+        "/contabilidad/f29/cargar",
+        data={"mayor": [(_informe(), "informe.xlsx")]},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+    _subir(client, ["FORMULARIO 29", "FOLIO [07] 1234", "PERIODO [15] 202609",
+                    "502 DEBITOS FACTURAS EMITIDAS 90.000.000"])
+
+
+def test_los_documentos_del_mayor_quedan_guardados(client, db, empresa, usuario_admin):
+    from app.models.contabilidad import F29Documento
+
+    login(client, "admin@test.cl")
+    _con_todo(client)
+
+    folios = {d.folio for d in F29Documento.query.all()}
+    assert "5526" in folios   # la factura de venta
+    assert "1001" in folios   # la factura de compra
+
+
+def test_el_codigo_distinto_trae_el_boton_y_sus_documentos(client, db, empresa, usuario_admin):
+    # Es lo que hay que mirar cuando no calza: en julio de 2026 la diferencia
+    # del código 502 resultó ser una sola factura.
+    login(client, "admin@test.cl")
+    _con_todo(client)
+
+    cuerpo = client.get(
+        "/contabilidad/f29?mes=2026-09&vista=comparacion"
+    ).get_data(as_text=True)
+
+    assert "Ver los 1 documentos" in cuerpo or "documentos</button>" in cuerpo
+    assert 'id="docs-502"' in cuerpo
+    assert "5526" in cuerpo
+
+
+def test_volver_a_subir_una_cuenta_no_duplica_sus_documentos(client, db, empresa, usuario_admin):
+    from app.models.contabilidad import F29Documento
+    from tests.test_f29 import _informe
+
+    login(client, "admin@test.cl")
+    for _ in range(2):
+        client.post(
+            "/contabilidad/f29/cargar",
+            data={"mayor": [(_informe(), "informe.xlsx")]},
+            content_type="multipart/form-data", follow_redirects=True,
+        )
+
+    assert F29Documento.query.filter_by(folio="5526").count() == 1
+
+
+def test_el_informe_en_excel_trae_sus_cuatro_hojas(client, db, empresa, usuario_admin):
+    login(client, "admin@test.cl")
+    _con_todo(client)
+
+    r = client.get("/contabilidad/f29/propuesta.xlsx?mes=2026-09")
+
+    assert r.status_code == 200
+    libro = openpyxl.load_workbook(io.BytesIO(r.data))
+    assert len(libro.worksheets) == 4
+    titulos = [
+        [v for v in hoja.iter_rows(values_only=True).__next__() if v][0]
+        for hoja in libro.worksheets
+    ]
+    assert "F29 Septiembre 2026" in titulos[0]
+    assert "Mayor por cuenta" in titulos[1]
+    assert "Documentos del mayor" in titulos[2]
+    assert "Declarado en el F29" in titulos[3]
+
+
+def test_el_informe_pone_lo_declarado_y_la_diferencia_al_lado(client, db, empresa, usuario_admin):
+    login(client, "admin@test.cl")
+    _con_todo(client)
+
+    r = client.get("/contabilidad/f29/propuesta.xlsx?mes=2026-09")
+    hoja = openpyxl.load_workbook(io.BytesIO(r.data)).worksheets[0]
+    filas = [f for f in hoja.iter_rows(values_only=True) if f and f[0] == "502"]
+
+    assert filas, "falta la fila del código 502"
+    assert filas[0][2] == 95961778          # la propuesta
+    assert filas[0][3] == 90000000          # lo declarado
+    assert filas[0][4] == 5961778           # la diferencia
+    assert filas[0][5] == "Distinto"
+
+
+def test_sin_f29_cargado_el_informe_sale_igual(client, db, empresa, usuario_admin):
+    from tests.test_f29 import _informe
+
+    login(client, "admin@test.cl")
+    client.post(
+        "/contabilidad/f29/cargar",
+        data={"mayor": [(_informe(), "informe.xlsx")]},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+
+    r = client.get("/contabilidad/f29/propuesta.xlsx?mes=2026-09")
+
+    assert r.status_code == 200
+    libro = openpyxl.load_workbook(io.BytesIO(r.data))
+    # Sin el formulario no hay hoja de lo declarado, y las otras tres están
+    assert len(libro.worksheets) == 3
