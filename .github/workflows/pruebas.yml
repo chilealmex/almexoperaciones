@@ -35,9 +35,18 @@ jobs:
       - name: Preparar Python
         uses: actions/setup-python@v5
         with:
-          # La misma versión que usa Render (PYTHON_VERSION en el panel), para
+          # La misma línea que usa Render (PYTHON_VERSION en el panel), para
           # que lo que pasa acá pase también allá.
-          python-version: "3.12.4"
+          #
+          # El parche exacto NO se fija. Estuvo clavado en "3.12.4" hasta que
+          # los runners de GitHub pasaron a Ubuntu 26.04, donde esa compilación
+          # ya no existe: la CI se cayó entera —"The version '3.12.4' ... was
+          # not found for Ubuntu 26.04"— sin que nadie tocara el código, y dejó
+          # en rojo todos los pull requests abiertos a la vez. Pidiendo la
+          # línea, el runner da el 3.12 más nuevo que tenga y eso no vuelve a
+          # pasar; entre dos parches de 3.12 no hay diferencias que cambien lo
+          # que estas pruebas comprueban.
+          python-version: "3.12"
           cache: pip
 
       - name: Instalar dependencias
