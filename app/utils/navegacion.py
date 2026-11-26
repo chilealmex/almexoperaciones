@@ -82,6 +82,12 @@ MODULOS = (
                               "inventario.regularizacion_historial_archivo", "inventario.regularizacion_historial_borrar"),
             },
             {
+                "clave": "lineas_negocio",
+                "etiqueta": "Línea de negocio",
+                "endpoint": "inventario.lineas_negocio",
+                "endpoints": ("inventario.lineas_negocio",),
+            },
+            {
                 "clave": "historial_tomas",
                 "etiqueta": "Historial de tomas",
                 "endpoint": "inventario.historial",

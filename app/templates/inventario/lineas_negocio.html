@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Línea de negocio{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <h1>Línea de negocio</h1>
+    <p class="page-sub">El Informe de Inventario de Defontana con la línea de negocio de cada artículo al lado.</p>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <p class="text-muted small mb-3">
+      Sube el <strong>Informe de Inventario de Defontana</strong> y baja el mismo informe
+      con una columna más: a qué línea de negocio pertenece cada artículo.
+      Si el informe trae las filas verdes de subtotal —«Total Artículo …» y «TOTAL GENERAL»—
+      <strong>se sacan</strong>, porque no son artículos.
+      <strong>No se guarda nada</strong>: el archivo entra, sale el Excel y se acabó.
+    </p>
+
+    {# De dónde sale la línea. Son los mismos archivos de Regularización, y
+       pueden no estar los tres: con dos cargados se cruza con dos, y la
+       pantalla lo dice antes de subir nada para no prometer una columna que
+       va a salir vacía. #}
+    <p class="small mb-1 fw-semibold">La línea sale de los archivos de Regularización:</p>
+    <ul class="small text-muted">
+      {% for etiqueta, cargado in fuentes %}
+      <li>
+        {{ etiqueta }} —
+        {% if cargado %}<span class="text-success">cargado</span>
+        {% else %}<span class="text-warning">no está cargado</span>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    <p class="small text-muted">
+      Cuando las fuentes cargadas dicen lo mismo sale una sola línea, porque es el mismo
+      nombre escrito varias veces. Cuando no coinciden salen todas, con su origen, y la
+      columna <em>Aviso</em> lo marca para poder filtrarlas.
+      {% if not fuentes|selectattr('1')|list %}
+      <br><strong>Ahora mismo no hay ninguno cargado</strong>, así que no hay de dónde sacar la línea:
+      cárgalos en <a href="{{ url_for('inventario.regularizacion') }}">Regularización</a>.
+      {% endif %}
+    </p>
+
+    <form method="post" enctype="multipart/form-data" data-boton-ocupado="Armando el Excel, espera...">
+      {{ formulario.hidden_tag() }}
+      <div class="row g-2">
+        <div class="col-12 col-md-8">
+          <label class="form-label small mb-1" for="archivo">Informe de Inventario de Defontana</label>
+          {{ formulario.archivo(class="form-control form-control-sm", id="archivo") }}
+          {% for error in formulario.archivo.errors %}
+          <div class="text-danger small">{{ error }}</div>
+          {% endfor %}
+        </div>
+        <div class="col-12 col-md-4 d-flex align-items-end">
+          <button type="submit" class="btn btn-primary btn-sm w-100">⬇ Armar el Excel</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% endblock %}

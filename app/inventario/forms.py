@@ -57,6 +57,21 @@ class CruceDePruebaForm(FlaskForm):
     )
 
 
+class LineasNegocioForm(FlaskForm):
+    """El informe de Defontana al que hay que pegarle la línea de negocio.
+
+    No guarda nada: el archivo entra, sale el Excel y se acabó. Por eso no hay
+    casilla de "solo no contados" ni nada que decidir — lo único que puede
+    variar es qué archivos de Regularización haya cargados, que es dato del
+    sistema y no del formulario.
+    """
+
+    archivo = FileField(
+        "Informe de Inventario de Defontana",
+        validators=[DataRequired(), FileAllowed(["csv", "xlsx"], "Debe ser un archivo .csv o .xlsx")],
+    )
+
+
 class AccionForm(FlaskForm):
     """Solo aporta el token CSRF a los botones que no envían campos propios."""
 
