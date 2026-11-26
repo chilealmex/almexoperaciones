@@ -209,10 +209,14 @@ def informe_con_lineas(informe: dict, lineas: dict) -> dict:
             distintas += 1
         elif aviso == AVISO_SIN_LINEA:
             sin_linea += 1
-        filas.append([fila.get(e) for e in encabezados] + [linea, aviso])
+        # Una sola columna. Lo que pasa con cada artículo —si quedó sin línea o
+        # si las fuentes no coinciden— se cuenta para el resumen, que va en su
+        # propia hoja: el informe se entrega como el de Defontana más una
+        # columna, no más dos.
+        filas.append([fila.get(e) for e in encabezados] + [linea])
 
     return {
-        "encabezados": encabezados + ["Línea de negocio", "Aviso"],
+        "encabezados": encabezados + ["Línea de negocio"],
         "filas": filas,
         "resumen": {
             "fuentes": fuentes_con_datos(lineas),

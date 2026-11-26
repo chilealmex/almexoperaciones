@@ -204,12 +204,14 @@ def test_el_informe_queda_con_la_linea_al_final_y_el_resumen_cuadra():
 
     resultado = informe_con_lineas(informe, leer_lineas(TRES_ARCHIVOS))
 
-    assert resultado["encabezados"] == CABECERA + ["Línea de negocio", "Aviso"]
+    # Una sola columna al final, no dos: el informe de Defontana más la línea.
+    assert resultado["encabezados"] == CABECERA + ["Línea de negocio"]
     # El primero: las tres dicen REPUESTOS, así que sale una sola.
-    assert resultado["filas"][0][-2:] == ["REPUESTOS", ""]
-    # El segundo: QMS dice otra cosa, así que salen las tres.
-    assert resultado["filas"][1][-1] == AVISO_DISTINTAS
-    assert "QMS: LAGGING" in resultado["filas"][1][-2]
+    assert resultado["filas"][0][-1] == "REPUESTOS"
+    # El segundo: QMS dice otra cosa, así que salen las tres en esa misma celda.
+    assert resultado["filas"][1][-1] == (
+        "Conteo: INS DE PRODUCCION · QMS: LAGGING · Defontana: INS DE PRODUCCION"
+    )
     assert resultado["resumen"] == {
         "fuentes": ["Conteo", "QMS", "Defontana"],
         "articulos": 2, "subtotales": 3, "con_linea": 2, "sin_linea": 0, "distintas": 1,
@@ -236,7 +238,7 @@ def test_el_articulo_que_no_esta_en_regularizacion_queda_marcado():
 
     resultado = informe_con_lineas(informe, leer_lineas(TRES_ARCHIVOS))
 
-    assert resultado["filas"][1][-2:] == ["", AVISO_SIN_LINEA]
+    assert resultado["filas"][1][-1] == ""
     assert resultado["resumen"]["sin_linea"] == 1
 
 
@@ -281,7 +283,7 @@ def test_subir_el_informe_baja_el_excel_con_la_columna(client, db, empresa, usua
     assert libro.sheetnames == ["Inventario con línea", "Resumen"]
     hoja = libro["Inventario con línea"]
     titulos = [c.value for c in hoja[4]]
-    assert titulos[-2:] == ["Línea de negocio", "Aviso"]
+    assert titulos == CABECERA + ["Línea de negocio"]
     # Y los subtotales no llegaron: dos artículos, no cinco filas.
     codigos = [hoja.cell(row=f, column=1).value for f in (5, 6)]
     assert codigos == ["00-FSR-OTH-01", "ZXDNHX20"]

@@ -34,9 +34,10 @@
       {% endfor %}
     </ul>
     <p class="small text-muted">
-      Cuando las fuentes cargadas dicen lo mismo sale una sola línea, porque es el mismo
-      nombre escrito varias veces. Cuando no coinciden salen todas, con su origen, y la
-      columna <em>Aviso</em> lo marca para poder filtrarlas.
+      Es <strong>una sola columna</strong>. Cuando las fuentes cargadas dicen lo mismo sale
+      una sola línea, porque es el mismo nombre escrito varias veces; cuando no coinciden
+      salen todas en esa misma celda, con su origen. La hoja <em>Resumen</em> dice cuántos
+      productos quedaron así y cuántos sin línea.
       {% if not fuentes|selectattr('1')|list %}
       <br><strong>Ahora mismo no hay ninguno cargado</strong>, así que no hay de dónde sacar la línea:
       cárgalos en <a href="{{ url_for('inventario.regularizacion') }}">Regularización</a>.

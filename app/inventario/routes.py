@@ -3046,5 +3046,5 @@ def _excel_de_lineas(resultado, cargados):
 _ANCHO_LINEAS = {
     "Código Artículo": 20, "Descripción": 46, "Categoría": 22, "Bodega": 20,
     "Saldo": 12, "Unidad": 10, "Valorización": 16,
-    "Línea de negocio": 34, "Aviso": 34,
+    "Línea de negocio": 44,
 }
