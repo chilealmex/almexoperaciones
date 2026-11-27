@@ -5,7 +5,7 @@ import unicodedata
 from datetime import date, datetime, timezone
 
 from flask import current_app
-from sqlalchemy import update
+from sqlalchemy import func, update
 
 from app.extensions import db
 from app.models.conteo_inventario import ItemConteoInventario
@@ -1058,8 +1058,49 @@ def _mismo_conteo(item, cantidad, por_id, por_texto, cuando) -> bool:
     return abs((guardado - cuando).total_seconds()) < 60
 
 
-def importar_conteo_fisico(file_storage, empresa_id: int, usuario_id=None) -> dict:
+class TomaEnCurso(Exception):
+    """Hay una toma sin cerrar y el archivo nuevo la pisaría.
+
+    Lleva los datos de la toma viva para que la pantalla pueda decir cuánto hay
+    contado y desde cuándo, en vez de un "no se puede" pelado.
+    """
+
+    def __init__(self, contados: int, desde=None):
+        self.contados = contados
+        self.desde = desde
+        super().__init__(
+            f"Hay una toma en curso con {contados} artículos contados. "
+            "Ciérrala antes de subir un conteo nuevo: al cerrarla queda en el "
+            "historial con sus diferencias y el conteo parte en blanco."
+        )
+
+
+def hay_toma_en_curso(empresa_id: int):
+    """(cuántos artículos contados, desde cuándo), o None si no hay toma viva."""
+    contados, desde = db.session.query(
+        func.count(ItemConteoInventario.id), func.min(ItemConteoInventario.contado_en)
+    ).filter(
+        ItemConteoInventario.empresa_id == empresa_id,
+        ItemConteoInventario.cantidad_fisica.isnot(None),
+    ).one()
+    return (contados, desde) if contados else None
+
+
+def importar_conteo_fisico(file_storage, empresa_id: int, usuario_id=None,
+                           reemplazar: bool = False) -> dict:
     """Carga el conteo físico desde un archivo. No toca nada más.
+
+    Si hay una toma sin cerrar no se carga nada, salvo que se pida reemplazar a
+    propósito. Son dos casos que se parecen y no son lo mismo:
+
+      - Una toma NUEVA encima de una a medio hacer mezcla dos conteos en la
+        misma pantalla y del anterior no queda rastro. Eso no debe poder pasar
+        sin querer: hay que cerrar la anterior, que es lo que la archiva en el
+        historial con el stock que los sistemas declaraban ese día.
+      - La MISMA toma con la planilla corregida —bodega manda el archivo con un
+        nombre arreglado o una cantidad rectificada— es legítimo y frecuente.
+        Para eso está `reemplazar`, que lo vuelve una decisión dicha en voz
+        alta en vez de algo que ocurre solo.
 
     Escribe sólo cantidad_fisica, contado_por_id y contado_en: ni las
     cantidades de los sistemas, ni el costo, ni la unidad, ni el nombre. Es
@@ -1072,6 +1113,10 @@ def importar_conteo_fisico(file_storage, empresa_id: int, usuario_id=None) -> di
     Un código que no está en el maestro se informa y no se carga: el maestro se
     arma con las planillas de QMS y Defontana, no con el conteo.
     """
+    viva = None if reemplazar else hay_toma_en_curso(empresa_id)
+    if viva:
+        raise TomaEnCurso(*viva)
+
     filas, problemas = leer_conteo_fisico(file_storage)
 
     items = _items_de_la_empresa(empresa_id)
