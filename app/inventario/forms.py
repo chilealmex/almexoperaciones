@@ -31,6 +31,15 @@ class ImportarConteoForm(FlaskForm):
         "Archivo CSV o Excel con el conteo",
         validators=[DataRequired(), FileAllowed(["csv", "xlsx"], "Debe ser un archivo .csv o .xlsx")],
     )
+    # Sin marcar, un archivo subido sobre una toma a medio hacer se rechaza:
+    # mezclaría dos conteos y del anterior no quedaría rastro. Marcándola se
+    # reemplaza igual, que es lo que corresponde cuando bodega manda la
+    # planilla corregida de esa misma toma. Nunca viene marcada de fábrica: la
+    # decisión tiene que ser de quien sube, no del formulario.
+    reemplazar = BooleanField(
+        "Reemplazar el conteo de la toma en curso (es la planilla corregida de esa misma toma)",
+        default=False,
+    )
 
 
 class CruceDePruebaForm(FlaskForm):

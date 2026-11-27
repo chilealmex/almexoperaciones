@@ -11,6 +11,8 @@ son de los otros importadores, y pisarlos acá rompería el cruce.
 
 import io
 
+import pytest
+
 from werkzeug.datastructures import FileStorage
 
 from app.models.conteo_inventario import ItemConteoInventario
@@ -37,7 +39,7 @@ def test_carga_el_conteo_desde_el_archivo(db, empresa):
     _item(db, empresa, "COD-001")
     _item(db, empresa, "COD-002")
 
-    r = importar_conteo_fisico(_fs("Código;Stock físico\nCOD-001;7\nCOD-002;3\n"), empresa.id)
+    r = importar_conteo_fisico(_fs("Código;Stock físico\nCOD-001;7\nCOD-002;3\n"), empresa.id, reemplazar=True)
 
     assert r["actualizados"] == 2
     assert [i.cantidad_fisica for i in ItemConteoInventario.query.order_by(ItemConteoInventario.codigo)] == [
@@ -50,7 +52,7 @@ def test_no_toca_nada_mas_que_el_conteo(db, empresa):
     item = _item(db, empresa, "COD-001", nombre="NOMBRE ORIGINAL", cantidad_qms=10,
                  cantidad_defontana=12, unidad_qms="UN", costo_unitario_qms=1500)
 
-    importar_conteo_fisico(_fs("Código;Stock físico\nCOD-001;7\n"), empresa.id)
+    importar_conteo_fisico(_fs("Código;Stock físico\nCOD-001;7\n"), empresa.id, reemplazar=True)
 
     db.session.refresh(item)
     assert item.cantidad_fisica == a_cantidad(7)
@@ -66,7 +68,7 @@ def test_el_archivo_pisa_el_conteo_anterior(db, empresa):
     contrario de lo que se pide."""
     item = _item(db, empresa, "COD-001", cantidad_fisica=a_cantidad(99))
 
-    r = importar_conteo_fisico(_fs("Código;Stock físico\nCOD-001;7\n"), empresa.id)
+    r = importar_conteo_fisico(_fs("Código;Stock físico\nCOD-001;7\n"), empresa.id, reemplazar=True)
 
     db.session.refresh(item)
     assert item.cantidad_fisica == a_cantidad(7)
@@ -79,7 +81,7 @@ def test_el_resumen_separa_lo_que_cambio_de_lo_que_ya_estaba(db, empresa):
     _item(db, empresa, "COD-001", cantidad_fisica=a_cantidad(7))
     _item(db, empresa, "COD-002", cantidad_fisica=a_cantidad(1))
 
-    r = importar_conteo_fisico(_fs("Código;Stock físico\nCOD-001;7\nCOD-002;3\n"), empresa.id)
+    r = importar_conteo_fisico(_fs("Código;Stock físico\nCOD-001;7\nCOD-002;3\n"), empresa.id, reemplazar=True)
 
     assert r["actualizados"] == 1
     assert r["sin_cambio"] == 1
@@ -90,7 +92,7 @@ def test_una_fila_sin_cantidad_no_borra_el_conteo(db, empresa):
     """El archivo puede traer todo el maestro con sólo algunas filas contadas."""
     item = _item(db, empresa, "COD-001", cantidad_fisica=a_cantidad(99))
 
-    r = importar_conteo_fisico(_fs("Código;Stock físico\nCOD-001;\n"), empresa.id)
+    r = importar_conteo_fisico(_fs("Código;Stock físico\nCOD-001;\n"), empresa.id, reemplazar=True)
 
     db.session.refresh(item)
     assert item.cantidad_fisica == a_cantidad(99)
@@ -137,7 +139,7 @@ def test_un_punto_ambiguo_no_se_adivina(db, empresa):
     pantalla pregunta; acá se informa y no se carga."""
     item = _item(db, empresa, "COD-001", cantidad_fisica=a_cantidad(2))
 
-    r = importar_conteo_fisico(_fs("Código;Stock físico\nCOD-001;3.125\n"), empresa.id)
+    r = importar_conteo_fisico(_fs("Código;Stock físico\nCOD-001;3.125\n"), empresa.id, reemplazar=True)
 
     db.session.refresh(item)
     assert item.cantidad_fisica == a_cantidad(2)
@@ -391,7 +393,7 @@ def test_volver_a_subir_la_misma_exportacion_no_dice_que_cambio_todo(db, empresa
     archivo = ("Código;Stock físico;Contado por;Fecha y hora del conteo\n"
                "COD-001;7;Admin de Prueba;13-10-2026 10:30\n")
 
-    r = importar_conteo_fisico(_fs(archivo), empresa.id, usuario_admin.id)
+    r = importar_conteo_fisico(_fs(archivo), empresa.id, usuario_admin.id, reemplazar=True)
 
     assert r["actualizados"] == 0
     assert r["sin_cambio"] == 1
@@ -423,8 +425,10 @@ def test_corregir_quien_conto_sin_cambiar_la_cantidad_si_entra(db, empresa, usua
         _fs("Código;Stock físico;Contado por\nCOD-001;7;Juan Pérez\n"), empresa.id, usuario_admin.id
     )
 
+    # La planilla corregida de la misma toma: entra diciéndolo.
     r = importar_conteo_fisico(
-        _fs("Código;Stock físico;Contado por\nCOD-001;7;Pedro Soto\n"), empresa.id, usuario_admin.id
+        _fs("Código;Stock físico;Contado por\nCOD-001;7;Pedro Soto\n"), empresa.id, usuario_admin.id,
+        reemplazar=True,
     )
 
     db.session.refresh(item)
@@ -502,7 +506,8 @@ def test_informa_cuantos_venian_contados_de_la_toma_en_curso(db, empresa):
     _item(db, empresa, "COD-003")                                  # sin contar
 
     r = importar_conteo_fisico(
-        _fs("Código;Stock físico\nCOD-001;7\nCOD-002;3\nCOD-003;5\n"), empresa.id
+        _fs("Código;Stock físico\nCOD-001;7\nCOD-002;3\nCOD-003;5\n"), empresa.id,
+        reemplazar=True,
     )
 
     assert r["pisados"] == 1
@@ -540,7 +545,7 @@ def test_el_resumen_dice_cuantos_se_pisaron(db, empresa, usuario_admin, client):
 
     html = client.post(
         "/inventario/conteo/importar/conteo",
-        data={"cnt-archivo": _fs("Código;Stock físico\nCOD-001;7\n")},
+        data={"cnt-archivo": _fs("Código;Stock físico\nCOD-001;7\n"), "cnt-reemplazar": "y"},
         content_type="multipart/form-data", follow_redirects=True,
     ).get_data(as_text=True)
 
@@ -557,8 +562,11 @@ def test_la_pantalla_avisa_que_hay_una_toma_sin_finalizar(db, empresa, usuario_a
 
     html = client.get("/inventario/conteo/importar").get_data(as_text=True)
 
-    assert "ya contado en la toma en curso" in html
+    assert "Hay una toma en curso" in html
+    assert "no se puede cargar un conteo nuevo" in html
     assert "Finalizar toma" in html
+    # Y la salida para la planilla corregida de esa misma toma
+    assert "cnt-reemplazar" in html
 
 
 def test_el_aviso_es_de_la_propia_empresa(db, empresa, usuario_admin, client):
@@ -591,3 +599,128 @@ def test_sin_nada_contado_no_avisa(db, empresa, usuario_admin, client):
     assert "en la toma en curso" not in html
     # Pero la tarjeta sigue ahí
     assert "Conteo físico" in html
+
+
+# --- El bloqueo cuando hay una toma en curso --------------------------------
+#
+# Lo que pidió la usuaria: que el archivo entre únicamente si no hay una toma
+# vigente, y que si la hay, haya que cerrarla antes. La excepción es la
+# planilla corregida de esa MISMA toma, que bodega manda a cada rato: para eso
+# está la casilla, que vuelve el reemplazo una decisión dicha en voz alta en
+# vez de algo que ocurre solo.
+
+
+def test_con_una_toma_en_curso_no_se_carga_nada(db, empresa, usuario_admin):
+    from app.utils.importar_conteo import TomaEnCurso
+
+    item = _item(db, empresa, "COD-001", cantidad_fisica=a_cantidad(99))
+
+    with pytest.raises(TomaEnCurso):
+        importar_conteo_fisico(_fs("Código;Stock físico\nCOD-001;7\n"), empresa.id, usuario_admin.id)
+
+    # Y no es que haya cargado a medias: la cantidad anterior sigue intacta.
+    db.session.refresh(item)
+    assert item.cantidad_fisica == a_cantidad(99)
+
+
+def test_el_aviso_dice_cuantos_hay_contados(db, empresa, usuario_admin):
+    """"No se puede" a secas no deja decidir si esa toma se cierra."""
+    from app.utils.importar_conteo import TomaEnCurso
+
+    _item(db, empresa, "COD-001", cantidad_fisica=a_cantidad(99))
+    _item(db, empresa, "COD-002", cantidad_fisica=a_cantidad(3))
+
+    with pytest.raises(TomaEnCurso) as error:
+        importar_conteo_fisico(_fs("Código;Stock físico\nCOD-001;7\n"), empresa.id, usuario_admin.id)
+
+    assert error.value.contados == 2
+    assert "2 artículos contados" in str(error.value)
+
+
+def test_sin_toma_en_curso_entra_sin_pedir_nada(db, empresa, usuario_admin):
+    item = _item(db, empresa, "COD-001")
+
+    r = importar_conteo_fisico(_fs("Código;Stock físico\nCOD-001;7\n"), empresa.id, usuario_admin.id)
+
+    db.session.refresh(item)
+    assert item.cantidad_fisica == a_cantidad(7)
+    assert r["actualizados"] == 1
+
+
+def test_la_planilla_corregida_de_la_misma_toma_entra_diciendolo(db, empresa, usuario_admin):
+    item = _item(db, empresa, "COD-001", cantidad_fisica=a_cantidad(99))
+
+    r = importar_conteo_fisico(
+        _fs("Código;Stock físico\nCOD-001;7\n"), empresa.id, usuario_admin.id, reemplazar=True
+    )
+
+    db.session.refresh(item)
+    assert item.cantidad_fisica == a_cantidad(7)
+    assert r["pisados"] == 1
+
+
+def test_la_pantalla_rechaza_la_subida_y_lo_explica(db, empresa, usuario_admin, client):
+    from tests.conftest import login
+
+    item = _item(db, empresa, "COD-001", cantidad_fisica=a_cantidad(99))
+    login(client, usuario_admin.email)
+
+    html = client.post(
+        "/inventario/conteo/importar/conteo",
+        data={"cnt-archivo": _fs("Código;Stock físico\nCOD-001;7\n")},
+        content_type="multipart/form-data", follow_redirects=True,
+    ).get_data(as_text=True)
+
+    assert "Hay una toma en curso" in html
+    assert "Ciérrala antes de subir un conteo nuevo" in html
+    db.session.refresh(item)
+    assert item.cantidad_fisica == a_cantidad(99)
+
+
+def test_la_casilla_de_la_pantalla_deja_pasar_la_corregida(db, empresa, usuario_admin, client):
+    from tests.conftest import login
+
+    item = _item(db, empresa, "COD-001", cantidad_fisica=a_cantidad(99))
+    login(client, usuario_admin.email)
+
+    client.post(
+        "/inventario/conteo/importar/conteo",
+        data={"cnt-archivo": _fs("Código;Stock físico\nCOD-001;7\n"), "cnt-reemplazar": "y"},
+        content_type="multipart/form-data", follow_redirects=True,
+    )
+
+    db.session.refresh(item)
+    assert item.cantidad_fisica == a_cantidad(7)
+
+
+def test_el_archivo_puede_traer_contados_y_no_contados_a_la_vez(db, empresa, usuario_admin):
+    """Lo que dijo la usuaria: "puede venir con productos contados y/o no contados"."""
+    contado = _item(db, empresa, "COD-001")
+    sin_contar = _item(db, empresa, "COD-002")
+
+    r = importar_conteo_fisico(
+        _fs("Código;Stock físico\nCOD-001;7\nCOD-002;\n"), empresa.id, usuario_admin.id
+    )
+
+    db.session.refresh(contado); db.session.refresh(sin_contar)
+    assert contado.cantidad_fisica == a_cantidad(7)
+    assert sin_contar.cantidad_fisica is None     # la fila vacía no lo da por contado
+    assert r["actualizados"] == 1
+    assert r["vacias"] == 1
+
+
+def test_la_toma_en_curso_es_de_la_propia_empresa(db, empresa, usuario_admin):
+    """El conteo de otra empresa no puede bloquear el de ésta."""
+    from app.models.empresa import Empresa
+
+    otra = Empresa(rut="77.000.000-0", razon_social="Otra SPA")
+    db.session.add(otra)
+    db.session.commit()
+    _item(db, otra, "COD-001", cantidad_fisica=a_cantidad(99))
+    item = _item(db, empresa, "COD-001")
+
+    r = importar_conteo_fisico(_fs("Código;Stock físico\nCOD-001;7\n"), empresa.id, usuario_admin.id)
+
+    db.session.refresh(item)
+    assert item.cantidad_fisica == a_cantidad(7)
+    assert r["actualizados"] == 1

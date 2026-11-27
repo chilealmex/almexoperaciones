@@ -26,7 +26,9 @@ from app.utils.decorators import require_permission
 from app.utils.equivalencias_codigos import proponer
 from app.utils.importar_oti import importar_ot_internas
 from app.utils.importar_conteo import (
+    TomaEnCurso,
     articulos_fuera_de_ambas_planillas,
+    hay_toma_en_curso,
     importar_conteo_fisico,
     leer_defontana,
     leer_qms,
@@ -1873,10 +1875,17 @@ def conteo_importar_fisico():
         return redirect(url_for("inventario.conteo_importar"))
     try:
         resultado = importar_conteo_fisico(
-            form.archivo.data, current_user.empresa_id, current_user.id
+            form.archivo.data, current_user.empresa_id, current_user.id,
+            reemplazar=form.reemplazar.data,
         )
         hubo_problemas = any(resultado[k] for k in ("sin_codigo", "ambiguos", "sin_numero", "negativos"))
         flash(_resumen_conteo(resultado), "warning" if hubo_problemas else "success")
+    except TomaEnCurso as e:
+        # No se cargó nada. Se dice desde cuándo viene lo contado: es el dato
+        # con que se decide si esa toma se cierra o si el archivo que se está
+        # subiendo era justamente el de esa toma.
+        desde = f" El conteo más antiguo es del {format_fecha_hora(e.desde)}." if e.desde else ""
+        flash(f"{e}{desde}", "warning")
     except ValueError as e:
         flash(str(e), "danger")
     except SQLAlchemyError as e:
